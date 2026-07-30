@@ -2,7 +2,12 @@ import { ModuleKey, Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { getGarlandCarrierManifestHistory } from "@/modules/shipment-documents/carrier-manifest-queries";
-import type { GarlandCarrierKey, GarlandCarrierManifestRow } from "@/modules/shipment-documents/carrier-manifest-types";
+import {
+  buildGarlandCarrierCounts,
+  isGarlandCarrierKey,
+  type GarlandCarrierKey,
+  type GarlandCarrierManifestRow
+} from "@/modules/shipment-documents/carrier-manifest-types";
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -58,10 +63,13 @@ export async function POST(request: Request) {
     const rows = Array.isArray(body.rows) ? body.rows.filter(isManifestRow) : [];
 
     if (rows.length === 0) {
-      return NextResponse.json({ error: "At least one Midland, Speedy, or Suretrack row is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "At least one Midland, Speedy, Suretrack, or Clarke row is required." },
+        { status: 400 }
+      );
     }
 
-    const counts = buildCarrierCounts(rows);
+    const counts = buildGarlandCarrierCounts(rows);
     const workbooks = body.workbooks ?? {};
 
     await client.shipmentCarrierManifestRun.create({
@@ -79,6 +87,8 @@ export async function POST(request: Request) {
         speedyWorkbookBytes: workbooks.SPEEDY ? decodeBase64(workbooks.SPEEDY.base64) : null,
         suretrackFileName: workbooks.SURETRACK?.fileName ?? null,
         suretrackWorkbookBytes: workbooks.SURETRACK ? decodeBase64(workbooks.SURETRACK.base64) : null,
+        clarkeFileName: workbooks.CLARKE?.fileName ?? null,
+        clarkeWorkbookBytes: workbooks.CLARKE ? decodeBase64(workbooks.CLARKE.base64) : null,
         createdByUserId: context.userId
       }
     });
@@ -133,18 +143,10 @@ function decodeBase64(value: string) {
 function isManifestRow(value: GarlandCarrierManifestRow): value is GarlandCarrierManifestRow {
   return (
     value &&
-    ["MIDLAND", "SPEEDY", "SURETRACK"].includes(value.carrier) &&
+    isGarlandCarrierKey(value.carrier) &&
     typeof value.pageNumber === "number" &&
     typeof value.srNumber === "string" &&
     typeof value.psNumber === "string" &&
     typeof value.cityProvince === "string"
   );
-}
-
-function buildCarrierCounts(rows: GarlandCarrierManifestRow[]): Record<GarlandCarrierKey, number> {
-  return {
-    MIDLAND: rows.filter((row) => row.carrier === "MIDLAND").length,
-    SPEEDY: rows.filter((row) => row.carrier === "SPEEDY").length,
-    SURETRACK: rows.filter((row) => row.carrier === "SURETRACK").length
-  };
 }

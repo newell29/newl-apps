@@ -3,10 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 
-import type {
-  GarlandCarrierKey,
-  GarlandCarrierManifestHistoryResponse,
-  GarlandCarrierManifestRow
+import {
+  buildGarlandCarrierCounts,
+  GARLAND_CARRIERS,
+  GARLAND_CARRIER_LABELS,
+  type GarlandCarrierKey,
+  type GarlandCarrierManifestHistoryResponse,
+  type GarlandCarrierManifestRow
 } from "@/modules/shipment-documents/carrier-manifest-types";
 import { MANIFEST_CROP_BOXES } from "@/modules/shipment-documents/carrier-manifest-extraction";
 import { buildCarrierManifestWorkbookHtml } from "@/modules/shipment-documents/carrier-manifest-workbook";
@@ -30,11 +33,10 @@ type ExtractionResponse = {
 
 type EditableManifestField = "srNumber" | "psNumber" | "cityProvince" | "skids";
 
-const TARGET_CARRIERS: Array<{ key: GarlandCarrierKey; label: string }> = [
-  { key: "MIDLAND", label: "Midland" },
-  { key: "SPEEDY", label: "Speedy" },
-  { key: "SURETRACK", label: "Suretrack" }
-];
+const TARGET_CARRIERS = GARLAND_CARRIERS.map((key) => ({
+  key,
+  label: GARLAND_CARRIER_LABELS[key]
+}));
 const EXTRACTION_BATCH_SIZE = 1;
 const MANIFEST_CROP_IMAGE_WIDTH = 1800;
 const MANIFEST_CROP_IMAGE_JPEG_QUALITY = 0.9;
@@ -84,7 +86,7 @@ export function GarlandCarrierManifestClient({
     };
   }, [workbooks]);
 
-  const carrierCounts = useMemo(() => buildCarrierCounts(rows), [rows]);
+  const carrierCounts = useMemo(() => buildGarlandCarrierCounts(rows), [rows]);
 
   function acceptBolFile(file: File | null) {
     if (!file) {
@@ -142,7 +144,7 @@ export function GarlandCarrierManifestClient({
       setStatus(
         nextWorkbooks.length > 0
           ? `Built ${nextWorkbooks.length} carrier manifest workbook${nextWorkbooks.length === 1 ? "" : "s"}.`
-          : "No Midland, Speedy, or Suretrack BOLs were found in this upload."
+          : "No Midland, Speedy, Suretrack, or Clarke BOLs were found in this upload."
       );
     } catch (buildError) {
       const message = buildError instanceof Error ? buildError.message : "Unable to build carrier manifests.";
@@ -415,7 +417,7 @@ export function GarlandCarrierManifestClient({
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {TARGET_CARRIERS.map((carrier) => (
               <div key={carrier.key} className="rounded-md border border-border bg-muted/20 p-4">
                 <p className="text-sm font-semibold text-foreground">{carrier.label}</p>
@@ -541,6 +543,7 @@ export function GarlandCarrierManifestClient({
                           {run.hasMidlandWorkbook ? <DownloadLink runId={run.id} type="midland" label="Midland XLS" /> : null}
                           {run.hasSpeedyWorkbook ? <DownloadLink runId={run.id} type="speedy" label="Speedy XLS" /> : null}
                           {run.hasSuretrackWorkbook ? <DownloadLink runId={run.id} type="suretrack" label="Suretrack XLS" /> : null}
+                          {run.hasClarkeWorkbook ? <DownloadLink runId={run.id} type="clarke" label="Clarke XLS" /> : null}
                           <button
                             type="button"
                             onClick={() => void handleDeleteRun(run.id)}
@@ -657,7 +660,7 @@ async function extractManifestRows(images: Array<{ pageNumber: number; imageData
 }
 
 function buildWorkbook(carrier: GarlandCarrierKey, documentLabel: string, shipmentDate: string, rows: GarlandCarrierManifestRow[]): GeneratedWorkbook {
-  const carrierLabel = formatCarrier(carrier);
+  const carrierLabel = GARLAND_CARRIER_LABELS[carrier];
   const fileName = `${sanitizeFilename(`${carrierLabel} Manifest ${documentLabel}`)}.xls`;
   const sortedRows = sortManifestRows(rows);
   const rowCount = Math.max(sortedRows.length, 16);
@@ -899,14 +902,6 @@ function combineConfidence(left: GarlandCarrierManifestRow["confidence"], right:
   return rank[right] > rank[left] ? right : left;
 }
 
-function buildCarrierCounts(rows: GarlandCarrierManifestRow[]): Record<GarlandCarrierKey, number> {
-  return {
-    MIDLAND: rows.filter((row) => row.carrier === "MIDLAND").length,
-    SPEEDY: rows.filter((row) => row.carrier === "SPEEDY").length,
-    SURETRACK: rows.filter((row) => row.carrier === "SURETRACK").length
-  };
-}
-
 function normalizeEditablePallets(value: string) {
   const trimmed = value.trim();
   if (trimmed.length === 0) {
@@ -918,7 +913,7 @@ function normalizeEditablePallets(value: string) {
 }
 
 function formatCarrier(carrier: GarlandCarrierKey) {
-  return carrier === "SURETRACK" ? "Suretrack" : carrier.charAt(0) + carrier.slice(1).toLowerCase();
+  return GARLAND_CARRIER_LABELS[carrier];
 }
 
 function formatDate(value: string | null) {
