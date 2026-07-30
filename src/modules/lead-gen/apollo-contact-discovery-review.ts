@@ -19,6 +19,31 @@ export function isMappedApolloZeroEmployeeState({
 export function blocksApolloEmployeeLookup({
   classification,
   apolloOrganizationId,
+  matchReason,
+  reviewedAt = null
+}: {
+  classification: ApolloCompanyMatchClassification;
+  apolloOrganizationId: string | null;
+  matchReason: string | null;
+  reviewedAt?: Date | null;
+}) {
+  const mappedZeroEmployees = isMappedApolloZeroEmployeeState({
+    apolloOrganizationId,
+    matchReason
+  });
+
+  return (
+    (mappedZeroEmployees && Boolean(reviewedAt)) ||
+    (
+      classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+      !mappedZeroEmployees
+    )
+  );
+}
+
+export function allowsApolloExceptionMutation({
+  classification,
+  apolloOrganizationId,
   matchReason
 }: {
   classification: ApolloCompanyMatchClassification;
@@ -26,8 +51,8 @@ export function blocksApolloEmployeeLookup({
   matchReason: string | null;
 }) {
   return (
-    classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY &&
-    !isMappedApolloZeroEmployeeState({
+    classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY ||
+    isMappedApolloZeroEmployeeState({
       apolloOrganizationId,
       matchReason
     })

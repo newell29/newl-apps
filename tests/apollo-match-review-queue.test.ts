@@ -101,6 +101,18 @@ describe("Apollo review queue states", () => {
     ).toBe("MAPPED_NO_EMPLOYEES");
   });
 
+  it("moves an archived mapped zero-employee company out of active exceptions", () => {
+    expect(
+      resolveApolloReviewQueueStatus({
+        apolloOrganizationId: "apollo-org-celgard",
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        matchReason:
+          "direct company; Apollo verified the company but returned zero employees. Open the company in Apollo, select its People page, and paste that Apollo company URL for manual verification.",
+        reviewedAt: new Date("2026-07-30T20:00:00.000Z")
+      })
+    ).toBe("CONFIRMED_NO_MATCH");
+  });
+
   it("does not offer mapped-company employee recovery for an unresolved match without the zero-employee marker", () => {
     expect(
       resolveApolloReviewQueueStatus({
