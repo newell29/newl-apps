@@ -18,8 +18,10 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the account ID and Apollo's canonical
 organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
-filter. If that search returns no useful people, it retries with the exact domain returned by the confirmed saved
-account. Apollo can return a strictly scoped employee with only a marketing/brand employer label and omit the
+filter. A successfully resolved saved account already supplies that canonical identity, so Hunter skips the
+credit-consuming Organization Search endpoint on later rechecks. If People Search returns no useful people, it
+retries with the exact domain returned by the confirmed saved account. Apollo can return a strictly scoped employee
+with only a marketing/brand employer label and omit the
 organization ID and domain from that person record. Newl Apps accepts a safe leading uppercase brand expansion such
 as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside the exact confirmed organization/domain query;
 explicitly different organization IDs, domains, and sibling names still fail closed. If the UI still exposes people

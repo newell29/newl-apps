@@ -573,7 +573,9 @@ export async function fetchApolloContactsForCompany(
   // the global organization. Always resolve the company identity first—even
   // when a confirmed mapping exists and the company has no stored domain—so a
   // saved account ID cannot silently produce an empty or partial employee set.
-  const discoveredOrganization = await findApolloOrganization(input, apiKey);
+  const discoveredOrganization = confirmedSavedAccount
+    ? null
+    : await findApolloOrganization(input, apiKey);
   const canonicalDiscoveredOrganization =
     providedOrganizationId &&
     discoveredOrganization?.id &&

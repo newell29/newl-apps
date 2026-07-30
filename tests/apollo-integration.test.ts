@@ -518,6 +518,11 @@ describe("fetchApolloContactsForCompany", () => {
         String(request).includes("/api/v1/people/match")
       )
     ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).includes("/api/v1/mixed_companies/search")
+      )
+    ).toBe(false);
   });
 
   it("recovers reviewer-selected YAT employees by exact Apollo person ID when public roster search returns zero", async () => {
@@ -624,6 +629,9 @@ describe("fetchApolloContactsForCompany", () => {
     });
     expect(fetchMock.mock.calls.some(([request]) =>
       new URL(String(request)).searchParams.has("account_ids[]")
+    )).toBe(false);
+    expect(fetchMock.mock.calls.some(([request]) =>
+      String(request).includes("/api/v1/mixed_companies/search")
     )).toBe(false);
   });
 
