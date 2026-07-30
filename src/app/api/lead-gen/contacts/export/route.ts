@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import {
   getActiveCadenceQueue,
   getContactDirectory,
+  getDeliveryFailureQueue,
   getOutreachQueue,
   type ContactBooleanFilter,
   type ContactDraftStatusFilter,
@@ -52,6 +53,8 @@ export async function GET(request: Request) {
         ? await getOutreachQueue(context, filters)
         : scope === "active-cadences"
           ? await getActiveCadenceQueue(context, filters)
+          : scope === "delivery-failures"
+            ? await getDeliveryFailureQueue(context, filters)
           : await getContactDirectory(context, filters);
     const csv = toCsv([
       [
@@ -70,6 +73,8 @@ export async function GET(request: Request) {
         "Contact Score Summary",
         "Apollo Status",
         "Sequence Status",
+        "Apollo Delivery Failure",
+        "Apollo Delivery Failure Detected",
         "Reply Status",
         "Assigned Rep",
         "Recommended Sequence",
@@ -100,6 +105,8 @@ export async function GET(request: Request) {
         contact.contactScoreSummary,
         contact.apolloStatus,
         contact.sequenceStatus,
+        contact.apolloDeliveryFailureReason ?? "",
+        contact.apolloDeliveryFailureDetectedAt ?? "",
         contact.replyStatus,
         contact.assignedRep,
         contact.recommendedSequenceName ?? "",

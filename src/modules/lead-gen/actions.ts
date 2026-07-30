@@ -100,7 +100,6 @@ import { persistOutreachPlanWithSteps } from "@/modules/lead-gen/outreach-plan-p
 import { buildApprovedOutreachEnrollment } from "@/modules/lead-gen/outreach-enrollment";
 import {
   decideApolloSequenceTransition,
-  needsApolloBounceDeliveryReconciliation,
   resolveTrackedSequenceStatus
 } from "@/modules/lead-gen/apollo-reengagement-policy";
 import { resolveLiveApolloSequence } from "@/modules/lead-gen/apollo-sequence-resolution";
@@ -123,7 +122,7 @@ import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
   createApolloContactForEnrollment,
-  fetchApolloBouncedSequenceContacts,
+  fetchApolloSequenceDeliveryFailures,
   fetchApolloContactById,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
@@ -131,9 +130,9 @@ import {
   fetchApolloSequenceDirectory,
   parseApolloCompanyReference,
   parseApolloPersonIds,
-  reconcileApolloContactWithBounceEvidence,
+  reconcileApolloContactWithDeliveryFailureEvidence,
   syncApolloContactTypedCustomFields,
-  type ApolloBouncedSequenceContact,
+  type ApolloSequenceDeliveryFailure,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
   type ApolloSequenceDirectoryEntry,
@@ -2984,9 +2983,9 @@ export async function syncSelectedApolloStatusesAction(
     let failedContacts = 0;
     let skippedContacts = 0;
     const failureReasons = new Set<string>();
-    const bouncedContactsBySequence = new Map<
+    const deliveryFailuresBySequence = new Map<
       string,
-      Promise<ApolloBouncedSequenceContact[]>
+      Promise<ApolloSequenceDeliveryFailure[]>
     >();
 
     for (const company of companies.values()) {
@@ -3005,27 +3004,21 @@ export async function syncSelectedApolloStatusesAction(
               }
 
               let incoming = await fetchApolloContactById(apolloContactId);
-              if (
-                contact.selectedSequenceId &&
-                needsApolloBounceDeliveryReconciliation(
-                  contact.sequenceStatus,
-                  incoming.sequenceStatus
-                )
-              ) {
+              if (contact.selectedSequenceId) {
                 const selectedSequenceId = contact.selectedSequenceId;
-                const bouncedContactsPromise =
-                  bouncedContactsBySequence.get(selectedSequenceId) ??
-                  fetchApolloBouncedSequenceContacts(selectedSequenceId);
-                bouncedContactsBySequence.set(
+                const deliveryFailuresPromise =
+                  deliveryFailuresBySequence.get(selectedSequenceId) ??
+                  fetchApolloSequenceDeliveryFailures(selectedSequenceId);
+                deliveryFailuresBySequence.set(
                   selectedSequenceId,
-                  bouncedContactsPromise
+                  deliveryFailuresPromise
                 );
-                incoming = reconcileApolloContactWithBounceEvidence({
+                incoming = reconcileApolloContactWithDeliveryFailureEvidence({
                   contact: incoming,
                   selectedSequenceId,
                   apolloContactId,
                   email: contact.email,
-                  bouncedContacts: await bouncedContactsPromise
+                  deliveryFailures: await deliveryFailuresPromise
                 });
               }
               return incoming;
@@ -5982,6 +5975,8 @@ function buildApolloContactMutation({
   incoming: ApolloContactRecord;
 }) {
   const currentRawJson = isJsonObject(existing?.rawJson) ? existing.rawJson : {};
+  const currentApollo = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
+  const deliveryFailure = readApolloDeliveryFailureMetadata(incoming.rawPayload);
 
   return {
     tenantId,
@@ -6022,11 +6017,46 @@ function buildApolloContactMutation({
     rawJson: toInputJsonValue({
       ...currentRawJson,
       apollo: {
+        ...currentApollo,
         importedAt: new Date().toISOString(),
         leadId,
-        record: incoming.rawPayload
+        record: incoming.rawPayload,
+        ...(deliveryFailure
+          ? {
+              deliveryFailure: {
+                ...deliveryFailure,
+                detectedAt: new Date().toISOString()
+              }
+            }
+          : {})
       }
     })
+  };
+}
+
+function readApolloDeliveryFailureMetadata(rawPayload: Record<string, unknown>) {
+  const rawFailure = rawPayload.newlDeliveryFailureReconciliation;
+  const failure =
+    rawFailure && typeof rawFailure === "object" && !Array.isArray(rawFailure)
+      ? (rawFailure as Record<string, unknown>)
+      : null;
+  if (
+    !failure ||
+    typeof failure.kind !== "string" ||
+    typeof failure.reason !== "string"
+  ) {
+    return null;
+  }
+  return {
+    kind: failure.kind,
+    reason: failure.reason,
+    source:
+      typeof failure.source === "string"
+        ? failure.source
+        : "APOLLO_OUTREACH_EMAIL_SEARCH",
+    sequenceId:
+      typeof failure.sequenceId === "string" ? failure.sequenceId : null,
+    record: failure.record ?? null
   };
 }
 

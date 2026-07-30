@@ -26,6 +26,7 @@ const requireModule = vi.fn();
 const requireMutationAccess = vi.fn();
 const fetchApolloContactsForCompany = vi.fn();
 const fetchApolloContactById = vi.fn();
+const fetchApolloSequenceDeliveryFailures = vi.fn();
 const apolloCompanyMatchCreate = vi.fn();
 const outreachPlanUpdateMany = vi.fn();
 const contactOutreachDraftUpdateMany = vi.fn();
@@ -107,7 +108,14 @@ vi.mock("@/server/auth/authorization", () => ({
 
 vi.mock("@/server/integrations/apollo", () => ({
   fetchApolloContactsForCompany: (...args: unknown[]) => fetchApolloContactsForCompany(...args),
-  fetchApolloContactById: (...args: unknown[]) => fetchApolloContactById(...args)
+  fetchApolloContactById: (...args: unknown[]) => fetchApolloContactById(...args),
+  fetchApolloSequenceDeliveryFailures: (...args: unknown[]) =>
+    fetchApolloSequenceDeliveryFailures(...args),
+  reconcileApolloContactWithDeliveryFailureEvidence: ({
+    contact
+  }: {
+    contact: unknown;
+  }) => contact
 }));
 
 vi.mock("@/modules/lead-gen/contact-score-snapshot", () => ({
@@ -200,6 +208,7 @@ describe("pipeline bulk actions", () => {
         ]
       }
     });
+    fetchApolloSequenceDeliveryFailures.mockResolvedValue([]);
     fetchApolloContactsForCompany.mockResolvedValue({
       organizationId: "apollo-org-1",
       companyName: "Harbor Home Retail LLC",

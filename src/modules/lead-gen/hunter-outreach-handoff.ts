@@ -23,7 +23,8 @@ import {
 } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import {
   isActiveHunterCadence,
-  isHunterContactSafeForReview
+  isHunterContactSafeForReview,
+  resolveTrackedSequenceStatus
 } from "@/modules/lead-gen/apollo-reengagement-policy";
 import {
   HUNTER_COMPANY_RESEARCH_JOB_TYPE,
@@ -1712,6 +1713,7 @@ async function upsertContacts({
       continue;
     }
     const rawJson = isObject(match?.rawJson) ? match.rawJson : {};
+    const existingApollo = isObject(rawJson.apollo) ? rawJson.apollo : {};
     const data = {
       tenantId,
       companyId,
@@ -1732,7 +1734,14 @@ async function upsertContacts({
         incoming.recordSource === "SAVED_CONTACT" || incoming.apolloContactId
           ? ApolloStatus.ENRICHED
           : match?.apolloStatus ?? ApolloStatus.NOT_STARTED,
-      sequenceStatus: incoming.sequenceStatus,
+      sequenceStatus: match
+        ? resolveTrackedSequenceStatus({
+            existingStatus: match.sequenceStatus,
+            incomingStatus: incoming.sequenceStatus,
+            selectedSequenceId: match.selectedSequenceId,
+            incomingSequenceId: incoming.sequenceId
+          })
+        : incoming.sequenceStatus,
       replyStatus: incoming.replyStatus,
       selectedSequenceId: match?.selectedSequenceId ?? null,
       selectedSequenceName: match?.selectedSequenceName ?? null,
@@ -1742,6 +1751,7 @@ async function upsertContacts({
       rawJson: toInputJsonValue({
         ...rawJson,
         apollo: {
+          ...existingApollo,
           importedAt: new Date().toISOString(),
           hunterHandoffJobId: jobId,
           recordSource: incoming.recordSource,

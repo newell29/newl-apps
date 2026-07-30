@@ -22,21 +22,18 @@ import {
   persistApolloPushJobPendingResolution,
   readApolloPendingSequenceConfirmation
 } from "@/modules/lead-gen/apollo-push-jobs";
-import {
-  needsApolloBounceDeliveryReconciliation,
-  resolveTrackedSequenceStatus
-} from "@/modules/lead-gen/apollo-reengagement-policy";
+import { resolveTrackedSequenceStatus } from "@/modules/lead-gen/apollo-reengagement-policy";
 import { recordCurrentContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { recordLeadOutcomeEvent } from "@/modules/lead-gen/score-history";
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
   ApolloTransientError,
-  fetchApolloBouncedSequenceContacts,
+  fetchApolloSequenceDeliveryFailures,
   fetchApolloContactById,
-  reconcileApolloContactWithBounceEvidence,
-  type ApolloBouncedSequenceContact,
-  type ApolloContactRecord
+  reconcileApolloContactWithDeliveryFailureEvidence,
+  type ApolloContactRecord,
+  type ApolloSequenceDeliveryFailure
 } from "@/server/integrations/apollo";
 import type { TenantContext } from "@/server/tenant-context";
 
@@ -45,7 +42,7 @@ const ACTIVE_JOB_WINDOW_MS = 30 * 60 * 1000;
 
 type SyncDependencies = {
   fetchContact: typeof fetchApolloContactById;
-  fetchBouncedSequenceContacts: typeof fetchApolloBouncedSequenceContacts;
+  fetchDeliveryFailures: typeof fetchApolloSequenceDeliveryFailures;
   sleep: (milliseconds: number) => Promise<void>;
   now: () => Date;
   recordScoreSnapshot: typeof recordCurrentContactScoreSnapshot;
@@ -54,7 +51,7 @@ type SyncDependencies = {
 
 const defaultDependencies: SyncDependencies = {
   fetchContact: fetchApolloContactById,
-  fetchBouncedSequenceContacts: fetchApolloBouncedSequenceContacts,
+  fetchDeliveryFailures: fetchApolloSequenceDeliveryFailures,
   sleep: async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   now: () => new Date(),
   recordScoreSnapshot: recordCurrentContactScoreSnapshot,
@@ -74,6 +71,8 @@ export type ApolloStatusSyncResult = {
   deferredContacts: number;
   retryCount: number;
   rateLimited: boolean;
+  deliveryFailuresMatched: number;
+  unmatchedDeliveryFailures: number;
   message: string;
 };
 
@@ -188,10 +187,11 @@ export async function syncApolloStatusesForTenant(
       take: batchSize
     });
     result.selectedContacts = contacts.length;
-    const bouncedContactsBySequence = new Map<
+    const deliveryFailuresBySequence = new Map<
       string,
-      Promise<ApolloBouncedSequenceContact[]>
+      Promise<ApolloSequenceDeliveryFailure[]>
     >();
+    const matchedDeliveryFailureKeys = new Set<string>();
 
     for (let index = 0; index < contacts.length; index += 1) {
       const contact = contacts[index];
@@ -204,25 +204,30 @@ export async function syncApolloStatusesForTenant(
         let incoming = await fetchContactWithRetry(apolloContactId, dependencies, () => {
           result.retryCount += 1;
         });
-        if (
-          contact.selectedSequenceId &&
-          needsApolloBounceDeliveryReconciliation(
-            contact.sequenceStatus,
-            incoming.sequenceStatus
-          )
-        ) {
+        if (contact.selectedSequenceId) {
           const selectedSequenceId = contact.selectedSequenceId;
-          const bouncedContactsPromise =
-            bouncedContactsBySequence.get(selectedSequenceId) ??
-            dependencies.fetchBouncedSequenceContacts(selectedSequenceId);
-          bouncedContactsBySequence.set(selectedSequenceId, bouncedContactsPromise);
-          incoming = reconcileApolloContactWithBounceEvidence({
+          const deliveryFailuresPromise =
+            deliveryFailuresBySequence.get(selectedSequenceId) ??
+            dependencies.fetchDeliveryFailures(selectedSequenceId);
+          deliveryFailuresBySequence.set(selectedSequenceId, deliveryFailuresPromise);
+          const deliveryFailures = await deliveryFailuresPromise;
+          incoming = reconcileApolloContactWithDeliveryFailureEvidence({
             contact: incoming,
             selectedSequenceId,
             apolloContactId,
             email: contact.email,
-            bouncedContacts: await bouncedContactsPromise
+            deliveryFailures
           });
+          const matchedFailure = findMatchingDeliveryFailure({
+            failures: deliveryFailures,
+            apolloContactId,
+            email: contact.email
+          });
+          if (matchedFailure) {
+            matchedDeliveryFailureKeys.add(
+              deliveryFailureKey(selectedSequenceId, matchedFailure)
+            );
+          }
         }
         const syncedAt = dependencies.now();
         const pendingConfirmation = readApolloPendingSequenceConfirmation(contact.rawJson);
@@ -374,6 +379,18 @@ export async function syncApolloStatusesForTenant(
       }
     }
 
+    const allDeliveryFailures = (
+      await Promise.all(
+        [...deliveryFailuresBySequence.entries()].map(async ([sequenceId, failures]) =>
+          (await failures).map((failure) => ({ sequenceId, failure }))
+        )
+      )
+    ).flat();
+    result.deliveryFailuresMatched = matchedDeliveryFailureKeys.size;
+    result.unmatchedDeliveryFailures = allDeliveryFailures.filter(
+      ({ sequenceId, failure }) =>
+        !matchedDeliveryFailureKeys.has(deliveryFailureKey(sequenceId, failure))
+    ).length;
     result.status = result.failedContacts > 0 ? "error" : "success";
     result.message = buildResultMessage(result);
     await finishJob(job.id, result, dependencies.now());
@@ -502,6 +519,7 @@ function mergeApolloSyncPayload(
     Object.entries(withoutPending).filter(([key]) => key !== "pushBlocker")
   );
   const pending = enrollmentConfirmation.pendingConfirmation;
+  const deliveryFailure = readIncomingDeliveryFailure(incoming.rawPayload);
   const enrollmentMetadata = enrollmentConfirmation.confirmed
     ? withoutPendingOrBlocker
     : enrollmentConfirmation.failed
@@ -534,7 +552,15 @@ function mergeApolloSyncPayload(
       statusSync: {
         trigger: "SCHEDULED_SYNC",
         syncedAt: syncedAt.toISOString()
-      }
+      },
+      ...(deliveryFailure
+        ? {
+            deliveryFailure: {
+              ...deliveryFailure,
+              detectedAt: syncedAt.toISOString()
+            }
+          }
+        : {})
     }
   } as Prisma.InputJsonValue;
 }
@@ -562,25 +588,75 @@ function emptyResult(tenantId: string, status: ApolloStatusSyncResult["status"],
     deferredContacts: 0,
     retryCount: 0,
     rateLimited: false,
+    deliveryFailuresMatched: 0,
+    unmatchedDeliveryFailures: 0,
     message
   };
 }
 
 function buildResultMessage(result: ApolloStatusSyncResult) {
+  const deliverySummary =
+    result.deliveryFailuresMatched > 0 || result.unmatchedDeliveryFailures > 0
+      ? ` ${result.deliveryFailuresMatched} delivery failure(s) were reconciled; ${result.unmatchedDeliveryFailures} Apollo delivery failure(s) did not match a tracked contact in this sync batch.`
+      : "";
   if (result.rateLimited) {
-    return `Apollo rate-limited the sync after ${result.syncedContacts} contact(s); ${result.deferredContacts} contact(s) remain due.`;
+    return `Apollo rate-limited the sync after ${result.syncedContacts} contact(s); ${result.deferredContacts} contact(s) remain due.${deliverySummary}`;
   }
   if (result.failedContacts > 0) {
-    return `Apollo status sync refreshed ${result.syncedContacts} contact(s) and failed ${result.failedContacts}.`;
+    return `Apollo status sync refreshed ${result.syncedContacts} contact(s) and failed ${result.failedContacts}.${deliverySummary}`;
   }
   if (result.confirmedEnrollments > 0 || result.failedEnrollments > 0) {
     return (
       `Apollo status sync refreshed ${result.syncedContacts} contact(s); ` +
       `${result.confirmedEnrollments} pending enrollment(s) were confirmed and ` +
-      `${result.failedEnrollments} expired without confirmation.`
+      `${result.failedEnrollments} expired without confirmation.${deliverySummary}`
     );
   }
-  return `Apollo status sync refreshed ${result.syncedContacts} contact(s); ${result.changedContacts} had new sequence or reply outcomes.`;
+  return `Apollo status sync refreshed ${result.syncedContacts} contact(s); ${result.changedContacts} had new sequence or reply outcomes.${deliverySummary}`;
+}
+
+function readIncomingDeliveryFailure(rawPayload: Record<string, unknown>) {
+  const failure = asJsonObject(rawPayload.newlDeliveryFailureReconciliation);
+  const kind = typeof failure.kind === "string" ? failure.kind : null;
+  const reason = typeof failure.reason === "string" ? failure.reason : null;
+  if (!kind || !reason) {
+    return null;
+  }
+  return {
+    kind,
+    reason,
+    source:
+      typeof failure.source === "string"
+        ? failure.source
+        : "APOLLO_OUTREACH_EMAIL_SEARCH",
+    sequenceId:
+      typeof failure.sequenceId === "string" ? failure.sequenceId : null,
+    record: failure.record ?? null
+  };
+}
+
+function findMatchingDeliveryFailure({
+  failures,
+  apolloContactId,
+  email
+}: {
+  failures: ApolloSequenceDeliveryFailure[];
+  apolloContactId: string;
+  email: string | null;
+}) {
+  const normalizedEmail = email?.trim().toLowerCase() ?? null;
+  return failures.find(
+    (failure) =>
+      failure.apolloContactId === apolloContactId ||
+      (normalizedEmail && failure.email?.trim().toLowerCase() === normalizedEmail)
+  );
+}
+
+function deliveryFailureKey(
+  sequenceId: string,
+  failure: ApolloSequenceDeliveryFailure
+) {
+  return `${sequenceId}|${failure.apolloContactId ?? failure.email?.trim().toLowerCase() ?? "unknown"}|${failure.kind}`;
 }
 
 async function finishJob(jobRunId: string, result: ApolloStatusSyncResult, finishedAt: Date) {

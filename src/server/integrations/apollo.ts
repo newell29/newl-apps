@@ -7,7 +7,7 @@ const APOLLO_SAVED_CONTACT_RECOVERY_LIMIT = 10;
 const APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT = 3;
 const APOLLO_RELATED_ACCOUNT_LIMIT = 5;
 const APOLLO_COMPANY_KEYWORD_FALLBACK_LIMIT = 3;
-const APOLLO_BOUNCED_MESSAGE_MAX_PAGES = 10;
+const APOLLO_DELIVERY_FAILURE_MAX_PAGES = 10;
 const INTERNAL_SEQUENCE_KEYS = new Set([
   "hunter-email-only",
   "hunter-executive-referral",
@@ -138,9 +138,19 @@ export type ApolloContactRecord = {
   rawPayload: Record<string, unknown>;
 };
 
-export type ApolloBouncedSequenceContact = {
+export type ApolloDeliveryFailureKind =
+  | "BOUNCE"
+  | "INVALID_MX"
+  | "BAD_DATA"
+  | "RECIPIENT_DOMAIN"
+  | "SPAM_BLOCKED"
+  | "OTHER_PERMANENT";
+
+export type ApolloSequenceDeliveryFailure = {
   apolloContactId: string | null;
   email: string | null;
+  kind: ApolloDeliveryFailureKind;
+  reason: string;
   rawPayload: Record<string, unknown>;
 };
 
@@ -1373,12 +1383,12 @@ export async function fetchApolloContactById(apolloContactId: string): Promise<A
   return contact;
 }
 
-export async function fetchApolloBouncedSequenceContacts(
+export async function fetchApolloSequenceDeliveryFailures(
   sequenceIdInput: string
-): Promise<ApolloBouncedSequenceContact[]> {
+): Promise<ApolloSequenceDeliveryFailure[]> {
   const sequenceId = sequenceIdInput.trim();
   if (!sequenceId) {
-    throw new Error("Apollo bounce reconciliation requires a sequence ID.");
+    throw new Error("Apollo delivery-failure reconciliation requires a sequence ID.");
   }
   if (INTERNAL_SEQUENCE_KEYS.has(sequenceId)) {
     throw new Error(
@@ -1387,112 +1397,139 @@ export async function fetchApolloBouncedSequenceContacts(
   }
 
   const apiKey = readApolloMasterApiKey();
-  const contacts = new Map<string, ApolloBouncedSequenceContact>();
+  const contacts = new Map<string, ApolloSequenceDeliveryFailure>();
+  const searches = [
+    {
+      key: "message-status",
+      messageStats: ["bounced", "failed_other", "spam_blocked"],
+      notSentReasons: []
+    },
+    {
+      key: "not-sent-reason",
+      messageStats: [],
+      notSentReasons: [
+        "email_format_invalid",
+        "email_service_provider_delivery_failure",
+        "sendgrid_dropped_email",
+        "mailgun_dropped_email",
+        "not_valid_hard_bounce_detected",
+        "email_on_global_bounce_list"
+      ]
+    }
+  ] as const;
 
-  for (let page = 1; page <= APOLLO_BOUNCED_MESSAGE_MAX_PAGES; page += 1) {
-    const params = new URLSearchParams({
-      page: String(page),
-      per_page: String(DEFAULT_PAGE_SIZE)
-    });
-    params.append("emailer_campaign_ids[]", sequenceId);
-    params.append("emailer_message_stats[]", "bounced");
+  for (const search of searches) {
+    for (let page = 1; page <= APOLLO_DELIVERY_FAILURE_MAX_PAGES; page += 1) {
+      const params = new URLSearchParams({
+        page: String(page),
+        per_page: String(DEFAULT_PAGE_SIZE)
+      });
+      params.append("emailer_campaign_ids[]", sequenceId);
+      search.messageStats.forEach((value) => params.append("emailer_message_stats[]", value));
+      search.notSentReasons.forEach((value) => params.append("not_sent_reason_cds[]", value));
 
-    const response = await fetch(
-      `${DEFAULT_BASE_URL}/api/v1/emailer_messages/search?${params.toString()}`,
-      {
-        method: "GET",
-        headers: buildApolloHeaders(apiKey),
-        cache: "no-store"
+      const response = await fetch(
+        `${DEFAULT_BASE_URL}/api/v1/emailer_messages/search?${params.toString()}`,
+        {
+          method: "GET",
+          headers: buildApolloHeaders(apiKey),
+          cache: "no-store"
+        }
+      );
+      const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+      if (!response.ok) {
+        const message =
+          extractApolloError(json) ??
+          `Apollo delivery-failure reconciliation failed with status ${response.status}.`;
+        if (response.status === 429 || isApolloRateLimitMessage(message)) {
+          throw new ApolloRateLimitError(
+            message,
+            parseRetryAfterMs(response.headers.get("retry-after"))
+          );
+        }
+        if (response.status >= 500) {
+          throw new ApolloTransientError(message, response.status);
+        }
+        throw new Error(message);
       }
-    );
-    const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
 
-    if (!response.ok) {
-      const message =
-        extractApolloError(json) ??
-        `Apollo bounced-email reconciliation failed with status ${response.status}.`;
-      if (response.status === 429 || isApolloRateLimitMessage(message)) {
-        throw new ApolloRateLimitError(
-          message,
-          parseRetryAfterMs(response.headers.get("retry-after"))
+      if (!json) {
+        throw new ApolloTransientError(
+          "Apollo returned an unreadable delivery-failure response.",
+          502
         );
       }
-      if (response.status >= 500) {
-        throw new ApolloTransientError(message, response.status);
+
+      const entries = readApolloActivityEntries(json)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+      for (const entry of entries) {
+        const failure = classifyApolloDeliveryFailure(entry);
+        if (!failure) {
+          continue;
+        }
+        const nestedContact =
+          asRecord(entry.contact) ??
+          asRecord(entry.recipient) ??
+          asRecord(entry.person) ??
+          asRecord(entry.prospect);
+        const apolloContactId =
+          readApolloString(entry, [
+            "contact_id",
+            "apollo_contact_id",
+            "recipient_contact_id",
+            "prospect_id"
+          ]) ?? readApolloString(nestedContact ?? {}, ["contact_id", "apollo_contact_id", "id"]);
+        const email =
+          readApolloString(entry, ["to_email", "recipient_email", "email"]) ??
+          readApolloString(nestedContact ?? {}, ["email"]);
+        const key = apolloContactId ?? email?.trim().toLowerCase() ?? null;
+
+        if (key && !contacts.has(key)) {
+          contacts.set(key, {
+            apolloContactId,
+            email,
+            ...failure,
+            rawPayload: entry
+          });
+        }
       }
-      throw new Error(message);
-    }
 
-    if (!json) {
-      throw new ApolloTransientError(
-        "Apollo returned an unreadable bounced-email response.",
-        502
-      );
-    }
-
-    const entries = readApolloActivityEntries(json)
-      .map((entry) => asRecord(entry))
-      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
-
-    for (const entry of entries) {
-      const nestedContact =
-        asRecord(entry.contact) ??
-        asRecord(entry.recipient) ??
-        asRecord(entry.person) ??
-        asRecord(entry.prospect);
-      const apolloContactId =
-        readApolloString(entry, [
-          "contact_id",
-          "apollo_contact_id",
-          "recipient_contact_id",
-          "prospect_id"
-        ]) ?? readApolloString(nestedContact ?? {}, ["contact_id", "apollo_contact_id", "id"]);
-      const email =
-        readApolloString(entry, ["to_email", "recipient_email", "email"]) ??
-        readApolloString(nestedContact ?? {}, ["email"]);
-      const key = apolloContactId ?? email?.trim().toLowerCase() ?? null;
-
-      if (key && !contacts.has(key)) {
-        contacts.set(key, {
-          apolloContactId,
-          email,
-          rawPayload: entry
-        });
+      if (entries.length < DEFAULT_PAGE_SIZE) {
+        break;
       }
-    }
-
-    if (entries.length < DEFAULT_PAGE_SIZE) {
-      break;
     }
   }
 
   return [...contacts.values()];
 }
 
-export function reconcileApolloContactWithBounceEvidence({
+export function reconcileApolloContactWithDeliveryFailureEvidence({
   contact,
   selectedSequenceId,
   apolloContactId,
   email,
-  bouncedContacts
+  deliveryFailures
 }: {
   contact: ApolloContactRecord;
   selectedSequenceId: string | null;
   apolloContactId: string;
   email: string | null;
-  bouncedContacts: ApolloBouncedSequenceContact[];
+  deliveryFailures: ApolloSequenceDeliveryFailure[];
 }): ApolloContactRecord {
-  if (!selectedSequenceId || contact.sequenceStatus === SequenceStatus.BOUNCED) {
+  if (!selectedSequenceId) {
     return contact;
   }
 
   const normalizedEmail = email?.trim().toLowerCase() ?? null;
-  const bounce = bouncedContacts.find(
+  const failure = deliveryFailures.find(
     (candidate) =>
       candidate.apolloContactId === apolloContactId ||
       (normalizedEmail && candidate.email?.trim().toLowerCase() === normalizedEmail)
   );
-  if (!bounce) {
+  if (!failure) {
     return contact;
   }
 
@@ -1502,13 +1539,102 @@ export function reconcileApolloContactWithBounceEvidence({
     sequenceId: selectedSequenceId,
     rawPayload: {
       ...contact.rawPayload,
-      newlBounceReconciliation: {
+      newlDeliveryFailureReconciliation: {
         source: "APOLLO_OUTREACH_EMAIL_SEARCH",
         sequenceId: selectedSequenceId,
-        record: bounce.rawPayload
+        kind: failure.kind,
+        reason: failure.reason,
+        record: failure.rawPayload
       }
     }
   };
+}
+
+export function classifyApolloDeliveryFailure(
+  value: Record<string, unknown>
+): { kind: ApolloDeliveryFailureKind; reason: string } | null {
+  const records = [
+    value,
+    asRecord(value.delivery),
+    asRecord(value.emailer_message),
+    asRecord(value.message)
+  ].filter((record): record is Record<string, unknown> => Boolean(record));
+  const reason =
+    records
+      .map((record) =>
+        readApolloString(record, [
+          "failure_reason",
+          "not_sent_reason",
+          "not_sent_reason_cd",
+          "delivery_failure_reason",
+          "status_reason",
+          "error_message",
+          "message"
+        ])
+      )
+      .find(Boolean) ??
+    records
+      .map((record) =>
+        readApolloString(record, [
+          "emailer_message_stat",
+          "emailer_message_status",
+          "email_status",
+          "email_delivery_status",
+          "status",
+          "state"
+        ])
+      )
+      .find(Boolean) ??
+    "";
+  const searchable = records
+    .flatMap((record) =>
+      [
+        "failure_reason",
+        "not_sent_reason",
+        "not_sent_reason_cd",
+        "delivery_failure_reason",
+        "status_reason",
+        "error_message",
+        "message",
+        "emailer_message_stat",
+        "emailer_message_status",
+        "email_status",
+        "email_delivery_status",
+        "status",
+        "state"
+      ].map((key) => readApolloString(record, [key]))
+    )
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+
+  if (!searchable) {
+    return null;
+  }
+  if (/invalid[-_ ]?mx|mx record|no mx|domain.*mx/.test(searchable)) {
+    return { kind: "INVALID_MX", reason: reason || "Invalid MX record detected for the recipient domain." };
+  }
+  if (/recipient[-_ ]?domain|invalid domain|domain does not exist|email domain/.test(searchable)) {
+    return { kind: "RECIPIENT_DOMAIN", reason: reason || "Recipient-domain delivery failure." };
+  }
+  if (/bad data|email[-_ ]?format[-_ ]?invalid|invalid email|email unverified/.test(searchable)) {
+    return { kind: "BAD_DATA", reason: reason || "Apollo marked the recipient as bad data." };
+  }
+  if (/spam[-_ ]?blocked/.test(searchable)) {
+    return { kind: "SPAM_BLOCKED", reason: reason || "Apollo blocked the message as spam." };
+  }
+  if (/bounc|hard[-_ ]?bounce|global[-_ ]?bounce/.test(searchable)) {
+    return { kind: "BOUNCE", reason: reason || "Apollo reported a bounced message." };
+  }
+  if (
+    /failed_other|delivery failure|delivery_failure|dropped_email|dropped email|email_service_provider_delivery_failure/.test(
+      searchable
+    )
+  ) {
+    return { kind: "OTHER_PERMANENT", reason: reason || "Apollo reported a permanent delivery failure." };
+  }
+
+  return null;
 }
 
 export async function createApolloContactForEnrollment(
@@ -3214,14 +3340,10 @@ function parseApolloContacts(
         "emailer_campaign_status"
       ]) ?? readApolloString(sequenceDetails ?? {}, ["status", "state"])
     );
-    const emailDeliveryStatus = readApolloString(record, [
-      "email_status",
-      "email_delivery_status",
-      "emailer_message_status"
-    ]);
-    const sequenceStatus = /bounc/i.test(emailDeliveryStatus ?? "")
-      ? SequenceStatus.BOUNCED
-      : campaignSequenceStatus;
+    const deliveryFailure =
+      classifyApolloDeliveryFailure(record) ??
+      (sequenceDetails ? classifyApolloDeliveryFailure(sequenceDetails) : null);
+    const sequenceStatus = deliveryFailure ? SequenceStatus.BOUNCED : campaignSequenceStatus;
     const explicitReplyStatus = parseReplyStatus(
       readApolloString(record, ["reply_status", "response_status", "last_response_type"])
     );
@@ -3296,7 +3418,17 @@ function parseApolloContacts(
         rawPayload: {
           ...record,
           organization,
-          sequence: sequenceDetails
+          sequence: sequenceDetails,
+          ...(deliveryFailure
+            ? {
+                newlDeliveryFailureReconciliation: {
+                  source: "APOLLO_CONTACT_RECORD",
+                  kind: deliveryFailure.kind,
+                  reason: deliveryFailure.reason,
+                  record
+                }
+              }
+            : {})
         }
       }
     ];

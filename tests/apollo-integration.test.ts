@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import {
   createApolloContactForEnrollment,
+  classifyApolloDeliveryFailure,
   fetchApolloActivitySummary,
-  fetchApolloBouncedSequenceContacts,
+  fetchApolloSequenceDeliveryFailures,
   fetchApolloContactById,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
@@ -14,7 +15,7 @@ import {
   parseApolloPersonIds,
   pushApolloContactsToSequence,
   readApolloAccountIdFromMatchQuery,
-  reconcileApolloContactWithBounceEvidence,
+  reconcileApolloContactWithDeliveryFailureEvidence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
 } from "@/server/integrations/apollo";
@@ -235,9 +236,39 @@ describe("fetchApolloContactById", () => {
       sequenceStatus: SequenceStatus.BOUNCED
     });
   });
+
+  it("treats Apollo's invalid-MX not-sent reason as terminal delivery failure", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        contact: {
+          id: "apollo-contact-rodney",
+          first_name: "Rodney",
+          last_name: "Rivers",
+          email: "rodney@example.com",
+          status: "not sent",
+          failure_reason:
+            "Invalid MX record detected for the recipient domain. Email not sent to prevent delivery failures or spam reputation impact.",
+          apollo_sequence_status: "finished",
+          apollo_sequence_id: "hunter-email-only"
+        }
+      })
+    } as unknown as Response);
+
+    const contact = await fetchApolloContactById("apollo-contact-rodney");
+
+    expect(contact.sequenceStatus).toBe(SequenceStatus.BOUNCED);
+    expect(contact.rawPayload).toMatchObject({
+      newlDeliveryFailureReconciliation: {
+        source: "APOLLO_CONTACT_RECORD",
+        kind: "INVALID_MX"
+      }
+    });
+  });
 });
 
-describe("Apollo bounced outreach reconciliation", () => {
+describe("Apollo delivery-failure reconciliation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.stubEnv("APOLLO_MASTER_API", "master-api-key");
@@ -261,7 +292,7 @@ describe("Apollo bounced outreach reconciliation", () => {
           }
         })
       } as unknown as Response)
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         ok: true,
         status: 200,
         json: vi.fn().mockResolvedValue({
@@ -277,13 +308,13 @@ describe("Apollo bounced outreach reconciliation", () => {
       } as unknown as Response);
 
     const contact = await fetchApolloContactById("apollo-contact-1");
-    const bouncedContacts = await fetchApolloBouncedSequenceContacts("sequence-1");
-    const reconciled = reconcileApolloContactWithBounceEvidence({
+    const deliveryFailures = await fetchApolloSequenceDeliveryFailures("sequence-1");
+    const reconciled = reconcileApolloContactWithDeliveryFailureEvidence({
       contact,
       selectedSequenceId: "sequence-1",
       apolloContactId: "apollo-contact-1",
       email: "taylor@example.com",
-      bouncedContacts
+      deliveryFailures
     });
 
     expect(contact.sequenceStatus).toBe(SequenceStatus.NOT_STARTED);
@@ -294,7 +325,33 @@ describe("Apollo bounced outreach reconciliation", () => {
     const requestUrl = new URL(String(fetchMock.mock.calls[1]?.[0]));
     expect(requestUrl.pathname).toBe("/api/v1/emailer_messages/search");
     expect(requestUrl.searchParams.getAll("emailer_campaign_ids[]")).toEqual(["sequence-1"]);
-    expect(requestUrl.searchParams.getAll("emailer_message_stats[]")).toEqual(["bounced"]);
+    expect(requestUrl.searchParams.getAll("emailer_message_stats[]")).toEqual([
+      "bounced",
+      "failed_other",
+      "spam_blocked"
+    ]);
+    expect(reconciled.rawPayload).toMatchObject({
+      newlDeliveryFailureReconciliation: {
+        kind: "BOUNCE",
+        reason: "bounced"
+      }
+    });
+  });
+
+  it("classifies Tina's bad-data and Dileep's recipient-domain failures without using a configurable contact stage", () => {
+    expect(
+      classifyApolloDeliveryFailure({
+        status: "not sent",
+        failure_reason: "Bad data: the email format is invalid."
+      })
+    ).toMatchObject({ kind: "BAD_DATA" });
+    expect(
+      classifyApolloDeliveryFailure({
+        status: "not sent",
+        failure_reason: "The recipient domain does not exist."
+      })
+    ).toMatchObject({ kind: "RECIPIENT_DOMAIN" });
+    expect(classifyApolloDeliveryFailure({ contact_stage: "Bad Data" })).toBeNull();
   });
 });
 
