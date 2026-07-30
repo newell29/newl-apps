@@ -2582,7 +2582,7 @@ describe("fetchApolloContactsForCompany", () => {
     expect(peopleSearchUrl.searchParams.get("per_page")).toBe("100");
   });
 
-  it("recovers YAT employees when Apollo applies People Search filters only from the documented query string", async () => {
+  it("recovers YAT employees when a scoped People Search returns only Apollo's marketing brand label", async () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body
@@ -2645,8 +2645,7 @@ describe("fetchApolloContactsForCompany", () => {
                     title: "Import Export Specialist",
                     has_email: true,
                     organization: {
-                      name: "YAT USA, INC.",
-                      primary_domain: "yattool.com"
+                      name: "YAT - Your Advanced Technology"
                     }
                   }]
                 }

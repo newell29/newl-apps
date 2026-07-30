@@ -3324,6 +3324,23 @@ function filterApolloContactsForExpectedOrganization(
         return true;
       }
 
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        !organization.id &&
+        !organization.domain &&
+        hasSafeScopedLeadingBrandExpansion(
+          companyName,
+          organization.name
+        )
+      ) {
+        // Apollo sometimes returns only its marketing/brand label on people
+        // retrieved through an exact organization_ids[] query. The query scope
+        // is the authoritative employer identity in that response; rejecting
+        // the record because the embedded label differs would discard valid
+        // people such as YAT USA's "YAT - Your Advanced Technology" roster.
+        return true;
+      }
+
       if (!organization.name && !organization.domain) {
         return true;
       }
@@ -3354,6 +3371,19 @@ function filterApolloContactsForExpectedOrganization(
     }
 
     if (normalizedDomain) {
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        !organization.domain &&
+        hasSafeScopedLeadingBrandExpansion(
+          companyName,
+          organization.name
+        )
+      ) {
+        // The same Apollo response-shape gap occurs on exact
+        // q_organization_domains_list[] searches. Trust the documented query
+        // scope when the returned person does not contradict it with a domain.
+        return true;
+      }
       return organization.domain === normalizedDomain;
     }
 
@@ -4702,6 +4732,26 @@ function hasSafeScopedOrganizationAcronymMatch(
         )
       );
     })
+  );
+}
+
+function hasSafeScopedLeadingBrandExpansion(
+  companyName: string,
+  candidateName: string | null
+) {
+  if (!candidateName || !/\s[-|]\s/u.test(candidateName)) {
+    return false;
+  }
+
+  const expectedTokens = tokenizeCompanyName(companyName);
+  const candidateTokens = tokenizeCompanyName(candidateName);
+  const expectedFirstToken = companyName.trim().match(/^([A-Z0-9]{2,6})\b/u)?.[1];
+
+  return Boolean(
+    expectedFirstToken &&
+    expectedTokens.length === 1 &&
+    candidateTokens.length >= 3 &&
+    candidateTokens[0] === expectedTokens[0]
   );
 }
 
