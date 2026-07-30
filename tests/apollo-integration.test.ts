@@ -465,7 +465,7 @@ describe("fetchApolloContactsForCompany", () => {
     );
   });
 
-  it("recovers YAT employees by confirmed account domain when its canonical organization returns zero", async () => {
+  it("uses only YAT's exact reviewer-confirmed organization scope", async () => {
     const accountId = "6888f2e0496bf40001170587";
     const organizationId = "5e66b6381e05b4008c8331b8";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
@@ -511,29 +511,27 @@ describe("fetchApolloContactsForCompany", () => {
       if (url.includes("/api/v1/mixed_people/api_search")) {
         const requestUrl = new URL(url);
         if (requestUrl.searchParams.getAll("organization_ids[]").includes(organizationId)) {
-          return emptyApolloPeopleResponse();
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [{
+                id: "6138684489ec360001a60945",
+                first_name: "Rogelio",
+                last_name: "Martinez",
+                title: "Import Export Specialist",
+                has_email: true,
+                organization: {
+                  id: organizationId,
+                  name: "YAT USA, INC.",
+                  primary_domain: "yattool.com"
+                }
+              }]
+            })
+          } as unknown as Response;
         }
 
-        expect(requestUrl.searchParams.getAll("q_organization_domains_list[]"))
-          .toEqual(["yattool.com"]);
-        return {
-          ok: true,
-          status: 200,
-          json: vi.fn().mockResolvedValue({
-            people: [{
-              id: "6138684489ec360001a60945",
-              first_name: "Rogelio",
-              last_name: "Martinez",
-              title: "Import Export Specialist",
-              has_email: true,
-              organization: {
-                id: organizationId,
-                name: "YAT USA, INC.",
-                primary_domain: "yattool.com"
-              }
-            }]
-          })
-        } as unknown as Response;
+        throw new Error(`YAT lookup escaped the confirmed organization: ${url}`);
       }
 
       throw new Error(
@@ -557,7 +555,7 @@ describe("fetchApolloContactsForCompany", () => {
       })
     ]);
     expect(result.match.matchReason).toContain(
-      "recovered employees through the confirmed Apollo account domain"
+      "reviewer-confirmed exact saved Apollo account mapping"
     );
     expect(result.match.query).toMatchObject({
       apollo_account_id: accountId
@@ -569,7 +567,7 @@ describe("fetchApolloContactsForCompany", () => {
           .getAll("q_organization_domains_list[]")
           .includes("yattool.com")
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       fetchMock.mock.calls.some(([request]) =>
         String(request).includes("/api/v1/people/match")
@@ -2112,6 +2110,115 @@ describe("fetchApolloContactsForCompany", () => {
     ).toBe(true);
   });
 
+  it("searches only the organization linked by Canadian General Tower's reviewer-confirmed account URL", async () => {
+    const accountId = "68c827e245bff10001541e03";
+    const organizationId = "61e67cd9a2fcd500a4fcca77";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(
+      async (input) => {
+        const url = String(input);
+
+        if (url.endsWith(`/api/v1/accounts/${accountId}`)) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              account: {
+                id: accountId,
+                name: "CANADIAN GENERAL TOWER LTD",
+                primary_domain: "cgtower.com",
+                organization: {
+                  id: organizationId,
+                  name: "CANADIAN GENERAL TOWER LTD",
+                  primary_domain: "cgtower.com"
+                }
+              }
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/contacts/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ contacts: [] })
+          } as unknown as Response;
+        }
+
+        if (url.includes("/api/v1/mixed_people/api_search")) {
+          const scopedIds = new URL(url).searchParams.getAll(
+            "organization_ids[]"
+          );
+          expect(scopedIds).toEqual([organizationId]);
+          expect(scopedIds).not.toContain(accountId);
+          expect(
+            new URL(url).searchParams.getAll(
+              "q_organization_domains_list[]"
+            )
+          ).toEqual([]);
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [{
+                id: "cgt-supply-chain-director",
+                first_name: "Cameron",
+                last_name: "Tower",
+                title: "Director of Supply Chain",
+                email: "cameron.tower@cgtower.com",
+                organization: {
+                  id: organizationId,
+                  name: "CANADIAN GENERAL TOWER LTD",
+                  primary_domain: "cgtower.com"
+                }
+              }]
+            })
+          } as unknown as Response;
+        }
+
+        throw new Error(
+          `Unexpected Apollo URL in Canadian General Tower account-scope test: ${url}`
+        );
+      }
+    );
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "CANADIAN GENERAL TOWER LTD",
+      domain: "cgtower.com",
+      apolloOrganizationId: organizationId,
+      apolloAccountId: accountId
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloPersonId: "cgt-supply-chain-director",
+        fullName: "Cameron Tower",
+        title: "Director of Supply Chain",
+        email: "cameron.tower@cgtower.com"
+      })
+    ]);
+    expect(result.match.classification).toBe("DIRECT_COMPANY");
+    expect(result.match.matchReason).toContain(
+      "reviewer-confirmed exact saved Apollo account mapping"
+    );
+    expect(result.contactRecovery).toMatchObject({
+      confirmedAccountScopesChecked: 1,
+      relatedAccountsChecked: 0,
+      relatedOrganizationScopesChecked: 0
+    });
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).endsWith("/api/v1/accounts/search")
+      )
+    ).toBe(false);
+    for (const [request] of fetchMock.mock.calls) {
+      const url = String(request);
+      if (!url.includes("/api/v1/mixed_people/api_search")) continue;
+      expect(
+        new URL(url).searchParams.getAll("organization_ids[]")
+      ).toEqual([organizationId]);
+    }
+  });
+
   it("retries an exact saved account by trusted domain when Apollo exposes no nested organization ID", async () => {
     const accountId = "661ec0f545d31b00076e28e0";
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
@@ -2195,7 +2302,7 @@ describe("fetchApolloContactsForCompany", () => {
     })).toBe(true);
   });
 
-  it("recovers Dansons employees from a verified same-domain duplicate Apollo account", async () => {
+  it("does not substitute a same-domain Apollo account after a reviewer confirms Dansons", async () => {
     const providedAccountId = "661ec104e14548000791da78";
     const providedOrganizationId = "dansons-us-organization";
     const relatedAccountId = "649c3a742d787d00c3ff63fa";
@@ -2255,7 +2362,7 @@ describe("fetchApolloContactsForCompany", () => {
       if (url.includes("/api/v1/mixed_people/api_search")) {
         const requestUrl = new URL(url);
         const organizationIds = requestUrl.searchParams.getAll("organization_ids[]");
-        if (organizationIds.includes(relatedOrganizationId)) {
+        if (organizationIds.includes(providedOrganizationId)) {
           return {
             ok: true,
             status: 200,
@@ -2265,8 +2372,8 @@ describe("fetchApolloContactsForCompany", () => {
                 name: "Derek Serran",
                 title: "Director of Supply Chain",
                 organization: {
-                  id: relatedOrganizationId,
-                  name: "Dansons",
+                  id: providedOrganizationId,
+                  name: "DANSONS US LLC",
                   primary_domain: "dansons.com"
                 }
               }]
@@ -2274,12 +2381,7 @@ describe("fetchApolloContactsForCompany", () => {
           } as unknown as Response;
         }
 
-        expect(organizationIds).not.toContain("unsafe-dansons-organization");
-        return {
-          ok: true,
-          status: 200,
-          json: vi.fn().mockResolvedValue({ people: [] })
-        } as unknown as Response;
+        throw new Error(`Dansons lookup escaped the confirmed organization: ${url}`);
       }
 
       throw new Error(`Unexpected Apollo URL in Dansons duplicate-account test: ${url}`);
@@ -2300,12 +2402,11 @@ describe("fetchApolloContactsForCompany", () => {
       })
     ]);
     expect(result.match.classification).toBe("DIRECT_COMPANY");
-    expect(result.match.matchReason).toContain(
-      "verified same-domain Apollo saved-account organization scope"
-    );
+    expect(result.match.matchReason).toContain("reviewer-confirmed exact saved Apollo account mapping");
     expect(result.contactRecovery).toMatchObject({
-      relatedAccountsChecked: 1,
-      relatedOrganizationScopesChecked: 1,
+      relatedAccountsChecked: 0,
+      relatedOrganizationScopesChecked: 0,
+      confirmedAccountScopesChecked: 1,
       companyKeywordSearches: 0
     });
     expect(
@@ -2314,10 +2415,10 @@ describe("fetchApolloContactsForCompany", () => {
           .getAll("organization_ids[]")
           .includes(relatedOrganizationId)
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("recovers Pratt employees from the single vetted parent when a reviewer-confirmed account is an empty shell", async () => {
+  it("does not substitute Pratt's parent after a reviewer confirms an empty account shell", async () => {
     const sparseAccountId = "6888f2ad496bf4000116f03c";
     const parentAccountId = "6351479cb4e0c000a35c49e8";
     const parentOrganizationId = "pratt-industries-global-org";
@@ -2426,21 +2527,14 @@ describe("fetchApolloContactsForCompany", () => {
         "Evidence confirms the entity is a manufacturing plant of Pratt Industries operating in Rock Hill."
     });
 
-    expect(result.organizationId).toBe(parentOrganizationId);
-    expect(result.companyName).toBe("Pratt Industries");
-    expect(result.contacts).toEqual([
-      expect.objectContaining({
-        fullName: "Greg Holley",
-        title: "Logistics Manager",
-        email: "greg.holley@prattindustries.com"
-      })
-    ]);
-    expect(result.match.matchReason).toContain(
-      "vetted Hunter/Kimi parent identity"
-    );
+    expect(result.organizationId).toBe(sparseAccountId);
+    expect(result.companyName).toBe("PRATT (ROCK HILL CORRUGATING) LLC,");
+    expect(result.contacts).toEqual([]);
+    expect(result.match.matchReason).toContain("reviewer-confirmed exact saved Apollo account mapping");
     expect(result.contactRecovery).toMatchObject({
-      vettedParentAccountsChecked: 1,
-      relatedOrganizationScopesChecked: 1
+      vettedParentAccountsChecked: 0,
+      relatedOrganizationScopesChecked: 0,
+      confirmedAccountScopesChecked: 1
     });
     expect(
       fetchMock.mock.calls.some(([, requestInit]) => {
@@ -2449,10 +2543,10 @@ describe("fetchApolloContactsForCompany", () => {
           : {};
         return requestBody.q_organization_name === "pratt";
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it("uses a strict same-company keyword fallback only after verified Apollo scopes return zero", async () => {
+  it("does not run a company-keyword fallback for a reviewer-confirmed account", async () => {
     const accountId = "661ec104e14548000791da78";
     const organizationId = "dansons-us-organization";
     vi.spyOn(global, "fetch").mockImplementation(async (input) => {
@@ -2534,16 +2628,13 @@ describe("fetchApolloContactsForCompany", () => {
       apolloAccountId: accountId
     });
 
-    expect(result.contacts.map((contact) => contact.fullName)).toEqual([
-      "Derek Serran"
-    ]);
-    expect(result.match.matchReason).toContain(
-      "strict same-company keyword fallback"
-    );
+    expect(result.contacts).toEqual([]);
+    expect(result.match.matchReason).toContain("reviewer-confirmed exact saved Apollo account mapping");
     expect(result.contactRecovery).toMatchObject({
       relatedAccountsChecked: 0,
       relatedOrganizationScopesChecked: 0,
-      companyKeywordSearches: 1
+      confirmedAccountScopesChecked: 1,
+      companyKeywordSearches: 0
     });
   });
 

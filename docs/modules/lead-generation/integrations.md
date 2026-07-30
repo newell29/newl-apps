@@ -237,6 +237,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   regional brand, parent-company, and provider-like name differences are audited but cannot cause Newl Apps to reject
   or substitute the chosen URL. Duplicate tenant mapping prevention remains enforced, and contact/outreach safety
   (email, DNC, bounce, active cadence, role eligibility, and provider prospecting policy) is evaluated separately.
+- A reviewer-confirmed saved Apollo account URL is authoritative. Newl Apps reads that exact account record and uses
+  only its linked organization ID for Apollo's zero-credit People Search (Apollo's documented employee endpoint does
+  not accept saved-account IDs). It does not substitute a parent, sibling, same-domain organization, or similarly named
+  company. Returned people must still match the exact linked organization before buyer review.
 - Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
 - **Archived exceptions** is an auditable, reversible state rather than deletion. It covers both confirmed no-match
   companies and reviewer-confirmed mappings with no usable employees, duplicates, or irrelevant companies. The
