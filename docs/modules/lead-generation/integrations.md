@@ -45,7 +45,7 @@ account. Both People Search requests are zero-credit; paid email enrichment rema
 - Ollama structured output receives the same JSON Schema represented in the application validator. Invalid, omitted, weak, or unmapped classifications fail closed.
 - The machine prepare, complete, and fail routes reuse ingestion authentication and resolve the configured ingestion tenant server-side.
 - The scout does not use Apollo credentials and has no Apollo, cadence, or messaging client. It may create a
-  tenant-scoped provisional company so the existing full Qwen/Kimi research gate can later decide whether the
+  tenant-scoped provisional company so the existing full Luna/Kimi research gate can later decide whether the
   separate assisted handoff is allowed to search Apollo.
 
 ## Hunter company-research providers

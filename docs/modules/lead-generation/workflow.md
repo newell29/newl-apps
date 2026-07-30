@@ -109,7 +109,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
     superseded plan versions are removed from the active Outreach Queue.
     Manual Apollo URL mapping and the admin-only **Re-evaluate company contacts** action use this same targeted
     one-company path. They force buyer-role review, enforce the saved 1-3-contact ceiling, archive unselected
-    unapproved plans, and do not rerun paid web research or the Qwen/Kimi company assessment. Both controls keep
+    unapproved plans, and do not rerun paid web research or the Luna/Kimi company assessment. Both controls keep
     contact retrieval credit-free by default. A separate optional checkbox may authorize at most three email-only
     People Enrichment requests after saved-contact recovery found no usable email; phone and waterfall enrichment
     remain disabled, and the authorization is frozen into the tenant-scoped handoff job and audit record.

@@ -137,9 +137,9 @@ export default async function AutomationSettingsPage({
                 </button>
                 <p className="mt-2 text-xs text-mutedForeground">
                   Reruns organization-scoped Apollo employee searches for current Hot and Qualified companies with
-                  completed Qwen synthesis and Kimi scoring, repeats AI contact review, and creates or refreshes plans
+                  completed Luna synthesis and Kimi scoring, repeats AI contact review, and creates or refreshes plans
                   for selected contacts. Failed plans receive one automatic QA-guided rewrite in the same run. This
-                  does not rerun Brave searches, Qwen research, or Kimi scoring, and it never sends outreach without
+                  does not rerun Brave searches, Luna research, or Kimi scoring, and it never sends outreach without
                   plan approval.
                 </p>
               </div>
@@ -295,7 +295,7 @@ function LatestContactDiscoveryRun({
           </h2>
           <p className="mt-1 text-sm text-mutedForeground">
             Started {formatRunDate(run.startedAt, timeZone)}. Every queued company
-            passed the saved Qwen synthesis, Kimi scoring, deterministic research,
+            passed the saved Luna synthesis (or an approved legacy Qwen run), Kimi scoring, deterministic research,
             and current Hunter selection gates. Evaluated contacts are the bounded
             Apollo candidates sent through buyer-role review; only contacts with a
             generated plan appear in Outreach Queue.

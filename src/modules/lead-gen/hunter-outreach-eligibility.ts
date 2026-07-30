@@ -133,8 +133,7 @@ export function evaluateHunterOutreachEligibility({
     !["HOT_OPPORTUNITY", "QUALIFIED_CURRENT_ACCOUNT"].includes(opportunityTier) ||
     deterministicGate.passed !== true ||
     !retrievedAt ||
-    synthesisModel.provider !== "OLLAMA" ||
-    !isRequiredModel(synthesisModel.name, "qwen") ||
+    !isApprovedSynthesisModel(synthesisModel) ||
     scoringModel.provider !== "KIMI" ||
     !isRequiredModel(scoringModel.name, "kimi") ||
     synthesisServiceLine !== scoringServiceLine ||
@@ -148,7 +147,7 @@ export function evaluateHunterOutreachEligibility({
     return result(
       "INVALID_HANDOFF",
       "Hunter handoff incomplete",
-      "Hunter research is missing the Qwen/Kimi model handoff, a valid tier, deterministic gate, score, confidence, or consistent service line.",
+      "Hunter research is missing the Luna/Kimi model handoff (or an approved legacy Qwen handoff), a valid tier, deterministic gate, score, confidence, or consistent service line.",
       opportunityTier,
       scoringServiceLine,
       retrievedAt
@@ -234,6 +233,13 @@ export function evaluateHunterOutreachEligibility({
       researchRetrievedAt: retrievedAt.toISOString()
     }
   };
+}
+
+function isApprovedSynthesisModel(model: Record<string, unknown>) {
+  return (
+    (model.provider === "OPENAI" && isRequiredModel(model.name, "luna")) ||
+    (model.provider === "OLLAMA" && isRequiredModel(model.name, "qwen"))
+  );
 }
 
 function result(

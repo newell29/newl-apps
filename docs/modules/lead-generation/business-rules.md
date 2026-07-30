@@ -60,7 +60,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
   enrichment is disabled for automatic runs and requires a separate explicit manual authorization capped at three
   people; phone, personal-email, and waterfall enrichment remain disabled.
 - Bulk outreach approval accepts selected contacts rather than plan IDs, resolves each contact's latest non-archived
-  plan inside the authenticated tenant, and approves only current `QA_PASSED` plans for safe Qwen/Kimi-vetted Hunter
+  plan inside the authenticated tenant, and approves only current `QA_PASSED` plans for safe Luna/Kimi-vetted Hunter
   opportunities with a usable email. Eligible contacts are approved atomically and placed into one Apollo enrollment
   job; ineligible selections remain unchanged and return a visible reason.
 - Scoring settings reject invalid window combinations, company weights that do not total exactly 100 points, non-descending contact tiers, and incomplete or inverted mid-market TEU ranges.

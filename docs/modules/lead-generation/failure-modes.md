@@ -451,7 +451,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   and waterfall requests.
 - Queue behavior: a direct company with at least one recovered employee leaves Apollo Exceptions. A direct company
   with no employees remains visible with the completed-search reason so it cannot spin silently. Queue eligibility
-  still requires a current Qwen/Kimi-vetted Hunter opportunity; the zero-employee marker is the only direct-match
+  still requires a current Luna/Kimi-vetted Hunter opportunity (or an approved legacy Qwen run); the zero-employee marker is the only direct-match
   exception. Unapproved plans attached to contacts that still have no concrete email are archived.
 
 ### Apollo People Search returns employees but Hunter still keeps the same saved contacts
