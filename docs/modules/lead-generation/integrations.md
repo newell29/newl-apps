@@ -24,7 +24,8 @@ retries with the trusted domain stored on the confirmed company even when the or
 unavailable. Both scopes read up to five 100-person pages rather than treating the first page as the complete
 company roster. Saved-contact lookup uses Apollo's canonical account/company name—not a TradeMining facility label
 such as `UNISYNC GROUP:GUELPH DC`—and accepts contacts tied to either the reviewer-confirmed account ID or its resolved
-canonical organization ID. A contradictory organization ID still fails closed. Apollo can maintain duplicate or
+canonical organization ID. Outside an exact reviewer-confirmed organization-scoped People Search, a contradictory
+organization ID still fails closed. Apollo can maintain duplicate or
 related saved accounts for one brand while its UI combines their
 employees through **Include Sub Accounts**. After the exact organization and domain return zero, Hunter searches a
 bounded set of zero-credit saved-account results, accepts only safe same-brand records on the exact trusted domain,
@@ -41,11 +42,15 @@ exact same reviewer-confirmed global organization ID. The supporting Account ID 
 does not replace or weaken the reviewer-confirmed mapping. Same name, same domain, or acronym similarity without that
 exact global-organization relationship remains rejected.
 
-Apollo can return a strictly scoped employee
-with only a marketing/brand employer label and omit the
-organization ID and domain from that person record. Newl Apps accepts a safe leading uppercase brand expansion such
-as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside the exact confirmed organization/domain query;
-explicitly different organization IDs, domains, and sibling names still fail closed. If the UI still exposes people
+Apollo can return a strictly scoped employee with only a marketing/brand employer label, omit the global
+organization ID, or embed a different saved Account ID in the person record. For a reviewer-confirmed account URL,
+the exact `organization_ids[]` query is authoritative: Newl Apps accepts the roster returned through that immutable
+scope even when records use an operating-brand Account such as `CGT` under `CANADIAN GENERAL TOWER LTD`. Account IDs
+and global organization IDs are different namespaces and must not be compared as if they were interchangeable.
+This trust applies only to the exact reviewer-confirmed query; automatic matches, domain searches, company-keyword
+fallbacks, and unconfirmed mappings retain strict employer identity checks. Newl Apps also accepts a safe leading
+uppercase brand expansion such as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside an exact confirmed
+organization/domain query. If the UI still exposes people
 that neither supported employer index returns, Newl Apps exposes a last-resort reviewer option for up to
 three exact Apollo person profile URLs. Apollo can place either a saved-contact ID or a global person ID in this
 route, so Newl Apps first checks zero-credit Contact View and uses separately authorized email-only People Enrichment

@@ -633,6 +633,11 @@ export async function fetchApolloContactsForCompany(
     trustedMatchedOrganization?.name ?? input.companyName;
   const confirmedSavedContactDomain =
     trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
+  const trustReviewerConfirmedPeopleScope = Boolean(
+    providedAccountId &&
+    providedOrganizationId &&
+    confirmedSavedAccount
+  );
   const rawSavedContactsForProvidedOrganization = providedOrganizationId
     ? ((await searchApolloContacts({
         apiKey,
@@ -677,6 +682,7 @@ export async function fetchApolloContactsForCompany(
           allowPeopleSearchFallback,
           keywordSearchLimit,
           enforceExpectedOrganization: true,
+          trustExactOrganizationScope: trustReviewerConfirmedPeopleScope,
           savedContacts: savedContactsForProvidedOrganization,
           contactRecovery
         })) ??
@@ -710,6 +716,7 @@ export async function fetchApolloContactsForCompany(
         allowPeopleSearchFallback,
         keywordSearchLimit,
         enforceExpectedOrganization: true,
+        trustExactOrganizationScope: trustReviewerConfirmedPeopleScope,
         savedContacts: savedContactsForProvidedOrganization,
         contactRecovery
       })) ?? [];
@@ -2724,6 +2731,7 @@ async function searchApolloRelevantPeople({
   allowPeopleSearchFallback,
   keywordSearchLimit,
   enforceExpectedOrganization,
+  trustExactOrganizationScope = false,
   savedContacts,
   contactRecovery
 }: {
@@ -2735,6 +2743,7 @@ async function searchApolloRelevantPeople({
   allowPeopleSearchFallback: boolean;
   keywordSearchLimit: number;
   enforceExpectedOrganization: boolean;
+  trustExactOrganizationScope?: boolean;
   savedContacts: ApolloContactRecord[] | null;
   contactRecovery: ApolloContactLookupResult["contactRecovery"];
 }) {
@@ -2771,7 +2780,8 @@ async function searchApolloRelevantPeople({
     ? filterApolloContactsForExpectedOrganization(peopleWithoutKeywordRaw, {
         companyName,
         normalizedDomain: normalizedExpectedDomain,
-        organizationId
+        organizationId,
+        trustExactOrganizationScope
       })
     : peopleWithoutKeywordRaw;
   contactRecovery.peopleSearchAcceptedRecords +=
@@ -2797,7 +2807,8 @@ async function searchApolloRelevantPeople({
       ? filterApolloContactsForExpectedOrganization(rolePeopleRaw, {
           companyName,
           normalizedDomain: normalizedExpectedDomain,
-          organizationId
+          organizationId,
+          trustExactOrganizationScope
         })
       : rolePeopleRaw;
     contactRecovery.peopleSearchAcceptedRecords += rolePeople.length;
@@ -3809,11 +3820,13 @@ function filterApolloContactsForExpectedOrganization(
   {
     companyName,
     normalizedDomain,
-    organizationId
+    organizationId,
+    trustExactOrganizationScope = false
   }: {
     companyName: string;
     normalizedDomain: string | null;
     organizationId: string | null;
+    trustExactOrganizationScope?: boolean;
   }
 ) {
   const expectedAliases = buildCompanyNameAliases(companyName);
@@ -3827,6 +3840,21 @@ function filterApolloContactsForExpectedOrganization(
     }
 
     if (organizationId) {
+      if (
+        trustExactOrganizationScope &&
+        contact.recordSource === "PEOPLE_SEARCH"
+      ) {
+        // A reviewer-confirmed Apollo account URL is authoritative. Apollo's
+        // organization_ids[] query scopes the returned roster to the exact
+        // global organization resolved from that URL, but individual people
+        // can embed a different saved Account ID and operating-brand label
+        // (for example CGT under Canadian General Tower). Those identifiers
+        // are different namespaces, not evidence that Apollo returned another
+        // employer. Trust the exact query scope instead of discarding the
+        // complete roster after Apollo has already applied it.
+        return true;
+      }
+
       if (organization.id && organization.id !== organizationId) {
         return false;
       }
