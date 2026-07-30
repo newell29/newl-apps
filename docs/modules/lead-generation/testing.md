@@ -338,6 +338,10 @@ Regression coverage must prove:
     empty or singular, reads the bounded paged People Search roster, and does not require individual person URLs.
 27. an Apollo `/people/<id>` recovery value can resolve as a zero-credit saved-contact ID before separately
     authorized People Enrichment is attempted, while wrong-employer and missing-email records remain rejected.
+28. when a reviewer-confirmed saved Account is an empty shell, a populated operating-brand Account such as `CGT`
+    may supply saved contacts only when Apollo explicitly links both Accounts to the same immutable global
+    organization ID; a same-name or same-domain Account linked to a different global organization remains rejected,
+    and no paid organization or person endpoint is called.
 
 ## Outreach Plans and grounded sequence generation
 

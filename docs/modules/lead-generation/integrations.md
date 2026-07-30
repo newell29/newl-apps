@@ -33,6 +33,14 @@ company-keyword People Search may generate candidates, but every returned person
 still pass the strict confirmed-company guard. A different domain, sibling identity, or ambiguous employer is
 discarded.
 
+Apollo can also store an empty legal-name Account and a populated operating-brand Account under the same global
+organization. When the reviewer-confirmed Account and exact global-organization People Search both return zero,
+Hunter runs a bounded zero-credit Account Search over the confirmed legal name and a deterministic acronym. It may
+read saved contacts from another Account only when Apollo's returned record explicitly links that Account to the
+exact same reviewer-confirmed global organization ID. The supporting Account ID is recorded in diagnostics, but it
+does not replace or weaken the reviewer-confirmed mapping. Same name, same domain, or acronym similarity without that
+exact global-organization relationship remains rejected.
+
 Apollo can return a strictly scoped employee
 with only a marketing/brand employer label and omit the
 organization ID and domain from that person record. Newl Apps accepts a safe leading uppercase brand expansion such
