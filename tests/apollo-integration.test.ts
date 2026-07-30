@@ -635,6 +635,192 @@ describe("fetchApolloContactsForCompany", () => {
     )).toBe(false);
   });
 
+  it("recovers employees through the confirmed company domain without requiring a saved account ID", async () => {
+    const organizationId = "5e66b6381e05b4008c8331b8";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: organizationId,
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ accounts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        const requestUrl = new URL(url);
+        if (
+          requestUrl.searchParams
+            .getAll("organization_ids[]")
+            .includes(organizationId)
+        ) {
+          return emptyApolloPeopleResponse();
+        }
+
+        expect(
+          requestUrl.searchParams.getAll("q_organization_domains_list[]")
+        ).toEqual(["yattool.com"]);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            people: [{
+              id: "6138684489ec360001a60945",
+              first_name: "Rogelio",
+              last_name: "Martinez",
+              title: "Import Export Specialist",
+              has_email: true,
+              organization: {
+                name: "YAT - Your Advanced Technology",
+                primary_domain: "yattool.com"
+              }
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in mapped-domain recovery test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "YAT USA, INC.",
+      domain: "yattool.com",
+      apolloOrganizationId: organizationId
+    });
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloPersonId: "6138684489ec360001a60945",
+        fullName: "Rogelio Martinez",
+        title: "Import Export Specialist"
+      })
+    ]);
+    expect(result.match.matchReason).toContain(
+      "confirmed Apollo company domain"
+    );
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        new URL(String(request)).searchParams
+          .getAll("q_organization_domains_list[]")
+          .includes("yattool.com")
+      )
+    ).toBe(true);
+  });
+
+  it("treats a pasted Apollo people URL as a saved-contact ID before spending an enrichment credit", async () => {
+    const accountId = "6888f2e0496bf40001170587";
+    const organizationId = "5e66b6381e05b4008c8331b8";
+    const savedContactId = "66e34b81740c50074e3d1bd4";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/accounts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            accounts: [{
+              id: accountId,
+              organization_id: organizationId,
+              name: "YAT USA, INC.",
+              primary_domain: "yattool.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return emptyApolloPeopleResponse();
+      }
+
+      if (url.endsWith(`/api/v1/contacts/${savedContactId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            contact: {
+              id: savedContactId,
+              person_id: "6138684489ec360001a60945",
+              first_name: "Rogelio",
+              last_name: "Martinez",
+              title: "Import Export Specialist",
+              email: "rogelio.martinez@yattool.com",
+              organization: {
+                id: organizationId,
+                name: "YAT USA, INC.",
+                primary_domain: "yattool.com"
+              }
+            }
+          })
+        } as unknown as Response;
+      }
+
+      throw new Error(`Unexpected Apollo URL in saved-contact people URL test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "YAT USA, INC.",
+        domain: "yattool.com",
+        apolloOrganizationId: organizationId,
+        apolloAccountId: accountId
+      },
+      {
+        authorizePaidEmailEnrichment: true,
+        explicitApolloPersonIds: [savedContactId]
+      }
+    );
+
+    expect(result.contacts).toEqual([
+      expect.objectContaining({
+        apolloContactId: savedContactId,
+        fullName: "Rogelio Martinez",
+        email: "rogelio.martinez@yattool.com"
+      })
+    ]);
+    expect(result.contactRecovery).toMatchObject({
+      savedContactsRecovered: 1,
+      paidEmailEnrichmentsAttempted: 0,
+      paidEmailsRecovered: 0
+    });
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).includes("/api/v1/people/match")
+      )
+    ).toBe(false);
+  });
+
   it("rejects a reviewer-selected Apollo person whose returned employer is not the mapped company", async () => {
     const personId = "6138684489ec360001a60945";
     vi.spyOn(global, "fetch").mockImplementation(async (input) => {

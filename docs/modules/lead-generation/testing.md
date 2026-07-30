@@ -323,6 +323,10 @@ Regression coverage must prove:
 25. the exact persisted zero-employee production shape—a current Hunter company with a `DIRECT_COMPANY` match and
     the explicit zero-employee marker—remains in **Mapped company — employee lookup needed**, while ordinary
     successful direct matches remain excluded.
+26. a confirmed company retries employee discovery through its trusted domain when the organization-ID result is
+    empty or singular, reads the bounded paged People Search roster, and does not require individual person URLs.
+27. an Apollo `/people/<id>` recovery value can resolve as a zero-credit saved-contact ID before separately
+    authorized People Enrichment is attempted, while wrong-employer and missing-email records remain rejected.
 
 ## Outreach Plans and grounded sequence generation
 

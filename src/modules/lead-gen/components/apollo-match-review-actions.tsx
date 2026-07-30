@@ -49,42 +49,70 @@ export function ApolloMatchReviewActions({
 
   if (status === "MAPPED_NO_EMPLOYEES") {
     return (
-      <div className="rounded-md border border-success/30 bg-success/10 p-4">
+      <div className="space-y-4 rounded-md border border-success/30 bg-success/10 p-4">
         <p className="font-semibold text-foreground">Apollo company mapping is confirmed</p>
         <p className="mt-1 text-sm leading-6 text-mutedForeground">
-          Apollo&apos;s supported API could not read the Suggested leads shown on this saved account. Open up
-          to three relevant people from the confirmed company&apos;s People page, copy each person&apos;s Apollo
-          profile URL, and paste them below. Newl Apps will verify every returned employer before continuing.
+          Recheck the confirmed company first. Newl Apps searches Apollo&apos;s complete organization roster,
+          retries through the confirmed company domain, merges saved contacts, and lets Hunter select no more
+          than three relevant buyers. You do not need to paste individual people.
         </p>
         <form action={mappedCompanyRecheckAction} className="mt-3 space-y-3">
           <input type="hidden" name="companyId" value={companyId} />
-          <label className="block space-y-1 text-xs font-medium text-foreground">
-            <span>Apollo person URLs (one per line, maximum 3)</span>
-            <textarea
-              name="apolloPersonUrls"
-              required
-              rows={4}
-              placeholder={"https://app.apollo.io/#/people/<person-id>\nhttps://app.apollo.io/#/people/<person-id>"}
-              className="w-full rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
-            />
-          </label>
           <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-background px-3 py-2 text-xs leading-5 text-mutedForeground">
             <input
               type="checkbox"
               name="authorizePaidEmailEnrichment"
               value="yes"
-              required
               className="mt-1"
             />
             <span>
-              I authorize email-only enrichment for the selected people (maximum 1 Apollo credit per
-              person; no phone, personal email, or waterfall lookup).
+              Optional: if the best automatically selected employees are not already saved with email,
+              authorize up to three email-only enrichments (maximum 1 Apollo credit each; no phone,
+              personal email, or waterfall lookup).
             </span>
           </label>
           <button className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground">
-            Verify selected people and build plans
+            Search company employees and build plans
           </button>
         </form>
+        <details className="rounded-md border border-border bg-background p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-foreground">
+            Last-resort person URL recovery
+          </summary>
+          <p className="mt-2 text-xs leading-5 text-mutedForeground">
+            Use this only if the automatic company search still reports zero employees. Apollo may put
+            either a saved-contact ID or a person ID in this URL; Newl Apps checks both safely.
+          </p>
+          <form action={mappedCompanyRecheckAction} className="mt-3 space-y-3">
+            <input type="hidden" name="companyId" value={companyId} />
+            <label className="block space-y-1 text-xs font-medium text-foreground">
+              <span>Apollo person URLs (one per line, maximum 3)</span>
+              <textarea
+                name="apolloPersonUrls"
+                required
+                rows={4}
+                placeholder="https://app.apollo.io/#/people/<person-or-contact-id>"
+                className="w-full rounded-md border border-border bg-card px-3 py-2 text-xs text-foreground"
+              />
+            </label>
+            <label className="flex items-start gap-2 rounded-md border border-warning/30 bg-card px-3 py-2 text-xs leading-5 text-mutedForeground">
+              <input
+                type="checkbox"
+                name="authorizePaidEmailEnrichment"
+                value="yes"
+                required
+                className="mt-1"
+              />
+              <span>
+                I authorize email-only enrichment only when the pasted ID is not an existing saved
+                Apollo contact (maximum 1 credit per person).
+              </span>
+            </label>
+            <button className="rounded-md border border-border bg-card px-3 py-2 text-sm font-semibold text-foreground">
+              Verify pasted people
+            </button>
+          </form>
+        </details>
       </div>
     );
   }
