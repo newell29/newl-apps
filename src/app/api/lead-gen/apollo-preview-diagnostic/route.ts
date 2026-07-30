@@ -35,7 +35,6 @@ export async function GET() {
         apolloPersonId: contact.apolloPersonId,
         fullName: contact.fullName,
         title: contact.title,
-        companyName: contact.companyName,
         hasEmailAvailable: contact.hasEmailAvailable
       }))
     });
