@@ -48,7 +48,7 @@ const sortOptions = [
 ] as const;
 
 type SearchParams = Record<string, string | string[] | undefined>;
-type OutreachView = "attention" | "active-cadences";
+type OutreachView = "attention" | "active-cadences" | "delivery-failures";
 
 export default async function OutreachQueuePage({
   searchParams
@@ -106,8 +106,14 @@ export default async function OutreachQueuePage({
       assignedRep !== "ALL" ||
       sort !== "score_desc"
   );
+  const exportScope =
+    view === "active-cadences"
+      ? "active-cadences"
+      : view === "delivery-failures"
+        ? "delivery-failures"
+        : "outreach";
   const exportFilteredHref = buildContactsExportHref({
-    scope: view === "active-cadences" ? "active-cadences" : "outreach",
+    scope: exportScope,
     q: query,
     company: companyId ?? "",
     searchProfile: searchProfileId ?? "",
@@ -124,7 +130,7 @@ export default async function OutreachQueuePage({
     rep: assignedRep,
     sort
   });
-  const exportAllHref = `/api/lead-gen/contacts/export?scope=${view === "active-cadences" ? "active-cadences" : "outreach"}`;
+  const exportAllHref = `/api/lead-gen/contacts/export?scope=${exportScope}`;
   const [queues, filterOptions, apolloPushJobs, apolloSyncHealth] = await Promise.all([
     getOutreachQueues(tenant, {
       query,
@@ -147,7 +153,12 @@ export default async function OutreachQueuePage({
     getRecentApolloPushJobs(tenant),
     getApolloStatusSyncHealth(tenant)
   ]);
-  const contacts = view === "active-cadences" ? queues.activeCadences : queues.attention;
+  const contacts =
+    view === "active-cadences"
+      ? queues.activeCadences
+      : view === "delivery-failures"
+        ? queues.deliveryFailures
+        : queues.attention;
   const filterChips = buildContactFilterChips({
     view,
     query,
@@ -183,6 +194,8 @@ export default async function OutreachQueuePage({
         contact is confirmed in its exact selected Apollo cadence, it moves to Active Cadences for reply monitoring.
         If Apollo accepted a push before membership became visible, Newl Apps keeps checking without sending a second
         enrollment request. Rejected, do-not-contact, bounced, finished, and sales-engaged records remain hidden.
+        Terminal delivery failures remain available in Delivery Failures for audit without returning to an actionable
+        queue.
       </div>
 
       {contactReviewMessage ? (
@@ -211,6 +224,16 @@ export default async function OutreachQueuePage({
           }`}
         >
           Active Cadences ({queues.activeCadences.length.toLocaleString("en-US")})
+        </Link>
+        <Link
+          href="/lead-gen/outreach?view=delivery-failures"
+          className={`rounded-md border px-4 py-2 text-sm font-semibold transition-colors ${
+            view === "delivery-failures"
+              ? "border-primary bg-primary text-primaryForeground"
+              : "border-border bg-card text-foreground hover:bg-accentSoft"
+          }`}
+        >
+          Delivery Failures ({queues.deliveryFailures.length.toLocaleString("en-US")})
         </Link>
       </nav>
 
@@ -254,7 +277,7 @@ export default async function OutreachQueuePage({
       </section>
 
       <form className="overflow-hidden rounded-lg border border-border bg-card shadow-sm" action="/lead-gen/outreach">
-        {view === "active-cadences" ? <input type="hidden" name="view" value="active-cadences" /> : null}
+        {view !== "attention" ? <input type="hidden" name="view" value={view} /> : null}
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-foreground">Filters</p>
@@ -267,7 +290,7 @@ export default async function OutreachQueuePage({
               Apply filters
             </button>
             <a
-              href={view === "active-cadences" ? "/lead-gen/outreach?view=active-cadences" : "/lead-gen/outreach"}
+              href={view === "attention" ? "/lead-gen/outreach" : `/lead-gen/outreach?view=${view}`}
               className="rounded-md border border-border bg-card px-4 py-2 text-center text-sm font-semibold text-foreground transition-colors hover:bg-accentSoft"
             >
               Clear filters
@@ -447,11 +470,17 @@ export default async function OutreachQueuePage({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-foreground">
-              {view === "active-cadences" ? "Active Apollo cadences" : "Contacts requiring attention"}
+              {view === "active-cadences"
+                ? "Active Apollo cadences"
+                : view === "delivery-failures"
+                  ? "Apollo delivery failures"
+                  : "Contacts requiring attention"}
             </p>
             <p className="text-xs text-mutedForeground">
               {view === "active-cadences"
                 ? "Monitor enrolled contacts and synchronized Apollo status without mixing them into the approval queue."
+                : view === "delivery-failures"
+                  ? "Review terminal bounced, invalid-MX, bad-data, and recipient-domain failures with Apollo's exact reason preserved for audit."
                 : "Review evidence-grounded Outreach Plans, QA, ownership, and Apollo readiness before enrollment."}
             </p>
           </div>
@@ -460,7 +489,44 @@ export default async function OutreachQueuePage({
           </span>
         </div>
 
-        {contacts.length > 0 ? (
+        {contacts.length > 0 && view === "delivery-failures" ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="border-b border-border bg-muted text-xs uppercase tracking-wide text-mutedForeground">
+                <tr>
+                  <th className="px-4 py-3">Contact</th>
+                  <th className="px-4 py-3">Company</th>
+                  <th className="px-4 py-3">Email</th>
+                  <th className="px-4 py-3">Apollo outcome</th>
+                  <th className="px-4 py-3">Exact delivery reason</th>
+                  <th className="px-4 py-3">Detected</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {contacts.map((contact) => (
+                  <tr key={contact.id}>
+                    <td className="px-4 py-3 font-semibold text-foreground">{contact.fullName}</td>
+                    <td className="px-4 py-3 text-foreground">{contact.companyName}</td>
+                    <td className="px-4 py-3 text-mutedForeground">{contact.email ?? "No email"}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full border border-danger/30 bg-danger/5 px-2.5 py-1 text-xs font-semibold text-danger">
+                        {contact.apolloDeliveryFailureKind
+                          ? formatEnum(contact.apolloDeliveryFailureKind)
+                          : "Bounced"}
+                      </span>
+                    </td>
+                    <td className="max-w-xl px-4 py-3 text-foreground">
+                      {contact.apolloDeliveryFailureReason ?? "Apollo reported a terminal delivery failure."}
+                    </td>
+                    <td className="px-4 py-3 text-mutedForeground">
+                      {formatDeliveryFailureDate(contact.apolloDeliveryFailureDetectedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : contacts.length > 0 ? (
           <ContactDirectoryTableClient
             contacts={contacts}
             initialApolloPushJobs={apolloPushJobs}
@@ -492,9 +558,17 @@ export default async function OutreachQueuePage({
           <div className="px-4 py-12 text-center">
             <h2 className="text-base font-semibold text-foreground">
               {hasFilters
-                ? `No ${view === "active-cadences" ? "active cadences" : "attention items"} match these filters.`
+                ? `No ${
+                    view === "active-cadences"
+                      ? "active cadences"
+                      : view === "delivery-failures"
+                        ? "delivery failures"
+                        : "attention items"
+                  } match these filters.`
                 : view === "active-cadences"
                   ? "No contacts are currently enrolled."
+                  : view === "delivery-failures"
+                    ? "No terminal Apollo delivery failures are recorded."
                   : "The attention queue is clear."}
             </h2>
             <p className="mt-2 text-sm text-mutedForeground">
@@ -502,7 +576,9 @@ export default async function OutreachQueuePage({
                 ? "Adjust the company, status, source, tier, search, or sort controls to widen the queue."
                 : view === "active-cadences"
                   ? "Contacts appear here automatically after Apollo confirms cadence enrollment."
-                : filterOptions.approvedAccountCount > 0
+                  : view === "delivery-failures"
+                    ? "Bounces and permanent Apollo delivery failures will appear here automatically after synchronization."
+                  : filterOptions.approvedAccountCount > 0
                   ? "There is no drafting, approval, assignment, paused-cadence, or Apollo push work requiring attention."
                   : "Review Daily Opportunities first; approved outreach work will appear here automatically."}
             </p>
@@ -555,7 +631,7 @@ function buildContactFilterChips({
   const chips: Array<{ label: string; href: string }> = [];
   const buildHref = (params: Record<string, string | undefined>) =>
     buildContactsPageHref({
-      ...(view === "active-cadences" ? { view } : {}),
+      ...(view !== "attention" ? { view } : {}),
       ...params
     });
   const matchedCompany = companies.find((company) => company.id === companyId);
@@ -788,7 +864,23 @@ function parseSortParam(value: string | undefined): ContactDirectorySort {
 }
 
 function parseOutreachView(value: string | undefined): OutreachView {
-  return value === "active-cadences" ? value : "attention";
+  return value === "active-cadences" || value === "delivery-failures"
+    ? value
+    : "attention";
+}
+
+function formatDeliveryFailureDate(value: string | null) {
+  if (!value) {
+    return "Unknown";
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "America/Toronto"
+      }).format(date);
 }
 
 function readParam(value: string | string[] | undefined) {

@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatSalesOpportunityStage,
   isActiveCadenceContact,
+  isDeliveryFailureContact,
   isOutreachQueueContact,
   isSalesOpportunityStage,
   resolveSalesOpportunityStage,
@@ -69,7 +70,7 @@ describe("automated sales workflow", () => {
         draft: null,
         outreachPlan: { id: "current-hunter-plan" }
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isOutreachQueueContact({
         email: "buyer@example.com",
@@ -132,6 +133,8 @@ describe("automated sales workflow", () => {
     expect(isOutreachQueueContact({ ...base, replyStatus: ReplyStatus.MEETING_BOOKED })).toBe(false);
     expect(isActiveCadenceContact({ ...base, replyStatus: ReplyStatus.POSITIVE })).toBe(false);
     expect(isActiveCadenceContact({ ...base, sequenceStatus: SequenceStatus.BOUNCED })).toBe(false);
+    expect(isDeliveryFailureContact({ sequenceStatus: SequenceStatus.BOUNCED })).toBe(true);
+    expect(isDeliveryFailureContact({ sequenceStatus: SequenceStatus.FINISHED })).toBe(false);
   });
 
   it("keeps contacts without a usable email out of actionable outreach views", () => {

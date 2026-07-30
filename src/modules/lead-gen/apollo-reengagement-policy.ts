@@ -141,6 +141,10 @@ export function resolveTrackedSequenceStatus({
   selectedSequenceId: string | null;
   incomingSequenceId: string | null;
 }) {
+  if (existingStatus === SequenceStatus.BOUNCED) {
+    return SequenceStatus.BOUNCED;
+  }
+
   if (selectedSequenceId && incomingSequenceId === selectedSequenceId) {
     return incomingStatus;
   }
@@ -152,24 +156,6 @@ export function resolveTrackedSequenceStatus({
   return sequenceStatusRank(incomingStatus) >= sequenceStatusRank(existingStatus)
     ? incomingStatus
     : existingStatus;
-}
-
-export function needsApolloBounceDeliveryReconciliation(
-  existingStatus: SequenceStatus,
-  incomingStatus: SequenceStatus
-) {
-  const unresolvedStatuses = [
-    SequenceStatus.NOT_STARTED,
-    SequenceStatus.READY
-  ] as const;
-  return (
-    unresolvedStatuses.includes(
-      existingStatus as (typeof unresolvedStatuses)[number]
-    ) &&
-    unresolvedStatuses.includes(
-      incomingStatus as (typeof unresolvedStatuses)[number]
-    )
-  );
 }
 
 function sequenceStatusRank(status: SequenceStatus) {

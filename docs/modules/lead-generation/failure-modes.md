@@ -97,17 +97,20 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - The hourly Apollo status sync also removes a stale push blocker when the exact selected cadence is confirmed active.
   A missing selected cadence ID or a different live cadence still fails closed and remains in Needs Attention.
 
-## Apollo shows a bounced Hunter contact that remains in Needs Attention
+## Apollo shows a bounced or permanently undeliverable Hunter contact that remains actionable
 
-- Apollo can show an exact cadence as `Bounced` while its contact-detail response omits both campaign membership and
-  delivery status. Newl Apps therefore checks Apollo's zero-credit outreach-email search only when the local state and
-  contact response are both unresolved and an exact selected cadence is known.
+- Apollo can show an exact cadence as `Bounced` or `Not sent` while its contact-detail response omits both campaign
+  membership and delivery status. Permanent `Not sent` cases include explicit invalid-MX, bad-data,
+  recipient-domain, spam-blocked, hard-bounce, and provider delivery-failure reasons. Newl Apps therefore checks
+  Apollo's zero-credit outreach-email search for every due contact with an exact selected cadence.
 - The fallback is bounded to ten 100-record pages per cadence and reused across contacts in the same sync. It matches
-  exact Apollo contact ID first and normalized email second. A confirmed match persists `BOUNCED`, records the Apollo
-  evidence in the contact's raw audit payload, and the normal queue rule removes the contact from Needs Attention.
-- A failed or rate-limited fallback fails the affected sync visibly; it never guesses from Apollo's user-configurable
-  `Bad Data` contact stage and never changes a contact that Apollo already reports as active, replied, finished, or
-  bounced.
+  exact Apollo contact ID first and normalized email second. A confirmed terminal match persists the existing
+  `BOUNCED` enum, records Apollo's exact reason and evidence in the contact audit payload, removes the contact from
+  Needs Attention and Active Cadences, and displays it in the read-only Delivery Failures view.
+- A failed or rate-limited fallback fails the affected sync visibly. The reconciler never guesses from Apollo's
+  user-configurable `Bad Data` contact stage. A successful sync reports unmatched Apollo delivery failures instead
+  of silently ignoring them.
+- Contact discovery and rechecks preserve terminal sequence state and the existing nested Apollo audit metadata.
 
 ## External signal discovery or classification fails
 

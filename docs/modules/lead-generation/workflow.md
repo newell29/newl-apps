@@ -150,7 +150,9 @@ The employee-facing layout follows the lifecycle of a prospect rather than the u
 1. **Daily Opportunities** shows Hunter-researched Hot, Qualified current account, and Watchlist recommendations. Raw source candidates and blocked research remain collapsed audit material.
 2. **Outreach Queue** defaults to **Needs Attention**, containing drafting, QA, approval, sender assignment, paused-cadence,
    and Apollo enrollment work. Once Apollo confirms enrollment, the contact moves to **Active Cadences** for reply
-   monitoring. Terminal, unsafe, finished, and positively engaged contacts do not clutter either view. Contacts
+   monitoring. Bounces and explicit permanent delivery failures move to the read-only **Delivery Failures** history,
+   which preserves Apollo's exact reason. Terminal, unsafe, finished, and positively engaged contacts do not clutter
+   either actionable view. Contacts
    without a concrete syntactically usable email remain stored for audit and Apollo recovery but are excluded from
    both actionable tabs. The default
    table hides secondary audit columns; employees can restore them through the Columns menu. Recent Apollo enrollment

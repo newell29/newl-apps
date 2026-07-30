@@ -85,11 +85,11 @@ export function isOutreachQueueContact(contact: {
     return false;
   }
 
-  const hasCurrentOutreachWork = Boolean(contact.draft) || Boolean(contact.outreachPlan);
-  if (contact.sequenceStatus === SequenceStatus.FINISHED && !hasCurrentOutreachWork) {
+  if (contact.sequenceStatus === SequenceStatus.FINISHED) {
     return false;
   }
 
+  const hasCurrentOutreachWork = Boolean(contact.draft) || Boolean(contact.outreachPlan);
   return (
     contact.contactStatus === ContactStatus.APPROVED ||
     contact.sequenceStatus === SequenceStatus.READY ||
@@ -110,6 +110,12 @@ export function isActiveCadenceContact(contact: {
     !isTerminalOrUnsafeOutreachContact(contact) &&
     contact.sequenceStatus === SequenceStatus.ENROLLED
   );
+}
+
+export function isDeliveryFailureContact(contact: {
+  sequenceStatus: SequenceStatus;
+}) {
+  return contact.sequenceStatus === SequenceStatus.BOUNCED;
 }
 
 export function hasActionableEmail(email: string | null) {

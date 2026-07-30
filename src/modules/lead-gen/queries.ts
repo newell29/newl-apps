@@ -20,6 +20,7 @@ import type { TenantContext } from "@/server/tenant-context";
 import { getContactApolloAssignmentBlockReason, scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
   isActiveCadenceContact,
+  isDeliveryFailureContact,
   isOutreachQueueContact,
   resolveSalesOpportunityStage
 } from "@/modules/lead-gen/automation-workflow";
@@ -1439,6 +1440,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         : ("LEAD_GEN_AI_DISABLED" satisfies ContactDraftGenerationDisabledReason);
     const rawJson = asObject(contact.rawJson);
     const apolloJson = asObject(rawJson.apollo);
+    const deliveryFailure = asObject(apolloJson.deliveryFailure);
     const pushBlocker = asObject(apolloJson.pushBlocker);
     const pendingSequenceConfirmation = asObject(apolloJson.pendingSequenceConfirmation);
     const effectiveSequenceStatus: ContactSequenceStatusFilter =
@@ -1493,6 +1495,9 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceStatus: contact.sequenceStatus,
       apolloPushBlockedReason: readString(pushBlocker, "reason"),
       apolloPushBlockedAt: readString(pushBlocker, "blockedAt"),
+      apolloDeliveryFailureKind: readString(deliveryFailure, "kind"),
+      apolloDeliveryFailureReason: readString(deliveryFailure, "reason"),
+      apolloDeliveryFailureDetectedAt: readString(deliveryFailure, "detectedAt"),
       effectiveSequenceStatus,
       replyStatus: contact.replyStatus,
       recommendedSequenceId: useHunterRecommendation ? recommendation.id : contact.recommendedSequenceId ?? recommendation.id,
@@ -1649,13 +1654,19 @@ export async function getOutreachQueues(tenant: TenantContext, filters: ContactD
   const contacts = await getContactDirectory(tenant, filters);
   return {
     attention: contacts.filter(isOutreachQueueContact),
-    activeCadences: contacts.filter(isActiveCadenceContact)
+    activeCadences: contacts.filter(isActiveCadenceContact),
+    deliveryFailures: contacts.filter(isDeliveryFailureContact)
   };
 }
 
 export async function getActiveCadenceQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
   const contacts = await getContactDirectory(tenant, filters);
   return contacts.filter(isActiveCadenceContact);
+}
+
+export async function getDeliveryFailureQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return contacts.filter(isDeliveryFailureContact);
 }
 
 export async function getContactDirectoryFilters(tenant: TenantContext) {
