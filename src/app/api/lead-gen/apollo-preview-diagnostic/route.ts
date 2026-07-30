@@ -10,7 +10,7 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
+export async function GET() {
   if (process.env.VERCEL_ENV !== "preview") {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -19,30 +19,11 @@ export async function GET(request: Request) {
   requireAdmin(context);
   await requireModule(context, ModuleKey.LEAD_GEN);
 
-  if (new URL(request.url).searchParams.get("inspect") === "1") {
-    const result = await diagnoseApolloPeopleDirectoryForSavedAccount({
-      apolloAccountId: "6888f2e0496bf40001170587",
-      expectedApolloPersonId: "6138684489ec360001a60945"
-    });
-    return NextResponse.json(result);
-  }
-
-  return new NextResponse(
-    [
-      "<!doctype html>",
-      '<html lang="en"><body>',
-      '<form method="post">',
-      '<button type="submit">Run one-credit YAT verification</button>',
-      "</form>",
-      "</body></html>"
-    ].join(""),
-    {
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store"
-      }
-    }
-  );
+  const result = await diagnoseApolloPeopleDirectoryForSavedAccount({
+    apolloAccountId: "6888f2e0496bf40001170587",
+    expectedApolloPersonId: "6138684489ec360001a60945"
+  });
+  return NextResponse.json(result);
 }
 
 export async function POST() {
