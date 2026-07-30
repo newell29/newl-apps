@@ -1060,18 +1060,46 @@ export async function diagnoseApolloPeopleDirectoryForSavedAccount({
         queryKeywords: null
       })
     : [];
+  const organizationFiltered = filterApolloContactsForExpectedOrganization(
+    organizationScoped,
+    {
+      companyName: organization.name ?? "Unknown organization",
+      normalizedDomain: organization.domain,
+      organizationId: organization.id
+    }
+  );
+  const domainFiltered = filterApolloContactsForExpectedOrganization(
+    domainScoped,
+    {
+      companyName: organization.name ?? "Unknown organization",
+      normalizedDomain: organization.domain,
+      organizationId: null
+    }
+  );
   const expectedPerson =
     [...organizationScoped, ...domainScoped].find(
       (contact) => contact.apolloPersonId === expectedApolloPersonId
     ) ?? null;
+  const expectedPersonOrganization = expectedPerson
+    ? readApolloOrganizationFromContact(expectedPerson)
+    : null;
 
   return {
     canonicalOrganizationId: organization.id,
     organizationName: organization.name,
     organizationDomain: organization.domain,
     organizationScopedCount: organizationScoped.length,
+    organizationFilteredCount: organizationFiltered.length,
     domainScopedCount: domainScoped.length,
+    domainFilteredCount: domainFiltered.length,
     expectedPersonFound: Boolean(expectedPerson),
+    expectedPersonOrganization: expectedPersonOrganization
+      ? {
+          id: expectedPersonOrganization.id,
+          name: expectedPersonOrganization.name,
+          domain: expectedPersonOrganization.domain
+        }
+      : null,
     expectedPerson: expectedPerson
       ? {
           apolloPersonId: expectedPerson.apolloPersonId,
