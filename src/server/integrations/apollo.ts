@@ -1016,6 +1016,74 @@ export function parseApolloPersonIds(value: string) {
   return personIds;
 }
 
+export async function diagnoseApolloPeopleDirectoryForSavedAccount({
+  apolloAccountId,
+  expectedApolloPersonId
+}: {
+  apolloAccountId: string;
+  expectedApolloPersonId: string;
+}) {
+  const apiKey = readApolloMasterApiKey();
+  const json = await getApolloJson(
+    `/api/v1/accounts/${encodeURIComponent(apolloAccountId)}`,
+    apiKey
+  );
+  const account =
+    asRecord(json.account) ??
+    asRecord(json.data) ??
+    asRecord(json.company) ??
+    null;
+  if (!account) {
+    throw new Error("Apollo did not return the saved account.");
+  }
+
+  const [organization] = parseApolloOrganizations({ accounts: [account] });
+  if (!organization?.id) {
+    throw new Error(
+      "Apollo did not expose the canonical organization ID for the saved account."
+    );
+  }
+
+  const organizationScoped = await searchApolloPeople({
+    apiKey,
+    companyName: organization.name ?? "Unknown organization",
+    domain: null,
+    organizationId: organization.id,
+    queryKeywords: null
+  });
+  const domainScoped = organization.domain
+    ? await searchApolloPeople({
+        apiKey,
+        companyName: organization.name ?? "Unknown organization",
+        domain: organization.domain,
+        organizationId: null,
+        queryKeywords: null
+      })
+    : [];
+  const expectedPerson =
+    [...organizationScoped, ...domainScoped].find(
+      (contact) => contact.apolloPersonId === expectedApolloPersonId
+    ) ?? null;
+
+  return {
+    canonicalOrganizationId: organization.id,
+    organizationName: organization.name,
+    organizationDomain: organization.domain,
+    organizationScopedCount: organizationScoped.length,
+    domainScopedCount: domainScoped.length,
+    expectedPersonFound: Boolean(expectedPerson),
+    expectedPerson: expectedPerson
+      ? {
+          apolloPersonId: expectedPerson.apolloPersonId,
+          fullName: expectedPerson.fullName,
+          title: expectedPerson.title,
+          hasEmailAvailable: expectedPerson.hasEmailAvailable,
+          hasConcreteEmail: hasConcreteApolloEmail(expectedPerson)
+        }
+      : null
+  };
+}
+
 function parseApolloPersonId(value: string) {
   if (/^[a-f0-9]{24}$/iu.test(value)) {
     return value;

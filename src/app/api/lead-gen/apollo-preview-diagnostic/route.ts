@@ -2,12 +2,15 @@ import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { requireAdmin, requireModule } from "@/server/auth/authorization";
-import { fetchApolloContactsForCompany } from "@/server/integrations/apollo";
+import {
+  diagnoseApolloPeopleDirectoryForSavedAccount,
+  fetchApolloContactsForCompany
+} from "@/server/integrations/apollo";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   if (process.env.VERCEL_ENV !== "preview") {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -15,6 +18,14 @@ export async function GET() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
   await requireModule(context, ModuleKey.LEAD_GEN);
+
+  if (new URL(request.url).searchParams.get("inspect") === "1") {
+    const result = await diagnoseApolloPeopleDirectoryForSavedAccount({
+      apolloAccountId: "6888f2e0496bf40001170587",
+      expectedApolloPersonId: "6138684489ec360001a60945"
+    });
+    return NextResponse.json(result);
+  }
 
   return new NextResponse(
     [
