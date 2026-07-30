@@ -584,9 +584,7 @@ describe("fetchApolloContactsForCompany", () => {
               title: "Import Export Specialist",
               email: "rogelio.martinez@yattool.com",
               organization: {
-                id: organizationId,
-                name: "YAT USA, INC.",
-                primary_domain: "yattool.com"
+                name: "YAT - Your Advanced Technology"
               }
             }
           })

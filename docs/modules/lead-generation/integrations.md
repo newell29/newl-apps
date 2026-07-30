@@ -19,13 +19,15 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the account ID and Apollo's canonical
 organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
 filter. If that search returns no useful people, it retries with the exact domain returned by the confirmed saved
-account. Apollo's supported public People API does not expose the private saved-account `accountIds` roster used by
-the Apollo UI's Suggested leads panel. If the UI still exposes people that neither supported employer index returns,
-Newl Apps stops automatic retries and asks the reviewer for up to three exact Apollo person profile URLs. Resolving
-those IDs uses separately authorized email-only People Enrichment. Every returned employer must match the confirmed
-account identity and trusted domain, and a concrete email must be present; similarly named or unverifiable companies
-are rejected. Company name is not placed in People Search's generic keyword filter because Apollo does not document
-that filter as an employer-name lookup.
+account. Apollo can return a strictly scoped employee with only a marketing/brand employer label and omit the
+organization ID and domain from that person record. Newl Apps accepts a safe leading uppercase brand expansion such
+as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside the exact confirmed organization/domain query;
+explicitly different organization IDs, domains, and sibling names still fail closed. If the UI still exposes people
+that neither supported employer index returns, Newl Apps stops automatic retries and asks the reviewer for up to
+three exact Apollo person profile URLs. Resolving those IDs uses separately authorized email-only People Enrichment.
+Every returned employer must match the confirmed account identity and trusted domain, and a concrete email must be
+present; similarly named or unverifiable companies are rejected. Company name is not placed in People Search's
+generic keyword filter because Apollo does not document that filter as an employer-name lookup.
 
 ## Hunter TradeMining query mapping
 
@@ -116,7 +118,9 @@ that filter as an employer-name lookup.
   `apolloContactId`; a People Search `id` is stored as `apolloPersonId`. People Search can omit the returned
   organization's ID even when the request was constrained by `organization_ids`, so Hunter validates any returned
   company name/domain against the expected company instead of rejecting the scoped employee solely because that ID
-  is absent. An explicit different organization ID or sibling company name still fails closed.
+  is absent. When both ID and domain are absent, a safe uppercase leading-brand expansion is accepted only inside the
+  exact organization/domain query. An explicit different organization ID, domain, or sibling company name still
+  fails closed.
 - People Search availability flags identify candidates for recovery, but they are not represented as revealed email,
   phone, or LinkedIn values. Hunter reads zero-credit Saved Contact Search in 100-record pages (maximum 20 relevant
   pages), then searches the saved directory again for each of the best 10 masked role candidates using name, title,

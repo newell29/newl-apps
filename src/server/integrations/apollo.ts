@@ -1016,102 +1016,6 @@ export function parseApolloPersonIds(value: string) {
   return personIds;
 }
 
-export async function diagnoseApolloPeopleDirectoryForSavedAccount({
-  apolloAccountId,
-  expectedApolloPersonId
-}: {
-  apolloAccountId: string;
-  expectedApolloPersonId: string;
-}) {
-  const apiKey = readApolloMasterApiKey();
-  const json = await getApolloJson(
-    `/api/v1/accounts/${encodeURIComponent(apolloAccountId)}`,
-    apiKey
-  );
-  const account =
-    asRecord(json.account) ??
-    asRecord(json.data) ??
-    asRecord(json.company) ??
-    null;
-  if (!account) {
-    throw new Error("Apollo did not return the saved account.");
-  }
-
-  const [organization] = parseApolloOrganizations({ accounts: [account] });
-  if (!organization?.id) {
-    throw new Error(
-      "Apollo did not expose the canonical organization ID for the saved account."
-    );
-  }
-
-  const organizationScoped = await searchApolloPeople({
-    apiKey,
-    companyName: organization.name ?? "Unknown organization",
-    domain: null,
-    organizationId: organization.id,
-    queryKeywords: null
-  });
-  const domainScoped = organization.domain
-    ? await searchApolloPeople({
-        apiKey,
-        companyName: organization.name ?? "Unknown organization",
-        domain: organization.domain,
-        organizationId: null,
-        queryKeywords: null
-      })
-    : [];
-  const organizationFiltered = filterApolloContactsForExpectedOrganization(
-    organizationScoped,
-    {
-      companyName: organization.name ?? "Unknown organization",
-      normalizedDomain: organization.domain,
-      organizationId: organization.id
-    }
-  );
-  const domainFiltered = filterApolloContactsForExpectedOrganization(
-    domainScoped,
-    {
-      companyName: organization.name ?? "Unknown organization",
-      normalizedDomain: organization.domain,
-      organizationId: null
-    }
-  );
-  const expectedPerson =
-    [...organizationScoped, ...domainScoped].find(
-      (contact) => contact.apolloPersonId === expectedApolloPersonId
-    ) ?? null;
-  const expectedPersonOrganization = expectedPerson
-    ? readApolloOrganizationFromContact(expectedPerson)
-    : null;
-
-  return {
-    canonicalOrganizationId: organization.id,
-    organizationName: organization.name,
-    organizationDomain: organization.domain,
-    organizationScopedCount: organizationScoped.length,
-    organizationFilteredCount: organizationFiltered.length,
-    domainScopedCount: domainScoped.length,
-    domainFilteredCount: domainFiltered.length,
-    expectedPersonFound: Boolean(expectedPerson),
-    expectedPersonOrganization: expectedPersonOrganization
-      ? {
-          id: expectedPersonOrganization.id,
-          name: expectedPersonOrganization.name,
-          domain: expectedPersonOrganization.domain
-        }
-      : null,
-    expectedPerson: expectedPerson
-      ? {
-          apolloPersonId: expectedPerson.apolloPersonId,
-          fullName: expectedPerson.fullName,
-          title: expectedPerson.title,
-          hasEmailAvailable: expectedPerson.hasEmailAvailable,
-          hasConcreteEmail: hasConcreteApolloEmail(expectedPerson)
-        }
-      : null
-  };
-}
-
 function parseApolloPersonId(value: string) {
   if (/^[a-f0-9]{24}$/iu.test(value)) {
     return value;
@@ -3416,7 +3320,8 @@ function filterTrustedApolloAccountNameFallback({
     const exactCompanyName =
       hasExactAliasMatch(expectedAliases, candidateAliases) ||
       hasStrongBaseNameMatch(expectedAliases, candidateAliases) ||
-      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases);
+      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases) ||
+      hasSafeScopedLeadingBrandExpansion(companyName, organization.name);
     if (!exactCompanyName) {
       return false;
     }
