@@ -395,8 +395,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Also verify that `organization_ids` contains Apollo's nested global organization ID rather than the saved account
   record ID. A legacy account ID that returns no employees may be recovered only from one exact organization identity;
   when Account View omits its nested organization object, retry the global organization ID already stored with the
-  same reviewer-confirmed account mapping. Parent/sibling evidence must produce `MATCH_QUALITY_REVIEW` and an empty
-  contact set.
+  same reviewer-confirmed account mapping. When that exact query returns people, do not reject them merely because
+  the embedded employer ID is a different saved Account ID or the employer label is an operating brand; Apollo uses
+  separate identifier namespaces for saved Accounts and global organizations. This exception applies only to the
+  exact reviewer-confirmed organization scope. Parent/sibling evidence from automatic, domain, or keyword recovery
+  must still produce `MATCH_QUALITY_REVIEW` and an empty contact set.
 - An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
   ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.

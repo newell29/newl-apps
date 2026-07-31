@@ -342,6 +342,9 @@ Regression coverage must prove:
     may supply saved contacts only when Apollo explicitly links both Accounts to the same immutable global
     organization ID; a same-name or same-domain Account linked to a different global organization remains rejected,
     and no paid organization or person endpoint is called.
+29. an exact reviewer-confirmed `organization_ids[]` People Search accepts the roster Apollo returns when the person
+    records embed a different saved Account ID and operating-brand label such as `CGT`; the same identifier mismatch
+    remains rejected for automatic or unconfirmed company matching.
 
 ## Outreach Plans and grounded sequence generation
 
