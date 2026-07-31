@@ -4146,6 +4146,11 @@ describe("fetchApolloContactsForCompany", () => {
   });
 
   it("recovers a masked shortlisted person from saved contacts before considering paid enrichment", async () => {
+    const savedContactQueries: string[] = [];
+    const longApolloTitle =
+      "Assistant Warehouse Manager | Continuous Improvement and Process Optimization ".repeat(
+        4
+      ).trim();
     const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const body = init?.body
@@ -4165,7 +4170,9 @@ describe("fetchApolloContactsForCompany", () => {
         } as unknown as Response;
       }
       if (url.endsWith("/api/v1/contacts/search")) {
-        const targeted = String(body.q_keywords ?? "").includes("Isaac");
+        const keywords = String(body.q_keywords ?? "");
+        savedContactQueries.push(keywords);
+        const targeted = keywords.includes("Isaac");
         return {
           ok: true,
           status: 200,
@@ -4175,7 +4182,7 @@ describe("fetchApolloContactsForCompany", () => {
                   id: "apollo-contact-isaac",
                   first_name: "Isaac",
                   last_name: "Watkins",
-                  title: "Assistant Warehouse Manager",
+                  title: longApolloTitle,
                   email: "i.watkins@vsamerica.com",
                   organization: {
                     id: "apollo-org-vs",
@@ -4196,7 +4203,7 @@ describe("fetchApolloContactsForCompany", () => {
               person_id: "apollo-person-isaac",
               first_name: "Isaac",
               last_name_obfuscated: "Wa***s",
-              title: "Assistant Warehouse Manager",
+              title: longApolloTitle,
               has_email: true,
               organization: {
                 id: "apollo-org-vs",
@@ -4228,6 +4235,7 @@ describe("fetchApolloContactsForCompany", () => {
         apolloContactId: "apollo-contact-isaac",
         apolloPersonId: "apollo-person-isaac",
         fullName: "Isaac Watkins",
+        title: longApolloTitle,
         email: "i.watkins@vsamerica.com"
       })
     ]);
@@ -4240,6 +4248,12 @@ describe("fetchApolloContactsForCompany", () => {
     expect(fetchMock.mock.calls.some(([input]) =>
       String(input).includes("/api/v1/people/match")
     )).toBe(false);
+    expect(savedContactQueries).toEqual(
+      expect.arrayContaining([expect.stringContaining("Isaac")])
+    );
+    expect(
+      savedContactQueries.every((keywords) => keywords.length <= 200)
+    ).toBe(true);
   });
 
   it("uses an email-only paid enrichment only after explicit authorization and a saved-contact miss", async () => {

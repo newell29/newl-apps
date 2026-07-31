@@ -112,13 +112,15 @@ export async function loadReviewerConfirmedApolloCompanyMapping({
   // Do not search only the newest retry rows. Every employee lookup records a
   // new immutable ApolloCompanyMatch, so repeated zero-contact attempts can
   // push the original reviewer-confirmed mapping outside any bounded history
-  // window. Load that authoritative audit row directly and require it to match
-  // the company's current Apollo organization.
+  // window. Account IDs and global organization IDs are separate Apollo
+  // namespaces: a reviewed /accounts/{id} row can therefore carry a different
+  // persisted ID from the company's later canonical organization ID. Load the
+  // tenant/company-scoped review history first, then validate the typed manual
+  // reference below instead of excluding the account row in the DB predicate.
   const confirmedMatches = await prisma.apolloCompanyMatch.findMany({
     where: {
       tenantId,
       companyId,
-      apolloOrganizationId: currentOrganizationId,
       classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
       reviewedAt: { not: null },
       reviewedByUserId: { not: null }
@@ -141,9 +143,12 @@ export async function loadReviewerConfirmedApolloCompanyMapping({
       const hasManualMappingEvidence =
         Boolean(apolloAccountId) ||
         queryOrganizationId === currentOrganizationId ||
-        match.matchReason
-          ?.toLowerCase()
-          .includes(MANUAL_APOLLO_COMPANY_MAPPING_REASON.toLowerCase()) === true;
+        (
+          match.apolloOrganizationId === currentOrganizationId &&
+          match.matchReason
+            ?.toLowerCase()
+            .includes(MANUAL_APOLLO_COMPANY_MAPPING_REASON.toLowerCase()) === true
+        );
       return hasManualMappingEvidence
         ? { apolloAccountId }
         : null;

@@ -258,11 +258,15 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   company. If Account View returns only the saved-account shell, Newl Apps retries the global organization ID already
   stored from that same reviewer-confirmed mapping rather than treating the account ID as an organization ID. Returned
   people must still match the exact linked organization before buyer review.
-- Reviewer confirmation is loaded from its immutable, tenant-scoped Apollo match audit row by company and current
-  organization ID. It is not inferred from only the newest retry attempts: every zero-employee recheck creates another
-  match row, so a bounded history window could otherwise hide an older valid confirmation and inconsistently reject
-  the exact same Apollo roster. Legacy reviewed mappings remain valid when their typed URL metadata predates the
-  current query schema, provided the persisted organization ID still equals the company's current mapping.
+- Reviewer confirmation is loaded from its immutable, tenant-scoped Apollo match audit history by company. It is not
+  inferred from only the newest retry attempts: every zero-employee recheck creates another match row, so a bounded
+  history window could otherwise hide an older valid confirmation and inconsistently reject the exact same Apollo
+  roster. A reviewed `/accounts/{id}` reference remains authoritative even when that saved Account ID differs from the
+  later canonical global organization ID; Apollo Account View must resolve the exact account before its roster is
+  trusted. A reviewed organization reference remains valid only when its supplied organization ID equals the company's
+  current mapping. Legacy untyped rows require both the explicit manual-mapping marker and that same current-ID match.
+- Apollo keyword fields are whitespace-normalized and capped at the documented 200-character boundary before Saved
+  Contact or People Search. Long facility labels and contact titles therefore cannot fail the entire company handoff.
 - Apollo's Complete Organization Info endpoint consumes one credit when a company is returned. The mapping form therefore requires explicit one-credit confirmation. An automatic name-only retry requires a separate confirmation and is capped at two organization-search pages.
 - **Archived exceptions** is an auditable, reversible state rather than deletion. It covers both confirmed no-match
   companies and reviewer-confirmed mappings with no usable employees, duplicates, or irrelevant companies. The

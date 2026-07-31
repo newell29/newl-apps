@@ -77,7 +77,9 @@ describe("Hunter assisted handoff queueing", () => {
         queryJson: { source: "automatic-apollo-recheck" }
       },
       {
-        apolloOrganizationId: "54a134c369702d4255de4600",
+        // Apollo can persist the reviewed Account identity separately from
+        // the canonical global organization later stored on Company.
+        apolloOrganizationId: "6888f2e0496bf40001170587",
         matchReason:
           "direct company; manually confirmed from Apollo company URL",
         queryJson: {
@@ -106,7 +108,6 @@ describe("Hunter assisted handoff queueing", () => {
       where: {
         tenantId: "tenant-a",
         companyId: "company-cefla",
-        apolloOrganizationId: "54a134c369702d4255de4600",
         classification: "DIRECT_COMPANY",
         reviewedAt: { not: null },
         reviewedByUserId: { not: null }
