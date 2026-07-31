@@ -397,9 +397,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   when Account View omits its nested organization object, retry the global organization ID already stored with the
   same reviewer-confirmed account mapping. When that exact query returns people, do not reject them merely because
   the embedded employer ID is a different saved Account ID or the employer label is an operating brand; Apollo uses
-  separate identifier namespaces for saved Accounts and global organizations. This exception applies only to the
-  exact reviewer-confirmed organization scope. Parent/sibling evidence from automatic, domain, or keyword recovery
-  must still produce `MATCH_QUALITY_REVIEW` and an empty contact set.
+  separate identifier namespaces for saved Accounts and global organizations. The same rule applies when an
+  authenticated reviewer supplied the canonical organization URL directly, but only when the manual mapping audit
+  record's organization ID still exactly equals the company's current stored organization ID. This exception applies
+  only to the exact reviewer-confirmed organization scope. Parent/sibling evidence from automatic, domain, or keyword
+  recovery must still produce `MATCH_QUALITY_REVIEW` and an empty contact set.
 - An HTTP 307 from the Mac-mini handoff worker means session middleware intercepted the machine route before
   ingestion authentication. `/api/lead-gen/hunter/outreach-handoff/*` is exempt from session middleware and must
   enforce its own tenant-bound ingestion token; regression coverage preserves that boundary.

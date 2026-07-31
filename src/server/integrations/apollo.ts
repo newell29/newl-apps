@@ -92,6 +92,7 @@ export type ApolloCompanyLookupInput = {
   domain?: string | null;
   apolloOrganizationId?: string | null;
   apolloAccountId?: string | null;
+  reviewerConfirmedApolloOrganizationId?: string | null;
   verifiedIdentityContext?: string | null;
 };
 
@@ -633,10 +634,20 @@ export async function fetchApolloContactsForCompany(
     trustedMatchedOrganization?.name ?? input.companyName;
   const confirmedSavedContactDomain =
     trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
+  const providedReviewerConfirmedOrganizationId =
+    input.reviewerConfirmedApolloOrganizationId?.trim() &&
+    input.reviewerConfirmedApolloOrganizationId !== "null"
+      ? input.reviewerConfirmedApolloOrganizationId.trim()
+      : null;
   const trustReviewerConfirmedPeopleScope = Boolean(
-    providedAccountId &&
     providedOrganizationId &&
-    confirmedSavedAccount
+    (
+      (
+        providedAccountId &&
+        confirmedSavedAccount
+      ) ||
+      providedReviewerConfirmedOrganizationId === providedOrganizationId
+    )
   );
   const rawSavedContactsForProvidedOrganization = providedOrganizationId
     ? ((await searchApolloContacts({
@@ -1154,6 +1165,25 @@ export function readApolloAccountIdFromMatchQuery(value: unknown) {
 
   return accountId && /^[a-f0-9]{24}$/iu.test(accountId)
     ? accountId
+    : null;
+}
+
+export function readReviewerConfirmedApolloOrganizationIdFromMatchQuery(
+  value: unknown
+) {
+  const query = asRecord(value);
+  if (!query) return null;
+
+  const source = readApolloString(query, ["source"])?.toLowerCase();
+  const resourceType = readApolloString(query, ["resource_type"])?.toUpperCase();
+  if (source !== "manual-apollo-url" || resourceType !== "ORGANIZATION") {
+    return null;
+  }
+
+  const suppliedOrganizationId = readApolloString(query, ["supplied_id"]);
+  return suppliedOrganizationId &&
+    /^[a-f0-9]{24}$/iu.test(suppliedOrganizationId)
+    ? suppliedOrganizationId
     : null;
 }
 
