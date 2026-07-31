@@ -76,11 +76,18 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   both records rather than leaving a partial plan.
 - Lead-generation AI runtime enablement is saved independently from scoring weights. An unrelated invalid scoring total
   cannot block the runtime toggle or silently rewrite scoring configuration.
-- If drafting succeeds but the model critic is unavailable, Newl Apps saves the version as `QA_FAILED` with a
-  `MODEL_QA_UNAVAILABLE` error. It cannot be approved or pushed.
+- The model critic retries transient HTTP 408/409/429/5xx and transport failures after bounded 2-second,
+  5-second, and 15-second delays. Strategy and drafting calls are not automatically replayed, avoiding duplicate
+  copy-generation cost.
+- If drafting succeeds but all model-critic attempts remain unavailable, Newl Apps saves the version as `QA_FAILED`
+  with a `MODEL_QA_UNAVAILABLE` error. It cannot be approved or pushed, but is labeled as a temporary QA retry rather
+  than an evidence failure.
 - Unknown evidence citations, unsupported quantified claims, unsupported URLs, invalid sequence structure, sender
   placeholders, generic company signatures, Hunter/internal references, an incorrect mailbox-first-name signature, or semantic
   grounding errors fail closed and remain visible on the plan.
+- **Repair failed QA plans** rechecks a saved `MODEL_QA_UNAVAILABLE` sequence directly with the critic and does not
+  regenerate its strategy or email copy. A passing retry promotes the existing plan to `QA_PASSED`; genuine semantic
+  findings remain failed and continue through the established model-regeneration path.
 - Exact evidence-ledger annotations and whitespace-only corruption of a known evidence ID are repaired
   deterministically before QA and do not spend another model call. The bulk repair action applies that same safe
   correction to existing failed plans. Unsupported claims use bounded model regeneration; missing evidence, sender

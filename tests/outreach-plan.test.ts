@@ -460,6 +460,14 @@ describe("outreach plan grounding", () => {
     ).toBe("HUMAN_REVIEW");
     expect(
       classifyOutreachQaIssues([{
+        code: "MODEL_QA_UNAVAILABLE",
+        severity: "ERROR",
+        message: "Our servers are currently overloaded. Please try again later.",
+        stepNumber: null
+      }])
+    ).toBe("MODEL_QA_RETRY");
+    expect(
+      classifyOutreachQaIssues([{
         code: "UNSUPPORTED_CAUSAL_CLAIM",
         severity: "ERROR",
         message: "The claim is not grounded.",

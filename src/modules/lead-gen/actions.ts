@@ -3378,6 +3378,7 @@ export async function bulkRepairFailedOutreachPlansAction(
     const contactsById = new Map(contacts.map((contact) => [contact.id, contact]));
     const details: ContactBulkActionSummary["details"] = [];
     let repaired = 0;
+    let qaRetried = 0;
     let regenerated = 0;
     let skipped = 0;
     let failed = 0;
@@ -3390,6 +3391,7 @@ export async function bulkRepairFailedOutreachPlansAction(
           contactId
         });
         if (result.state === "repaired") repaired += 1;
+        else if (result.state === "qa_retried") qaRetried += 1;
         else if (result.state === "regenerated") regenerated += 1;
         else if (result.state === "failed") failed += 1;
         else skipped += 1;
@@ -3398,7 +3400,7 @@ export async function bulkRepairFailedOutreachPlansAction(
           contactName: contact.fullName,
           companyName: contact.company.name,
           outcome:
-            result.state === "repaired"
+            result.state === "repaired" || result.state === "qa_retried"
               ? "repaired"
               : result.state === "regenerated"
                 ? "regenerated"
@@ -3427,10 +3429,11 @@ export async function bulkRepairFailedOutreachPlansAction(
       operation: "qa_repair",
       message:
         `${repaired} plan${repaired === 1 ? "" : "s"} repaired without a model call; ` +
+        `${qaRetried} temporary QA failure${qaRetried === 1 ? "" : "s"} rechecked; ` +
         `${regenerated} regenerated; ${skipped} require no action or human review; ${failed} failed.`,
       completedAt: new Date().toISOString(),
       selectedContacts: contactIds.length,
-      updatedContacts: repaired + regenerated,
+      updatedContacts: repaired + qaRetried + regenerated,
       skippedContacts: skipped,
       failedContacts: failed,
       companiesTouched: new Set(contacts.map((contact) => contact.company.name)).size,

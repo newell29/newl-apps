@@ -129,6 +129,9 @@ generation only and never overrides those identity checks.
 - The strategy call receives bounded contact role data and the frozen evidence ledger. The drafting and critic calls
   receive the saved strategy and the same ledger. No Apollo secret, tenant credential, raw customer record, or
   unrelated tenant data is included.
+- The critic alone retries transient provider overload, rate-limit, server, and transport failures after bounded
+  2-second, 5-second, and 15-second delays. The bulk QA-repair control can replay that critic against the already saved
+  sequence, avoiding another strategy or drafting call and preserving the existing customer-facing copy.
 - The strategy call also receives the tenant-scoped Hunter handoff. Its required service line and opportunity thesis
   are authoritative; server code rejects a returned strategy that changes that service line.
 - `HUNTER_OUTREACH_RESEARCH_MAX_AGE_DAYS` controls how long saved Hunter research can authorize outreach. The default

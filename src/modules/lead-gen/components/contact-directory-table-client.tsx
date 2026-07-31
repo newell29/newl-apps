@@ -107,7 +107,11 @@ type ContactDirectoryRow = {
     callToAction: string;
     senderRecommendation: string | null;
     confidence: number;
-    qaRepairDisposition: "AUTOMATIC" | "MODEL_REGENERATION" | "HUMAN_REVIEW";
+    qaRepairDisposition:
+      | "AUTOMATIC"
+      | "MODEL_QA_RETRY"
+      | "MODEL_REGENERATION"
+      | "HUMAN_REVIEW";
     regenerationBlockReason: string | null;
     qaIssues: Array<{
       code: string;
@@ -1029,7 +1033,7 @@ export function ContactDirectoryTableClient({
               disabled={selectedIds.length === 0 || isAnyBulkActionPending}
               className="rounded-md border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-semibold text-warning transition-colors hover:bg-warning/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isQaRepairPending ? "Repairing QA..." : "Repair failed QA plans"}
+              {isQaRepairPending ? "Repairing / retrying QA..." : "Repair / retry failed QA"}
             </button>
             <button
               type="submit"
@@ -1198,6 +1202,8 @@ function OutreachPlanPanel({
             <p className="mt-1 text-xs font-semibold text-foreground">
               {plan.qaRepairDisposition === "AUTOMATIC"
                 ? "Automatically repairable without another model call."
+                : plan.qaRepairDisposition === "MODEL_QA_RETRY"
+                  ? "QA was temporarily unavailable. Retry the saved sequence without regenerating it."
                 : plan.qaRepairDisposition === "MODEL_REGENERATION"
                   ? "Requires model regeneration because the remaining issue is semantic."
                   : "Requires human evidence, sender, or configuration review."}

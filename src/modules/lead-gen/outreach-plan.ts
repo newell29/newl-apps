@@ -105,6 +105,7 @@ export type ModelOutreachQaResult = {
 
 export type OutreachQaRepairDisposition =
   | "AUTOMATIC"
+  | "MODEL_QA_RETRY"
   | "MODEL_REGENERATION"
   | "HUMAN_REVIEW";
 
@@ -199,13 +200,16 @@ export function classifyOutreachQaIssues(
 
   const humanReviewCodes = new Set([
     "MISSING_EVIDENCE",
-    "MODEL_QA_UNAVAILABLE",
     "SENDER_IDENTITY_MISSING",
     "SENDER_SIGNATURE",
     "SENDER_PLACEHOLDER"
   ]);
   if ([...errorCodes].some((code) => humanReviewCodes.has(code))) {
     return "HUMAN_REVIEW";
+  }
+
+  if (errorCodes.has("MODEL_QA_UNAVAILABLE")) {
+    return "MODEL_QA_RETRY";
   }
 
   const unknownEvidenceIssues = issues.filter(

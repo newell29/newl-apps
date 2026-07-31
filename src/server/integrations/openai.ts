@@ -249,6 +249,7 @@ export type ApolloCompanySuggestionResult = {
 };
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+const OUTREACH_QA_RETRY_DELAYS_MS = [2_000, 5_000, 15_000];
 
 const OUTREACH_STRATEGY_SCHEMA = {
   type: "object",
@@ -594,7 +595,8 @@ export async function reviewOutreachSequenceGrounding(
       senderFirstName: context.senderFirstName,
       allowCallTask: context.allowCallTask,
       evidenceLedger: context.evidence
-    })
+    }),
+    retryDelaysMs: OUTREACH_QA_RETRY_DELAYS_MS
   });
 
   return {
@@ -1002,7 +1004,8 @@ async function requestStructuredOpenAiResponse({
   schemaName,
   schema,
   system,
-  user
+  user,
+  retryDelaysMs = []
 }: {
   model: string;
   reasoningEffort: "low" | "medium";
@@ -1010,48 +1013,72 @@ async function requestStructuredOpenAiResponse({
   schema: Record<string, unknown>;
   system: string;
   user: string;
+  retryDelaysMs?: number[];
 }) {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey || apiKey === "OPENAI_API_KEY_PLACEHOLDER") {
     throw new Error("OPENAI_API_KEY is not configured. Add it to enable outreach generation.");
   }
 
-  const response = await fetch(`${OPENAI_API_BASE_URL}/responses`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`
+  const requestBody = JSON.stringify({
+    model,
+    reasoning: {
+      effort: reasoningEffort
     },
-    body: JSON.stringify({
-      model,
-      reasoning: {
-        effort: reasoningEffort
+    input: [
+      {
+        role: "system",
+        content: system
       },
-      input: [
-        {
-          role: "system",
-          content: system
-        },
-        {
-          role: "user",
-          content: user
-        }
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: schemaName,
-          strict: true,
-          schema
-        }
+      {
+        role: "user",
+        content: user
       }
-    }),
-    cache: "no-store"
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: schemaName,
+        strict: true,
+        schema
+      }
+    }
   });
 
-  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!response.ok || !json) {
-    throw new Error(extractOpenAiError(json) ?? `OpenAI outreach generation failed with status ${response.status}.`);
+  let json: Record<string, unknown> | null = null;
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    try {
+      const response = await fetch(`${OPENAI_API_BASE_URL}/responses`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`
+        },
+        body: requestBody,
+        cache: "no-store"
+      });
+      json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (response.ok && json) {
+        break;
+      }
+
+      const canRetry = attempt < retryDelaysMs.length && isRetryableOpenAiStatus(response.status);
+      if (!canRetry) {
+        throw new Error(
+          extractOpenAiError(json) ?? `OpenAI outreach generation failed with status ${response.status}.`
+        );
+      }
+      await waitForOpenAiRetry(resolveOpenAiRetryDelay(response, retryDelaysMs[attempt]));
+    } catch (error) {
+      if (attempt >= retryDelaysMs.length || !isRetryableOpenAiTransportError(error)) {
+        throw error;
+      }
+      await waitForOpenAiRetry(retryDelaysMs[attempt]);
+    }
+  }
+
+  if (!json) {
+    throw new Error("OpenAI returned no structured outreach response.");
   }
 
   const content = readResponsesOutputText(json);
@@ -1063,6 +1090,27 @@ async function requestStructuredOpenAiResponse({
   } catch {
     throw new Error("OpenAI returned outreach output that was not valid JSON.");
   }
+}
+
+function isRetryableOpenAiStatus(status: number) {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function isRetryableOpenAiTransportError(error: unknown) {
+  return error instanceof TypeError ||
+    (error instanceof Error && /fetch|network|socket|connection|timed?\s*out/i.test(error.message));
+}
+
+function resolveOpenAiRetryDelay(response: Response, fallbackMs: number) {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) return fallbackMs;
+  const seconds = Number(retryAfter);
+  if (!Number.isFinite(seconds) || seconds < 0) return fallbackMs;
+  return Math.min(15_000, Math.max(fallbackMs, Math.round(seconds * 1_000)));
+}
+
+function waitForOpenAiRetry(delayMs: number) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function readStructuredUsage(payload: Record<string, unknown>): OpenAiStructuredUsage {

@@ -14,6 +14,7 @@ describe("OpenAI structured outreach workflow", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -193,6 +194,78 @@ describe("OpenAI structured outreach workflow", () => {
     ).rejects.toThrow("changed Hunter's required service line");
   });
 
+  it("retries a transient QA overload and preserves the saved sequence", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        headers: new Headers(),
+        json: vi.fn().mockResolvedValue({
+          error: { message: "Our servers are currently overloaded. Please try again later." }
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce(responseWithOutput({ passed: true, issues: [] }));
+    const evidence = [{
+      id: "company:identity",
+      kind: "COMPANY" as const,
+      title: "Company identity",
+      summary: "Jordan Demo is Director of Supply Chain at Harbor Home.",
+      sourceUrl: "https://harborhome.example",
+      publishedAt: null,
+      facts: ["Contact title: Director of Supply Chain"]
+    }];
+    const strategy = {
+      serviceLine: HunterServiceLine.WAREHOUSING,
+      opportunityType: "Recent inbound inventory",
+      objective: "Confirm whether flexible warehousing is useful.",
+      triggerSummary: "Saved evidence shows Houston-bound activity.",
+      buyerHypothesis: "The supply-chain director may influence capacity planning.",
+      valueProposition: "Newl can review warehouse and freight handoffs.",
+      likelyObjection: "Capacity may already be covered.",
+      callToAction: "Ask for a short comparison.",
+      channelStrategy: ["Evidence-led email"],
+      senderRecommendation: "Alex",
+      confidence: 82,
+      evidenceRefs: ["company:identity"]
+    };
+    const qaPromise = reviewOutreachSequenceGrounding({
+      model: "gpt-5.6-luna",
+      companyName: "Harbor Home",
+      contact: {
+        firstName: "Jordan",
+        fullName: "Jordan Demo",
+        title: "Director of Supply Chain",
+        department: "Logistics",
+        seniority: "director"
+      },
+      strategy,
+      sequence: {
+        sequenceName: "Warehouse Capacity Outreach",
+        steps: [emailStep(1, 0), emailStep(2, 4), emailStep(3, 10)]
+      },
+      evidence,
+      senderFirstName: "Alex",
+      allowCallTask: false
+    });
+
+    await vi.runAllTimersAsync();
+    await expect(qaPromise).resolves.toEqual({
+      result: { passed: true, issues: [] },
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        totalTokens: 0
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toBe(
+      String(fetchMock.mock.calls[1]?.[1]?.body)
+    );
+  });
+
   it("uses a strict, bounded buyer-role review before drafting", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValueOnce(
       responseWithOutput({
@@ -287,7 +360,7 @@ function responseWithOutput(payload: Record<string, unknown>) {
 function emailStep(stepNumber: number, delayDays: number) {
   return {
     stepNumber,
-    channel: "EMAIL",
+    channel: OutreachChannel.EMAIL,
     delayDays,
     subject: "Houston inbound capacity",
     body:
