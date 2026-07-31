@@ -560,6 +560,8 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   organization search can be empty even when the same confirmed company is indexed through its domain. Apollo can
   also store duplicate same-brand accounts and combine their rosters in the UI while each public API organization
   scope remains separate. The `/people/<id>` UI route can carry a saved-contact ID rather than a global person ID.
+  Repeated rechecks also create immutable match rows; the original reviewer confirmation must be queried directly
+  instead of searched for only inside a bounded newest-attempt list.
 - Recovery: use **Search company employees and build plans** first. It searches the global organization and trusted
   domain, expands verified same-domain duplicate account organizations, runs one strict company-keyword candidate
   fallback, and can resolve one identity-evidence-backed parent for a reviewer-confirmed domainless shell. It reads

@@ -43,6 +43,7 @@ import {
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
+  MANUAL_APOLLO_COMPANY_MAPPING_REASON,
   fetchApolloContactsForCompany,
   readApolloAccountIdFromMatchQuery,
   readReviewerConfirmedApolloOrganizationIdFromMatchQuery,
@@ -93,6 +94,80 @@ type HandoffResult = {
   message: string;
   completedAt: string;
 };
+
+export async function loadReviewerConfirmedApolloCompanyMapping({
+  tenantId,
+  companyId,
+  apolloOrganizationId
+}: {
+  tenantId: string;
+  companyId: string;
+  apolloOrganizationId: string | null;
+}) {
+  const currentOrganizationId = apolloOrganizationId?.trim() ?? "";
+  if (!/^[a-f0-9]{24}$/iu.test(currentOrganizationId)) {
+    return null;
+  }
+
+  // Do not search only the newest retry rows. Every employee lookup records a
+  // new immutable ApolloCompanyMatch, so repeated zero-contact attempts can
+  // push the original reviewer-confirmed mapping outside any bounded history
+  // window. Load that authoritative audit row directly and require it to match
+  // the company's current Apollo organization.
+  const confirmedMatches = await prisma.apolloCompanyMatch.findMany({
+    where: {
+      tenantId,
+      companyId,
+      apolloOrganizationId: currentOrganizationId,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      reviewedAt: { not: null },
+      reviewedByUserId: { not: null }
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      apolloOrganizationId: true,
+      matchReason: true,
+      queryJson: true
+    }
+  });
+  const confirmedMapping = confirmedMatches
+    .map((match) => {
+      const apolloAccountId =
+        readApolloAccountIdFromMatchQuery(match.queryJson);
+      const queryOrganizationId =
+        readReviewerConfirmedApolloOrganizationIdFromMatchQuery(
+          match.queryJson
+        );
+      const hasManualMappingEvidence =
+        Boolean(apolloAccountId) ||
+        queryOrganizationId === currentOrganizationId ||
+        match.matchReason
+          ?.toLowerCase()
+          .includes(MANUAL_APOLLO_COMPANY_MAPPING_REASON.toLowerCase()) === true;
+      return hasManualMappingEvidence
+        ? { apolloAccountId }
+        : null;
+    })
+    .find(
+      (
+        mapping
+      ): mapping is {
+        apolloAccountId: string | null;
+      } => Boolean(mapping)
+    ) ?? null;
+  if (!confirmedMapping) {
+    return null;
+  }
+
+  return {
+    apolloAccountId: confirmedMapping.apolloAccountId,
+    // The reviewed row itself is tenant-scoped, immutable audit evidence that
+    // the authenticated employee confirmed this exact organization. Legacy
+    // rows may predate resource_type/supplied_id in queryJson, so preserve the
+    // persisted organization ID as the safe fallback.
+    apolloOrganizationId: currentOrganizationId
+  };
+}
 
 type HandoffOutput = {
   phase: "QUEUED" | "RUNNING" | "COMPLETE";
@@ -810,24 +885,16 @@ async function processCompany({
   let classification: ApolloCompanyMatchClassification | null =
     company.apolloOrganizationId ? ApolloCompanyMatchClassification.DIRECT_COMPANY : null;
   const latestMatch = company.apolloCompanyMatches[0] ?? null;
+  const reviewerConfirmedMapping =
+    await loadReviewerConfirmedApolloCompanyMapping({
+      tenantId,
+      companyId: company.id,
+      apolloOrganizationId: company.apolloOrganizationId
+    });
   const confirmedApolloAccountId =
-    company.apolloCompanyMatches
-      .map((match) => readApolloAccountIdFromMatchQuery(match.queryJson))
-      .find((accountId): accountId is string => Boolean(accountId)) ??
-    null;
+    reviewerConfirmedMapping?.apolloAccountId ?? null;
   const reviewerConfirmedApolloOrganizationId =
-    company.apolloCompanyMatches
-      .map((match) =>
-        readReviewerConfirmedApolloOrganizationIdFromMatchQuery(match.queryJson)
-      )
-      .find(
-        (organizationId): organizationId is string =>
-          Boolean(
-            organizationId &&
-            organizationId === company.apolloOrganizationId
-          )
-      ) ??
-    null;
+    reviewerConfirmedMapping?.apolloOrganizationId ?? null;
   if (
     latestMatch &&
     blocksApolloEmployeeLookup({

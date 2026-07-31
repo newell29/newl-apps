@@ -125,6 +125,7 @@ import { requireAdmin, requireModule, requireMutationAccess } from "@/server/aut
 import { prisma } from "@/server/db";
 import {
   ApolloRateLimitError,
+  MANUAL_APOLLO_COMPANY_MAPPING_REASON,
   createApolloContactForEnrollment,
   fetchApolloSequenceDeliveryFailures,
   fetchApolloContactById,
@@ -1414,7 +1415,8 @@ export async function mapApolloCompanyUrlAction(
           domainMatch: mapping.match.domainMatch,
           logisticsProviderMatch: mapping.match.logisticsProviderMatch,
           branchLocationMatch: mapping.match.branchLocationMatch,
-          matchReason: `${mapping.match.matchReason}; manually confirmed from Apollo company URL`,
+          matchReason:
+            `${mapping.match.matchReason}; ${MANUAL_APOLLO_COMPANY_MAPPING_REASON}`,
           queryJson: toInputJsonValue({
             ...mapping.match.query,
             source: "manual-apollo-url"

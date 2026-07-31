@@ -1,6 +1,8 @@
 import { ApolloCompanyMatchClassification, ReplyStatus, SequenceStatus } from "@prisma/client";
 
 const DEFAULT_BASE_URL = "https://api.apollo.io";
+export const MANUAL_APOLLO_COMPANY_MAPPING_REASON =
+  "manually confirmed from Apollo company URL";
 const DEFAULT_PAGE_SIZE = 100;
 const APOLLO_SAVED_CONTACT_MAX_PAGES = 20;
 const APOLLO_SAVED_CONTACT_RECOVERY_LIMIT = 10;
