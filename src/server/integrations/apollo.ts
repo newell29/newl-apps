@@ -10,6 +10,7 @@ const APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT = 3;
 const APOLLO_EQUIVALENT_ACCOUNT_LIMIT = 5;
 const APOLLO_EQUIVALENT_ACCOUNT_QUERY_LIMIT = 4;
 const APOLLO_DELIVERY_FAILURE_MAX_PAGES = 10;
+const APOLLO_KEYWORD_MAX_LENGTH = 200;
 const INTERNAL_SEQUENCE_KEYS = new Set([
   "hunter-email-only",
   "hunter-executive-referral",
@@ -4536,10 +4537,24 @@ function buildApolloPeopleSearchKeywords(companyName: string, queryKeywords: str
   const trimmedKeyword = queryKeywords?.trim() ?? "";
 
   if (!trimmedKeyword) {
-    return constrainedToOrganization ? undefined : companyName;
+    return constrainedToOrganization
+      ? undefined
+      : boundApolloKeywordText(companyName);
   }
 
-  return constrainedToOrganization ? trimmedKeyword : `${companyName} ${trimmedKeyword}`.trim();
+  return boundApolloKeywordText(
+    constrainedToOrganization
+      ? trimmedKeyword
+      : `${companyName} ${trimmedKeyword}`
+  );
+}
+
+function boundApolloKeywordText(value: string) {
+  return value
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, APOLLO_KEYWORD_MAX_LENGTH)
+    .trim();
 }
 
 function rankApolloRelevantContacts(entries: ApolloContactRecord[]) {
