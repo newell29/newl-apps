@@ -2,6 +2,7 @@ import { HunterAutomationMode } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prisma = vi.hoisted(() => ({
+  apolloCompanyMatch: { findMany: vi.fn() },
   hunterAutomationPolicy: { findUnique: vi.fn() },
   tradeMiningScoringConfig: { findUnique: vi.fn() },
   automationJobRun: {
@@ -18,6 +19,8 @@ const prisma = vi.hoisted(() => ({
 const evaluateHunterOutreachEligibility = vi.hoisted(() => vi.fn());
 const isOpenAiDraftGenerationConfigured = vi.hoisted(() => vi.fn());
 const runHunterDryPlan = vi.hoisted(() => vi.fn());
+const readApolloAccountIdFromMatchQuery = vi.hoisted(() => vi.fn());
+const readReviewerConfirmedApolloOrganizationIdFromMatchQuery = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({ prisma }));
 vi.mock("@/server/integrations/openai", () => ({
@@ -37,12 +40,17 @@ vi.mock("@/modules/lead-gen/hunter-planner", () => ({
 }));
 vi.mock("@/server/integrations/apollo", () => ({
   ApolloRateLimitError: class ApolloRateLimitError extends Error {},
-  fetchApolloContactsForCompany: vi.fn()
+  MANUAL_APOLLO_COMPANY_MAPPING_REASON:
+    "manually confirmed from Apollo company URL",
+  fetchApolloContactsForCompany: vi.fn(),
+  readApolloAccountIdFromMatchQuery,
+  readReviewerConfirmedApolloOrganizationIdFromMatchQuery
 }));
 
 import {
   enqueueHunterCompanyOutreachHandoff,
   enqueueHunterOutreachHandoff,
+  loadReviewerConfirmedApolloCompanyMapping,
   queueCurrentHunterOutreachHandoff
 } from "@/modules/lead-gen/hunter-outreach-handoff";
 
@@ -58,6 +66,79 @@ describe("Hunter assisted handoff queueing", () => {
     runHunterDryPlan.mockResolvedValue({
       state: "completed",
       runId: "plan-current"
+    });
+  });
+
+  it("loads an older reviewer-confirmed mapping independently of bounded retry history", async () => {
+    prisma.apolloCompanyMatch.findMany.mockResolvedValue([
+      {
+        apolloOrganizationId: "54a134c369702d4255de4600",
+        matchReason: "automatic direct-company retry",
+        queryJson: { source: "automatic-apollo-recheck" }
+      },
+      {
+        apolloOrganizationId: "54a134c369702d4255de4600",
+        matchReason:
+          "direct company; manually confirmed from Apollo company URL",
+        queryJson: {
+          source: "manual-apollo-url",
+          resource_type: "ACCOUNT",
+          supplied_id: "6888f2e0496bf40001170587"
+        }
+      }
+    ]);
+    readApolloAccountIdFromMatchQuery
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce("6888f2e0496bf40001170587");
+    readReviewerConfirmedApolloOrganizationIdFromMatchQuery
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(null);
+
+    await expect(loadReviewerConfirmedApolloCompanyMapping({
+      tenantId: "tenant-a",
+      companyId: "company-cefla",
+      apolloOrganizationId: "54a134c369702d4255de4600"
+    })).resolves.toEqual({
+      apolloAccountId: "6888f2e0496bf40001170587",
+      apolloOrganizationId: "54a134c369702d4255de4600"
+    });
+    expect(prisma.apolloCompanyMatch.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-a",
+        companyId: "company-cefla",
+        apolloOrganizationId: "54a134c369702d4255de4600",
+        classification: "DIRECT_COMPANY",
+        reviewedAt: { not: null },
+        reviewedByUserId: { not: null }
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        apolloOrganizationId: true,
+        matchReason: true,
+        queryJson: true
+      }
+    });
+  });
+
+  it("uses the reviewed organization row for legacy mappings without typed query metadata", async () => {
+    prisma.apolloCompanyMatch.findMany.mockResolvedValue([{
+      apolloOrganizationId: "54a134c369702d4255de4600",
+      matchReason:
+        "direct company; manually confirmed from Apollo company URL",
+      queryJson: { source: "manual-apollo-url" }
+    }]);
+    readApolloAccountIdFromMatchQuery.mockReturnValue(null);
+    readReviewerConfirmedApolloOrganizationIdFromMatchQuery.mockReturnValue(
+      null
+    );
+
+    await expect(loadReviewerConfirmedApolloCompanyMapping({
+      tenantId: "tenant-a",
+      companyId: "company-legacy",
+      apolloOrganizationId: "54a134c369702d4255de4600"
+    })).resolves.toEqual({
+      apolloAccountId: null,
+      apolloOrganizationId: "54a134c369702d4255de4600"
     });
   });
 

@@ -347,6 +347,9 @@ Regression coverage must prove:
     an Apollo account URL or canonical organization URL; organization-URL trust must come from the manual mapping
     audit record and still equal the company's current stored organization ID, while the same identifier mismatch
     remains rejected for automatic or unconfirmed company matching.
+30. reviewer-confirmed Apollo account and organization mappings are loaded independently of the newest retry-history
+    window, including legacy reviewed rows without typed `resource_type` metadata, while the persisted organization
+    must still equal the company's current tenant-scoped mapping.
 
 ## Outreach Plans and grounded sequence generation
 
