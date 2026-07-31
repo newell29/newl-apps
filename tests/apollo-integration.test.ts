@@ -182,6 +182,111 @@ describe("fetchApolloContactById", () => {
     });
   });
 
+  it("recovers an active Hunter membership when Apollo contact detail omits campaign statuses", async () => {
+    const fetchMock = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contact: {
+            id: "apollo-contact-kameron",
+            first_name: "Kameron",
+            last_name: "Harper",
+            email: "kameron@example.com",
+            organization: {
+              id: "apollo-org-roechling",
+              name: "Roechling Industrial Gastonia"
+            }
+          }
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contacts: [{
+            id: "apollo-contact-kameron",
+            first_name: "Kameron",
+            last_name: "Harper",
+            email: "kameron@example.com",
+            organization: {
+              id: "apollo-org-roechling",
+              name: "Roechling Industrial Gastonia"
+            },
+            contact_campaign_statuses: [{
+              emailer_campaign_id: "hunter-email-only",
+              status: "active",
+              added_at: "2026-07-31T13:00:00.000Z"
+            }]
+          }]
+        })
+      } as unknown as Response);
+
+    await expect(fetchApolloContactById("apollo-contact-kameron")).resolves.toMatchObject({
+      apolloContactId: "apollo-contact-kameron",
+      sequenceId: "hunter-email-only",
+      sequenceStatus: SequenceStatus.ENROLLED
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.apollo.io/api/v1/contacts/search");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      q_keywords: "Kameron Harper"
+    });
+  });
+
+  it("selects current Hunter enrollment over older campaign history in the recovered saved contact", async () => {
+    vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contact: {
+            id: "apollo-contact-dylan",
+            first_name: "Dylan",
+            last_name: "Threatt",
+            email: "dylan@example.com",
+            organization: {
+              id: "apollo-org-royal-home",
+              name: "Jiangsu Royal Home USA"
+            }
+          }
+        })
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({
+          contacts: [{
+            id: "apollo-contact-dylan",
+            first_name: "Dylan",
+            last_name: "Threatt",
+            email: "dylan@example.com",
+            organization: {
+              id: "apollo-org-royal-home",
+              name: "Jiangsu Royal Home USA"
+            },
+            contact_campaign_statuses: [
+              {
+                emailer_campaign_id: "older-sequence",
+                status: "finished",
+                added_at: "2026-06-01T13:00:00.000Z"
+              },
+              {
+                emailer_campaign_id: "hunter-email-only",
+                status: "active",
+                added_at: "2026-07-31T13:00:00.000Z"
+              }
+            ]
+          }]
+        })
+      } as unknown as Response);
+
+    await expect(fetchApolloContactById("apollo-contact-dylan")).resolves.toMatchObject({
+      sequenceId: "hunter-email-only",
+      sequenceStatus: SequenceStatus.ENROLLED
+    });
+  });
+
   it("treats a bounced sequence membership as terminal even when Apollo also returns an active status", async () => {
     vi.spyOn(global, "fetch").mockResolvedValue({
       ok: true,

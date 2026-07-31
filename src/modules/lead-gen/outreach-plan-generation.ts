@@ -147,12 +147,14 @@ export function buildBoundedOutreachRepairFeedback({
     .join("\n");
 
   return [
-    "Automatic bounded QA repair: regenerate the complete sequence once and correct every blocking issue below.",
+    "Automatic bounded QA repair: regenerate the complete sequence and correct every blocking issue below.",
     schedule,
     `Every email must end with ${senderFirstName} on its own final line.`,
     "Never expose research provenance in customer-visible copy. Do not say saved activity, saved shipment, saved record, evidence, research, TradeMining, Hunter, internal, database, or system.",
     "Use only evidenceRefs that exactly match IDs in the supplied evidence ledger.",
     "Replace or remove each exact disputed clause. Do not preserve an unsupported inference by paraphrasing it.",
+    "Never claim or imply that the prospect has an existing or current warehouse process, network, provider, arrangement, capacity, facility, or operating setup unless the evidence ledger explicitly proves that exact fact.",
+    "Never promise to leave, keep, preserve, avoid replacing, or avoid disrupting a prospect's current process, network, provider, arrangement, capacity, facility, or operating setup. Describe Newl positively as an optional supplemental resource without asserting what the prospect already has.",
     "Keep dates, quantities, and intended outcomes attached only to the exact fact they modify in the evidence.",
     "A job posting proves only that the listed role is being recruited; it does not prove added capacity, team growth, increased workload, or an operational problem.",
     issueText
@@ -199,6 +201,7 @@ export async function runBoundedOutreachQaRepair({
 }) {
   const draftingUsageAttempts: OpenAiStructuredUsage[] = [];
   const qaUsageAttempts: OpenAiStructuredUsage[] = [];
+  const automaticRepairFeedbackAttempts: string[] = [];
 
   const createDraft = async (repairFeedback: string | null) => {
     const generated = await generateSequence(repairFeedback);
@@ -218,14 +221,17 @@ export async function runBoundedOutreachQaRepair({
   let modelQa = deterministicQa.passed
     ? await reviewDraft(sequence)
     : { passed: true, issues: [] as OutreachQaIssue[] };
-  const automaticRepairFeedback = buildBoundedOutreachRepairFeedback({
-    deterministicIssues: deterministicQa.issues,
-    modelIssues: modelQa.issues,
-    allowCallTask,
-    senderFirstName
-  });
-
-  if (automaticRepairFeedback) {
+  for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+    const automaticRepairFeedback = buildBoundedOutreachRepairFeedback({
+      deterministicIssues: deterministicQa.issues,
+      modelIssues: modelQa.issues,
+      allowCallTask,
+      senderFirstName
+    });
+    if (!automaticRepairFeedback) {
+      break;
+    }
+    automaticRepairFeedbackAttempts.push(automaticRepairFeedback);
     sequence = await createDraft(automaticRepairFeedback);
     deterministicQa = runDeterministicQa(sequence);
     modelQa = deterministicQa.passed
@@ -233,14 +239,17 @@ export async function runBoundedOutreachQaRepair({
       : { passed: true, issues: [] as OutreachQaIssue[] };
   }
 
+  const automaticRepairFeedback = automaticRepairFeedbackAttempts.at(-1) ?? null;
+
   return {
     sequence,
     deterministicQa,
     modelQa,
     draftingUsageAttempts,
     qaUsageAttempts,
-    automaticRepairAttempted: Boolean(automaticRepairFeedback),
-    automaticRepairFeedback
+    automaticRepairAttempted: automaticRepairFeedbackAttempts.length > 0,
+    automaticRepairFeedback,
+    automaticRepairFeedbackAttempts
   };
 }
 
@@ -456,7 +465,8 @@ export async function generateOutreachPlanForContact({
     },
     automaticRepair: {
       attempted: automaticRepairAttempted,
-      feedback: automaticRepairFeedback
+      feedback: automaticRepairFeedback,
+      feedbackAttempts: repaired.automaticRepairFeedbackAttempts
     },
     generatedAt: new Date().toISOString(),
     companyName: draftContext.contact.company.name,

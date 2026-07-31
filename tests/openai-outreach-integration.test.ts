@@ -118,6 +118,12 @@ describe("OpenAI structured outreach workflow", () => {
     expect(qaReview.result).toEqual({ passed: true, issues: [] });
     expect(String(fetchMock.mock.calls[0]?.[1]?.body)).toContain("Use a more direct opening.");
     expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain("Use a more direct opening.");
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain(
+      "Never claim or imply that the prospect has an existing or current warehouse process"
+    );
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).toContain(
+      "Never promise to leave, keep, preserve, avoid replacing, or avoid disrupting"
+    );
     expect(strategyGeneration.usage).toEqual({
       inputTokens: 0,
       outputTokens: 0,

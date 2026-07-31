@@ -159,7 +159,8 @@ Scoring regression coverage must also verify:
     accepted contact IDs.
 29. Outreach QA repairs normalize whitespace-only corruption of a saved evidence ID, strip any exact ledger ID from
     customer-visible copy, preserve line breaks and mailbox signatures, and rerun deterministic QA without a second
-    draft-model call. Unsupported semantic claims still receive at most one model regeneration.
+    draft-model call. Unsupported semantic claims receive at most two model regenerations using the latest exact QA
+    findings, and drafting forbids unsupported incumbent/process/network assumptions or unchanged-network promises.
 30. Regeneration remains allowed for an unapproved contact whose prior cadence is `FINISHED`, but replies, bounces,
     rejection, do-not-contact, approval, and active or paused outreach remain hard stops.
 31. Needs Attention and Active Cadences exclude null, masked, and syntactically invalid email values without deleting

@@ -1523,9 +1523,31 @@ export async function fetchApolloContactById(apolloContactId: string): Promise<A
   }
 
   const record = asRecord(json.contact) ?? asRecord(json.data) ?? json;
-  const contact = parseApolloContacts({ contacts: [record] }, "SAVED_CONTACT")[0];
+  let contact = parseApolloContacts({ contacts: [record] }, "SAVED_CONTACT")[0];
   if (!contact) {
     throw new Error("Apollo returned a contact response without a usable contact record.");
+  }
+
+  // Apollo's single-contact response can omit `contact_campaign_statuses` even
+  // when the same saved contact is actively enrolled. Recover the richer saved
+  // contact record and merge it only when Apollo returns the exact same contact
+  // ID. This keeps status sync zero-credit and prevents an incomplete detail
+  // response from shadowing confirmed cadence membership.
+  const organization = readApolloOrganizationFromContact(contact);
+  if (
+    contact.sequenceStatus === SequenceStatus.NOT_STARTED &&
+    organization
+  ) {
+    const savedSearch = await postApolloJson("/api/v1/contacts/search", apiKey, {
+      page: 1,
+      per_page: DEFAULT_PAGE_SIZE,
+      q_keywords: contact.fullName
+    });
+    const exactSavedContact = parseApolloContacts(savedSearch, "SAVED_CONTACT")
+      .find((candidate) => candidate.apolloContactId === contactId);
+    if (exactSavedContact) {
+      contact = mergeApolloContactRecords(contact, exactSavedContact);
+    }
   }
 
   return contact;
@@ -4134,6 +4156,8 @@ function mergeApolloContactRecords(
           ? right
           : left;
   const fallback = preferred === left ? right : left;
+  const sequencePreferred = selectPreferredApolloSequenceRecord(left, right);
+  const sequenceFallback = sequencePreferred === left ? right : left;
 
   return {
     ...fallback,
@@ -4159,6 +4183,24 @@ function mergeApolloContactRecords(
       preferred.hasPhoneAvailable || fallback.hasPhoneAvailable,
     hasLinkedinAvailable:
       preferred.hasLinkedinAvailable || fallback.hasLinkedinAvailable,
+    sequenceStatus: sequencePreferred.sequenceStatus,
+    replyStatus:
+      sequencePreferred.replyStatus === ReplyStatus.REPLIED ||
+      sequenceFallback.replyStatus !== ReplyStatus.REPLIED
+        ? sequencePreferred.replyStatus
+        : sequenceFallback.replyStatus,
+    sequenceId:
+      sequencePreferred.sequenceId ?? sequenceFallback.sequenceId,
+    sequenceName:
+      sequencePreferred.sequenceName ?? sequenceFallback.sequenceName,
+    sequenceOwnerName:
+      sequencePreferred.sequenceOwnerName ?? sequenceFallback.sequenceOwnerName,
+    sequenceOwnerUserId:
+      sequencePreferred.sequenceOwnerUserId ?? sequenceFallback.sequenceOwnerUserId,
+    lastTouchAt:
+      laterApolloDate(sequencePreferred.lastTouchAt, sequenceFallback.lastTouchAt),
+    lastReplyAt:
+      laterApolloDate(sequencePreferred.lastReplyAt, sequenceFallback.lastReplyAt),
     rawPayload: {
       ...fallback.rawPayload,
       ...preferred.rawPayload,
@@ -4167,6 +4209,47 @@ function mergeApolloContactRecords(
       apolloSources: [...new Set([left.recordSource, right.recordSource])]
     }
   };
+}
+
+function selectPreferredApolloSequenceRecord(
+  left: ApolloContactRecord,
+  right: ApolloContactRecord
+) {
+  const leftRank = apolloSequenceStatusRank(left.sequenceStatus);
+  const rightRank = apolloSequenceStatusRank(right.sequenceStatus);
+  if (leftRank !== rightRank) {
+    return leftRank > rightRank ? left : right;
+  }
+
+  return (right.lastTouchAt?.getTime() ?? 0) >
+    (left.lastTouchAt?.getTime() ?? 0)
+    ? right
+    : left;
+}
+
+function apolloSequenceStatusRank(status: SequenceStatus) {
+  switch (status) {
+    case SequenceStatus.REPLIED:
+      return 7;
+    case SequenceStatus.BOUNCED:
+      return 6;
+    case SequenceStatus.ENROLLED:
+      return 5;
+    case SequenceStatus.PAUSED:
+      return 4;
+    case SequenceStatus.FINISHED:
+      return 3;
+    case SequenceStatus.READY:
+      return 2;
+    case SequenceStatus.NOT_STARTED:
+      return 1;
+  }
+}
+
+function laterApolloDate(left: Date | null, right: Date | null) {
+  if (!left) return right;
+  if (!right) return left;
+  return left.getTime() >= right.getTime() ? left : right;
 }
 
 function dedupeApolloSequences(entries: ApolloSequenceDirectoryEntry[]) {
