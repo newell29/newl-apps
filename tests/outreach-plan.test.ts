@@ -507,7 +507,74 @@ describe("outreach plan grounding", () => {
 
     expect(feedback).toContain("Replace or remove each exact disputed clause");
     expect(feedback).toContain("job posting proves only that the listed role is being recruited");
+    expect(feedback).toContain("existing or current warehouse process, network, provider");
+    expect(feedback).toContain("Never promise to leave, keep, preserve, avoid replacing, or avoid disrupting");
     expect(feedback).toContain("Step 2: A job posting was turned into added shipping capacity.");
+  });
+
+  it("allows a second bounded semantic rewrite when the first rewrite repeats an unsupported incumbent assumption", async () => {
+    let draftCalls = 0;
+    let modelQaCalls = 0;
+    const repairFeedback: Array<string | null> = [];
+    const result = await runBoundedOutreachQaRepair({
+      generateSequence: async (feedback) => {
+        draftCalls += 1;
+        repairFeedback.push(feedback);
+        return { sequence, usage: usage() };
+      },
+      runDeterministicQa: (candidateSequence) =>
+        runDeterministicOutreachQa({
+          evidence,
+          strategy,
+          sequence: candidateSequence,
+          senderFirstName: "Alex",
+          allowCallTask: true
+        }),
+      runModelQa: async () => {
+        modelQaCalls += 1;
+        if (modelQaCalls === 1) {
+          return {
+            result: {
+              passed: false,
+              issues: [{
+                code: "UNSUPPORTED_CLAIM",
+                severity: "ERROR",
+                message: "The draft assumes established warehouse processes.",
+                stepNumber: 2
+              }]
+            },
+            usage: usage()
+          };
+        }
+        if (modelQaCalls === 2) {
+          return {
+            result: {
+              passed: false,
+              issues: [{
+                code: "UNSUPPORTED_CLAIM",
+                severity: "ERROR",
+                message: "The draft promises to leave the current network unchanged.",
+                stepNumber: 3
+              }]
+            },
+            usage: usage()
+          };
+        }
+        return {
+          result: { passed: true, issues: [] },
+          usage: usage()
+        };
+      },
+      allowCallTask: true,
+      senderFirstName: "Alex"
+    });
+
+    expect(draftCalls).toBe(3);
+    expect(modelQaCalls).toBe(3);
+    expect(result.modelQa.passed).toBe(true);
+    expect(result.automaticRepairFeedbackAttempts).toHaveLength(2);
+    expect(repairFeedback[1]).toContain("established warehouse processes");
+    expect(repairFeedback[2]).toContain("current network unchanged");
   });
 
   it("passes a complete hot-opportunity email sequence with one call task", () => {

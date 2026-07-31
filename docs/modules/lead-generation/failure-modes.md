@@ -528,10 +528,10 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 ### Generated Hunter plans repeatedly fail QA for correctable formatting or provenance wording
 
 - Hunter treats the saved cadence schedule as authoritative instead of accepting model-invented days.
-- A repairable deterministic or model finding receives one automatic full-sequence regeneration in the same job.
+- A repairable deterministic or model finding receives up to two automatic full-sequence regenerations in the same job.
   The repair prompt includes the exact findings, required channels/days, sender signature, valid evidence-reference
   rule, and a prohibition on customer-visible phrases such as “saved shipment activity.”
-- The repaired sequence reruns deterministic and model QA. Hunter never loops beyond that one retry; a remaining
+- Each repaired sequence reruns deterministic and model QA using the latest exact findings. Hunter never loops beyond two retries; a remaining
   failure is persisted with its final reason for human review.
 - `MODEL_QA_UNAVAILABLE` is not retried as a copy repair. Transient provider retry belongs to the integration layer
   and must not create repeated drafting spend.
