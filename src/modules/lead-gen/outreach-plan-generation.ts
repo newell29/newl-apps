@@ -623,9 +623,17 @@ export async function repairFailedOutreachPlanForContact({
       steps: { orderBy: { stepNumber: "asc" } },
       contact: {
         select: {
+          firstName: true,
+          fullName: true,
+          title: true,
+          department: true,
+          seniority: true,
           contactStatus: true,
           replyStatus: true,
-          sequenceStatus: true
+          sequenceStatus: true,
+          company: {
+            select: { name: true }
+          }
         }
       }
     }
@@ -706,6 +714,155 @@ export async function repairFailedOutreachPlanForContact({
     evidence,
     deterministicRepair.sequence
   );
+
+  if (priorDisposition === "MODEL_QA_RETRY" && deterministicQa.passed) {
+    const firstEmail = deterministicRepair.sequence.steps.find(
+      (step) => step.channel === "EMAIL" && step.subject
+    );
+    if (!firstEmail?.subject) {
+      return {
+        state: "human_review" as const,
+        message: "The saved plan has no usable first email."
+      };
+    }
+
+    let modelQa: ModelOutreachQaResult;
+    let qaUsage: OpenAiStructuredUsage | null = null;
+    try {
+      const qaReview = await reviewOutreachSequenceGrounding({
+        model: plan.qaModel ?? loadOutreachModels().qa,
+        companyName: plan.contact.company.name,
+        contact: {
+          firstName: plan.contact.firstName,
+          fullName: plan.contact.fullName,
+          title: plan.contact.title,
+          department: plan.contact.department,
+          seniority: plan.contact.seniority
+        },
+        strategy,
+        sequence: deterministicRepair.sequence,
+        evidence,
+        senderFirstName: plan.senderRecommendation ?? undefined,
+        allowCallTask
+      });
+      modelQa = qaReview.result;
+      qaUsage = qaReview.usage;
+    } catch (error) {
+      const unavailableIssue: OutreachQaIssue = {
+        code: "MODEL_QA_UNAVAILABLE",
+        severity: "ERROR",
+        message: error instanceof Error
+          ? error.message
+          : "The model QA check could not be completed after bounded retries.",
+        stepNumber: null
+      };
+      await prisma.$transaction([
+        prisma.outreachPlan.update({
+          where: { tenantId_id: { tenantId, id: plan.id } },
+          data: {
+            qaIssues: toInputJsonValue([unavailableIssue]),
+            qaCheckedAt: new Date()
+          }
+        }),
+        prisma.outreachSequenceStep.updateMany({
+          where: { tenantId, outreachPlanId: plan.id },
+          data: { qaIssues: toInputJsonValue([unavailableIssue]) }
+        }),
+        prisma.auditLog.create({
+          data: {
+            tenantId,
+            actorUserId: null,
+            action: "OUTREACH_PLAN_MODEL_QA_RETRY_FAILED",
+            entityType: "OUTREACH_PLAN",
+            entityId: plan.id,
+            after: toInputJsonValue({
+              contactId,
+              qaModel: plan.qaModel,
+              issue: unavailableIssue.message
+            })
+          }
+        })
+      ]);
+      return {
+        state: "failed" as const,
+        message: "The QA provider remained unavailable after four bounded attempts. The saved sequence was preserved."
+      };
+    }
+
+    const qa = mergeOutreachQaResults(deterministicQa, modelQa);
+    const passed = qa.passed;
+    await prisma.$transaction(async (transaction) => {
+      await transaction.outreachPlan.update({
+        where: { tenantId_id: { tenantId, id: plan.id } },
+        data: {
+          status: passed ? OutreachPlanStatus.QA_PASSED : OutreachPlanStatus.QA_FAILED,
+          qaStatus: passed ? OutreachQaStatus.PASSED : OutreachQaStatus.FAILED,
+          qaIssues: toInputJsonValue(qa.issues),
+          qaCheckedAt: new Date()
+        }
+      });
+      for (const step of deterministicRepair.sequence.steps) {
+        await transaction.outreachSequenceStep.update({
+          where: {
+            tenantId_outreachPlanId_stepNumber: {
+              tenantId,
+              outreachPlanId: plan.id,
+              stepNumber: step.stepNumber
+            }
+          },
+          data: {
+            subject: step.subject,
+            body: step.body,
+            evidenceRefs: toInputJsonValue(step.evidenceRefs),
+            qaIssues: toInputJsonValue(
+              qa.issues.filter(
+                (issue) => issue.stepNumber === null || issue.stepNumber === step.stepNumber
+              )
+            )
+          }
+        });
+      }
+      await transaction.contactOutreachDraft.updateMany({
+        where: {
+          tenantId,
+          contactId,
+          sequenceName: plan.sequenceName
+        },
+        data: {
+          subject: firstEmail.subject!,
+          body: firstEmail.body,
+          status: passed
+            ? ContactOutreachDraftStatus.AVAILABLE
+            : ContactOutreachDraftStatus.DRAFT,
+          approvedAt: null
+        }
+      });
+      await transaction.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: null,
+          action: "OUTREACH_PLAN_MODEL_QA_RETRIED",
+          entityType: "OUTREACH_PLAN",
+          entityId: plan.id,
+          after: toInputJsonValue({
+            contactId,
+            qaModel: plan.qaModel,
+            passed,
+            issueCount: qa.issues.length,
+            usage: qaUsage,
+            sequenceRegenerated: false
+          })
+        }
+      });
+    });
+
+    return {
+      state: passed ? "qa_retried" as const : "failed" as const,
+      message: passed
+        ? "The saved sequence passed a fresh model QA review without regeneration."
+        : `QA completed, but found ${qa.issues.length} grounding issue${qa.issues.length === 1 ? "" : "s"}; use model regeneration for those semantic findings.`
+    };
+  }
 
   if (
     priorDisposition === "AUTOMATIC" &&
