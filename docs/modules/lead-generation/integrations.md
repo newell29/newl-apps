@@ -43,12 +43,14 @@ does not replace or weaken the reviewer-confirmed mapping. Same name, same domai
 exact global-organization relationship remains rejected.
 
 Apollo can return a strictly scoped employee with only a marketing/brand employer label, omit the global
-organization ID, or embed a different saved Account ID in the person record. For a reviewer-confirmed account URL,
-the exact `organization_ids[]` query is authoritative: Newl Apps accepts the roster returned through that immutable
-scope even when records use an operating-brand Account such as `CGT` under `CANADIAN GENERAL TOWER LTD`. Account IDs
-and global organization IDs are different namespaces and must not be compared as if they were interchangeable.
-This trust applies only to the exact reviewer-confirmed query; automatic matches, domain searches, company-keyword
-fallbacks, and unconfirmed mappings retain strict employer identity checks. Newl Apps also accepts a safe leading
+organization ID, or embed a different saved Account ID in the person record. For a reviewer-confirmed account URL
+or canonical organization URL, the exact `organization_ids[]` query is authoritative: Newl Apps accepts the roster
+returned through that immutable scope even when records use an operating-brand Account such as `CGT` under
+`CANADIAN GENERAL TOWER LTD`. Account IDs and global organization IDs are different namespaces and must not be
+compared as if they were interchangeable. Organization-URL trust is recovered only from the tenant-scoped manual
+mapping audit record and only when its supplied organization ID still exactly equals the company's current stored
+Apollo organization ID. This trust applies only to the exact reviewer-confirmed query; automatic matches, domain
+searches, company-keyword fallbacks, and unconfirmed mappings retain strict employer identity checks. Newl Apps also accepts a safe leading
 uppercase brand expansion such as `YAT USA, INC.` / `YAT - Your Advanced Technology` only inside an exact confirmed
 organization/domain query. If the UI still exposes people
 that neither supported employer index returns, Newl Apps exposes a last-resort reviewer option for up to

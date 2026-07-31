@@ -343,7 +343,9 @@ Regression coverage must prove:
     organization ID; a same-name or same-domain Account linked to a different global organization remains rejected,
     and no paid organization or person endpoint is called.
 29. an exact reviewer-confirmed `organization_ids[]` People Search accepts the roster Apollo returns when the person
-    records embed a different saved Account ID and operating-brand label such as `CGT`; the same identifier mismatch
+    records embed a different saved Account ID and operating-brand label such as `CGT`, whether the reviewer supplied
+    an Apollo account URL or canonical organization URL; organization-URL trust must come from the manual mapping
+    audit record and still equal the company's current stored organization ID, while the same identifier mismatch
     remains rejected for automatic or unconfirmed company matching.
 
 ## Outreach Plans and grounded sequence generation

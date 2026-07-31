@@ -45,6 +45,7 @@ import {
   ApolloRateLimitError,
   fetchApolloContactsForCompany,
   readApolloAccountIdFromMatchQuery,
+  readReviewerConfirmedApolloOrganizationIdFromMatchQuery,
   type ApolloContactLookupResult,
   type ApolloContactRecord
 } from "@/server/integrations/apollo";
@@ -814,6 +815,19 @@ async function processCompany({
       .map((match) => readApolloAccountIdFromMatchQuery(match.queryJson))
       .find((accountId): accountId is string => Boolean(accountId)) ??
     null;
+  const reviewerConfirmedApolloOrganizationId =
+    company.apolloCompanyMatches
+      .map((match) =>
+        readReviewerConfirmedApolloOrganizationIdFromMatchQuery(match.queryJson)
+      )
+      .find(
+        (organizationId): organizationId is string =>
+          Boolean(
+            organizationId &&
+            organizationId === company.apolloOrganizationId
+          )
+      ) ??
+    null;
   if (
     latestMatch &&
     blocksApolloEmployeeLookup({
@@ -840,6 +854,7 @@ async function processCompany({
       domain: company.domain,
       apolloOrganizationId: company.apolloOrganizationId,
       apolloAccountId: confirmedApolloAccountId,
+      reviewerConfirmedApolloOrganizationId,
       verifiedIdentityContext: buildVerifiedApolloIdentityContext({
         researchEvidence:
           company.hunterOpportunitySignals[0]?.evidence ?? null,

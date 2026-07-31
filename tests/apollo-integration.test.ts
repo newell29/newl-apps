@@ -15,6 +15,7 @@ import {
   parseApolloPersonIds,
   pushApolloContactsToSequence,
   readApolloAccountIdFromMatchQuery,
+  readReviewerConfirmedApolloOrganizationIdFromMatchQuery,
   reconcileApolloContactWithDeliveryFailureEvidence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
@@ -975,6 +976,31 @@ describe("fetchApolloContactsForCompany", () => {
       resource_type: "ORGANIZATION",
       supplied_id: "6888f2e0496bf40001170587"
     })).toBeNull();
+  });
+
+  it("recovers only a reviewer-confirmed organization ID from a manual organization mapping query", () => {
+    expect(
+      readReviewerConfirmedApolloOrganizationIdFromMatchQuery({
+        source: "manual-apollo-url",
+        resource_type: "ORGANIZATION",
+        supplied_id: "54a134c369702d4255de4600",
+        organization_ids: ["54a134c369702d4255de4600"]
+      })
+    ).toBe("54a134c369702d4255de4600");
+    expect(
+      readReviewerConfirmedApolloOrganizationIdFromMatchQuery({
+        source: "automatic-apollo-match",
+        resource_type: "ORGANIZATION",
+        supplied_id: "54a134c369702d4255de4600"
+      })
+    ).toBeNull();
+    expect(
+      readReviewerConfirmedApolloOrganizationIdFromMatchQuery({
+        source: "manual-apollo-url",
+        resource_type: "ACCOUNT",
+        supplied_id: "54a134c369702d4255de4600"
+      })
+    ).toBeNull();
   });
 
   it("parses contacts and preserves existing Apollo sequence history", async () => {
@@ -2408,6 +2434,111 @@ describe("fetchApolloContactsForCompany", () => {
       peopleSearchAcceptedRecords: 2,
       relatedAccountsChecked: 0,
       companyKeywordSearches: 0,
+      paidEmailEnrichmentsAttempted: 0
+    });
+    expect(
+      fetchMock.mock.calls.some(([request]) =>
+        String(request).includes("/api/v1/accounts/search")
+      )
+    ).toBe(false);
+  });
+
+  it("accepts an exact canonical organization roster when the reviewer supplied the organization URL directly", async () => {
+    const organizationId = "54a134c369702d4255de4600";
+    const embeddedAccountId = "6724feaa5e168800018195ea";
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(
+      async (input) => {
+        const url = String(input);
+
+        if (url.endsWith("/api/v1/mixed_companies/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              organizations: [
+                {
+                  id: organizationId,
+                  name: "Celgard",
+                  primary_domain: "celgard.com"
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        if (url.endsWith("/api/v1/contacts/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({ contacts: [] })
+          } as unknown as Response;
+        }
+
+        if (url.includes("/api/v1/mixed_people/api_search")) {
+          expect(
+            new URL(url).searchParams.getAll("organization_ids[]")
+          ).toEqual([organizationId]);
+          return {
+            ok: true,
+            status: 200,
+            json: vi.fn().mockResolvedValue({
+              people: [
+                {
+                  id: "celgard-supply-chain-director",
+                  first_name: "Casey",
+                  last_name_obfuscated: "B****",
+                  title: "Director of Supply Chain",
+                  has_email: true,
+                  organization: {
+                    id: embeddedAccountId,
+                    name: "Celgard, LLC",
+                    primary_domain: "celgard.com"
+                  }
+                },
+                {
+                  id: "celgard-procurement-manager",
+                  first_name: "Morgan",
+                  last_name_obfuscated: "P****",
+                  title: "Procurement Manager",
+                  has_email: true,
+                  organization: {
+                    id: embeddedAccountId,
+                    name: "Celgard, LLC",
+                    primary_domain: "celgard.com"
+                  }
+                }
+              ]
+            })
+          } as unknown as Response;
+        }
+
+        throw new Error(
+          `Unexpected Apollo URL in canonical Celgard roster test: ${url}`
+        );
+      }
+    );
+
+    const result = await fetchApolloContactsForCompany({
+      companyName: "CELGARD, LLCCELGARD LAKEMONT,LAKEMO",
+      domain: "celgard.com",
+      apolloOrganizationId: organizationId,
+      reviewerConfirmedApolloOrganizationId: organizationId
+    });
+
+    expect(result.organizationId).toBe(organizationId);
+    expect(result.contacts).toHaveLength(2);
+    expect(result.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          apolloPersonId: "celgard-supply-chain-director",
+          fullName: "Casey B****",
+          title: "Director of Supply Chain"
+        })
+      ])
+    );
+    expect(result.contactRecovery).toMatchObject({
+      peopleSearchRawRecords: 4,
+      peopleSearchAcceptedRecords: 4,
       paidEmailEnrichmentsAttempted: 0
     });
     expect(
