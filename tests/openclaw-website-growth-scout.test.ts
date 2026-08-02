@@ -18,6 +18,10 @@ const backlinkInstallerPath = path.join(
   repoRoot,
   "ops/openclaw/install-website-growth-backlink-executor.sh",
 );
+const backlinkEnablePath = path.join(
+  repoRoot,
+  "ops/openclaw/enable-website-growth-backlink-executor.sh",
+);
 const backlinkPromptPath = path.join(
   repoRoot,
   "ops/openclaw/prompts/website-growth-backlink-executor.md",
@@ -171,6 +175,8 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(enableScript).toContain(
       '(job.get("payload") or {}).get("kind") == "command"'
     );
+    expect(enableScript).toContain("cron list --all --json");
+    expect(installer).toContain("openclaw cron list --all --json");
     expect(enableScript).toContain("if len(matches) == 1:");
     expect(runner).toContain('run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"');
     expect(runner).toContain('"${openclaw_command}" agent');
@@ -188,6 +194,40 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(prompt).toContain(
       "Do not call `newl_backlink_summary` and do not send a Teams message."
     );
+  });
+
+  it("finds and enables the intentionally disabled backlink command job", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-enable-"));
+    const openclawPath = path.join(directory, "openclaw");
+    const enableLogPath = path.join(directory, "enabled.txt");
+    await writeFile(
+      openclawPath,
+      `#!/bin/zsh
+if [[ "$1" == "cron" && "$2" == "list" && "$3" == "--all" && "$4" == "--json" ]]; then
+  print -r -- '{"jobs":[{"id":"disabled-job-1","declarationKey":"newl.website-growth.backlink-outreach.weekday.v1","enabled":false,"payload":{"kind":"command"}}]}'
+  exit 0
+fi
+if [[ "$1" == "cron" && "$2" == "enable" && "$3" == "disabled-job-1" ]]; then
+  print -r -- "$3" > "$ENABLE_LOG_PATH"
+  exit 0
+fi
+exit 2
+`,
+    );
+    await chmod(openclawPath, 0o700);
+
+    try {
+      await expect(execFileAsync("/bin/zsh", [backlinkEnablePath], {
+        env: {
+          ...process.env,
+          OPENCLAW_BIN: openclawPath,
+          ENABLE_LOG_PATH: enableLogPath
+        }
+      })).resolves.toBeDefined();
+      expect(await readFile(enableLogPath, "utf8")).toBe("disabled-job-1\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when the backlink agent has no exposed tools", async () => {
