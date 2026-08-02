@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -43,6 +43,10 @@ const backlinkDiscoveryPath = path.join(
   repoRoot,
   "ops/openclaw/website_growth_backlink_discovery.py",
 );
+const backlinkValidatorPath = path.join(
+  repoRoot,
+  "ops/openclaw/validate-website-growth-backlink-agent-run.py",
+);
 
 describe("Website Growth Scout OpenClaw scripts", () => {
   it("honors an explicit executable CODEX_BIN", async () => {
@@ -72,15 +76,19 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(script).toContain("${codex_bin}");
   });
 
-  it("splits the Monday deep run from cache-backed weekday check-ins", async () => {
+  it("splits Monday and Wednesday deep runs from cache-backed weekday check-ins", async () => {
     const installer = await readFile(installerPath, "utf8");
 
-    expect(installer).toContain('--cron "15 9 * * 1"');
-    expect(installer).toContain('--cron "15 9 * * 2-5"');
+    expect(installer).toContain('--cron "15 9 * * 1,3"');
+    expect(installer).toContain('--cron "15 9 * * 2,4-5"');
     expect(installer).toContain("NEWL_APPS_SCOUT_RUNTIME_REPO_PATH");
     expect(installer).toContain("run-website-growth-scout-runtime.sh");
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekly.v1"');
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekday-checkin.v1"');
+    expect(installer).toContain(
+      '--declaration-key "newl.website-growth.build-notifications.v1"'
+    );
+    expect(installer).toContain('--every "2m"');
     expect(installer).toContain('\\"--light\\"');
   });
 
@@ -145,6 +153,9 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     ]);
 
     expect(installer).toContain('profile: "minimal"');
+    expect(installer).toContain('--model "openai/gpt-5.4-mini"');
+    expect(installer).toContain('alsoAllow: [');
+    expect(installer).not.toContain('  allow: [');
     expect(installer).toContain(
       'deny: ["exec", "bash", "read", "write", "edit", "apply_patch", "process"]'
     );
@@ -169,12 +180,98 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(runner).toContain(
       "The Scout browser work phase failed after its deterministic summary was delivered."
     );
+    expect(runner).toContain("validate-website-growth-backlink-agent-run.py");
+    expect(runner).toContain('--model "openai/gpt-5.4-mini"');
     expect(prompt).toContain(
       "Never call or emulate Bash, exec, a shell, arbitrary file reads"
     );
     expect(prompt).toContain(
       "Do not call `newl_backlink_summary` and do not send a Teams message."
     );
+  });
+
+  it("fails closed when the backlink agent has no exposed tools", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-validator-"));
+    const agentOutputPath = path.join(directory, "agent-output.json");
+    const sessionsDirectory = path.join(directory, "sessions");
+    const sessionId = "synthetic-session-123";
+    await mkdir(sessionsDirectory);
+
+    try {
+      await writeFile(agentOutputPath, JSON.stringify({
+        result: {
+          meta: {
+            agentMeta: { sessionId },
+            systemPromptReport: { tools: { entries: [] } }
+          }
+        }
+      }));
+      await writeFile(
+        path.join(sessionsDirectory, `${sessionId}.jsonl`),
+        JSON.stringify({
+          type: "message",
+          message: { role: "assistant", content: [{ type: "text", text: "finished" }] }
+        })
+      );
+
+      await expect(execFileAsync("/usr/bin/python3", [
+        backlinkValidatorPath,
+        "--agent-output",
+        agentOutputPath,
+        "--sessions-directory",
+        sessionsDirectory
+      ])).rejects.toMatchObject({
+        stderr: expect.stringContaining("required executor tools were not exposed")
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a backlink agent run only after the required tool sequence completes", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-validator-"));
+    const agentOutputPath = path.join(directory, "agent-output.json");
+    const sessionsDirectory = path.join(directory, "sessions");
+    const sessionId = "synthetic-session-456";
+    const requiredTools = [
+      "newl_backlink_business_profile",
+      "newl_backlink_sync_replies",
+      "newl_backlink_sync_directory_verifications",
+      "newl_backlink_follow_ups",
+      "newl_backlink_verification",
+      "newl_backlink_claim"
+    ];
+    await mkdir(sessionsDirectory);
+
+    try {
+      await writeFile(agentOutputPath, JSON.stringify({
+        result: {
+          meta: {
+            agentMeta: { sessionId },
+            systemPromptReport: {
+              tools: { entries: [...requiredTools, "browser"].map((name) => ({ name })) }
+            }
+          }
+        }
+      }));
+      await writeFile(
+        path.join(sessionsDirectory, `${sessionId}.jsonl`),
+        requiredTools.map((name) => JSON.stringify({
+          type: "message",
+          message: { role: "assistant", content: [{ type: "toolCall", name }] }
+        })).join("\n")
+      );
+
+      await expect(execFileAsync("/usr/bin/python3", [
+        backlinkValidatorPath,
+        "--agent-output",
+        agentOutputPath,
+        "--sessions-directory",
+        sessionsDirectory
+      ])).resolves.toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("delivers the deterministic summary even when the constrained agent turn fails", async () => {
@@ -341,6 +438,7 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     "run-rivet-backlink-failure-monitor.sh",
     "run-website-growth-scout.sh",
     "run-website-growth-scout-runtime.sh",
+    "run-website-growth-build-notifications.sh",
     "lib/website-growth-scout-runtime.zsh",
   ])("passes zsh syntax validation for %s", async (scriptName) => {
     await expect(

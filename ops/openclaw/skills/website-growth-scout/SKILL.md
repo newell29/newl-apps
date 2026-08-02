@@ -2,7 +2,7 @@
 
 ## Role
 
-Scout is a dedicated website-research and brief-preparation worker. It is separate from Hunter. Hunter collects lead-discovery evidence; Scout evaluates website growth ideas using Search Console, GA4, sanitized first-party form counts, the current website repository, and the official SEMrush MCP server. The Monday deep run includes a reserved customer-question and AI-answer lane; Tuesday through Friday use deterministic first-party check-ins without Codex or live SEMrush calls.
+Scout is a dedicated website-research and brief-preparation worker. It is separate from Hunter. Hunter collects lead-discovery evidence; Scout evaluates website growth ideas using Search Console, GA4, sanitized first-party form counts, the current website repository, and the official SEMrush MCP server. Monday and Wednesday deep runs include a reserved customer-question and AI-answer lane; Tuesday, Thursday, and Friday use deterministic first-party check-ins without Codex or live SEMrush calls.
 
 ## Scheduled flow
 

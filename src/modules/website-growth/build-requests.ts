@@ -13,7 +13,7 @@ import {
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
-const JOB_TYPE = "WEBSITE_GROWTH_DEVELOPER_BUILD";
+export const WEBSITE_GROWTH_BUILD_JOB_TYPE = "WEBSITE_GROWTH_DEVELOPER_BUILD";
 export const WEBSITE_GROWTH_STALE_DISPATCH_MS = 10 * 60 * 1000;
 export const WEBSITE_GROWTH_STALE_RUNNING_MS = 45 * 60 * 1000;
 
@@ -74,7 +74,7 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
           status: JobStatus.QUEUED,
           startedAt: new Date(),
           input: input as unknown as Prisma.InputJsonValue,
-          output: { phase: "QUEUED" },
+          output: { phase: "QUEUED", notificationVersion: 1, teamsNotifications: {} },
           errorMessage: null,
           finishedAt: null
         }
@@ -83,10 +83,10 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
         const created = await tx.automationJobRun.create({
           data: {
             tenantId: context.tenantId,
-            jobType: JOB_TYPE,
+            jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE,
             status: JobStatus.QUEUED,
             input: input as unknown as Prisma.InputJsonValue,
-            output: { phase: "QUEUED" }
+            output: { phase: "QUEUED", notificationVersion: 1, teamsNotifications: {} }
           }
         });
         await tx.auditLog.create({
@@ -119,6 +119,8 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
         data: {
           output: {
             phase: "DISPATCHED",
+            notificationVersion: 1,
+            teamsNotifications: {},
             repository: dispatched.repository,
             workflowFile: dispatched.workflowFile,
             model: dispatched.model,
@@ -149,7 +151,12 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
         data: {
           status: JobStatus.ERROR,
           finishedAt: new Date(),
-          output: { phase: "FAILED", errorCode: "DISPATCH_FAILED" },
+          output: {
+            phase: "FAILED",
+            notificationVersion: 1,
+            teamsNotifications: {},
+            errorCode: "DISPATCH_FAILED"
+          },
           errorMessage: message
         }
       });
@@ -173,7 +180,7 @@ export async function findWebsiteGrowthBuildRequestForDraft(tenantId: string, co
   return prisma.automationJobRun.findFirst({
     where: {
       tenantId,
-      jobType: JOB_TYPE,
+      jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE,
       input: { path: ["contentDraftId"], equals: contentDraftId }
     },
     orderBy: { createdAt: "desc" }
@@ -243,7 +250,7 @@ export async function getWebsiteGrowthBuildRequestPackage(requestId: string, ten
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true, slug: true } });
   if (!tenant) return null;
   const job = await prisma.automationJobRun.findFirst({
-    where: { id: requestId, tenantId: tenant.id, jobType: JOB_TYPE }
+    where: { id: requestId, tenantId: tenant.id, jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE }
   });
   if (!job) return null;
   const input = parseBuildRequestInput(job.input);
@@ -298,7 +305,9 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
 }) {
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true } });
   if (!tenant) return false;
-  const job = await prisma.automationJobRun.findFirst({ where: { id: requestId, tenantId: tenant.id, jobType: JOB_TYPE } });
+  const job = await prisma.automationJobRun.findFirst({
+    where: { id: requestId, tenantId: tenant.id, jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE }
+  });
   if (!job) return false;
   const input = parseBuildRequestInput(job.input);
   if (!input) return false;
