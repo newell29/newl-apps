@@ -13,6 +13,7 @@ import {
   getApolloIdentityResolutionMetrics,
   getApolloMatchReviewQueue
 } from "@/modules/lead-gen/queries";
+import { getApolloExceptionAutopilotStatus } from "@/modules/lead-gen/apollo-exception-autopilot";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -31,11 +32,12 @@ export default async function ApolloMatchReviewPage({
   const companyId = readParam(params.company);
   const contactReviewMessage = readParam(params.contactReview);
   const actionablePlans = Number(readParam(params.plans) ?? "0");
-  const [rows, identityMetrics] = await Promise.all([
+  const [rows, identityMetrics, autopilotStatus] = await Promise.all([
     getApolloMatchReviewQueue(context, {
       companyId: companyId ?? undefined
     }),
-    getApolloIdentityResolutionMetrics(context)
+    getApolloIdentityResolutionMetrics(context),
+    getApolloExceptionAutopilotStatus({ tenantId: context.tenantId })
   ]);
   const activeRows = rows.filter((row) => row.status === "NEEDS_REVIEW");
   const mappedNoEmployeeRows = rows.filter(
@@ -78,6 +80,33 @@ export default async function ApolloMatchReviewPage({
           <CompactMetric label="Auto matched" value={identityMetrics.autoMatched} />
           <CompactMetric label="Manual review" value={identityMetrics.manualReview} />
           <CompactMetric label="Rejected" value={identityMetrics.rejected} />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Exception Autopilot</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+              Hunter researches a changed exception once, verifies the operating identity with Luna,
+              and compares a bounded Apollo candidate set. Only a unique official-domain match is
+              mapped automatically; ambiguous companies stay below with evidence and suggestions.
+            </p>
+          </div>
+          <span className={autopilotStatus.enabled
+            ? "rounded-full bg-success/10 px-3 py-1 text-sm font-semibold text-success"
+            : "rounded-full bg-warning/10 px-3 py-1 text-sm font-semibold text-warning"}
+          >
+            {autopilotStatus.enabled ? "Enabled" : "Off"}
+          </span>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <CompactMetric label="24h processed" value={autopilotStatus.processedLast24Hours} />
+          <CompactMetric label="Auto mapped" value={autopilotStatus.autoResolvedLast24Hours} />
+          <CompactMetric label="Needs review" value={autopilotStatus.stillAmbiguousLast24Hours} />
+          <CompactMetric label="Failed" value={autopilotStatus.failedLast24Hours} />
+          <CompactMetric label="Queued" value={autopilotStatus.queued} />
+          <CompactMetric label="Daily cap" value={autopilotStatus.dailyCompanyLimit} />
         </div>
       </section>
 
@@ -218,6 +247,57 @@ function ReviewRows({
               {row.latestMatch.reason ?? "Apollo did not return a safe direct-company match."}
             </div>
           </div>
+
+          {row.resolverReview.reason || row.resolverReview.candidates.length > 0 ? (
+            <div className="rounded-md border border-border bg-background p-3">
+              <p className="text-sm font-semibold text-foreground">Autopilot research</p>
+              {row.resolverReview.reason ? (
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  {row.resolverReview.reason}
+                </p>
+              ) : null}
+              {row.resolverReview.candidates.length > 0 ? (
+                <div className="mt-3 grid gap-2 lg:grid-cols-3">
+                  {row.resolverReview.candidates.map((candidate) => (
+                    <a
+                      key={candidate.organizationId}
+                      href={`https://app.apollo.io/#/organizations/${candidate.organizationId}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-md border border-border px-3 py-2 text-sm hover:border-primary"
+                    >
+                      <span className="font-medium text-foreground">{candidate.companyName}</span>
+                      <span className="mt-1 block text-xs text-mutedForeground">
+                        {candidate.domain ?? "No domain"} · score {candidate.score}
+                        {candidate.domainMatch ? " · domain verified" : ""}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+              {row.resolverReview.sources.length > 0 ? (
+                <details className="mt-3 text-sm text-mutedForeground">
+                  <summary className="cursor-pointer font-medium text-foreground">
+                    Public identity evidence ({row.resolverReview.sources.length})
+                  </summary>
+                  <ul className="mt-2 space-y-1">
+                    {row.resolverReview.sources.map((source) => (
+                      <li key={source.url}>
+                        <a
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-primary hover:text-primaryHover"
+                        >
+                          {source.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
 
           <ApolloMatchReviewActions
             companyId={row.companyId}

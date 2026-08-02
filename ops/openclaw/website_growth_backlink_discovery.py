@@ -21,6 +21,8 @@ from hunter_company_research import fetch_page_evidence, search_web  # noqa: E40
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_QWEN_MODEL = "qwen3.5:35b"
+QWEN_BATCH_SIZE = 30
+QWEN_MAX_ATTEMPTS = 2
 ALLOWED_CATEGORIES = [
     "DIRECTORY_CITATION",
     "LINK_RECLAMATION",
@@ -116,7 +118,52 @@ def api_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def ollama_request(schema: dict[str, Any], system_prompt: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def ollama_request(
+    schema: dict[str, Any],
+    system_prompt: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    decisions: list[dict[str, Any]] = []
+    for batch_number, start in enumerate(range(0, len(rows), QWEN_BATCH_SIZE), start=1):
+        batch = rows[start : start + QWEN_BATCH_SIZE]
+        expected_ids = [str(row.get("id") or "") for row in batch]
+        if any(not row_id for row_id in expected_ids) or len(set(expected_ids)) != len(expected_ids):
+            raise RuntimeError("Local Qwen backlink triage received invalid candidate IDs.")
+        last_error: RuntimeError | None = None
+        for _attempt in range(QWEN_MAX_ATTEMPTS):
+            try:
+                batch_decisions = _ollama_batch(schema, system_prompt, batch)
+                actual_ids = [
+                    str(row.get("id") or "")
+                    for row in batch_decisions
+                    if isinstance(row, dict)
+                ]
+                if (
+                    len(actual_ids) != len(expected_ids)
+                    or len(set(actual_ids)) != len(actual_ids)
+                    or set(actual_ids) != set(expected_ids)
+                ):
+                    raise RuntimeError(
+                        "Local Qwen backlink triage did not return one decision per candidate."
+                    )
+                decisions.extend(batch_decisions)
+                last_error = None
+                break
+            except RuntimeError as error:
+                last_error = error
+        if last_error is not None:
+            raise RuntimeError(
+                f"Local Qwen backlink triage batch {batch_number} failed after "
+                f"{QWEN_MAX_ATTEMPTS} bounded attempts."
+            ) from last_error
+    return decisions
+
+
+def _ollama_batch(
+    schema: dict[str, Any],
+    system_prompt: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     request = urllib.request.Request(
         f"{os.environ.get('WEBSITE_GROWTH_QWEN_URL', DEFAULT_OLLAMA_URL).rstrip('/')}/api/chat",
         data=json.dumps(

@@ -9,12 +9,15 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 ## Scout-specific failures
 
 - Missing Google credentials: that source receives an error import, but other first-party sources continue.
-- Missing or expired SEMrush OAuth, or exhausted API units: the Monday worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, Brave/Qwen backlink discovery, website review, Teams reporting, and page briefs continue.
+- Missing or expired SEMrush OAuth, or exhausted API units: a Monday or Wednesday deep worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, Brave/Qwen backlink discovery, website review, Teams reporting, and page briefs continue.
 - Codex output outside the stored candidate IDs: completion is rejected.
 - Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
 - Duplicate worker start: an active tenant run blocks a second run for three hours.
 - Dedicated runtime update failure: the protected worktree remains unchanged, a safe Teams failure notice is attempted, and Scout does not start.
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; the safe failure notice is attempted through the same configured Teams target and may also fail when the channel itself is unavailable.
+- Missing Scout executor tools or an incomplete required call sequence: the backlink wrapper still records and delivers the deterministic no-change summary, then exits non-zero. The Rivet failure monitor records the sanitized failure; the run can no longer appear successful after doing no work.
+- Invalid or truncated local Qwen JSON: discovery processes no more than 30 candidates per local-model call and retries that same batch once. It does not repeat Brave Search, download additional pages, or perform outreach. A second invalid response fails the deep run and records the normal safe failure outcome.
+- Build-notification delivery failure: the notification remains leased for 15 minutes and is then eligible for another deterministic claim. Build state remains authoritative in Newl Apps, GitHub, and Vercel; no build, merge, or deployment is retried by the notifier.
 - Teams/OneDrive file consent rejects Allow: Website Growth reports no longer use that transport. The Teams summary contains a signed Newl Apps download link instead.
 - Expired or modified Excel link: the download route returns no workbook. The next deep Scout report creates fresh seven-day links; changing the tenant, run, report name, expiry, or signature invalidates the link.
 - Missing report signing secret: completion fails safely unless either `WEBSITE_GROWTH_REPORT_DOWNLOAD_SECRET` or the existing `OPENCLAW_WEBSITE_GROWTH_TOKEN` contains at least 32 characters.

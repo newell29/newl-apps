@@ -22,7 +22,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Read-only Codex/OpenClaw runtime | `ops/openclaw/run-website-growth-scout.sh` |
 | Safe environment and fixed-target Teams helpers | `ops/openclaw/lib/website-growth-scout-runtime.zsh` |
 | Official SEMrush OAuth setup | `ops/openclaw/configure-semrush-mcp.sh` |
-| Split Monday deep / Tuesday-Friday cache-backed schedule and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
+| Split Monday/Wednesday deep and Tuesday/Thursday/Friday cache-backed schedule, build notifications, and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
 | Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
 | Backlink parsing, quality gates, dedupe, retention, workspace query | `src/modules/website-growth/backlinks.ts` |
 | Rotating public-web query plan, canonical URL history, ingest and Qwen-finalist scope | `src/modules/website-growth/backlink-discovery.ts`, `src/app/api/website-growth/scout/backlink-discovery/*` |
@@ -37,7 +37,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Microsoft 365 draft/send helper | `src/server/integrations/microsoft-graph-mail.ts` |
 | Dedicated OpenClaw tool plugin | `ops/openclaw/plugins/newl-website-growth` |
 | Deterministic outreach wrapper and authoritative Teams summary | `ops/openclaw/run-website-growth-backlink-executor.sh` |
+| Fail-closed executor tool exposure and required-call validation | `ops/openclaw/validate-website-growth-backlink-agent-run.py` |
 | Protected Scout installer and disabled weekday schedule | `ops/openclaw/install-website-growth-backlink-executor.sh` |
+| Tenant-scoped build Teams event claims and acknowledgements | `src/modules/website-growth/build-notifications.ts`, `src/app/api/website-growth/scout/build-notifications/route.ts` |
+| Fixed-target build Teams delivery worker | `ops/openclaw/run-website-growth-build-notifications.sh` |
 | Production rollout and rollback | `docs/modules/website-growth/backlink-outreach-rollout.md` |
 
 ## Workflow / rules summary

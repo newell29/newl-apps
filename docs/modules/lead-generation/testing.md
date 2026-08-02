@@ -289,6 +289,25 @@ Regression coverage must prove:
 11. a successful Apollo sync reports terminal delivery failures that could not be matched by exact contact ID or
     normalized email.
 
+## Apollo exception autopilot
+
+Regression and preview coverage must prove:
+
+1. prepare/complete/fail routes derive `tenantId` only from ingestion authentication and remain exempt from session middleware;
+2. the worker deduplicates canonical HTTPS search URLs, honors the server's query/evidence limits, and completes the exact claimed run ID;
+3. a source identity fingerprint is attempted only once until its Apollo match or qualified Hunter research evidence changes;
+4. only a unique `DIRECT_COMPANY` with an exact independently verified official domain and at least 90% cited public-identity confidence auto-maps;
+5. low confidence, ambiguity, missing candidates, ties, non-direct classifications, and domain mismatch remain human review;
+6. structured identity validation rejects invented evidence indices and positive identity claims without a cited operating name and official domain;
+7. the resolver uses Luna's verified official domain before legal-name searches, while deterministic scoring still owns the final classification;
+8. the UI displays enabled/off status, 24-hour resolved/review/failed counts, up to three suggested Apollo organizations, and bounded public source links;
+9. Assisted mode, the kill switch, rolling daily cap, one-job lease, and stale source-match/research revalidation all fail closed; and
+10. no exception-autopilot route or worker performs paid person enrichment, plan/contact approval, cadence enrollment, or customer communication.
+
+No live Apollo, Brave, OpenAI, production database, or customer-communication write is permitted in automated tests.
+Vercel Preview validation may inspect the authenticated status and empty/fixture states with the autopilot flag off;
+production enablement and the first live identity run require separate human approval.
+
 ## Assisted post-research handoff
 
 Regression coverage must prove:

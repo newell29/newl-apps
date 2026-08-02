@@ -10,8 +10,10 @@ source "${runner_directory}/lib/website-growth-scout-runtime.zsh"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
 gateway_env_file="${OPENCLAW_GATEWAY_ENV_FILE:-${HOME}/.openclaw/.env}"
 prompt_path="${runner_directory}/prompts/website-growth-backlink-executor.md"
+validator_path="${runner_directory}/validate-website-growth-backlink-agent-run.py"
 openclaw_command="${OPENCLAW_BIN:-openclaw}"
 curl_command="${CURL_BIN:-curl}"
+scout_sessions_directory="${OPENCLAW_SCOUT_SESSIONS_DIR:-${HOME}/.openclaw/agents/scout/sessions}"
 
 if ! load_website_growth_scout_env "${scout_env_file}"; then
   echo "The protected Website Growth Scout environment file is not readable." >&2
@@ -34,6 +36,10 @@ if [[ ! -r "${prompt_path}" ]]; then
   echo "The Website Growth backlink executor prompt is not readable." >&2
   exit 1
 fi
+if [[ ! -r "${validator_path}" ]]; then
+  echo "The Website Growth backlink executor validator is not readable." >&2
+  exit 1
+fi
 
 temporary_directory="$(mktemp -d)"
 chmod 700 "${temporary_directory}"
@@ -53,12 +59,21 @@ agent_status=0
 
 "${openclaw_command}" agent \
   --agent scout \
-  --model "openai/gpt-5.6-sol" \
+  --model "openai/gpt-5.4-mini" \
   --thinking high \
   --timeout 1500 \
   --session-key "${session_key}" \
   --message-file "${prompt_path}" \
   --json > "${agent_output_path}" 2> "${agent_error_path}" || agent_status=$?
+
+if [[ "${agent_status}" -eq 0 ]]; then
+  if ! /usr/bin/python3 "${validator_path}" \
+    --agent-output "${agent_output_path}" \
+    --sessions-directory "${scout_sessions_directory}" \
+    >> "${agent_error_path}" 2>&1; then
+    agent_status=70
+  fi
+fi
 
 /usr/bin/python3 - "${run_started_at}" "${summary_request_path}" <<'PY'
 import json, sys

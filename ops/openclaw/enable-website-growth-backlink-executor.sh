@@ -4,13 +4,14 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+openclaw_command="${OPENCLAW_BIN:-openclaw}"
 temporary_file="$(mktemp)"
 cleanup() {
   rm -f "${temporary_file}"
 }
 trap cleanup EXIT
 
-openclaw cron list --json > "${temporary_file}"
+"${openclaw_command}" cron list --all --json > "${temporary_file}"
 job_id="$(/usr/bin/python3 - "${temporary_file}" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as handle:
@@ -35,5 +36,5 @@ if [[ -z "${job_id}" ]]; then
   exit 1
 fi
 
-openclaw cron enable "${job_id}"
+"${openclaw_command}" cron enable "${job_id}"
 echo "Enabled Website Growth backlink outreach for 11:00 AM America/Toronto on weekdays."

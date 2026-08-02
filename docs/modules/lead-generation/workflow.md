@@ -70,6 +70,17 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 9. `--company-research-now` runs the queue explicitly. `--company-research-dry-run` stops before persistence. `--company-research-cohort <json>` replays an exact bounded company list for model comparisons. Scheduled and manual runs atomically write a mode-`0600`, cohort-fingerprinted checkpoint immediately after paid retrieval, defaulting under `HUNTER_PROCESSED_DIRECTORY/company-research-checkpoints`. A same-day exact-cohort retry reuses that checkpoint automatically, while `--company-research-output` and `--company-research-resume` remain available for controlled replays. A different prompt version or tenant-prepared cohort fails closed rather than reusing mismatched evidence.
 10. With `HUNTER_TEAMS_TARGET` configured, a completed run reports researched, accepted, blocked, and omitted counts. The same digest adds Luna primary status and coverage plus categorical agreement with the optional Qwen shadow. A failed scheduled or explicit live run sends a sanitized alert stating that no outreach was sent and whether the paid-retrieval checkpoint can be reused; raw provider responses and credentials are never included.
 
+## Apollo exception autopilot
+
+1. The existing Hunter worker polls the tenant-scoped Apollo-exception prepare route in its own background thread, so a TradeMining export or outreach handoff cannot make identity review disappear or run twice.
+2. Newl Apps selects only current, unresolved Apollo matches attached to an eligible Luna/Kimi Hunter research handoff. Rejected, stale, reviewed, do-not-prospect, and already-direct companies are excluded.
+3. A material identity fingerprint covers the company identity, newest unresolved match, current research signal, saved evidence, and resolver version. The exact fingerprint is attempted once; repeated polling returns idle instead of paying for the same Brave or Luna work again.
+4. The worker runs at most five targeted Brave identity/brand/parent/geography queries and returns at most 20 unique HTTPS title/snippet records. Search credentials stay on the Mac.
+5. Server-side GPT-5.6 Luna synthesizes the operating identity with strict Structured Outputs and cited evidence. It does not browse, call Apollo, score the sales opportunity, or authorize a mapping.
+6. The deterministic Apollo resolver runs at most three documented organization searches. Auto-mapping requires a unique direct organization, an independently verified exact official-domain match, and at least 90% public-identity confidence. Every other case remains in Apollo Exceptions with the reason, candidate links, and public evidence.
+7. A successful mapping queues only the existing Assisted contact-discovery handoff. It does not approve contacts or plans, spend person-enrichment credits, enroll a cadence, or send communication.
+8. `HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED` defaults off. The server enforces `HUNTER_APOLLO_EXCEPTION_DAILY_COMPANY_LIMIT` (default 10, maximum 25), Assisted mode, the Hunter kill switch, a one-job lease, tenant filtering, stale-input revalidation, and an immutable job/audit ledger.
+
 ## Assisted post-research handoff
 
 1. **Assisted** is an explicit administrator-selected Hunter mode. `OFF` and `DRY_RUN` retain their existing no-handoff behavior.
