@@ -6,7 +6,8 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   evaluateCurrentHunterApolloException,
-  resolveApolloReviewQueueStatus
+  resolveApolloReviewQueueStatus,
+  summarizeApolloIdentityResolutionMetrics
 } from "@/modules/lead-gen/queries";
 
 const NOW = new Date("2026-07-28T18:00:00.000Z");
@@ -122,6 +123,28 @@ describe("Apollo review queue states", () => {
         reviewedAt: null
       })
     ).toBe("NEEDS_REVIEW");
+  });
+});
+
+describe("Apollo identity resolution metrics", () => {
+  it("measures only versioned resolver outcomes", () => {
+    expect(
+      summarizeApolloIdentityResolutionMetrics([
+        { identity_resolver: { version: 1, confidence_band: "AUTO_MATCH" } },
+        { identity_resolver: { version: 1, confidence_band: "AUTO_MATCH" } },
+        { identity_resolver: { version: 1, confidence_band: "MANUAL_REVIEW" } },
+        { identity_resolver: { version: 1, confidence_band: "REJECT" } },
+        { q_organization_name: "legacy match" },
+        null
+      ])
+    ).toEqual({
+      evaluated: 4,
+      autoMatched: 2,
+      manualReview: 1,
+      rejected: 1,
+      autoMatchRate: 50,
+      manualReviewRate: 25
+    });
   });
 });
 

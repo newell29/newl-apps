@@ -9,7 +9,10 @@ import {
 } from "@/modules/lead-gen/actions";
 import { recheckHunterCompanyContactsAction } from "@/modules/lead-gen/hunter-actions";
 import { ApolloMatchReviewActions } from "@/modules/lead-gen/components/apollo-match-review-actions";
-import { getApolloMatchReviewQueue } from "@/modules/lead-gen/queries";
+import {
+  getApolloIdentityResolutionMetrics,
+  getApolloMatchReviewQueue
+} from "@/modules/lead-gen/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -28,9 +31,12 @@ export default async function ApolloMatchReviewPage({
   const companyId = readParam(params.company);
   const contactReviewMessage = readParam(params.contactReview);
   const actionablePlans = Number(readParam(params.plans) ?? "0");
-  const rows = await getApolloMatchReviewQueue(context, {
-    companyId: companyId ?? undefined
-  });
+  const [rows, identityMetrics] = await Promise.all([
+    getApolloMatchReviewQueue(context, {
+      companyId: companyId ?? undefined
+    }),
+    getApolloIdentityResolutionMetrics(context)
+  ]);
   const activeRows = rows.filter((row) => row.status === "NEEDS_REVIEW");
   const mappedNoEmployeeRows = rows.filter(
     (row) => row.status === "MAPPED_NO_EMPLOYEES"
@@ -51,6 +57,29 @@ export default async function ApolloMatchReviewPage({
         <Metric label="Archived exceptions" value={confirmedRows.length} />
         <Metric label="Protected from bulk retry" value={rows.length} />
       </div>
+
+      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Automatic match coverage</h2>
+            <p className="mt-1 text-sm leading-6 text-mutedForeground">
+              Latest resolver result per company during the last seven days. Older matcher records are excluded.
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-2xl font-bold text-foreground">
+              {identityMetrics.autoMatchRate === null ? "—" : `${identityMetrics.autoMatchRate}%`}
+            </p>
+            <p className="text-xs text-mutedForeground">automatic match rate</p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+          <CompactMetric label="Evaluated" value={identityMetrics.evaluated} />
+          <CompactMetric label="Auto matched" value={identityMetrics.autoMatched} />
+          <CompactMetric label="Manual review" value={identityMetrics.manualReview} />
+          <CompactMetric label="Rejected" value={identityMetrics.rejected} />
+        </div>
+      </section>
 
       {contactReviewMessage ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-success/30 bg-success/10 px-4 py-3 text-sm text-foreground">
@@ -213,6 +242,15 @@ function Metric({ label, value }: { label: string; value: number }) {
     <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
       <p className="text-sm text-mutedForeground">{label}</p>
       <p className="mt-1 text-2xl font-bold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function CompactMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-border bg-background px-3 py-2">
+      <p className="text-xs text-mutedForeground">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-foreground">{value}</p>
     </div>
   );
 }

@@ -128,7 +128,11 @@ Scoring regression coverage must also verify:
 17. Apollo reply and sequence outcomes link to a score snapshot created before the new Apollo status is persisted, preventing positive engagement from leaking into the score used to evaluate that outcome.
 18. the GitHub Actions caller does not retry a failed whole-batch HTTP request; retries remain bounded inside the per-contact Apollo client.
 19. organization search sends `q_organization_domains_list` for domains and `q_organization_name` for name-only companies, never internal TradeMining identity-field names.
-20. name-only organization discovery is capped at two deterministic queries and stops at the first direct-company match.
+20. name-only organization discovery is capped at two deterministic queries. Domain-first discovery may perform one
+    additional name fallback when the domain result is not a direct match. A unique high-confidence direct match stops
+    the search, while tied direct candidates remain in manual review with a bounded candidate ledger. Regression cases
+    cover stale domains, vetted first-party research domains, regional/facility aliases, distributor names that are not
+    logistics providers, and ambiguous duplicate Apollo organizations.
 21. every confirmed Apollo mapping performs bounded identity lookup, with or without a saved domain, to resolve
     account IDs to Apollo's canonical nested organization ID; when Organization Search omits an already-saved account,
     an exact zero-credit saved-account lookup recovers that relationship after a zero/partial employee result. People

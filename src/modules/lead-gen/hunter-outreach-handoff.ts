@@ -1700,17 +1700,16 @@ function buildVerifiedApolloIdentityContext({
   researchEvidence: unknown;
   prospectingRationale: string | null;
 }) {
-  let serializedEvidence = "";
   try {
-    serializedEvidence = JSON.stringify(researchEvidence ?? "");
+    const serialized = JSON.stringify({
+      version: 1,
+      researchEvidence: researchEvidence ?? null,
+      prospectingRationale
+    });
+    return serialized.slice(0, 30_000);
   } catch {
-    serializedEvidence = "";
+    return prospectingRationale?.trim().slice(0, 30_000) ?? null;
   }
-
-  const context = [serializedEvidence, prospectingRationale]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join(" ");
-  return context ? context.slice(0, 30_000) : null;
 }
 
 async function recordCompanyMatch(

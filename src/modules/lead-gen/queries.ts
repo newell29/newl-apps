@@ -1142,6 +1142,72 @@ export async function getApolloMatchReviewQueue(
     });
 }
 
+export async function getApolloIdentityResolutionMetrics(
+  tenant: TenantContext,
+  now = new Date()
+) {
+  const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const matches = await prisma.apolloCompanyMatch.findMany({
+    where: tenantWhere(tenant, {
+      createdAt: { gte: since }
+    }),
+    orderBy: { createdAt: "desc" },
+    take: 1_000,
+    select: {
+      companyId: true,
+      queryJson: true
+    }
+  });
+  const latestByCompany = new Map<string, Prisma.JsonValue | null>();
+  for (const match of matches) {
+    if (!latestByCompany.has(match.companyId)) {
+      latestByCompany.set(match.companyId, match.queryJson);
+    }
+  }
+  return summarizeApolloIdentityResolutionMetrics([...latestByCompany.values()]);
+}
+
+export function summarizeApolloIdentityResolutionMetrics(
+  queryValues: Array<Prisma.JsonValue | null>
+) {
+  const counts = {
+    evaluated: 0,
+    autoMatched: 0,
+    manualReview: 0,
+    rejected: 0
+  };
+  for (const value of queryValues) {
+    const query = isJsonRecord(value) ? value : null;
+    const resolver = isJsonRecord(query?.identity_resolver)
+      ? query.identity_resolver
+      : null;
+    if (resolver?.version !== 1) continue;
+    const band = resolver.confidence_band;
+    if (band !== "AUTO_MATCH" && band !== "MANUAL_REVIEW" && band !== "REJECT") {
+      continue;
+    }
+    counts.evaluated += 1;
+    if (band === "AUTO_MATCH") counts.autoMatched += 1;
+    if (band === "MANUAL_REVIEW") counts.manualReview += 1;
+    if (band === "REJECT") counts.rejected += 1;
+  }
+  return {
+    ...counts,
+    autoMatchRate:
+      counts.evaluated > 0
+        ? Math.round((counts.autoMatched / counts.evaluated) * 100)
+        : null,
+    manualReviewRate:
+      counts.evaluated > 0
+        ? Math.round((counts.manualReview / counts.evaluated) * 100)
+        : null
+  };
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 export function resolveApolloReviewQueueStatus({
   apolloOrganizationId,
   classification,
