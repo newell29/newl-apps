@@ -6,7 +6,7 @@
 
 The code supports automated directory submissions, owner-approved outreach, two follow-ups, reply/opt-out handling, verification, and Teams reporting. The installer deliberately creates the weekday OpenClaw job in a **disabled** state. Do not enable it until the production migration, protected configuration, Microsoft 365 permissions, and one supervised message have passed.
 
-Scout uses its own OpenClaw agent and workspace with Codex `gpt-5.6-sol` at high reasoning. Nemo is not used. Rivet is restricted to failure diagnosis and draft code-fix PRs after the owner enables the standing approval; Rivet cannot perform outreach or operational retries.
+Scout uses its own OpenClaw agent and workspace. Deep website/backlink research uses Codex `gpt-5.6-sol` at high reasoning; the restricted weekday outreach executor uses the existing OpenAI `gpt-5.4-mini` connection because the current OpenClaw Codex harness exposes the plugin names without invoking them. Nemo is not used. Rivet is restricted to failure diagnosis and draft code-fix PRs after the owner enables the standing approval; Rivet cannot perform outreach or operational retries.
 
 ## Human approval boundary
 

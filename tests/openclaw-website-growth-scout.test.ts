@@ -18,6 +18,10 @@ const backlinkInstallerPath = path.join(
   repoRoot,
   "ops/openclaw/install-website-growth-backlink-executor.sh",
 );
+const backlinkEnablePath = path.join(
+  repoRoot,
+  "ops/openclaw/enable-website-growth-backlink-executor.sh",
+);
 const backlinkPromptPath = path.join(
   repoRoot,
   "ops/openclaw/prompts/website-growth-backlink-executor.md",
@@ -171,6 +175,8 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(enableScript).toContain(
       '(job.get("payload") or {}).get("kind") == "command"'
     );
+    expect(enableScript).toContain("cron list --all --json");
+    expect(installer).toContain("openclaw cron list --all --json");
     expect(enableScript).toContain("if len(matches) == 1:");
     expect(runner).toContain('run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"');
     expect(runner).toContain('"${openclaw_command}" agent');
@@ -188,6 +194,40 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(prompt).toContain(
       "Do not call `newl_backlink_summary` and do not send a Teams message."
     );
+  });
+
+  it("finds and enables the intentionally disabled backlink command job", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-enable-"));
+    const openclawPath = path.join(directory, "openclaw");
+    const enableLogPath = path.join(directory, "enabled.txt");
+    await writeFile(
+      openclawPath,
+      `#!/bin/zsh
+if [[ "$1" == "cron" && "$2" == "list" && "$3" == "--all" && "$4" == "--json" ]]; then
+  print -r -- '{"jobs":[{"id":"disabled-job-1","declarationKey":"newl.website-growth.backlink-outreach.weekday.v1","enabled":false,"payload":{"kind":"command"}}]}'
+  exit 0
+fi
+if [[ "$1" == "cron" && "$2" == "enable" && "$3" == "disabled-job-1" ]]; then
+  print -r -- "$3" > "$ENABLE_LOG_PATH"
+  exit 0
+fi
+exit 2
+`,
+    );
+    await chmod(openclawPath, 0o700);
+
+    try {
+      await expect(execFileAsync("/bin/zsh", [backlinkEnablePath], {
+        env: {
+          ...process.env,
+          OPENCLAW_BIN: openclawPath,
+          ENABLE_LOG_PATH: enableLogPath
+        }
+      })).resolves.toBeDefined();
+      expect(await readFile(enableLogPath, "utf8")).toBe("disabled-job-1\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when the backlink agent has no exposed tools", async () => {
@@ -415,6 +455,43 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     expect(discovery).toContain('limits.get("fetches") or 40');
     expect(discovery).toContain('limits.get("pagesPerDomain") or 2');
     expect(discovery).toContain('limits.get("finalists") or 15');
+  });
+
+  it("batches local Qwen review and retries one invalid batch without repeating search", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append(len(rows))
+    if len(calls) == 1:
+        raise RuntimeError("synthetic truncated JSON")
+    return [
+        {
+            "id": row["id"],
+            "disposition": "REJECT",
+            "category": None,
+            "confidence": 90,
+            "reason": "synthetic"
+        }
+        for row in rows
+    ]
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+rows = [{"id": f"candidate-{index}"} for index in range(65)]
+decisions = module["ollama_request"]({}, "synthetic prompt", rows)
+print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+
+    expect(JSON.parse(stdout)).toEqual({
+      calls: [30, 30, 30, 5],
+      decisionCount: 65
+    });
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {

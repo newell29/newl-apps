@@ -182,7 +182,7 @@ print(job["id"])
 PY
 )"
 
-openclaw cron list --json > "${cron_snapshot}"
+openclaw cron list --all --json > "${cron_snapshot}"
 while IFS= read -r stale_job_id; do
   [[ -z "${stale_job_id}" ]] && continue
   openclaw cron rm "${stale_job_id}"
