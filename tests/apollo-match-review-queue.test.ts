@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   evaluateCurrentHunterApolloException,
+  readApolloResolverReview,
   resolveApolloReviewQueueStatus,
   summarizeApolloIdentityResolutionMetrics
 } from "@/modules/lead-gen/queries";
@@ -144,6 +145,48 @@ describe("Apollo identity resolution metrics", () => {
       rejected: 1,
       autoMatchRate: 50,
       manualReviewRate: 25
+    });
+  });
+});
+
+describe("Apollo exception resolver review", () => {
+  it("exposes bounded candidate suggestions and public evidence without raw payloads", () => {
+    expect(readApolloResolverReview({
+      identity_resolver: {
+        candidates: [{
+          organizationId: "org-1",
+          companyName: "Example Brand",
+          domain: "example.com",
+          score: 88,
+          classification: "MATCH_QUALITY_REVIEW",
+          domainMatch: true
+        }]
+      },
+      exception_autopilot: {
+        state: "HUMAN_REVIEW_REQUIRED",
+        reason: "Two operating identities remain credible.",
+        public_evidence: [{
+          title: "Example official site",
+          url: "https://example.com/about",
+          sourceDomain: "example.com"
+        }]
+      }
+    })).toEqual({
+      state: "HUMAN_REVIEW_REQUIRED",
+      reason: "Two operating identities remain credible.",
+      candidates: [{
+        organizationId: "org-1",
+        companyName: "Example Brand",
+        domain: "example.com",
+        score: 88,
+        classification: "MATCH_QUALITY_REVIEW",
+        domainMatch: true
+      }],
+      sources: [{
+        title: "Example official site",
+        url: "https://example.com/about",
+        sourceDomain: "example.com"
+      }]
     });
   });
 });

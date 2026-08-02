@@ -74,6 +74,15 @@ describe("middleware machine route exemptions", () => {
     expect(matcher.test("/lead-gen/outreach")).toBe(true);
   });
 
+  it("lets Apollo exception autopilot enforce tenant-bound ingestion authentication", () => {
+    expect(config.matcher[0]).toContain("api/lead-gen/hunter/apollo-exceptions");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/lead-gen/hunter/apollo-exceptions/prepare")).toBe(false);
+    expect(matcher.test("/api/lead-gen/hunter/apollo-exceptions/complete")).toBe(false);
+    expect(matcher.test("/api/lead-gen/hunter/apollo-exceptions/fail")).toBe(false);
+  });
+
   it("lets the approved-work backlink executor enforce its dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/website-growth/backlinks/executor");
     const matcher = new RegExp(`^${config.matcher[0]}$`);

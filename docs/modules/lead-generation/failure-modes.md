@@ -418,6 +418,17 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
   audience accepts a current non-archived Outreach Plan without requiring a Sales Lead, and that queue visibility
   treats the complete Outreach Plan as actionable work rather than requiring a legacy single-message draft.
 
+## Apollo exception autopilot fails or repeats
+
+- **Disabled/idle:** the environment flag is off, Hunter is not in Assisted mode, the kill switch is active, the daily cap is reached, or no new/materially changed eligible exception exists. This consumes no Brave, Luna, or Apollo work.
+- **Same company appears again:** a new Apollo match or qualified research signal changed the identity fingerprint. An unchanged fingerprint is never searched twice, including after an ambiguous result or worker restart.
+- **Worker dies mid-run:** the tenant-scoped 15-minute lease expires into an error. A later materially changed fingerprint may run; the failed packet and safe error remain visible for audit.
+- **Public evidence is weak:** Luna must return `AMBIGUOUS` or `NO_MATCH`; the record stays in human review with candidate/source context and no automatic mapping.
+- **Luna or Apollo is unavailable:** the worker calls the fail callback. No partial direct mapping is written before validated Luna output and deterministic Apollo selection complete.
+- **Company changes while research runs:** completion revalidates that the source match is still latest/unreviewed and that the exact qualified Hunter research handoff is still eligible. Stale work fails before mapping.
+- **Mapping succeeds but contact handoff cannot queue:** the direct identity remains preserved and the job records `queue_failed` in its handoff result. No outreach is sent; operations can retry contact discovery from the mapped company without rerunning public identity research.
+- **Too many exceptions remain manual:** review the candidate margins and evidence. Do not lower the exact-domain or unique-direct-company gates merely to improve the automatic match rate.
+
 ## Apollo cannot safely match a company
 
 - Symptom: Pipeline shows **Resolve Apollo match**, or bulk enrichment reports a company as protected from retry.

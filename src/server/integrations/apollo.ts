@@ -292,7 +292,7 @@ export type ApolloCallActivitySummaryInput = {
 
 export type ApolloCallActivitySummary = ApolloActivitySummary;
 
-type ApolloOrganizationCandidate = {
+export type ApolloOrganizationCandidate = {
   id: string | null;
   name: string | null;
   domain: string | null;
@@ -2269,6 +2269,12 @@ async function fetchApolloPagedCollection(path: string, apiKey: string, basePayl
   return fetchApolloActivityPages(path, apiKey, basePayload);
 }
 
+export async function resolveApolloOrganizationForCompany(
+  input: ApolloCompanyLookupInput
+): Promise<ApolloOrganizationCandidate | null> {
+  return findApolloOrganization(input, readApolloSearchApiKey());
+}
+
 function readApolloMasterApiKey() {
   const value = process.env.APOLLO_MASTER_API?.trim();
   if (!value || value === "APOLLO_MASTER_API_PLACEHOLDER") {
@@ -2381,6 +2387,45 @@ function readApolloVerifiedIdentityHints(
 
   try {
     const root = asRecord(JSON.parse(context));
+    const identityResolution = asRecord(root?.identityResolution);
+    const identityConfidence =
+      typeof identityResolution?.confidence === "number"
+        ? identityResolution.confidence
+        : 0;
+    const identityDisposition = readApolloString(identityResolution ?? {}, [
+      "disposition"
+    ]);
+    const identityEvidenceIndices = Array.isArray(identityResolution?.evidenceIndices)
+      ? identityResolution.evidenceIndices.filter(
+          (value): value is number => Number.isInteger(value) && value >= 0
+        )
+      : [];
+    const verifiedResolution = Boolean(
+      identityConfidence >= 85 &&
+      identityEvidenceIndices.length > 0 &&
+      (
+        identityDisposition === "EXACT_OPERATING_COMPANY" ||
+        identityDisposition === "VERIFIED_PARENT_OR_BRAND"
+      )
+    );
+    if (verifiedResolution) {
+      for (const alias of [
+        readApolloString(identityResolution ?? {}, ["operatingName"]),
+        readApolloString(identityResolution ?? {}, ["legalName"]),
+        readApolloString(identityResolution ?? {}, ["parentName"]),
+        ...(Array.isArray(identityResolution?.aliases)
+          ? identityResolution.aliases.filter(
+              (value): value is string => typeof value === "string" && Boolean(value.trim())
+            )
+          : [])
+      ]) {
+        if (alias?.trim()) aliases.add(alias.trim());
+      }
+      const officialDomain = normalizeIdentityEvidenceDomain(
+        readApolloString(identityResolution ?? {}, ["officialDomain"])
+      );
+      if (officialDomain) domains.add(officialDomain);
+    }
     const researchEvidence = asRecord(root?.researchEvidence);
     const research = asRecord(researchEvidence?.research) ?? researchEvidence;
     const synthesis = asRecord(research?.synthesis);

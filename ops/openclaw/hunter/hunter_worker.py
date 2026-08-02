@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 from hunter_ingest import api_request, clean, required_env
 from hunter_company_research import run_company_research
+from hunter_apollo_exception_resolution import run_apollo_exception_resolution
 from hunter_outreach_handoff import drain_outreach_handoff
 from hunter_signal_scout import run_signal_scout
 
@@ -781,6 +782,23 @@ def run_outreach_handoff_poller(
         stop_event.wait(poll_ms / 1000)
 
 
+def run_apollo_exception_poller(
+    base_url: str,
+    token: str,
+    poll_ms: int,
+    stop_event: threading.Event,
+) -> None:
+    """Resolve at most one new or materially changed Apollo exception per poll."""
+    while not stop_event.is_set():
+        try:
+            result = run_apollo_exception_resolution(base_url, token)
+            if result.get("state") not in {"idle", "disabled", "already_processing"}:
+                print(json.dumps({"hunterApolloExceptionAutopilot": result}, indent=2))
+        except Exception as error:
+            print(f"Hunter Apollo exception autopilot failed: {error}", file=sys.stderr)
+        stop_event.wait(poll_ms / 1000)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
@@ -822,6 +840,11 @@ def main() -> int:
         action="store_true",
         help="Stop after web retrieval and local Qwen without calling Kimi.",
     )
+    parser.add_argument(
+        "--apollo-exceptions-now",
+        action="store_true",
+        help="Resolve at most one eligible Apollo exception now.",
+    )
     parser.add_argument("--end-date", help="Use a specific YYYY-MM-DD TradeMining end date for a controlled run.")
     parser.add_argument("--test-days", type=int, help="Temporarily shorten an explicit profile run without changing it.")
     profile = parser.add_mutually_exclusive_group()
@@ -840,6 +863,10 @@ def main() -> int:
     base_url = required_env("NEWL_APPS_BASE_URL")
     token = required_env("INGESTION_API_TOKEN")
     poll_ms = max(5000, int(os.environ.get("HUNTER_POLL_MS", "60000")))
+
+    if args.apollo_exceptions_now:
+        print(json.dumps(run_apollo_exception_resolution(base_url, token), indent=2))
+        return 0
 
     if args.signal_scout_now or args.signal_scout_dry_run:
         print(
@@ -888,6 +915,13 @@ def main() -> int:
             target=run_outreach_handoff_poller,
             args=(base_url, token, poll_ms, handoff_stop_event),
             name="hunter-outreach-handoff",
+            daemon=True,
+        ).start()
+        apollo_exception_stop_event = threading.Event()
+        threading.Thread(
+            target=run_apollo_exception_poller,
+            args=(base_url, token, poll_ms, apollo_exception_stop_event),
+            name="hunter-apollo-exception-autopilot",
             daemon=True,
         ).start()
 

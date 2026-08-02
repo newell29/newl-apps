@@ -1,6 +1,6 @@
 # Apollo company identity-resolution playbook
 
-> Evidence status: Confirmed from the implemented Newl Apps/Apollo workflow for supported API behavior. The proposed automation thresholds below require owner confirmation before they can authorize a company mapping.
+> Evidence status: Confirmed from the implemented Newl Apps/Apollo workflow. The owner approved the automatic threshold and fail-closed policy on August 2, 2026. Production enablement remains a separate environment/configuration change.
 
 ## Purpose
 
@@ -238,7 +238,32 @@ IDs must remain tenant scoped in storage and in every subsequent lookup.
 | Selected people have no concrete business email | Keep them out of the actionable queue; request separately authorized email-only enrichment if desired. |
 | Contact is active, replied, bounced, rejected, or do-not-contact | Preserve the terminal/active state and do not create or enroll another plan. |
 
-## Proposed automation phase
+## Implemented exception-autopilot phase
+
+The Mac-mini Hunter service polls a tenant-authenticated prepare route independently of TradeMining and company
+research. It claims at most one exception per poll and no more than the configured rolling 24-hour cap. The server
+freezes the current unresolved Apollo match, qualified Hunter research signal, current prospecting decision, company
+identity, geography, prior candidate ledger, and a SHA-256 identity fingerprint. A fingerprint already attempted is
+not searched again until the source match or research evidence materially changes.
+
+The worker runs at most five targeted Brave searches and sends no more than 20 unique HTTPS title/snippet records
+back to Newl Apps. GPT-5.6 Luna uses strict Structured Outputs, low reasoning, `store: false`, and no browsing/tools to
+synthesize the operating name, legal name, aliases, parent/brand relationship, official domain, and cited evidence.
+Luna proposes identity only; deterministic Apollo scoring makes the mapping decision.
+
+Automatic mapping requires all of the following:
+
+- the synthesis is `EXACT_OPERATING_COMPANY` or `VERIFIED_PARENT_OR_BRAND`;
+- public-identity confidence is at least 90;
+- at least one supplied public evidence record is cited;
+- an official domain is independently verified;
+- Apollo returns one unique `DIRECT_COMPANY`; and
+- that Apollo organization exactly matches the verified official domain.
+
+Any missing, tied, sibling, different-domain, name-only, or otherwise ambiguous result stays in Apollo Exceptions.
+The UI shows the reason, up to three Apollo candidates, and bounded public source links. An automatic mapping queues
+the existing assisted contact-discovery handoff; it never approves a contact or plan, enrolls a cadence, spends a
+person-enrichment credit, or sends customer communication.
 
 ### Deterministic candidate generation
 
@@ -255,7 +280,7 @@ Public identity research may suggest aliases and domains, but it cannot authoriz
 
 ### Candidate scoring
 
-Recommended score components for owner review:
+Implemented resolver score components:
 
 - exact verified domain: strongest positive signal;
 - explicit account-to-global-organization relationship: strongest positive signal;
@@ -265,7 +290,8 @@ Recommended score components for owner review:
 - explicit first-party parent/subsidiary relationship; and
 - penalties for different domains, sibling entities, incompatible geography, or generic legal tokens.
 
-The exact weights and auto-confirm threshold require owner confirmation. Until approved, the resolver may auto-prepare a recommendation but a human must confirm the mapping.
+Apollo's existing deterministic weights remain the source of truth. The additional 90% public-identity threshold and
+exact-domain requirement are a second gate; neither model confidence nor name similarity can bypass Apollo ambiguity.
 
 ### Fail-closed decisions
 
@@ -301,7 +327,7 @@ The intended UI is a bounded **Suggested mapping** queue:
 6. request paid email-only authorization only when necessary; and
 7. show the final contacts/plans or a durable no-employee/no-match reason.
 
-This should replace daily Google/Apollo manual matching for high-confidence cases while retaining a small human queue for ambiguous identities.
+This replaces daily Google/Apollo manual matching for high-confidence cases while retaining a small human queue for ambiguous identities.
 
 ## Acceptance criteria for automation
 
