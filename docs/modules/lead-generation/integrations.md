@@ -127,6 +127,15 @@ generation only and never overrides those identity checks.
   stored in the company-research `AutomationJobRun.output`. Luna rows continue into Kimi scoring and deterministic
   gates. Qwen comparison rows remain audit-only and cannot affect planning, Apollo, or outreach.
 
+## Apollo exception identity automation
+
+- The Mac worker uses the protected Brave credential to retrieve bounded public identity evidence. It calls only the ingestion-authenticated prepare, complete, and fail routes; the worker never receives the server's OpenAI or Apollo credential.
+- Newl Apps uses server-side `gpt-5.6-luna` with the Responses API, `store: false`, low reasoning, strict Structured Outputs, no tools, and a hashed tenant/company safety identifier.
+- Luna receives frozen company fields, shipment geography, prior bounded Apollo candidate summaries, and public search title/snippet evidence. It cannot see contacts, messages, cadence data, credentials, or raw production customer data.
+- The existing Apollo `mixed_companies/search` integration executes at most three domain/name searches after Luna returns. Candidate ranking, uniqueness, classification, and exact-domain enforcement are deterministic.
+- `AutomationJobRun` stores queue, lease, status, input fingerprint, bounded evidence, model usage, candidate summary, decision, and safe error data. `ApolloCompanyMatch` remains the immutable mapping/candidate ledger; no schema migration is required.
+- Auto-resolved companies enter the existing Assisted handoff. Ambiguous candidates are read-only links for human review. Neither path performs paid person enrichment or Apollo enrollment without the existing explicit approvals.
+
 ## Hunter planning integration boundary
 
 - `/api/lead-gen/hunter/daily-plan` is invoked daily by Vercel Cron and authenticates with the existing `CRON_SECRET`; Phase 1 introduces no new environment variable.

@@ -1125,7 +1125,8 @@ export async function getApolloMatchReviewQueue(
             attemptedAt: match.createdAt,
             reviewedAt: match.reviewedAt,
             reviewedByUserId: match.reviewedByUserId
-          }
+          },
+          resolverReview: readApolloResolverReview(match.queryJson)
         }
       ];
     })
@@ -1204,8 +1205,65 @@ export function summarizeApolloIdentityResolutionMetrics(
   };
 }
 
+export function readApolloResolverReview(value: unknown) {
+  const query = isJsonRecord(value) ? value : null;
+  const resolver = isJsonRecord(query?.identity_resolver)
+    ? query.identity_resolver
+    : null;
+  const autopilot = isJsonRecord(query?.exception_autopilot)
+    ? query.exception_autopilot
+    : null;
+  const candidates = Array.isArray(resolver?.candidates)
+    ? resolver.candidates
+        .map((candidate) => {
+          const row = isJsonRecord(candidate) ? candidate : null;
+          const organizationId = readOptionalJsonString(row?.organizationId);
+          const companyName = readOptionalJsonString(row?.companyName);
+          if (!organizationId || !companyName) return null;
+          return {
+            organizationId,
+            companyName,
+            domain: readOptionalJsonString(row?.domain),
+            score:
+              typeof row?.score === "number" && Number.isFinite(row.score)
+                ? Math.round(row.score)
+                : 0,
+            classification: readOptionalJsonString(row?.classification) ?? "UNKNOWN",
+            domainMatch: row?.domainMatch === true
+          };
+        })
+        .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+        .slice(0, 3)
+    : [];
+  const sources = Array.isArray(autopilot?.public_evidence)
+    ? autopilot.public_evidence
+        .map((item) => {
+          const row = isJsonRecord(item) ? item : null;
+          const url = readOptionalJsonString(row?.url);
+          if (!url?.startsWith("https://")) return null;
+          return {
+            title: readOptionalJsonString(row?.title) ?? url,
+            url,
+            sourceDomain: readOptionalJsonString(row?.sourceDomain)
+          };
+        })
+        .filter((source): source is NonNullable<typeof source> => Boolean(source))
+        .slice(0, 5)
+    : [];
+  return {
+    state: readOptionalJsonString(autopilot?.state),
+    reason: readOptionalJsonString(autopilot?.reason),
+    candidates,
+    sources
+  };
+}
+
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readOptionalJsonString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export function resolveApolloReviewQueueStatus({

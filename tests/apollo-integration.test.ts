@@ -16,6 +16,7 @@ import {
   pushApolloContactsToSequence,
   readApolloAccountIdFromMatchQuery,
   readReviewerConfirmedApolloOrganizationIdFromMatchQuery,
+  resolveApolloOrganizationForCompany,
   reconcileApolloContactWithDeliveryFailureEvidence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
@@ -1359,6 +1360,47 @@ describe("fetchApolloContactsForCompany", () => {
     });
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       q_organization_domains_list: ["kimbrells.com"]
+    });
+  });
+
+  it("uses a cited Luna identity domain before legal-name searches", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        organizations: [{
+          id: "apollo-org-example",
+          name: "Example Operating Brand",
+          primary_domain: "example.com"
+        }]
+      })
+    } as unknown as Response);
+
+    const result = await resolveApolloOrganizationForCompany({
+      companyName: "EXAMPLE DISTRIBUTION CENTER LLC",
+      verifiedIdentityContext: JSON.stringify({
+        identityResolution: {
+          disposition: "EXACT_OPERATING_COMPANY",
+          confidence: 96,
+          operatingName: "Example Operating Brand",
+          legalName: "Example Distribution Center LLC",
+          aliases: [],
+          parentName: null,
+          officialDomain: "example.com",
+          evidenceIndices: [0]
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      id: "apollo-org-example",
+      classification: "DIRECT_COMPANY",
+      domainMatch: true
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      page: 1,
+      per_page: 10,
+      q_organization_domains_list: ["example.com"]
     });
   });
 
