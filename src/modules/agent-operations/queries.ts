@@ -375,7 +375,37 @@ function buildAgentSchedules(data: AgentOperationData, runs: AgentRun[], now: Da
       sourceNote: "Declared OpenClaw schedule"
     },
     declaredSchedule("rivet:quality", "rivet", "Audit Hunter research quality", "DAILY", "13:30", "Daily at 13:30", now, activeRunKeys),
-    declaredSchedule("website-scout:scan", "website-scout", "Refresh growth opportunities", "WEEKDAYS", "09:15", "Weekdays at 09:15", now, activeRunKeys),
+    declaredSchedule(
+      "website-scout:scan",
+      "website-scout",
+      "Refresh website growth evidence",
+      "WEEKDAYS",
+      "09:15",
+      "Mon/Wed deep research · Tue/Thu/Fri evidence check-in at 09:15",
+      now,
+      activeRunKeys
+    ),
+    declaredSchedule(
+      "website-scout:outreach",
+      "website-scout",
+      "Process approved backlink outreach",
+      "WEEKDAYS",
+      "11:00",
+      "Weekdays at 11:00",
+      now,
+      activeRunKeys
+    ),
+    {
+      id: "website-scout:build-notifications",
+      agentKey: "website-scout",
+      agentName: AGENT_CATALOG["website-scout"].name,
+      assignment: "Check website-build notifications",
+      cadence: "Every 2 minutes",
+      timezone: DEFAULT_TIMEZONE,
+      nextRunAt: new Date(Math.ceil(now.getTime() / 120_000) * 120_000),
+      status: activeRunKeys.has("website-scout") ? "RUNNING" : "NEXT",
+      sourceNote: "Declared OpenClaw schedule"
+    },
     {
       id: "teamship-reader:poll",
       agentKey: "teamship-reader",

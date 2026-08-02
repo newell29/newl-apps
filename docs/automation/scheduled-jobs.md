@@ -15,6 +15,7 @@ This document records operational guardrails from `AGENTS.md`, `reference/CODEX_
 
 - `/agent-operations` presents the schedules declared by tenant-owned assistant automations and the repository's OpenClaw/local-worker defaults. It does not read protected local environment files, so an environment override can differ from the displayed repository default.
 - `/agent-operations/run-history` merges tenant-scoped run evidence already stored in `AutomationJobRun`, `AssistantAutomationRun`, `GarlandEmailSyncRun`, `TeamshipDailySyncRun`, and `TeamshipBrowserReadJob`.
+- Website Scout is presented with its current repository defaults: deep research Monday/Wednesday at 09:15, evidence check-ins Tuesday/Thursday/Friday at 09:15, approved backlink outreach weekdays at 11:00, and build-notification polling every two minutes in `America/Toronto`.
 - Run history applies the selected date, agent, status, attention, and text search before showing the 15 most recent matching results. **Show 15 more** expands the same result set, up to 150 displayed records.
 - A database-backed Nemo automation whose `nextRunAt` is more than five minutes overdue without a corresponding `lastRunAt` is shown as `MISSED`. Repository-declared local schedules do not fabricate missed records because local environment overrides and machine health are not available to the web application.
 - Failure and skip explanations are redacted and truncated before display. Raw job input/output, customer data, credentials, tokens, email addresses, and source URLs are not rendered by Agent Operations.

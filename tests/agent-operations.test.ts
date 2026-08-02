@@ -18,7 +18,7 @@ import {
   normalizeRunHistoryFilters,
   sanitizeOperationalText
 } from "@/modules/agent-operations/presentation";
-import { getAgentRunHistory } from "@/modules/agent-operations/queries";
+import { getAgentOperationsDashboard, getAgentRunHistory } from "@/modules/agent-operations/queries";
 
 const tenant = {
   tenantId: "tenant-1",
@@ -152,6 +152,32 @@ describe("agent operations", () => {
     ]) {
       expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-1" }) }));
     }
+  });
+
+  it("shows the current Website Scout research, outreach, and notification schedules", async () => {
+    const dashboard = await getAgentOperationsDashboard(
+      tenant,
+      new Date("2026-08-02T18:30:00.000Z")
+    );
+
+    expect(
+      dashboard.schedules
+        .filter((schedule) => schedule.agentKey === "website-scout")
+        .map((schedule) => ({ assignment: schedule.assignment, cadence: schedule.cadence }))
+    ).toEqual([
+      {
+        assignment: "Check website-build notifications",
+        cadence: "Every 2 minutes"
+      },
+      {
+        assignment: "Refresh website growth evidence",
+        cadence: "Mon/Wed deep research · Tue/Thu/Fri evidence check-in at 09:15"
+      },
+      {
+        assignment: "Process approved backlink outreach",
+        cadence: "Weekdays at 11:00"
+      }
+    ]);
   });
 
   it("redacts common secret and identity patterns from operational text", () => {

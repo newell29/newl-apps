@@ -7,3 +7,5 @@ Agent Operations is the read-only control surface at `/agent-operations` and `/a
 The module reuses the existing `ASSISTANT` entitlement and introduces no schema migration. It does not start, retry, cancel, approve, print, ship, post, communicate, merge, or deploy anything.
 
 The dashboard refreshes every 15 seconds while the browser tab is visible. The server remains the source of truth; no secret, raw payload, or live customer field is sent to the page.
+
+Website Scout's repository defaults distinguish Monday/Wednesday deep research, Tuesday/Thursday/Friday evidence check-ins, weekday approved-backlink processing, and the two-minute build-notification poll. Protected runtime overrides remain outside this read-only view.
