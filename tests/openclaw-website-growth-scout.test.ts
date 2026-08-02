@@ -457,6 +457,43 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     expect(discovery).toContain('limits.get("finalists") or 15');
   });
 
+  it("batches local Qwen review and retries one invalid batch without repeating search", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append(len(rows))
+    if len(calls) == 1:
+        raise RuntimeError("synthetic truncated JSON")
+    return [
+        {
+            "id": row["id"],
+            "disposition": "REJECT",
+            "category": None,
+            "confidence": 90,
+            "reason": "synthetic"
+        }
+        for row in rows
+    ]
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+rows = [{"id": f"candidate-{index}"} for index in range(65)]
+decisions = module["ollama_request"]({}, "synthetic prompt", rows)
+print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+
+    expect(JSON.parse(stdout)).toEqual({
+      calls: [30, 30, 30, 5],
+      decisionCount: 65
+    });
+  });
+
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {
     const [runner, runtimeRunner, helper] = await Promise.all([
       readFile(runnerPath, "utf8"),
