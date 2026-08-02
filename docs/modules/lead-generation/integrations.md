@@ -16,6 +16,18 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Confirmed Apollo account employee discovery
 
+Before a company enters manual Apollo review, automatic organization resolution evaluates every organization returned
+by a bounded search rather than trusting the first row. It starts with the saved company domain, may use a first-party
+domain or U.S. division name already verified by Hunter research, and falls back to at most two deterministic company
+name queries when a domain result is not a direct identity match. TradeMining facility labels, parenthetical operating
+names, possessives, and concatenated legal suffixes are normalized into auditable aliases. A direct-company result is
+accepted only when it is the unique high-confidence candidate; tied direct candidates remain in manual review.
+Identity resolution and prospect eligibility remain separate: a company is not treated as a logistics provider merely
+because its exact legal name contains words such as `distribution`. The immutable Apollo match query stores the search
+strategies, bounded candidate ledger, confidence band, and score margin so automatic-match and manual-review rates can
+be measured without a schema change. Apollo Exceptions reports the latest resolver outcome per company over a rolling
+seven-day window and excludes legacy matcher records from that coverage rate.
+
 When a reviewer maps a saved Apollo account URL, Newl Apps preserves both the account ID and Apollo's canonical
 organization ID in the match history. Employee discovery first uses Apollo's documented organization-ID People Search
 filter. A successfully resolved saved account already supplies that canonical identity, so Hunter skips the

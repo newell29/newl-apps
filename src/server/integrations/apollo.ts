@@ -309,6 +309,12 @@ type ApolloOrganizationCandidate = {
   rawPayload: Record<string, unknown>;
 };
 
+type ApolloVerifiedIdentityHints = {
+  aliases: string[];
+  domains: string[];
+  logisticsProvider: boolean | null;
+};
+
 export type ApolloCompanyLookupMatch = {
   organizationId: string | null;
   companyName: string | null;
@@ -2295,31 +2301,23 @@ function buildApolloHeaders(apiKey: string) {
 }
 
 async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: string): Promise<ApolloOrganizationCandidate | null> {
-  const normalizedDomain = normalizeDomain(input.domain);
-  const searchBodies = normalizedDomain
-    ? [
-        {
-          page: 1,
-          per_page: 10,
-          q_organization_domains_list: [normalizedDomain]
-        }
-      ]
-    : buildApolloOrganizationSearchQueries(input.companyName).map((searchCompanyName) => ({
-        page: 1,
-        per_page: 10,
-        q_organization_name: searchCompanyName
-      }));
+  const identityHints = readApolloVerifiedIdentityHints(input);
+  const searchBodies = buildApolloOrganizationSearchBodies(input, identityHints);
   const scoredCandidates: ApolloOrganizationCandidate[] = [];
+  const completedSearches: Record<string, unknown>[] = [];
 
   for (const body of searchBodies) {
     const json = await postApolloJson("/api/v1/mixed_companies/search", apiKey, body);
     const candidates = parseApolloOrganizations(json);
+    completedSearches.push(body);
 
     scoredCandidates.push(
-      ...candidates.map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain, body))
+      ...candidates.map((candidate) =>
+        scoreApolloOrganizationCandidateAgainstIdentity(candidate, input, identityHints, body)
+      )
     );
 
-    if (scoredCandidates.some((candidate) => candidate.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY)) {
+    if (hasUniqueHighConfidenceApolloCandidate(scoredCandidates)) {
       break;
     }
   }
@@ -2328,7 +2326,263 @@ async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: s
     return null;
   }
 
-  return scoredCandidates.sort((left, right) => right.score - left.score)[0] ?? null;
+  return selectResolvedApolloOrganizationCandidate({
+    candidates: scoredCandidates,
+    completedSearches,
+    identityHints
+  });
+}
+
+function buildApolloOrganizationSearchBodies(
+  input: ApolloCompanyLookupInput,
+  identityHints: ApolloVerifiedIdentityHints
+) {
+  const bodies: Record<string, unknown>[] = [];
+  const domains = [normalizeDomain(input.domain), ...identityHints.domains]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, 2);
+
+  for (const domain of domains) {
+    bodies.push({
+      page: 1,
+      per_page: 10,
+      q_organization_domains_list: [domain]
+    });
+  }
+
+  const nameQueries = [input.companyName, ...identityHints.aliases]
+    .flatMap((value) => buildApolloOrganizationSearchQueries(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const maximumSearches = domains.length > 0 ? 3 : 2;
+  for (const companyName of nameQueries) {
+    if (bodies.length >= maximumSearches) break;
+    bodies.push({
+      page: 1,
+      per_page: 10,
+      q_organization_name: companyName
+    });
+  }
+
+  return bodies;
+}
+
+function readApolloVerifiedIdentityHints(
+  input: ApolloCompanyLookupInput
+): ApolloVerifiedIdentityHints {
+  const aliases = new Set<string>();
+  const domains = new Set<string>();
+  let logisticsProvider: boolean | null = null;
+
+  const context = input.verifiedIdentityContext?.trim();
+  if (!context?.startsWith("{")) {
+    return { aliases: [], domains: [], logisticsProvider };
+  }
+
+  try {
+    const root = asRecord(JSON.parse(context));
+    const researchEvidence = asRecord(root?.researchEvidence);
+    const research = asRecord(researchEvidence?.research) ?? researchEvidence;
+    const synthesis = asRecord(research?.synthesis);
+    const divisionName = readApolloString(synthesis ?? {}, ["usDivisionName"]);
+    if (divisionName) aliases.add(divisionName);
+    if (typeof synthesis?.logisticsProvider === "boolean") {
+      logisticsProvider = synthesis.logisticsProvider;
+    }
+
+    for (const item of Array.isArray(research?.evidence) ? research.evidence : []) {
+      const evidence = asRecord(item);
+      if (!evidence || evidence.firstParty !== true) continue;
+      const sourceType = readApolloString(evidence, ["sourceType"]);
+      if (sourceType && sourceType !== "FIRST_PARTY" && sourceType !== "CAREERS") continue;
+      const sourceDomain = normalizeIdentityEvidenceDomain(
+        readApolloString(evidence, ["sourceDomain"])
+      );
+      if (sourceDomain) domains.add(sourceDomain);
+      const evidenceUrl = readApolloString(evidence, ["url"]);
+      if (evidenceUrl) {
+        try {
+          const urlDomain = normalizeIdentityEvidenceDomain(new URL(evidenceUrl).hostname);
+          if (urlDomain) domains.add(urlDomain);
+        } catch {
+          // Invalid evidence URLs are already rejected by company-research validation.
+        }
+      }
+    }
+  } catch {
+    return { aliases: [], domains: [], logisticsProvider: null };
+  }
+
+  return {
+    aliases: [...aliases].slice(0, 3),
+    domains: [...domains].slice(0, 3),
+    logisticsProvider
+  };
+}
+
+function normalizeIdentityEvidenceDomain(value: string | null | undefined) {
+  const domain = normalizeDomain(value);
+  if (!domain) return null;
+  const normalized = domain.replace(/^(?:about|careers|corporate|investors|jobs)\./u, "");
+  return APOLLO_SHARED_IDENTITY_DOMAINS.some(
+    (sharedDomain) =>
+      normalized === sharedDomain || normalized.endsWith(`.${sharedDomain}`)
+  )
+    ? null
+    : normalized;
+}
+
+function scoreApolloOrganizationCandidateAgainstIdentity(
+  candidate: {
+    id: string | null;
+    name: string | null;
+    domain: string | null;
+    linkedinUrl: string | null;
+    rawPayload: Record<string, unknown>;
+  },
+  input: ApolloCompanyLookupInput,
+  identityHints: ApolloVerifiedIdentityHints,
+  query: Record<string, unknown>
+) {
+  const aliases = [input.companyName, ...identityHints.aliases]
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const domains = [normalizeDomain(input.domain), ...identityHints.domains]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const domainCandidates: Array<string | null> = domains.length > 0 ? domains : [null];
+  let best: ApolloOrganizationCandidate | null = null;
+
+  for (const alias of aliases) {
+    for (const domain of domainCandidates) {
+      const scored = scoreApolloOrganizationCandidate(
+        candidate,
+        alias,
+        domain,
+        {
+          ...query,
+          matched_identity_alias: alias,
+          matched_identity_domain: domain
+        },
+        identityHints.logisticsProvider
+      );
+      if (!best || scored.score > best.score) best = scored;
+    }
+  }
+
+  return best ?? scoreApolloOrganizationCandidate(
+    candidate,
+    input.companyName,
+    normalizeDomain(input.domain),
+    query,
+    identityHints.logisticsProvider
+  );
+}
+
+function hasUniqueHighConfidenceApolloCandidate(candidates: ApolloOrganizationCandidate[]) {
+  const ranked = dedupeAndRankApolloOrganizationCandidates(candidates);
+  const best = ranked[0];
+  const runnerUp = ranked[1];
+  return Boolean(
+    best?.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    (
+      !runnerUp ||
+      runnerUp.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY ||
+      best.score - runnerUp.score >= 4
+    )
+  );
+}
+
+function selectResolvedApolloOrganizationCandidate({
+  candidates,
+  completedSearches,
+  identityHints
+}: {
+  candidates: ApolloOrganizationCandidate[];
+  completedSearches: Record<string, unknown>[];
+  identityHints: ApolloVerifiedIdentityHints;
+}) {
+  const ranked = dedupeAndRankApolloOrganizationCandidates(candidates);
+  const best = ranked[0] ?? null;
+  if (!best) return null;
+  const runnerUp = ranked[1] ?? null;
+  const ambiguousDirectMatch = Boolean(
+    best.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    runnerUp?.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    best.score - runnerUp.score < 4
+  );
+  const classification = ambiguousDirectMatch
+    ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+    : best.classification;
+  const confidenceBand = classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+    ? "AUTO_MATCH"
+    : classification === ApolloCompanyMatchClassification.NO_MATCH ||
+        classification === ApolloCompanyMatchClassification.LOGISTICS_PROVIDER
+      ? "REJECT"
+      : "MANUAL_REVIEW";
+  const candidateLedger = ranked.slice(0, 10).map((candidate) => ({
+    organizationId: candidate.id,
+    companyName: candidate.name,
+    domain: candidate.domain,
+    score: candidate.score,
+    classification: candidate.classification,
+    nameMatchType: candidate.nameMatchType,
+    domainMatch: candidate.domainMatch,
+    strongBaseNameMatch: candidate.strongBaseNameMatch
+  }));
+
+  return {
+    ...best,
+    classification,
+    matchReason: ambiguousDirectMatch
+      ? `${best.matchReason}; manual review required because another direct Apollo candidate was within three points`
+      : best.matchReason,
+    query: {
+      ...best.query,
+      identity_resolver: {
+        version: 1,
+        confidence_band: confidenceBand,
+        candidate_count: ranked.length,
+        score_margin:
+          runnerUp?.classification === best.classification
+            ? best.score - runnerUp.score
+            : null,
+        searches_completed: completedSearches,
+        verified_alias_count: identityHints.aliases.length,
+        verified_domain_count: identityHints.domains.length,
+        candidates: candidateLedger
+      }
+    }
+  } satisfies ApolloOrganizationCandidate;
+}
+
+function dedupeAndRankApolloOrganizationCandidates(candidates: ApolloOrganizationCandidate[]) {
+  const deduped = new Map<string, ApolloOrganizationCandidate>();
+  for (const candidate of candidates) {
+    const key = candidate.id ?? [candidate.name?.toLowerCase() ?? "", candidate.domain ?? ""].join("|");
+    const existing = deduped.get(key);
+    if (!existing || candidate.score > existing.score) deduped.set(key, candidate);
+  }
+  return [...deduped.values()].sort((left, right) =>
+    apolloMatchClassificationRank(right.classification) -
+      apolloMatchClassificationRank(left.classification) ||
+    right.score - left.score ||
+    (left.name ?? "").localeCompare(right.name ?? "")
+  );
+}
+
+function apolloMatchClassificationRank(
+  classification: ApolloCompanyMatchClassification
+) {
+  switch (classification) {
+    case ApolloCompanyMatchClassification.DIRECT_COMPANY:
+      return 4;
+    case ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW:
+      return 3;
+    case ApolloCompanyMatchClassification.LOGISTICS_PROVIDER:
+      return 2;
+    case ApolloCompanyMatchClassification.NO_MATCH:
+      return 1;
+  }
 }
 
 async function findApolloSavedAccountOrganization(
@@ -4280,7 +4534,8 @@ function scoreApolloOrganizationCandidate(
   },
   companyName: string,
   normalizedDomain: string | null,
-  query: Record<string, unknown>
+  query: Record<string, unknown>,
+  verifiedLogisticsProvider: boolean | null = null
 ): ApolloOrganizationCandidate {
   let score = 0;
   let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
@@ -4299,7 +4554,6 @@ function scoreApolloOrganizationCandidate(
     "apollo_organization_id"
   ]);
   const tokenSimilarity = calculateBestTokenSimilarity(inputAliases, candidateAliases);
-  const logisticsProviderMatch = isLogisticsProviderName(candidate.name ?? "") || isLogisticsProviderName(companyName);
   const accountBackedCanonicalMatch = Boolean(
     nestedOrganizationId &&
     candidate.id === nestedOrganizationId &&
@@ -4310,13 +4564,20 @@ function scoreApolloOrganizationCandidate(
     hasStrongBaseNameMatch(inputAliases, candidateAliases) ||
     hasSafeRegionalBrandAlias(inputAliases, candidateAliases) ||
     accountBackedCanonicalMatch;
+  const domainMatch = Boolean(normalizedDomain && candidate.domain === normalizedDomain);
+  const identityMatch =
+    domainMatch ||
+    hasExactAliasMatch(inputAliases, candidateAliases) ||
+    strongBaseNameMatch;
+  const logisticsProviderMatch =
+    verifiedLogisticsProvider === true ||
+    (isLogisticsProviderName(candidate.name ?? "") && !identityMatch);
   const branchLocationMatch = isBranchLocationMatch(candidate.name ?? "", companyName) && !strongBaseNameMatch;
 
   if (candidate.id) {
     score += 4;
   }
 
-  const domainMatch = Boolean(normalizedDomain && candidate.domain === normalizedDomain);
   if (domainMatch) {
     score += 10;
   }
@@ -5215,6 +5476,8 @@ function normalizeDomain(value: string | null | undefined) {
 
 export function normalizeCompanyName(value: string) {
   return value
+    .replace(/[’']s\b/giu, "s")
+    .replace(/\b(INC|LLC|LTD|CORP|Inc|Llc|Ltd|Corp)(?=[A-Z])/gu, "$1 ")
     .toLowerCase()
     .replace(/\b(incorporated|inc|llc|ltd|limited|corp|corporation|co|company|sa|s\.a|plc|gmbh)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
@@ -5252,7 +5515,27 @@ function buildCompanyNameAliases(value: string) {
     aliases.add(simplified);
   }
 
+  for (const segment of buildCompanyIdentitySegments(value)) {
+    const normalizedSegment = normalizeCompanyName(segment);
+    if (normalizedSegment) aliases.add(normalizedSegment);
+  }
+
   return [...aliases];
+}
+
+function buildCompanyIdentitySegments(value: string) {
+  const segments = new Set<string>();
+  const prefix = value.split(/[(:|]/u)[0]?.trim();
+  if (prefix && prefix.length >= 4) segments.add(prefix);
+  for (const match of value.matchAll(/\(([^)]+)\)/gu)) {
+    const segment = match[1]?.trim();
+    if (segment && segment.length >= 4) segments.add(segment);
+  }
+  const firstCommaSegment = value.split(",")[0]?.trim();
+  if (firstCommaSegment && firstCommaSegment.length >= 4) {
+    segments.add(firstCommaSegment);
+  }
+  return [...segments].slice(0, 3);
 }
 
 function buildApolloOrganizationSearchQueries(value: string) {
@@ -5323,7 +5606,23 @@ function hasStrongBaseNameMatch(leftAliases: string[], rightAliases: string[]) {
   return (
     hasExactAliasMatch(leftAliases, rightAliases) ||
     hasContainedLeadingTokenMatch(leftAliases, rightAliases) ||
+    hasSharedDistinctiveBrandPrefix(leftAliases, rightAliases) ||
     calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85
+  );
+}
+
+function hasSharedDistinctiveBrandPrefix(leftAliases: string[], rightAliases: string[]) {
+  return leftAliases.some((leftAlias) =>
+    rightAliases.some((rightAlias) => {
+      const leftTokens = tokenizeCompanyName(leftAlias);
+      const rightTokens = tokenizeCompanyName(rightAlias);
+      if (leftTokens.length < 2 || rightTokens.length < 2) return false;
+      return (
+        leftTokens[0] === rightTokens[0] &&
+        leftTokens[1] === rightTokens[1] &&
+        (leftTokens[0]?.length ?? 0) >= 4
+      );
+    })
   );
 }
 
@@ -5534,6 +5833,18 @@ const APOLLO_REGIONAL_IDENTITY_TOKENS = new Set([
   "united",
   "states"
 ]);
+
+const APOLLO_SHARED_IDENTITY_DOMAINS = [
+  "apollo.io",
+  "facebook.com",
+  "glassdoor.com",
+  "greenhouse.io",
+  "indeed.com",
+  "lever.co",
+  "linkedin.com",
+  "myworkdayjobs.com",
+  "youtube.com"
+];
 
 const LOGISTICS_PROVIDER_PATTERN =
   /\b(3pl|broker|carrier|customs|distribution|drayage|forwarder|freight|fulfillment|logistic|logistics|shipping|steamship|transport|trucking|warehouse|warehousing)\b/i;

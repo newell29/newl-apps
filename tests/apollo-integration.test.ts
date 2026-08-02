@@ -1221,6 +1221,247 @@ describe("fetchApolloContactsForCompany", () => {
     expect(requestBody).not.toHaveProperty("company_match_name");
   });
 
+  it("falls back from a stale company domain to a unique high-confidence name match", async () => {
+    const organizationBodies: Record<string, unknown>[] = [];
+    vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : {};
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        organizationBodies.push(body);
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: body.q_organization_name
+              ? [{
+                  id: "apollo-org-roechling",
+                  name: "Roechling Industrial North America",
+                  primary_domain: "roechling.com"
+                }]
+              : [{
+                  id: "apollo-org-unrelated",
+                  name: "Unrelated Gastonia Manufacturer",
+                  primary_domain: "stale.example"
+                }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in identity fallback test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "ROECHLING INDUSTRIAL GASTONIA",
+        domain: "stale.example"
+      },
+      { keywordSearchLimit: 0 }
+    );
+
+    expect(result.match).toMatchObject({
+      organizationId: "apollo-org-roechling",
+      classification: "DIRECT_COMPANY",
+      strongBaseNameMatch: true,
+      query: {
+        identity_resolver: expect.objectContaining({
+          version: 1,
+          confidence_band: "AUTO_MATCH",
+          candidate_count: 2
+        })
+      }
+    });
+    expect(organizationBodies).toEqual([
+      expect.objectContaining({ q_organization_domains_list: ["stale.example"] }),
+      expect.objectContaining({ q_organization_name: "ROECHLING INDUSTRIAL GASTONIA" })
+    ]);
+  });
+
+  it("uses vetted first-party research domains and does not mistake an exact distributor identity for a logistics provider", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-kimbrells",
+              name: "Kimbrell's Home Furnishings (Furniture Distributors, Inc.)",
+              primary_domain: "kimbrells.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in research identity test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      {
+        companyName: "KIMBRELLS FURNITURE DISTRIBUTORS",
+        verifiedIdentityContext: JSON.stringify({
+          version: 1,
+          researchEvidence: {
+            research: {
+              synthesis: { logisticsProvider: false },
+              evidence: [{
+                firstParty: true,
+                sourceType: "FIRST_PARTY",
+                sourceDomain: "careers.kimbrells.com",
+                url: "https://careers.kimbrells.com/jobs"
+              }]
+            }
+          }
+        })
+      },
+      { keywordSearchLimit: 0 }
+    );
+
+    expect(result.match).toMatchObject({
+      organizationId: "apollo-org-kimbrells",
+      classification: "DIRECT_COMPANY",
+      domainMatch: true,
+      logisticsProviderMatch: false,
+      query: {
+        identity_resolver: expect.objectContaining({
+          confidence_band: "AUTO_MATCH",
+          verified_domain_count: 1
+        })
+      }
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      q_organization_domains_list: ["kimbrells.com"]
+    });
+  });
+
+  it("recovers a unique Apollo brand from a concatenated TradeMining facility label", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-celgard",
+              name: "Celgard",
+              primary_domain: "celgard.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in TradeMining alias test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      { companyName: "CELGARD, LLCCELGARD LAKEMONT,LAKEMO" },
+      { keywordSearchLimit: 0 }
+    );
+
+    expect(result.match).toMatchObject({
+      organizationId: "apollo-org-celgard",
+      classification: "DIRECT_COMPANY",
+      nameMatchType: "EXACT",
+      query: {
+        identity_resolver: expect.objectContaining({
+          confidence_band: "AUTO_MATCH"
+        })
+      }
+    });
+  });
+
+  it("keeps tied direct Apollo organizations in manual review with a candidate ledger", async () => {
+    vi.spyOn(global, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/mixed_companies/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [
+              { id: "apollo-org-one", name: "Shared Brand USA", primary_domain: "one.example" },
+              { id: "apollo-org-two", name: "Shared Brand USA", primary_domain: "two.example" }
+            ]
+          })
+        } as unknown as Response;
+      }
+      if (url.endsWith("/api/v1/contacts/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ contacts: [] })
+        } as unknown as Response;
+      }
+      if (url.includes("/api/v1/mixed_people/api_search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ people: [] })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo URL in ambiguous identity test: ${url}`);
+    });
+
+    const result = await fetchApolloContactsForCompany(
+      { companyName: "Shared Brand USA" },
+      { keywordSearchLimit: 0 }
+    );
+
+    expect(result.match).toMatchObject({
+      classification: "MATCH_QUALITY_REVIEW",
+      matchReason: expect.stringContaining("another direct Apollo candidate was within three points"),
+      query: {
+        identity_resolver: expect.objectContaining({
+          confidence_band: "MANUAL_REVIEW",
+          candidate_count: 2,
+          score_margin: 0
+        })
+      }
+    });
+  });
+
   it("parses current sequence history from Apollo contact campaign statuses", async () => {
     vi.spyOn(global, "fetch")
       .mockResolvedValueOnce({
@@ -3931,10 +4172,6 @@ describe("fetchApolloContactsForCompany", () => {
   });
 
   it.each([
-    {
-      companyName: "ROECHLING INDUSTRIAL GASTONIA",
-      apolloName: "Roechling Industrial North America"
-    },
     {
       companyName: "KIMBRELLS FURNITURE DISTRIBUTORS",
       apolloName: "Kimbrell's Home Furnishings (Furniture Distributors, Inc.)"
