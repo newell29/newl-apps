@@ -84,7 +84,7 @@ if ! openclaw agents list --json | grep -Eq '"id"[[:space:]]*:[[:space:]]*"scout
   openclaw agents add scout \
     --workspace "${scout_workspace}" \
     --agent-dir "${scout_agent_directory}" \
-    --model "openai/gpt-5.6-sol" \
+    --model "openai/gpt-5.4-mini" \
     --non-interactive
 fi
 
@@ -121,10 +121,14 @@ if [[ -z "${scout_agent_index}" ]]; then
   echo "The Scout agent could not be located for tool-policy enforcement." >&2
   exit 1
 fi
+openclaw config set \
+  "agents.list[${scout_agent_index}].model" \
+  '"openai/gpt-5.4-mini"' \
+  --strict-json
 scout_tools_policy="$(node -e '
 console.log(JSON.stringify({
   profile: "minimal",
-  allow: [
+  alsoAllow: [
     "browser",
     "newl_backlink_business_profile",
     "newl_backlink_sync_replies",

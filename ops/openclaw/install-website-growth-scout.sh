@@ -48,13 +48,14 @@ git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
 git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
 
 runtime_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-scout-runtime.sh"
+build_notification_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-build-notifications.sh"
 
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
   --display-name "NEWL Website Growth Scout" \
-  --description "Every Monday, run bounded Brave backlink discovery, local Qwen triage, and read-only Codex final review; send the approval/report package to Teams." \
+  --description "Every Monday and Wednesday, run bounded Brave backlink discovery, local Qwen triage, and read-only Codex final review; send the approval/report package to Teams." \
   --declaration-key "newl.website-growth.scout.weekly.v1" \
-  --cron "15 9 * * 1" \
+  --cron "15 9 * * 1,3" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\"]" \
@@ -68,9 +69,9 @@ openclaw cron add \
 openclaw cron add \
   --name "NEWL Website Growth Scout check-in" \
   --display-name "NEWL Website Growth Scout check-in" \
-  --description "Tuesday through Friday, refresh Search Console, GA4, forms, and queue state; reuse the stored SEMrush cache; send a Teams check-in without Codex or SEMrush API calls." \
+  --description "Tuesday, Thursday, and Friday, refresh Search Console, GA4, forms, and queue state; reuse the stored SEMrush cache; send a Teams check-in without Codex or SEMrush API calls." \
   --declaration-key "newl.website-growth.scout.weekday-checkin.v1" \
-  --cron "15 9 * * 2-5" \
+  --cron "15 9 * * 2,4-5" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\",\"--light\"]" \
@@ -81,5 +82,18 @@ openclaw cron add \
   --output-max-bytes 100000 \
   --no-deliver
 
-echo "Installed the bounded Website Growth Scout for Mondays and the cache-backed check-in for Tuesday through Friday at 9:15 AM America/Toronto."
+openclaw cron add \
+  --name "NEWL Website Growth build notifications" \
+  --display-name "NEWL Website Growth build notifications" \
+  --description "Deliver deterministic Teams updates when an approved Website Growth build starts, reaches Preview, or fails." \
+  --declaration-key "newl.website-growth.build-notifications.v1" \
+  --every "2m" \
+  --command-argv "[\"/bin/zsh\",\"${build_notification_runner_path}\"]" \
+  --command-cwd "${runtime_repo_path}" \
+  --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
+  --timeout-seconds 90 \
+  --no-deliver
+
+echo "Installed the bounded Website Growth Scout for Mondays and Wednesdays and the cache-backed check-in for Tuesday, Thursday, and Friday at 9:15 AM America/Toronto."
+echo "Installed the deterministic Website Growth build notifier every two minutes."
 echo "Dedicated runtime: ${runtime_repo_path}"
