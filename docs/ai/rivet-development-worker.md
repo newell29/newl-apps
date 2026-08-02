@@ -50,7 +50,7 @@ Downloaded evidence lives only in the worker's ignored `.rivet-evidence` directo
 
 ## Hunter quality-triggered development
 
-The same dedicated Rivet runtime also schedules `ops/openclaw/run-rivet-hunter-quality-audit.sh` daily at 11:30 America/Toronto. It asks Newl Apps for a tenant-scoped five-company stratified sample plus deterministic TradeMining run-health findings. Codex independently researches the public web in read-only mode and returns schema-validated findings.
+The same dedicated Rivet runtime also schedules `ops/openclaw/run-rivet-hunter-quality-audit.sh` daily at 13:30 America/Toronto. It asks Newl Apps for a tenant-scoped five-company stratified sample plus deterministic TradeMining run-health findings. Codex independently researches the public web in read-only mode and returns schema-validated findings.
 
 Only reproducible evidence-retrieval, evidence-handoff, deterministic-rule, or TradeMining code defects can enter the development queue, and only when the application environment contains the exact owner-approved value `HUNTER_RIVET_AUTO_TRIAGE_APPROVAL=OWNER_APPROVED_HUNTER_QUALITY_TRIAGE`. Subjective model judgment, credentials, transient runtime failures, and business configuration are Teams alerts, not automatic code changes.
 

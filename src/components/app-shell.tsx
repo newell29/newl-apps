@@ -28,6 +28,7 @@ type NavNode = NavEntry | NavGroup;
 const navEntries: NavNode[] = [
   { id: "dashboard", href: "/dashboard", label: "Dashboard" },
   { id: "assistant", href: "/assistant", label: "Company Assistant", moduleKey: "ASSISTANT" as ModuleKey },
+  { id: "agent-operations", href: "/agent-operations", label: "Agent Operations", moduleKey: "ASSISTANT" as ModuleKey },
   {
     id: "sales",
     label: "Sales",
