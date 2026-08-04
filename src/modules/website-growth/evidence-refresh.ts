@@ -1,4 +1,5 @@
 import {
+  WebsiteGrowthContentDraftStatus,
   WebsiteGrowthDataSource,
   WebsiteGrowthImportStatus,
   WebsiteGrowthOpportunityStatus,
@@ -16,17 +17,27 @@ import {
   qualifyOpportunityCandidates,
   type OpportunityCandidate
 } from "@/modules/website-growth/opportunities";
+import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { prisma } from "@/server/db";
+import {
+  SEO_RECOVERY_PERIOD_DAYS,
+  buildWebsiteGrowthSearchConsoleComparisonWindows,
+  buildWebsiteGrowthSeoRecoveryOpportunityCandidates,
+  buildWebsiteGrowthSeoRecoverySnapshot,
+  type WebsiteGrowthSeoRecoverySnapshot
+} from "@/modules/website-growth/seo-recovery";
 
 export type WebsiteGrowthEvidenceSourceResult = {
   source: "search_console" | "ga4" | "website_inbound";
   status: "success" | "error";
   rowCount: number;
   message: string;
+  seoRecovery?: WebsiteGrowthSeoRecoverySnapshot;
 };
 
 export async function refreshWebsiteGrowthEvidenceForTenant(tenantId: string) {
   const sources: WebsiteGrowthEvidenceSourceResult[] = [];
+  let seoRecovery: WebsiteGrowthSeoRecoverySnapshot | null = null;
 
   for (const refresh of [
     syncSearchConsoleForTenant,
@@ -34,7 +45,9 @@ export async function refreshWebsiteGrowthEvidenceForTenant(tenantId: string) {
     syncWebsiteInboundForTenant
   ]) {
     try {
-      sources.push(await refresh(tenantId));
+      const result = await refresh(tenantId);
+      sources.push(result);
+      if (result.seoRecovery) seoRecovery = result.seoRecovery;
     } catch (error) {
       sources.push({
         source: sourceForRefresh(refresh),
@@ -47,6 +60,7 @@ export async function refreshWebsiteGrowthEvidenceForTenant(tenantId: string) {
 
   return {
     sources,
+    seoRecovery,
     successfulSourceCount: sources.filter((source) => source.status === "success").length,
     failedSourceCount: sources.filter((source) => source.status === "error").length
   };
@@ -63,14 +77,29 @@ export async function syncSearchConsoleForTenant(
       throw new Error(`Google Search Console is not configured. Missing: ${status.googleSearchConsole.missing.join(", ")}`);
     }
 
-    const endDate = new Date();
-    const startDate = daysBefore(endDate, 28);
-    const rows = await fetchSearchConsoleRows({
-      startDate: formatApiDate(startDate),
-      endDate: formatApiDate(endDate),
-      dimensions: ["query", "page"]
-    });
-    const metricRows = rows.map((row) => ({
+    const windows = buildWebsiteGrowthSearchConsoleComparisonWindows();
+    const websiteContext = await resolveNewlWebsiteContext();
+    const redirects = websiteContext.siteInventory?.redirects ?? [];
+    const [rows, previousRows, currentPageCountryRows, previousPageCountryRows] = await Promise.all([
+      fetchSearchConsoleRows({
+        ...windows.current,
+        dimensions: ["query", "page"]
+      }),
+      fetchSearchConsoleRows({
+        ...windows.previous,
+        dimensions: ["query", "page"]
+      }),
+      fetchSearchConsoleRows({
+        ...windows.current,
+        dimensions: ["page", "country"]
+      }),
+      fetchSearchConsoleRows({
+        ...windows.previous,
+        dimensions: ["page", "country"]
+      })
+    ]);
+    const metricRows = [...rows.map((row) => ({ row, period: windows.current })), ...previousRows.map((row) => ({ row, period: windows.previous }))]
+      .map(({ row, period }) => ({
       tenantId,
       source: WebsiteGrowthDataSource.GOOGLE_SEARCH_CONSOLE_API,
       query: row.keys?.[0] ?? null,
@@ -79,8 +108,8 @@ export async function syncSearchConsoleForTenant(
       impressions: Math.round(row.impressions ?? 0),
       ctr: row.ctr ?? null,
       position: row.position ?? null,
-      dateRangeStart: startDate,
-      dateRangeEnd: endDate,
+      dateRangeStart: new Date(`${period.startDate}T00:00:00.000Z`),
+      dateRangeEnd: new Date(`${period.endDate}T00:00:00.000Z`),
       raw: row
     }));
 
@@ -100,26 +129,184 @@ export async function syncSearchConsoleForTenant(
       })
     ));
     const opportunities = await createMissingWebsiteGrowthOpportunities(tenantId, qualification.qualified);
+    const seoRecovery = buildWebsiteGrowthSeoRecoverySnapshot({
+      currentPageCountryRows,
+      previousPageCountryRows,
+      currentQueryPageRows: rows,
+      previousQueryPageRows: previousRows,
+      redirects,
+      currentPeriod: windows.current,
+      previousPeriod: windows.previous
+    });
+    const recoveryCandidates = await excludeRoutesWithActiveWebsiteWork(
+      tenantId,
+      buildWebsiteGrowthSeoRecoveryOpportunityCandidates(seoRecovery)
+    );
+    const recoveryReconciliation = await reconcileSeoRecoveryOpportunityStatuses(
+      tenantId,
+      recoveryCandidates
+    );
+    const recoveryOpportunities = await createMissingWebsiteGrowthOpportunities(tenantId, recoveryCandidates);
 
     await completeImport(importRecord.id, rows.length, {
-      dateRange: "last_28_days",
+      dateRange: "current_28_days_vs_previous_28_days",
+      currentPeriod: windows.current,
+      previousPeriod: windows.previous,
       rawCandidates: qualification.rawCount,
       clusters: qualification.clusterCount,
       qualifiedOpportunities: qualification.qualified.length,
       skippedClusters: qualification.skippedCount,
       opportunitiesCreated: opportunities.createdCount,
-      existingMatches: opportunities.existingCount
+      existingMatches: opportunities.existingCount,
+      seoRecovery: {
+        counts: seoRecovery.counts,
+        site: seoRecovery.site,
+        candidatesCreated: recoveryOpportunities.createdCount,
+        existingCandidates: recoveryOpportunities.existingCount,
+        reactivatedCandidates: recoveryReconciliation.reactivatedCount,
+        movedToMonitoring: recoveryReconciliation.monitoringCount,
+        suppressedByActiveWork: buildWebsiteGrowthSeoRecoveryOpportunityCandidates(seoRecovery).length - recoveryCandidates.length
+      }
     });
 
     return {
       source: "search_console",
       status: "success",
       rowCount: rows.length,
-      message: `Search Console refreshed ${rows.length} query/page rows.`
+      message: `Search Console compared ${rows.length} current and ${previousRows.length} previous query/page rows.`,
+      seoRecovery
     };
   } catch (error) {
     await failImport(importRecord.id, error, "Unknown Search Console sync error");
     throw error;
+  }
+}
+
+async function reconcileSeoRecoveryOpportunityStatuses(
+  tenantId: string,
+  actionableCandidates: OpportunityCandidate[]
+) {
+  const actionableRoutes = new Set(
+    actionableCandidates
+      .map((candidate) => normalizeWebsiteRoute(candidate.targetPage))
+      .filter((route): route is string => Boolean(route))
+  );
+  const existing = await prisma.websiteGrowthOpportunity.findMany({
+    where: {
+      tenantId,
+      status: {
+        in: [
+          WebsiteGrowthOpportunityStatus.NEW,
+          WebsiteGrowthOpportunityStatus.REVIEWING,
+          WebsiteGrowthOpportunityStatus.MONITORING
+        ]
+      }
+    },
+    select: { id: true, status: true, targetPage: true, evidence: true },
+    take: 500
+  });
+  let reactivatedCount = 0;
+  let monitoringCount = 0;
+
+  for (const opportunity of existing) {
+    if (!isSeoRecoveryEvidence(opportunity.evidence)) continue;
+    const route = normalizeWebsiteRoute(opportunity.targetPage);
+    const nextStatus = resolveSeoRecoveryOpportunityStatus({
+      currentStatus: opportunity.status,
+      actionable: Boolean(route && actionableRoutes.has(route))
+    });
+    if (!nextStatus) continue;
+    await prisma.websiteGrowthOpportunity.updateMany({
+      where: { id: opportunity.id, tenantId },
+      data: { status: nextStatus }
+    });
+    if (nextStatus === WebsiteGrowthOpportunityStatus.NEW) reactivatedCount += 1;
+    else monitoringCount += 1;
+  }
+
+  return { reactivatedCount, monitoringCount };
+}
+
+export function resolveSeoRecoveryOpportunityStatus({
+  currentStatus,
+  actionable
+}: {
+  currentStatus: WebsiteGrowthOpportunityStatus;
+  actionable: boolean;
+}) {
+  if (actionable && currentStatus === WebsiteGrowthOpportunityStatus.MONITORING) {
+    return WebsiteGrowthOpportunityStatus.NEW;
+  }
+  if (!actionable && (
+    currentStatus === WebsiteGrowthOpportunityStatus.NEW ||
+    currentStatus === WebsiteGrowthOpportunityStatus.REVIEWING
+  )) {
+    return WebsiteGrowthOpportunityStatus.MONITORING;
+  }
+  return null;
+}
+
+function isSeoRecoveryEvidence(value: unknown) {
+  return readRecord(value).seoRecovery === true;
+}
+
+async function excludeRoutesWithActiveWebsiteWork(
+  tenantId: string,
+  candidates: OpportunityCandidate[]
+) {
+  if (candidates.length === 0) return candidates;
+  const recentPublishedAt = daysBefore(new Date(), SEO_RECOVERY_PERIOD_DAYS * 2);
+  const drafts = await prisma.websiteGrowthContentDraft.findMany({
+    where: {
+      tenantId,
+      OR: [
+        {
+          status: {
+            in: [
+              WebsiteGrowthContentDraftStatus.DRAFT,
+              WebsiteGrowthContentDraftStatus.APPROVED,
+              WebsiteGrowthContentDraftStatus.BUILT
+            ]
+          }
+        },
+        {
+          status: WebsiteGrowthContentDraftStatus.PUBLISHED,
+          publishedAt: { gte: recentPublishedAt }
+        }
+      ]
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 300,
+    select: {
+      proposedPath: true,
+      targetPage: true,
+      opportunity: {
+        select: { targetPage: true, sourcePage: true }
+      }
+    }
+  });
+  const activeRoutes = new Set(
+    drafts.flatMap((draft) => [
+      draft.proposedPath,
+      draft.targetPage,
+      draft.opportunity.targetPage,
+      draft.opportunity.sourcePage
+    ]).map(normalizeWebsiteRoute).filter((route): route is string => Boolean(route))
+  );
+
+  return candidates.filter((candidate) => {
+    const route = normalizeWebsiteRoute(candidate.targetPage);
+    return !route || !activeRoutes.has(route);
+  });
+}
+
+function normalizeWebsiteRoute(value: string | null | undefined) {
+  if (!value?.trim()) return null;
+  try {
+    return new URL(value).pathname.toLowerCase().replace(/\/+$/g, "") || "/";
+  } catch {
+    const path = value.replace(/^https?:\/\/[^/]+/i, "").split(/[?#]/)[0] ?? value;
+    return (path.startsWith("/") ? path : `/${path}`).toLowerCase().replace(/\/+$/g, "") || "/";
   }
 }
 

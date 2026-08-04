@@ -4,6 +4,8 @@
 
 Scout is a dedicated website-research and brief-preparation worker. It is separate from Hunter. Hunter collects lead-discovery evidence; Scout evaluates website growth ideas using Search Console, GA4, sanitized first-party form counts, the current website repository, and the official SEMrush MCP server. Monday and Wednesday deep runs include a reserved customer-question and AI-answer lane; Tuesday, Thursday, and Friday use deterministic first-party check-ins without Codex or live SEMrush calls.
 
+Monday and Wednesday deep runs also reserve up to two positions for deterministic SEO migration-recovery candidates. Newl Apps compares the latest complete 28-day Search Console period with the preceding non-overlapping 28 days, applies a two-day reporting lag, combines legacy URLs with their configured destinations, and suppresses routes with active or recently published website work.
+
 ## Scheduled flow
 
 1. Call `POST /api/website-growth/scout/prepare` with the dedicated Scout bearer token.
@@ -25,6 +27,14 @@ The repository runner `ops/openclaw/run-website-growth-scout.sh` implements this
 - Use visible FAQs only when they help visitors; never add unsupported or hidden structured data.
 - Recommend a dedicated guide only for a substantial, distinct intent that cannot be covered well on an existing page.
 - Reject thin question pages, duplicate intent, keyword-swapped pages, and guarantees of AI citations, AI Overviews, rankings, leads, or referrals.
+
+## SEO migration-recovery lane
+
+- Review candidates marked `seoRecovery` before ordinary content ideas.
+- Evaluate combined legacy and destination performance rather than treating a redirecting URL as an independent page.
+- Inspect redirect handling, canonical metadata, sitemap inclusion, internal links, retained useful content, and commercial query intent.
+- Prioritize qualified clicks, relevant Canada/United States visibility, engagement, and leads over raw impressions.
+- Do not recreate thin legacy pages and do not duplicate approved, building, preview-ready, or recently published work.
 
 ## Boundaries
 

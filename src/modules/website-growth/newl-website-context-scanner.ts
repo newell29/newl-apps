@@ -17,6 +17,8 @@ const PAGE_DATA_FILES = [
   { file: "lib/pages/locations.ts", type: "Location page", routePrefix: "/locations" }
 ];
 
+const REDIRECT_FILES = ["next.config.ts", "next.config.js", "next.config.mjs"];
+
 const KNOWN_COMPONENTS = [
   "PageLayout",
   "ServicePageHero",
@@ -54,7 +56,7 @@ export async function resolveNewlWebsiteContext(): Promise<NewlWebsiteContext> {
 
 export async function scanNewlWebsiteRepo(repoPath: string): Promise<NewlWebsiteContext> {
   const files = await Promise.all(
-    [...TEMPLATE_FILES, ...PAGE_DATA_FILES.map((entry) => entry.file)].map(async (file) => ({
+    [...TEMPLATE_FILES, ...PAGE_DATA_FILES.map((entry) => entry.file), ...REDIRECT_FILES].map(async (file) => ({
       file,
       text: await readOptionalFile(path.join(repoPath, file))
     }))
@@ -75,6 +77,7 @@ export async function scanNewlWebsiteRepo(repoPath: string): Promise<NewlWebsite
     file: entry.file,
     count: countFaqSignals(fileMap.get(entry.file) ?? "")
   })).filter((entry) => entry.count > 0);
+  const redirects = REDIRECT_FILES.flatMap((file) => extractRedirects(fileMap.get(file) ?? ""));
 
   return {
     ...newlWebsiteContext,
@@ -98,7 +101,8 @@ export async function scanNewlWebsiteRepo(repoPath: string): Promise<NewlWebsite
       templates,
       contactFormFields,
       faqSignals,
-      internalLinks
+      internalLinks,
+      redirects: uniqueRedirects(redirects).slice(0, 300)
     }
   };
 }
@@ -157,6 +161,12 @@ function countFaqSignals(text: string) {
   return (text.match(/\bq:\s*["'`]/g) ?? []).length + (text.match(/\bquestion:\s*["'`]/g) ?? []).length;
 }
 
+export function extractRedirects(text: string) {
+  return [...text.matchAll(/redirect\(\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*\)/g)]
+    .map((match) => ({ source: match[1], destination: match[2] }))
+    .filter((entry) => entry.source && entry.destination);
+}
+
 function unique(values: string[]) {
   return [...new Set(values)];
 }
@@ -168,6 +178,16 @@ function uniqueRoutes(routes: Array<{ path: string; type: string }>) {
     if (seen.has(key)) {
       return false;
     }
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueRedirects(redirects: Array<{ source: string; destination: string }>) {
+  const seen = new Set<string>();
+  return redirects.filter((redirect) => {
+    const key = `${redirect.source}:${redirect.destination}`;
+    if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
