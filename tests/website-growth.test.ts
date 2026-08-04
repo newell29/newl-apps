@@ -676,14 +676,33 @@ describe("website growth Codex Scout completion", () => {
         observedAt: "2026-07-20T13:15:00.000Z",
         expiresAt: "2026-07-28T13:15:00.000Z",
         ageDays: 4,
-        tracking: semrushTrackingSnapshot()
+        tracking: semrushTrackingSnapshot(),
+        reports: [{
+          reportType: "POSITION_TRACKING",
+          subject: "Scout - Weekly Newl Position Tracking",
+          observedAt: "2026-07-20T13:15:00.000Z",
+          metrics: { visibility: 8.2 },
+          excerpt: "Position Tracking visibility 8.2%."
+        }]
+      },
+      semrushMailSync: {
+        status: "SUCCESS",
+        messagesSeen: 1,
+        eligibleMessages: 1,
+        attachmentsSeen: 1,
+        imported: 1,
+        duplicates: 0,
+        skipped: 0,
+        failed: 0,
+        latestObservedAt: "2026-07-20T13:15:00.000Z"
       },
       backlinkCounts: { NEEDS_REVIEW: 4 },
       reviewBaseUrl: "https://newl-apps.example.com"
     });
 
     expect(message).toContain("no SEMrush API units or Codex research were used");
-    expect(message).toContain("SEMrush cache: current");
+    expect(message).toContain("SEMrush evidence cache: current");
+    expect(message).toContain("SEMrush mailbox: 1 new report imported");
     expect(message).toContain("4 curated prospects currently need review");
     expect(message).toContain(
       "Question and AI-answer lane: 1 question-led candidate newly shortlisted"

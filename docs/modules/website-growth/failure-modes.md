@@ -12,6 +12,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Missing or expired SEMrush OAuth, or exhausted API units: a Monday or Wednesday deep worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, Brave/Qwen backlink discovery, website review, Teams reporting, and page briefs continue.
 - Codex output outside the stored candidate IDs: completion is rejected.
 - Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
+- Missing `Inbox/Semrush`, mailbox-policy denial, or token failure: the importer records a bounded tenant-scoped error, the Teams check-in identifies the mailbox as unavailable, and Scout continues with retained evidence and first-party sources.
+- Unexpected sender, non-PDF/inline/oversized attachment, or previously imported content hash: the attachment is skipped. One malformed PDF records an error for that file and does not prevent other eligible reports from importing.
 - Duplicate worker start: an active tenant run blocks a second run for three hours.
 - Dedicated runtime update failure: the protected worktree remains unchanged, a safe Teams failure notice is attempted, and Scout does not start.
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; the safe failure notice is attempted through the same configured Teams target and may also fail when the channel itself is unavailable.

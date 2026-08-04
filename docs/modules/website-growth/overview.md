@@ -17,7 +17,9 @@ flowchart LR
   Leads[First-party inbound] --> Scout
   Brave[Bounded Brave Search] --> Qwen[Local Qwen triage]
   Qwen --> Scout
-  Semrush[Optional SEMrush MCP or cache] --> Scout
+  Semrush[Optional SEMrush MCP] --> Scout
+  SemrushMail[Scheduled SEMrush PDFs in Inbox/Semrush] --> Cache[Sanitized tenant-scoped evidence cache]
+  Cache --> Scout
   Repo[Website repo context] --> Scout
   Scout --> Brief[Versioned page brief + claim review]
   Brief --> Approval{Owner or manager approves}
@@ -77,7 +79,7 @@ Model changes must be evaluated against the same saved opportunities. Compare fa
 - Search Console: query/page clicks, impressions, CTR, and position, including deterministic classification of customer-question queries.
 - GA4 Data API: landing page sessions, engaged sessions, engagement rate, and event count for the last 28 days.
 - Newl inbound: form submissions and lead-producing pages. These remain the source of truth for lead counts.
-- SEMrush: official read-only MCP through OAuth for rankings, keyword gaps, competitors, intent, volume, and difficulty. Results are capped and cached as sanitized evidence.
+- SEMrush: official read-only MCP through OAuth remains optional. Scheduled SEMrush PDF reports sent from `mail@semrush.com` to `partnerships@newlgroup.com` are also read from `Inbox/Semrush`, parsed deterministically, deduplicated by content hash, and cached as sanitized supporting evidence. Email bodies, Graph IDs, and PDF files are not retained.
 - Manual CSV/TSV: historical Search Console, GA4, Semrush, or one-off research.
 - Website repository context: routes, templates, components, navigation, sitemap, and current content.
 - Durable design and decision memory: the versioned Newl page-pattern library, current repository inventory (including forms, heroes, CTAs, FAQs, and internal links), and up to 50 recent approved, rejected, built, or published brief decisions.
@@ -101,7 +103,7 @@ The developer run belongs in GitHub Actions rather than a Vercel function. Verce
 
 At 9:15 AM `America/Toronto`, Monday and Wednesday run bounded Brave Search, local Qwen triage, and the read-only Codex Scout; Tuesday, Thursday, and Friday run a deterministic check-in that refreshes Search Console, GA4, forms, and queue state while reusing any stored SEMrush snapshot. Lightweight check-ins spend no Codex tokens, Brave queries, or SEMrush API units. Every trigger still sends a Teams outcome.
 
-When SEMrush API units are available, a deep read-only session refreshes the Newl Group Position Tracking snapshot and stores it with an eight-day expiry. The Wednesday run reuses a still-fresh Monday snapshot instead of spending units again. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Broad competitor-gap discovery remains monthly and optional.
+Every weekday trigger first checks the dedicated SEMrush mailbox folder. New PDFs update the cache without using API units; duplicate PDFs are skipped. Position Tracking summary metrics refresh the observation date while the last complete tracked-keyword list is retained until a newer complete list exists. Site Audit, backlink, organic-position, and SEO-overview excerpts are supporting context only. When SEMrush API units are available, a deep read-only session may still refresh the complete Position Tracking snapshot. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Broad competitor-gap discovery remains monthly and optional.
 
 Each deep-run backlink funnel rotates through one of four 12-query plans. Each query returns at most 10 results; deterministic code accepts at most 120 rows, 60 unique domains, 40 full-page downloads, and two downloads per domain per run. Every canonical URL hash is written to the tenant-scoped Scout job ledger before Qwen runs. URLs seen in any prior Scout run or already promoted to the backlink queue are counted as duplicates and never downloaded or added again. Qwen returns at most 15 finalists; Codex may promote at most five. There is no recursive crawl. Newl Apps then applies its existing minimum relevance/quality score of 60, high-spam rejection, referring-domain/target-page dedupe, 50-item active-queue cap, and 45-day stale-review archive.
 
