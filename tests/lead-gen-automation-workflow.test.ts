@@ -111,6 +111,13 @@ describe("automated sales workflow", () => {
     };
     expect(isOutreachQueueContact(paused)).toBe(true);
     expect(isActiveCadenceContact(paused)).toBe(false);
+
+    const outOfOffice = {
+      ...paused,
+      replyStatus: ReplyStatus.OUT_OF_OFFICE
+    };
+    expect(isOutreachQueueContact(outOfOffice)).toBe(false);
+    expect(isActiveCadenceContact(outOfOffice)).toBe(true);
   });
 
   it("removes terminal, unsafe, and sales-engaged contacts from Outreach Queue", () => {

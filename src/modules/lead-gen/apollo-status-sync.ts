@@ -1,11 +1,13 @@
 import {
   ApolloStatus,
+  ContactStatus,
   IntegrationProvider,
   IntegrationStatus,
   JobStatus,
   ModuleKey,
   Prisma,
-  ReplyStatus
+  ReplyStatus,
+  SequenceStatus
 } from "@prisma/client";
 
 import {
@@ -23,6 +25,7 @@ import {
   readApolloPendingSequenceConfirmation
 } from "@/modules/lead-gen/apollo-push-jobs";
 import { resolveTrackedSequenceStatus } from "@/modules/lead-gen/apollo-reengagement-policy";
+import { enqueueHunterCompanyOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { recordCurrentContactScoreSnapshot } from "@/modules/lead-gen/contact-score-snapshot";
 import { recordLeadOutcomeEvent } from "@/modules/lead-gen/score-history";
 import { prisma } from "@/server/db";
@@ -30,10 +33,13 @@ import {
   ApolloRateLimitError,
   ApolloTransientError,
   fetchApolloSequenceDeliveryFailures,
+  fetchApolloSequencePauseEvidence,
   fetchApolloContactById,
   reconcileApolloContactWithDeliveryFailureEvidence,
+  reconcileApolloContactWithPauseEvidence,
   type ApolloContactRecord,
-  type ApolloSequenceDeliveryFailure
+  type ApolloSequenceDeliveryFailure,
+  type ApolloSequencePauseEvidence
 } from "@/server/integrations/apollo";
 import type { TenantContext } from "@/server/tenant-context";
 
@@ -43,6 +49,8 @@ const ACTIVE_JOB_WINDOW_MS = 30 * 60 * 1000;
 type SyncDependencies = {
   fetchContact: typeof fetchApolloContactById;
   fetchDeliveryFailures: typeof fetchApolloSequenceDeliveryFailures;
+  fetchPauseEvidence: typeof fetchApolloSequencePauseEvidence;
+  queueReplacementContactReview: typeof enqueueHunterCompanyOutreachHandoff;
   sleep: (milliseconds: number) => Promise<void>;
   now: () => Date;
   recordScoreSnapshot: typeof recordCurrentContactScoreSnapshot;
@@ -52,6 +60,8 @@ type SyncDependencies = {
 const defaultDependencies: SyncDependencies = {
   fetchContact: fetchApolloContactById,
   fetchDeliveryFailures: fetchApolloSequenceDeliveryFailures,
+  fetchPauseEvidence: fetchApolloSequencePauseEvidence,
+  queueReplacementContactReview: enqueueHunterCompanyOutreachHandoff,
   sleep: async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   now: () => new Date(),
   recordScoreSnapshot: recordCurrentContactScoreSnapshot,
@@ -174,6 +184,7 @@ export async function syncApolloStatusesForTenant(
         apolloContactId: true,
         apolloPersonId: true,
         email: true,
+        contactStatus: true,
         sequenceStatus: true,
         replyStatus: true,
         selectedSequenceId: true,
@@ -190,6 +201,10 @@ export async function syncApolloStatusesForTenant(
     const deliveryFailuresBySequence = new Map<
       string,
       Promise<ApolloSequenceDeliveryFailure[]>
+    >();
+    const pauseEvidenceBySequence = new Map<
+      string,
+      Promise<ApolloSequencePauseEvidence[]>
     >();
     const matchedDeliveryFailureKeys = new Set<string>();
 
@@ -228,6 +243,19 @@ export async function syncApolloStatusesForTenant(
               deliveryFailureKey(selectedSequenceId, matchedFailure)
             );
           }
+          if (incoming.sequenceStatus === SequenceStatus.PAUSED) {
+            const pauseEvidencePromise =
+              pauseEvidenceBySequence.get(selectedSequenceId) ??
+              dependencies.fetchPauseEvidence(selectedSequenceId);
+            pauseEvidenceBySequence.set(selectedSequenceId, pauseEvidencePromise);
+            incoming = reconcileApolloContactWithPauseEvidence({
+              contact: incoming,
+              selectedSequenceId,
+              apolloContactId,
+              email: contact.email,
+              pauseEvidence: await pauseEvidencePromise
+            });
+          }
         }
         const syncedAt = dependencies.now();
         const pendingConfirmation = readApolloPendingSequenceConfirmation(contact.rawJson);
@@ -247,15 +275,27 @@ export async function syncApolloStatusesForTenant(
           incoming.sequenceId === contact.selectedSequenceId &&
           isApolloSequenceMembershipConfirmed(incoming.sequenceStatus)
         );
-        const sequenceStatus = resolveTrackedSequenceStatus({
+        const trackedSequenceStatus = resolveTrackedSequenceStatus({
           existingStatus: contact.sequenceStatus,
           incomingStatus: incoming.sequenceStatus,
           selectedSequenceId: contact.selectedSequenceId,
           incomingSequenceId: incoming.sequenceId
         });
         const replyStatus = mergeReplyStatus(contact.replyStatus, incoming.replyStatus);
+        const pauseReconciliation = readIncomingPauseReconciliation(incoming.rawPayload);
+        const storedPauseReconciliation = readStoredPauseReconciliation(contact.rawJson);
+        const contactInvalidated =
+          pauseReconciliation?.kind === "NO_LONGER_EMPLOYED" ||
+          storedPauseReconciliation?.kind === "NO_LONGER_EMPLOYED";
+        const sequenceStatus = contactInvalidated
+          ? SequenceStatus.FINISHED
+          : trackedSequenceStatus;
+        const contactStatus = contactInvalidated
+          ? ContactStatus.REJECTED
+          : contact.contactStatus;
         const sequenceChanged = sequenceStatus !== contact.sequenceStatus;
         const replyChanged = replyStatus !== contact.replyStatus;
+        const contactStatusChanged = contactStatus !== contact.contactStatus;
         const rawJson = mergeApolloSyncPayload(contact.rawJson, incoming, syncedAt, {
           pendingConfirmation,
           confirmed: pendingEnrollmentConfirmed,
@@ -265,7 +305,7 @@ export async function syncApolloStatusesForTenant(
         let leadId: string | null = null;
         let scoreSnapshotId: string | null = null;
 
-        if (sequenceChanged || replyChanged) {
+        if (sequenceChanged || replyChanged || contactStatusChanged) {
           const lead = await prisma.lead.findFirst({
             where: { tenantId: tenant.tenantId, companyId: contact.companyId },
             select: { id: true }
@@ -284,6 +324,7 @@ export async function syncApolloStatusesForTenant(
           data: {
             apolloPersonId: contact.apolloPersonId ?? incoming.apolloPersonId,
             apolloStatus: ApolloStatus.ENRICHED,
+            contactStatus,
             sequenceStatus,
             replyStatus,
             selectedSequenceId: contact.selectedSequenceId ?? incoming.sequenceId,
@@ -324,7 +365,7 @@ export async function syncApolloStatusesForTenant(
             reason: APOLLO_ENROLLMENT_CONFIRMATION_FAILED_REASON
           });
         }
-        if (sequenceChanged || replyChanged) {
+        if (sequenceChanged || replyChanged || contactStatusChanged) {
           result.changedContacts += 1;
 
           if (sequenceChanged) {
@@ -355,6 +396,47 @@ export async function syncApolloStatusesForTenant(
               scoreSnapshotId,
               occurredAt: syncedAt,
               metadata: { trigger: "SCHEDULED_SYNC" }
+            });
+          }
+          if (contactStatusChanged) {
+            await dependencies.recordOutcome({
+              tenantId: tenant.tenantId,
+              companyId: contact.companyId,
+              contactId: contact.id,
+              leadId,
+              outcomeType: "APOLLO_CONTACT_STATUS_CHANGED",
+              previousValue: contact.contactStatus,
+              currentValue: contactStatus,
+              source: "APOLLO",
+              scoreSnapshotId,
+              occurredAt: syncedAt,
+              metadata: {
+                trigger: "SCHEDULED_SYNC",
+                reason: pauseReconciliation?.reason ?? null
+              }
+            });
+          }
+        }
+        if (contactStatusChanged && contactInvalidated) {
+          try {
+            await dependencies.queueReplacementContactReview({
+              tenantId: tenant.tenantId,
+              companyId: contact.companyId,
+              forceContactReview: true,
+              authorizePaidEmailEnrichment: false
+            });
+          } catch (replacementError) {
+            await prisma.auditLog.create({
+              data: {
+                tenantId: tenant.tenantId,
+                actorUserId: null,
+                action: "lead-gen.apollo-status-sync.replacement-contact-queue-failed",
+                entityType: "Contact",
+                entityId: contact.id,
+                after: {
+                  reason: normalizeSyncError(replacementError)
+                }
+              }
             });
           }
         }
@@ -407,7 +489,7 @@ export async function syncApolloStatusesForTenant(
 
 export async function getApolloStatusSyncHealth(tenant: Pick<TenantContext, "tenantId">) {
   const now = new Date();
-  const [integration, trackedContacts, dueContacts, failedContacts, nextDueContact, recentJobs] = await Promise.all([
+  const [integration, trackedContacts, dueContacts, failedContacts, failedContactDetails, nextDueContact, recentJobs] = await Promise.all([
     prisma.integrationCredential.findFirst({
       where: {
         tenantId: tenant.tenantId,
@@ -426,6 +508,26 @@ export async function getApolloStatusSyncHealth(tenant: Pick<TenantContext, "ten
     }),
     prisma.contact.count({
       where: { tenantId: tenant.tenantId, apolloContactId: { not: null }, apolloSyncFailureCount: { gt: 0 } }
+    }),
+    prisma.contact.findMany({
+      where: {
+        tenantId: tenant.tenantId,
+        apolloContactId: { not: null },
+        apolloSyncFailureCount: { gt: 0 }
+      },
+      select: {
+        id: true,
+        fullName: true,
+        apolloSyncFailureCount: true,
+        apolloSyncLastError: true,
+        apolloNextSyncAt: true,
+        company: { select: { name: true } }
+      },
+      orderBy: [
+        { apolloSyncFailureCount: "desc" },
+        { apolloNextSyncAt: "asc" }
+      ],
+      take: 5
     }),
     prisma.contact.findFirst({
       where: { tenantId: tenant.tenantId, apolloContactId: { not: null }, apolloNextSyncAt: { not: null } },
@@ -448,6 +550,14 @@ export async function getApolloStatusSyncHealth(tenant: Pick<TenantContext, "ten
     trackedContacts,
     dueContacts,
     failedContacts,
+    failedContactDetails: failedContactDetails.map((contact) => ({
+      id: contact.id,
+      fullName: contact.fullName,
+      companyName: contact.company.name,
+      failureCount: contact.apolloSyncFailureCount,
+      error: contact.apolloSyncLastError,
+      nextRetryAt: contact.apolloNextSyncAt
+    })),
     nextDueAt: nextDueContact?.apolloNextSyncAt ?? null,
     latestJob: recentJobs[0] ?? null,
     lastSuccessfulAt: latestSuccessfulJob?.finishedAt ?? null,
@@ -520,6 +630,7 @@ function mergeApolloSyncPayload(
   );
   const pending = enrollmentConfirmation.pendingConfirmation;
   const deliveryFailure = readIncomingDeliveryFailure(incoming.rawPayload);
+  const pauseReconciliation = readIncomingPauseReconciliation(incoming.rawPayload);
   const enrollmentMetadata = enrollmentConfirmation.confirmed
     ? withoutPendingOrBlocker
     : enrollmentConfirmation.failed
@@ -557,6 +668,14 @@ function mergeApolloSyncPayload(
         ? {
             deliveryFailure: {
               ...deliveryFailure,
+              detectedAt: syncedAt.toISOString()
+            }
+          }
+        : {}),
+      ...(pauseReconciliation
+        ? {
+            pauseReconciliation: {
+              ...pauseReconciliation,
               detectedAt: syncedAt.toISOString()
             }
           }
@@ -633,6 +752,41 @@ function readIncomingDeliveryFailure(rawPayload: Record<string, unknown>) {
       typeof failure.sequenceId === "string" ? failure.sequenceId : null,
     record: failure.record ?? null
   };
+}
+
+function readIncomingPauseReconciliation(rawPayload: Record<string, unknown>) {
+  const evidence = asJsonObject(rawPayload.newlPauseReconciliation);
+  const kind = typeof evidence.kind === "string" ? evidence.kind : null;
+  const reason = typeof evidence.reason === "string" ? evidence.reason : null;
+  if (
+    (kind !== "OUT_OF_OFFICE" && kind !== "NO_LONGER_EMPLOYED") ||
+    !reason
+  ) {
+    return null;
+  }
+  return {
+    kind,
+    reason,
+    source:
+      typeof evidence.source === "string"
+        ? evidence.source
+        : "APOLLO_OUTREACH_EMAIL_SEARCH",
+    sequenceId:
+      typeof evidence.sequenceId === "string" ? evidence.sequenceId : null,
+    occurredAt:
+      typeof evidence.occurredAt === "string" ? evidence.occurredAt : null,
+    resumeAt:
+      typeof evidence.resumeAt === "string" ? evidence.resumeAt : null,
+    record: evidence.record ?? null
+  };
+}
+
+function readStoredPauseReconciliation(rawJson: Prisma.JsonValue | null) {
+  const root = asJsonObject(rawJson);
+  const apollo = asJsonObject(root.apollo);
+  return readIncomingPauseReconciliation({
+    newlPauseReconciliation: apollo.pauseReconciliation
+  });
 }
 
 function findMatchingDeliveryFailure({

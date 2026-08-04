@@ -89,6 +89,13 @@ export function isOutreachQueueContact(contact: {
     return false;
   }
 
+  if (
+    contact.sequenceStatus === SequenceStatus.PAUSED &&
+    contact.replyStatus === ReplyStatus.OUT_OF_OFFICE
+  ) {
+    return false;
+  }
+
   const hasCurrentOutreachWork = Boolean(contact.draft) || Boolean(contact.outreachPlan);
   return (
     contact.contactStatus === ContactStatus.APPROVED ||
@@ -108,7 +115,13 @@ export function isActiveCadenceContact(contact: {
   return (
     hasActionableEmail(contact.email) &&
     !isTerminalOrUnsafeOutreachContact(contact) &&
-    contact.sequenceStatus === SequenceStatus.ENROLLED
+    (
+      contact.sequenceStatus === SequenceStatus.ENROLLED ||
+      (
+        contact.sequenceStatus === SequenceStatus.PAUSED &&
+        contact.replyStatus === ReplyStatus.OUT_OF_OFFICE
+      )
+    )
   );
 }
 

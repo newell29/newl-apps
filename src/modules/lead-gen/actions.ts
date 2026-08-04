@@ -128,6 +128,7 @@ import {
   MANUAL_APOLLO_COMPANY_MAPPING_REASON,
   createApolloContactForEnrollment,
   fetchApolloSequenceDeliveryFailures,
+  fetchApolloSequencePauseEvidence,
   fetchApolloContactById,
   fetchApolloEmailAccountDirectory,
   fetchApolloContactsForCompany,
@@ -136,8 +137,10 @@ import {
   parseApolloCompanyReference,
   parseApolloPersonIds,
   reconcileApolloContactWithDeliveryFailureEvidence,
+  reconcileApolloContactWithPauseEvidence,
   syncApolloContactTypedCustomFields,
   type ApolloSequenceDeliveryFailure,
+  type ApolloSequencePauseEvidence,
   type ApolloEmailAccountDirectoryEntry,
   type ApolloContactRecord,
   type ApolloSequenceDirectoryEntry,
@@ -3028,6 +3031,10 @@ export async function syncSelectedApolloStatusesAction(
       string,
       Promise<ApolloSequenceDeliveryFailure[]>
     >();
+    const pauseEvidenceBySequence = new Map<
+      string,
+      Promise<ApolloSequencePauseEvidence[]>
+    >();
 
     for (const company of companies.values()) {
       try {
@@ -3061,6 +3068,22 @@ export async function syncSelectedApolloStatusesAction(
                   email: contact.email,
                   deliveryFailures: await deliveryFailuresPromise
                 });
+                if (incoming.sequenceStatus === SequenceStatus.PAUSED) {
+                  const pauseEvidencePromise =
+                    pauseEvidenceBySequence.get(selectedSequenceId) ??
+                    fetchApolloSequencePauseEvidence(selectedSequenceId);
+                  pauseEvidenceBySequence.set(
+                    selectedSequenceId,
+                    pauseEvidencePromise
+                  );
+                  incoming = reconcileApolloContactWithPauseEvidence({
+                    contact: incoming,
+                    selectedSequenceId,
+                    apolloContactId,
+                    email: contact.email,
+                    pauseEvidence: await pauseEvidencePromise
+                  });
+                }
               }
               return incoming;
             })
@@ -4634,6 +4657,46 @@ async function syncExistingApolloContactsForCompany({
       });
     }
 
+    if (existing.contactStatus !== merged.contactStatus) {
+      await recordLeadOutcomeEvent({
+        tenantId,
+        companyId,
+        contactId: existing.id,
+        leadId: lead?.id ?? null,
+        outcomeType: "APOLLO_CONTACT_STATUS_CHANGED",
+        previousValue: existing.contactStatus,
+        currentValue: merged.contactStatus,
+        source: "APOLLO",
+        scoreSnapshotId: scoreSnapshot?.id ?? null
+      });
+      if (merged.contactStatus === ContactStatus.REJECTED) {
+        try {
+          await enqueueHunterCompanyOutreachHandoff({
+            tenantId,
+            companyId,
+            forceContactReview: true,
+            authorizePaidEmailEnrichment: false
+          });
+        } catch (replacementError) {
+          await prisma.auditLog.create({
+            data: {
+              tenantId,
+              actorUserId: null,
+              action: "lead-gen.apollo-status-sync.replacement-contact-queue-failed",
+              entityType: "Contact",
+              entityId: existing.id,
+              after: {
+                reason:
+                  replacementError instanceof Error
+                    ? replacementError.message.slice(0, 500)
+                    : "Replacement-contact review could not be queued."
+              }
+            }
+          });
+        }
+      }
+    }
+
     updatedCount += 1;
     await appendApolloContactActivity({
       tenantId,
@@ -6021,6 +6084,13 @@ function buildApolloContactMutation({
   const currentRawJson = isJsonObject(existing?.rawJson) ? existing.rawJson : {};
   const currentApollo = isJsonObject(currentRawJson.apollo) ? currentRawJson.apollo : {};
   const deliveryFailure = readApolloDeliveryFailureMetadata(incoming.rawPayload);
+  const pauseReconciliation = readApolloPauseReconciliationMetadata(incoming.rawPayload);
+  const storedPauseReconciliation = readApolloPauseReconciliationMetadata({
+    newlPauseReconciliation: currentApollo.pauseReconciliation
+  });
+  const contactInvalidated =
+    pauseReconciliation?.kind === "NO_LONGER_EMPLOYED" ||
+    storedPauseReconciliation?.kind === "NO_LONGER_EMPLOYED";
 
   return {
     tenantId,
@@ -6035,18 +6105,22 @@ function buildApolloContactMutation({
     phone: incoming.phone,
     linkedinUrl: incoming.linkedinUrl,
     source: "APOLLO" as const,
-    contactStatus: existing?.contactStatus ?? ContactStatus.REVIEWING,
+    contactStatus: contactInvalidated
+      ? ContactStatus.REJECTED
+      : existing?.contactStatus ?? ContactStatus.REVIEWING,
     apolloContactId: incoming.apolloContactId,
     apolloPersonId: incoming.apolloPersonId,
     apolloStatus: "ENRICHED" as const,
-    sequenceStatus: existing
-      ? resolveTrackedSequenceStatus({
-          existingStatus: existing.sequenceStatus,
-          incomingStatus: incoming.sequenceStatus,
-          selectedSequenceId: existing.selectedSequenceId,
-          incomingSequenceId: incoming.sequenceId
-        })
-      : incoming.sequenceStatus,
+    sequenceStatus: contactInvalidated
+      ? SequenceStatus.FINISHED
+      : existing
+        ? resolveTrackedSequenceStatus({
+            existingStatus: existing.sequenceStatus,
+            incomingStatus: incoming.sequenceStatus,
+            selectedSequenceId: existing.selectedSequenceId,
+            incomingSequenceId: incoming.sequenceId
+          })
+        : incoming.sequenceStatus,
     replyStatus: mergeReplyStatus(existing?.replyStatus ?? null, incoming.replyStatus),
     recommendedSequenceName: existing?.recommendedSequenceName ?? null,
     recommendedSequenceId: existing?.recommendedSequenceId ?? null,
@@ -6069,6 +6143,14 @@ function buildApolloContactMutation({
           ? {
               deliveryFailure: {
                 ...deliveryFailure,
+                detectedAt: new Date().toISOString()
+              }
+            }
+          : {}),
+        ...(pauseReconciliation
+          ? {
+              pauseReconciliation: {
+                ...pauseReconciliation,
                 detectedAt: new Date().toISOString()
               }
             }
@@ -6101,6 +6183,36 @@ function readApolloDeliveryFailureMetadata(rawPayload: Record<string, unknown>) 
     sequenceId:
       typeof failure.sequenceId === "string" ? failure.sequenceId : null,
     record: failure.record ?? null
+  };
+}
+
+function readApolloPauseReconciliationMetadata(rawPayload: Record<string, unknown>) {
+  const rawEvidence = rawPayload.newlPauseReconciliation;
+  const evidence =
+    rawEvidence && typeof rawEvidence === "object" && !Array.isArray(rawEvidence)
+      ? (rawEvidence as Record<string, unknown>)
+      : null;
+  if (
+    !evidence ||
+    (evidence.kind !== "OUT_OF_OFFICE" && evidence.kind !== "NO_LONGER_EMPLOYED") ||
+    typeof evidence.reason !== "string"
+  ) {
+    return null;
+  }
+  return {
+    kind: evidence.kind,
+    reason: evidence.reason,
+    source:
+      typeof evidence.source === "string"
+        ? evidence.source
+        : "APOLLO_OUTREACH_EMAIL_SEARCH",
+    sequenceId:
+      typeof evidence.sequenceId === "string" ? evidence.sequenceId : null,
+    occurredAt:
+      typeof evidence.occurredAt === "string" ? evidence.occurredAt : null,
+    resumeAt:
+      typeof evidence.resumeAt === "string" ? evidence.resumeAt : null,
+    record: evidence.record ?? null
   };
 }
 
