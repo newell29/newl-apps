@@ -220,7 +220,7 @@ function ReviewRows({
                 href="/lead-gen/hunter"
                 className="mt-2 inline-block text-sm font-semibold text-primary hover:text-primaryHover"
               >
-                View Daily Opportunities
+                View Hunter Control Tower
               </Link>
             </div>
             <div className="text-sm text-mutedForeground">

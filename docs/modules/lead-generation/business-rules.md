@@ -137,7 +137,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Automated sales workspace boundaries
 
-- Daily Opportunities is the researched decision surface; Found Companies remains a bounded source-data review screen.
+- Hunter Control Tower is the operational decision surface; Found Companies remains a bounded source-data review screen. Research evidence remains available as a collapsed Control Tower drill-down.
 - Outreach Queue defaults to **Needs Attention**. It includes approved, ready, paused, or replied contacts and contacts
   with a current Newl draft or Outreach Plan, but excludes contacts already enrolled in Apollo.
 - **Active Cadences** contains enrolled, no-reply contacts for monitoring. Enrollment therefore removes a contact from

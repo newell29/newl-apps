@@ -47,7 +47,28 @@ describe("Hunter company-research machine routes", () => {
     expect(prepareHunterCompanyResearchRun).toHaveBeenCalledWith({
       tenantId: "tenant-a",
       force: true,
-      companyKeys: ["Example Retailer"]
+      companyKeys: ["Example Retailer"],
+      recoveryOfRunId: undefined
+    });
+  });
+
+  it("passes a bounded recovery reference through the authenticated tenant route", async () => {
+    prepareHunterCompanyResearchRun.mockResolvedValue({ state: "ready", runId: "run-2" });
+    const response = await prepare(new Request(
+      "https://app.example/api/lead-gen/hunter/company-research/prepare",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ recoveryOfRunId: "failed-run-1" })
+      }
+    ));
+
+    expect(response.status).toBe(200);
+    expect(prepareHunterCompanyResearchRun).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      force: false,
+      companyKeys: undefined,
+      recoveryOfRunId: "failed-run-1"
     });
   });
 

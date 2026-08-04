@@ -9,7 +9,13 @@ export const maxDuration = 30;
 export async function POST(request: Request) {
   try {
     const tenant = await authenticateIngestionRequest(request);
-    const body = await request.json() as { runId?: unknown; errorMessage?: unknown };
+    const body = await request.json() as {
+      runId?: unknown;
+      errorMessage?: unknown;
+      retryable?: unknown;
+      retryScheduled?: unknown;
+      checkpointStage?: unknown;
+    };
     if (typeof body.runId !== "string" || !body.runId.trim()) {
       return NextResponse.json({ error: "Hunter company-research runId is required." }, { status: 400 });
     }
@@ -19,7 +25,13 @@ export async function POST(request: Request) {
     const result = await failHunterCompanyResearchRun({
       tenantId: tenant.tenantId,
       runId: body.runId.trim(),
-      errorMessage: body.errorMessage
+      errorMessage: body.errorMessage,
+      retryable: body.retryable === true,
+      retryScheduled: body.retryScheduled === true,
+      checkpointStage:
+        body.checkpointStage === "RETRIEVAL_COMPLETE" || body.checkpointStage === "SYNTHESIS_COMPLETE"
+          ? body.checkpointStage
+          : null
     });
     return NextResponse.json({ data: result });
   } catch (error) {

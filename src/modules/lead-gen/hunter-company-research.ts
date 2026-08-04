@@ -271,11 +271,13 @@ export async function prepareHunterCompanyResearchRun({
   tenantId,
   force = false,
   companyKeys,
+  recoveryOfRunId,
   now = new Date()
 }: {
   tenantId: string;
   force?: boolean;
   companyKeys?: string[];
+  recoveryOfRunId?: string;
   now?: Date;
 }) {
   const policy = await prisma.hunterAutomationPolicy.findUnique({ where: { tenantId } });
@@ -287,7 +289,47 @@ export async function prepareHunterCompanyResearchRun({
     };
   }
 
-  const requestedKeys = normalizeRequestedCompanyKeys(companyKeys);
+  const localDate = formatLocalDate(now, effective.scheduleTimezone);
+  const recoveryRun = recoveryOfRunId
+    ? await prisma.automationJobRun.findFirst({
+        where: {
+          id: recoveryOfRunId,
+          tenantId,
+          jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
+          status: JobStatus.ERROR
+        },
+        select: { id: true, input: true, startedAt: true }
+      })
+    : null;
+  if (recoveryOfRunId && !recoveryRun) {
+    throw new Error("The requested Hunter company-research recovery run is unavailable.");
+  }
+  if (
+    recoveryRun &&
+    formatLocalDate(recoveryRun.startedAt, effective.scheduleTimezone) !== localDate
+  ) {
+    throw new Error("Hunter company-research recovery is limited to the original local date.");
+  }
+  const recoveryInput = optionalRecord(recoveryRun?.input);
+  const recoveryAttempt = recoveryRun
+    ? Math.max(1, readNonNegativeInteger(recoveryInput?.recoveryAttempt)) + 1
+    : 1;
+  if (recoveryAttempt > 3) {
+    throw new Error("Hunter company research reached its three-attempt recovery limit.");
+  }
+  const recoveryCompanyKeys = recoveryRun
+    ? normalizeRequestedCompanyKeys(
+        Array.isArray(recoveryInput?.candidateCompanyKeys)
+          ? recoveryInput.candidateCompanyKeys.map(String)
+          : []
+      )
+    : [];
+  if (recoveryRun && recoveryCompanyKeys.length === 0) {
+    throw new Error("The failed Hunter run does not contain a recoverable company cohort.");
+  }
+  const requestedKeys = recoveryRun
+    ? recoveryCompanyKeys
+    : normalizeRequestedCompanyKeys(companyKeys);
   const active = await prisma.automationJobRun.findFirst({
     where: {
       tenantId,
@@ -306,8 +348,7 @@ export async function prepareHunterCompanyResearchRun({
     };
   }
 
-  const localDate = formatLocalDate(now, effective.scheduleTimezone);
-  if (!force && requestedKeys.length === 0) {
+  if (!force && !recoveryRun && requestedKeys.length === 0) {
     const latest = await prisma.automationJobRun.findFirst({
       where: { tenantId, jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE },
       orderBy: { startedAt: "desc" },
@@ -575,6 +616,8 @@ export async function prepareHunterCompanyResearchRun({
         version: 1,
         localDate,
         force,
+        recoveryOfRunId: recoveryRun?.id ?? null,
+        recoveryAttempt,
         requestedCompanyKeys: requestedKeys,
         candidateCompanyIds: candidates.map((candidate) => candidate.companyId),
         candidateCompanyKeys: candidates.map((candidate) => candidate.companyKey),
@@ -602,6 +645,9 @@ export async function prepareHunterCompanyResearchRun({
   return {
     state: "ready" as const,
     runId: job.id,
+    recovery: recoveryRun
+      ? { recoveryOfRunId: recoveryRun.id, attempt: recoveryAttempt }
+      : null,
     packet: {
       version: 1,
       localDate,
@@ -843,6 +889,12 @@ function readNonNegativeInteger(value: unknown) {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(0, Math.trunc(value))
     : 0;
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 export function rankHunterCompanyResearchCandidates<
@@ -1113,6 +1165,13 @@ export async function completeHunterCompanyResearchRun({
           search: completion.search,
           models: completion.models,
           selection,
+          recovery: {
+            recoveryOfRunId:
+              typeof input.recoveryOfRunId === "string" ? input.recoveryOfRunId : null,
+            attempt: Math.max(1, readNonNegativeInteger(input.recoveryAttempt)),
+            checkpointStage: "SYNTHESIS_COMPLETE",
+            recovered: typeof input.recoveryOfRunId === "string"
+          },
           lunaShadow,
           savedSignalIds,
           completedAt: new Date().toISOString()
@@ -1199,12 +1258,29 @@ export async function completeHunterCompanyResearchRun({
 export async function failHunterCompanyResearchRun({
   tenantId,
   runId,
-  errorMessage
+  errorMessage,
+  retryable = false,
+  checkpointStage = null,
+  retryScheduled = false
 }: {
   tenantId: string;
   runId: string;
   errorMessage: string;
+  retryable?: boolean;
+  checkpointStage?: "RETRIEVAL_COMPLETE" | "SYNTHESIS_COMPLETE" | null;
+  retryScheduled?: boolean;
 }) {
+  const current = await prisma.automationJobRun.findFirst({
+    where: {
+      id: runId,
+      tenantId,
+      jobType: HUNTER_COMPANY_RESEARCH_JOB_TYPE,
+      status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] }
+    },
+    select: { output: true }
+  });
+  if (!current) throw new Error("Hunter company-research run is not active for this tenant.");
+  const existingOutput = optionalRecord(current.output) ?? {};
   const result = await prisma.automationJobRun.updateMany({
     where: {
       id: runId,
@@ -1215,7 +1291,16 @@ export async function failHunterCompanyResearchRun({
     data: {
       status: JobStatus.ERROR,
       finishedAt: new Date(),
-      errorMessage: errorMessage.trim().slice(0, 1_000) || "Hunter company research failed."
+      errorMessage: errorMessage.trim().slice(0, 1_000) || "Hunter company research failed.",
+      output: {
+        ...existingOutput,
+        recovery: {
+          retryable,
+          retryScheduled,
+          checkpointStage,
+          failedAt: new Date().toISOString()
+        }
+      }
     }
   });
   if (result.count !== 1) throw new Error("Hunter company-research run is not active for this tenant.");

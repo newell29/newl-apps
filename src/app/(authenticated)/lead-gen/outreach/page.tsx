@@ -580,7 +580,7 @@ export default async function OutreachQueuePage({
                     ? "Bounces and permanent Apollo delivery failures will appear here automatically after synchronization."
                   : filterOptions.approvedAccountCount > 0
                   ? "There is no drafting, approval, assignment, paused-cadence, or Apollo push work requiring attention."
-                  : "Review Daily Opportunities first; approved outreach work will appear here automatically."}
+                  : "Review Hunter Control Tower first; approved outreach work will appear here automatically."}
             </p>
           </div>
         )}

@@ -17,7 +17,11 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from hunter_ingest import api_request, clean, required_env
-from hunter_company_research import run_company_research
+from hunter_company_research import (
+    HunterCompanyResearchRunError,
+    report_failure,
+    run_company_research,
+)
 from hunter_apollo_exception_resolution import run_apollo_exception_resolution
 from hunter_outreach_handoff import drain_outreach_handoff
 from hunter_signal_scout import run_signal_scout
@@ -388,19 +392,64 @@ def build_company_research_message(result: dict[str, Any]) -> str:
             f"Qwen shadow returned {qwen_valid} rows with {qwen_missing} omissions; "
             f"{agreement_text}. "
         )
-    return message + "Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
+    return message + "Review Sales → Hunter Control Tower and Admin & Quality → Health & Logs."
 
 
 def run_company_research_with_notification(**kwargs: Any) -> dict[str, Any]:
-    try:
-        result = run_company_research(**kwargs)
-    except Exception:
-        send_teams_message(
-            "Hunter company research failed during retrieval or model processing. "
-            "A paid-retrieval checkpoint was preserved when retrieval completed. "
-            "Review Admin & Quality → Health & Logs; no outreach was sent."
-        )
-        raise
+    max_attempts = max(
+        1,
+        min(3, int(os.environ.get("HUNTER_COMPANY_RESEARCH_MAX_ATTEMPTS", "3"))),
+    )
+    retry_base_seconds = max(
+        1,
+        min(300, int(os.environ.get("HUNTER_COMPANY_RESEARCH_RETRY_BASE_SECONDS", "30"))),
+    )
+    run_kwargs = dict(kwargs)
+    result: dict[str, Any]
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = run_company_research(**run_kwargs)
+            if attempt > 1 and isinstance(result, dict):
+                result["automaticRecovery"] = {
+                    "recovered": True,
+                    "attempt": attempt,
+                }
+            break
+        except HunterCompanyResearchRunError as error:
+            will_retry = bool(error.retryable and attempt < max_attempts)
+            report_failure(
+                required_env("NEWL_APPS_BASE_URL"),
+                required_env("INGESTION_API_TOKEN"),
+                error.run_id,
+                error,
+                retryable=error.retryable,
+                retry_scheduled=will_retry,
+                checkpoint_stage=error.checkpoint_stage,
+            )
+            if not will_retry:
+                send_teams_message(
+                    "Hunter company research failed after bounded checkpoint recovery. "
+                    "Paid retrieval or synthesis was preserved when a checkpoint was available. "
+                    "Review Sales → Hunter Control Tower and Admin & Quality → Health & Logs; "
+                    "no outreach was sent."
+                )
+                raise
+            next_attempt = attempt + 1
+            recovery_scope = (
+                "reuse the exact company cohort and resume from the "
+                f"{error.checkpoint_stage or 'available'} checkpoint"
+                if error.run_id
+                else "retry the tenant-scoped preparation request before any paid retrieval"
+            )
+            send_teams_message(
+                "Hunter company research hit a transient failure. "
+                f"Automatic recovery attempt {next_attempt}/{max_attempts} will {recovery_scope}."
+            )
+            time.sleep(retry_base_seconds * (2 ** (attempt - 1)))
+            if error.run_id:
+                run_kwargs["recovery_of_run_id"] = error.run_id
+    else:
+        raise RuntimeError("Hunter company research exhausted its recovery attempts.")
     if (
         isinstance(result, dict)
         and result.get("state") not in {
