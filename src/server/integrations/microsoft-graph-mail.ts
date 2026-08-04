@@ -78,6 +78,35 @@ export async function fetchMicrosoftGraphMailboxMessages(
   return messages.slice(0, options.maxMessagesPerMailbox);
 }
 
+export async function fetchMicrosoftGraphMailboxFolderMessages(
+  accessToken: string,
+  mailbox: string,
+  folderPath: string,
+  options: MicrosoftGraphMailFetchOptions
+) {
+  const messagePath = await resolveMicrosoftGraphMailboxFolderMessagesPath(
+    accessToken,
+    mailbox,
+    folderPath
+  );
+  const since = new Date(Date.now() - options.lookbackDays * 24 * 60 * 60 * 1000);
+  const messages: MicrosoftGraphMailMessage[] = [];
+  let nextUrl: string | null = buildMailboxMessagesUrl(
+    messagePath,
+    since,
+    options.maxMessagesPerMailbox,
+    "id,subject,receivedDateTime,hasAttachments,from"
+  );
+
+  while (nextUrl && messages.length < options.maxMessagesPerMailbox) {
+    const page = await fetchMailboxMessagesPage(accessToken, mailbox, nextUrl);
+    messages.push(...page.messages);
+    nextUrl = messages.length < options.maxMessagesPerMailbox ? page.nextLink : null;
+  }
+
+  return messages.slice(0, options.maxMessagesPerMailbox);
+}
+
 export async function fetchMicrosoftGraphMessageAttachments(accessToken: string, mailbox: string, messageId: string) {
   const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
   const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline,lastModifiedDateTime`;
@@ -207,6 +236,88 @@ export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: stri
   return `users/${encodeURIComponent(resolvedUserId)}/messages`;
 }
 
+export async function resolveMicrosoftGraphMailboxFolderMessagesPath(
+  accessToken: string,
+  mailbox: string,
+  folderPath: string
+) {
+  const segments = folderPath
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0) {
+    throw new Error("Microsoft Graph mail folder path cannot be empty.");
+  }
+
+  const mailboxMessagesPath =
+    mailbox === "me"
+      ? "me/messages"
+      : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
+  const mailboxRoot = mailboxMessagesPath.replace(/\/messages$/, "");
+  let folderResourcePath: string;
+  const firstSegment = segments[0]!;
+
+  if (firstSegment.toLowerCase() === "inbox") {
+    folderResourcePath = `${mailboxRoot}/mailFolders/inbox`;
+  } else {
+    const rootFolder = await findMicrosoftGraphMailFolder(
+      accessToken,
+      `${mailboxRoot}/mailFolders`,
+      firstSegment
+    );
+    folderResourcePath = `${mailboxRoot}/mailFolders/${encodeURIComponent(rootFolder.id)}`;
+  }
+
+  for (const segment of segments.slice(1)) {
+    const child = await findMicrosoftGraphMailFolder(
+      accessToken,
+      `${folderResourcePath}/childFolders`,
+      segment
+    );
+    folderResourcePath = `${mailboxRoot}/mailFolders/${encodeURIComponent(child.id)}`;
+  }
+
+  return `${folderResourcePath}/messages`;
+}
+
+async function findMicrosoftGraphMailFolder(
+  accessToken: string,
+  collectionPath: string,
+  displayName: string
+) {
+  const url = `https://graph.microsoft.com/v1.0/${collectionPath}?$top=50&$select=id,displayName`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph folder lookup failed for ${displayName} with status ${response.status}.`
+    );
+  }
+
+  const json = (await response.json()) as {
+    value?: Array<{ id?: string | null; displayName?: string | null }>;
+  };
+  const matches = (json.value ?? []).filter(
+    (folder) =>
+      Boolean(folder.id) &&
+      folder.displayName?.trim().toLowerCase() === displayName.trim().toLowerCase()
+  );
+  if (matches.length !== 1 || !matches[0]?.id) {
+    throw new Error(
+      matches.length > 1
+        ? `Microsoft Graph found more than one ${displayName} mail folder. Rename the duplicate folders before Scout imports reports.`
+        : `Microsoft Graph could not find the ${displayName} mail folder.`
+    );
+  }
+
+  return { id: matches[0].id, displayName: matches[0].displayName ?? displayName };
+}
+
 async function fetchMailboxMessagesPage(accessToken: string, mailbox: string, url: string) {
   const response = await fetch(url, {
     headers: {
@@ -240,8 +351,12 @@ async function fetchMailboxMessagesPage(accessToken: string, mailbox: string, ur
   };
 }
 
-function buildMailboxMessagesUrl(path: string, since: Date, maxMessages: number) {
-  const select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,hasAttachments,from,toRecipients,ccRecipients";
+function buildMailboxMessagesUrl(
+  path: string,
+  since: Date,
+  maxMessages: number,
+  select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,hasAttachments,from,toRecipients,ccRecipients"
+) {
   const top = Math.min(MICROSOFT_GRAPH_MAIL_PAGE_SIZE, maxMessages);
   const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
 

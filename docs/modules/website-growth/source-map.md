@@ -14,6 +14,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Question-intent classification, answer strategy, scoring, and qualification | `src/modules/website-growth/opportunities.ts` |
 | Tenant-scoped candidate upsert | `src/modules/website-growth/opportunity-store.ts` |
 | Scout run locking, SEMrush cache, weekday check-in, packet, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
+| Scheduled SEMrush mailbox/PDF import, sender checks, deduplication, and sanitization | `src/modules/website-growth/semrush-mail-reports.ts` |
+| Microsoft Graph child-folder resolution and bounded message retrieval | `src/server/integrations/microsoft-graph-mail.ts` |
+| Shared server PDF text extraction | `src/server/pdf-text.ts` |
 | Signed Excel links and stored-report validation | `src/modules/website-growth/report-download.ts` |
 | Machine API | `src/app/api/website-growth/scout/prepare`, `complete`, `check-in`, and `fail` |
 | Signed Excel download API | `src/app/api/website-growth/scout/runs/[runId]/reports/[reportName]` |

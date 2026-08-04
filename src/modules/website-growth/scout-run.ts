@@ -42,6 +42,11 @@ import {
 import { buildWebsiteGrowthReportDownloadLinks } from "@/modules/website-growth/report-download";
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { isWebsiteGrowthQuestionOpportunity } from "@/modules/website-growth/opportunities";
+import {
+  safeSyncWebsiteGrowthSemrushScheduledReports,
+  type SemrushScheduledReportSyncResult,
+  type SemrushScheduledReportType
+} from "@/modules/website-growth/semrush-mail-reports";
 import { createWeeklyWebsiteGrowthPlanForTenant } from "@/modules/website-growth/weekly-plan";
 import { prisma } from "@/server/db";
 
@@ -65,6 +70,13 @@ export type WebsiteGrowthSemrushCache = {
   expiresAt: string | null;
   ageDays: number | null;
   tracking: WebsiteGrowthSemrushTrackingSnapshot | null;
+  reports: Array<{
+    reportType: SemrushScheduledReportType;
+    subject: string;
+    observedAt: string;
+    metrics: Record<string, number>;
+    excerpt: string;
+  }>;
 };
 
 export type WebsiteGrowthSemrushEvidence = {
@@ -169,6 +181,7 @@ export async function prepareWebsiteGrowthScoutRun({
 
   try {
     const evidenceRefresh = await refreshWebsiteGrowthEvidenceForTenant(tenantId);
+    const semrushMailSync = await safeSyncWebsiteGrowthSemrushScheduledReports({ tenantId });
     const weeklyPlan = await createWeeklyWebsiteGrowthPlanForTenant(tenantId, { source: "cron" });
     const backlinkDiscovery = buildWebsiteGrowthBacklinkDiscoveryQueries();
     const [opportunityPool, opportunityStatusCounts, semrushCache] = await Promise.all([
@@ -270,6 +283,7 @@ export async function prepareWebsiteGrowthScoutRun({
         maxRows: MAX_SEMRUSH_ROWS,
         researchScope,
         cache: semrushCache,
+        scheduledReportSync: semrushMailSync,
         requiredChecks: [
           "Organic positions and landing pages relevant to each candidate",
           researchScope === "MONTHLY"
@@ -380,8 +394,10 @@ export async function prepareWebsiteGrowthScoutRun({
             fresh: semrushCache.fresh,
             observedAt: semrushCache.observedAt,
             expiresAt: semrushCache.expiresAt,
-            ageDays: semrushCache.ageDays
+            ageDays: semrushCache.ageDays,
+            reportCount: semrushCache.reports.length
           },
+          semrushMailSync,
           preparedAt: new Date().toISOString()
         }
       }
@@ -429,6 +445,7 @@ export async function runWebsiteGrowthScoutWeekdayCheckIn({
 
   try {
     const evidenceRefresh = await refreshWebsiteGrowthEvidenceForTenant(tenantId);
+    const semrushMailSync = await safeSyncWebsiteGrowthSemrushScheduledReports({ tenantId });
     const weeklyPlan = await createWeeklyWebsiteGrowthPlanForTenant(tenantId, { source: "cron" });
     const [opportunityStatusCounts, semrushCache, backlinkCounts] = await Promise.all([
       prisma.websiteGrowthOpportunity.groupBy({
@@ -459,6 +476,7 @@ export async function runWebsiteGrowthScoutWeekdayCheckIn({
       researchInventory,
       researchSignalCount,
       semrushCache,
+      semrushMailSync,
       backlinkCounts: backlinks,
       reviewBaseUrl
     });
@@ -480,8 +498,10 @@ export async function runWebsiteGrowthScoutWeekdayCheckIn({
               fresh: semrushCache.fresh,
               observedAt: semrushCache.observedAt,
               expiresAt: semrushCache.expiresAt,
-              ageDays: semrushCache.ageDays
+              ageDays: semrushCache.ageDays,
+              reportCount: semrushCache.reports.length
             },
+            semrushMailSync,
             backlinkCounts: backlinks,
             completedAt: new Date().toISOString()
           }
@@ -1048,6 +1068,7 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
   researchSignalCount,
   researchInventory,
   semrushCache,
+  semrushMailSync,
   backlinkCounts,
   reviewBaseUrl
 }: {
@@ -1056,6 +1077,7 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
   researchSignalCount: number;
   researchInventory: Record<string, unknown>;
   semrushCache: WebsiteGrowthSemrushCache;
+  semrushMailSync?: SemrushScheduledReportSyncResult;
   backlinkCounts: Record<string, unknown>;
   reviewBaseUrl: string;
 }) {
@@ -1067,8 +1089,13 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
     readOptionalInteger(readRecord(plan.laneCounts).QUESTION_ANSWER) ?? 0;
   const backlinkReviewCount = readOptionalInteger(backlinkCounts.NEEDS_REVIEW) ?? 0;
   const cacheLine = semrushCache.available
-    ? `SEMrush cache: ${semrushCache.fresh ? "current" : "stale"}; last refreshed ${formatReportDate(semrushCache.observedAt)}; next live refresh is Monday.`
-    : "SEMrush cache: unavailable. The next Monday deep run will attempt a live refresh.";
+    ? `SEMrush evidence cache: ${semrushCache.fresh ? "current" : "stale"}; last refreshed ${formatReportDate(semrushCache.observedAt)}; ${semrushCache.reports.length} scheduled report${semrushCache.reports.length === 1 ? "" : "s"} retained.`
+    : "SEMrush evidence cache: unavailable. Scheduled mailbox reports will be checked again on the next Scout run.";
+  const mailLine = semrushMailSync
+    ? semrushMailSync.status === "SUCCESS"
+      ? `SEMrush mailbox: ${semrushMailSync.imported} new report${semrushMailSync.imported === 1 ? "" : "s"} imported; ${semrushMailSync.duplicates} already seen; ${semrushMailSync.failed} failed.`
+      : `SEMrush mailbox: unavailable this run (${semrushMailSync.error ?? "unknown error"}); Scout continued with retained evidence.`
+    : null;
 
   return [
     "Website Growth Scout weekday check-in: first-party evidence refreshed; no SEMrush API units or Codex research were used.",
@@ -1076,9 +1103,10 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
     `Research queue: ${researchSignalCount} stored signals (${monitoringCount} monitoring); ${reviewingCount} awaiting Scout research; ${selectedCount} newly shortlisted by deterministic planning.`,
     `Question and AI-answer lane: ${questionSelectedCount} question-led candidate${questionSelectedCount === 1 ? "" : "s"} newly shortlisted for the next deep Scout review.`,
     cacheLine,
+    mailLine,
     `Backlinks: ${backlinkReviewCount} curated prospect${backlinkReviewCount === 1 ? "" : "s"} currently need review.`,
     `Review page: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth`,
-    "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday deep Scout run."
+    "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday and Wednesday deep Scout runs."
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
@@ -1093,7 +1121,7 @@ export async function loadWebsiteGrowthSemrushCache(
       status: WebsiteGrowthImportStatus.SUCCESS
     },
     orderBy: { completedAt: "desc" },
-    take: 20,
+    take: 40,
     select: {
       completedAt: true,
       createdAt: true,
@@ -1103,24 +1131,28 @@ export async function loadWebsiteGrowthSemrushCache(
   const trackingImport = imports.find(
     (item) => readOptionalString(readRecord(item.summary).runType, 100) === "semrush_keyword_tracking_report"
   );
-  if (!trackingImport) {
+  const scheduledImports = imports.filter(
+    (item) => readOptionalString(readRecord(item.summary).runType, 100) === "semrush_scheduled_email_report"
+  );
+  const reports = scheduledImports.slice(0, 5).map((item) => {
+    const summary = readRecord(item.summary);
     return {
-      available: false,
-      fresh: false,
-      observedAt: null,
-      expiresAt: null,
-      ageDays: null,
-      tracking: null
+      reportType: readSemrushScheduledReportType(summary.reportType),
+      subject: readOptionalString(summary.subject, 300) ?? "SEMrush scheduled report",
+      observedAt: readImportObservedAt(item),
+      metrics: readNumberRecord(summary.metrics),
+      excerpt: readOptionalString(summary.excerpt, 6_000) ?? ""
     };
-  }
-
-  const summary = readRecord(trackingImport.summary);
+  });
+  const positionImport = scheduledImports.find(
+    (item) => readOptionalString(readRecord(item.summary).reportType, 100) === "POSITION_TRACKING"
+  );
+  const positionSummary = readRecord(positionImport?.summary);
+  const summary = readRecord(trackingImport?.summary);
   const runId = readOptionalString(summary.runId, 100);
-  const observedAtDate = trackingImport.completedAt ?? trackingImport.createdAt;
-  const expiresAtDate = new Date(observedAtDate.getTime() + SEMRUSH_CACHE_TTL_MS);
   let tracking = parseCachedTrackingSnapshot(summary.snapshot);
 
-  if (!tracking && runId) {
+  if (!tracking && trackingImport && runId) {
     const metrics = await prisma.websiteGrowthMetric.findMany({
       where: {
         tenantId,
@@ -1178,14 +1210,85 @@ export async function loadWebsiteGrowthSemrushCache(
     };
   }
 
+  const positionTracking = parseCachedTrackingSnapshot(positionSummary.snapshot);
+  if (positionTracking) {
+    const scheduledMetrics = readNumberRecord(positionSummary.metrics);
+    tracking = {
+      ...(tracking ?? positionTracking),
+      projectId: tracking?.projectId ?? positionTracking.projectId,
+      campaignId: tracking?.campaignId ?? positionTracking.campaignId,
+      domain: positionTracking.domain ?? tracking?.domain ?? null,
+      database: tracking?.database ?? positionTracking.database,
+      device: tracking?.device ?? positionTracking.device,
+      visibility: scheduledMetrics.visibility ?? positionTracking.visibility ?? tracking?.visibility ?? null,
+      previousVisibility: tracking?.previousVisibility ?? positionTracking.previousVisibility,
+      top3: Math.round(scheduledMetrics.top3 ?? tracking?.top3 ?? positionTracking.top3),
+      top10: Math.round(scheduledMetrics.top10 ?? tracking?.top10 ?? positionTracking.top10),
+      top20: Math.round(scheduledMetrics.top20 ?? tracking?.top20 ?? positionTracking.top20),
+      top100: Math.round(scheduledMetrics.top100 ?? tracking?.top100 ?? positionTracking.top100),
+      improved: Math.round(scheduledMetrics.improved ?? tracking?.improved ?? positionTracking.improved),
+      declined: Math.round(scheduledMetrics.declined ?? tracking?.declined ?? positionTracking.declined),
+      entered: tracking?.entered ?? positionTracking.entered,
+      lost: tracking?.lost ?? positionTracking.lost,
+      trackedKeywords: tracking?.trackedKeywords ?? positionTracking.trackedKeywords
+    };
+  }
+
+  const newestEvidenceImport = positionImport ?? trackingImport ?? scheduledImports[0];
+  if (!newestEvidenceImport) {
+    return {
+      available: false,
+      fresh: false,
+      observedAt: null,
+      expiresAt: null,
+      ageDays: null,
+      tracking: null,
+      reports: []
+    };
+  }
+  const observedAtDate = new Date(readImportObservedAt(newestEvidenceImport));
+  const expiresAtDate = new Date(observedAtDate.getTime() + SEMRUSH_CACHE_TTL_MS);
+
   return {
     available: Boolean(tracking),
     fresh: Boolean(tracking) && expiresAtDate.getTime() >= now.getTime(),
     observedAt: observedAtDate.toISOString(),
     expiresAt: expiresAtDate.toISOString(),
     ageDays: Math.max(0, Math.floor((now.getTime() - observedAtDate.getTime()) / (24 * 60 * 60 * 1000))),
-    tracking
+    tracking,
+    reports
   };
+}
+
+function readImportObservedAt(item: {
+  completedAt: Date | null;
+  createdAt: Date;
+  summary: unknown;
+}) {
+  const observedAt = readOptionalString(readRecord(item.summary).observedAt, 100);
+  const parsed = observedAt ? new Date(observedAt) : null;
+  return parsed && !Number.isNaN(parsed.getTime())
+    ? parsed.toISOString()
+    : (item.completedAt ?? item.createdAt).toISOString();
+}
+
+function readSemrushScheduledReportType(value: unknown): SemrushScheduledReportType {
+  return value === "POSITION_TRACKING" ||
+    value === "SITE_AUDIT" ||
+    value === "BACKLINKS" ||
+    value === "ORGANIC_POSITIONS" ||
+    value === "SEO_OVERVIEW"
+    ? value
+    : "UNKNOWN";
+}
+
+function readNumberRecord(value: unknown) {
+  return Object.fromEntries(
+    Object.entries(readRecord(value)).flatMap(([key, raw]) => {
+      const numeric = readOptionalNumber(raw);
+      return numeric === null ? [] : [[key, numeric]];
+    })
+  );
 }
 
 async function persistSemrushTrackingSnapshot({

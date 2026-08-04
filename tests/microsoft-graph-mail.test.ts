@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAndSendMicrosoftGraphMailboxMessage,
+  fetchMicrosoftGraphMailboxFolderMessages,
   fetchMicrosoftGraphMessageAttachmentContent
 } from "@/server/integrations/microsoft-graph-mail";
 
@@ -26,6 +27,55 @@ describe("Microsoft Graph mail attachment downloads", () => {
 
     const [url] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("https://graph.microsoft.com/v1.0/me/messages/message-1/attachments/attachment-1/$value");
+  });
+});
+
+describe("Microsoft Graph mailbox folders", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads messages only from the named Inbox child folder", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        value: [{ id: "semrush-folder-id", displayName: "Semrush" }]
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        value: [{ id: "message-1", subject: "Scout - Weekly Newl Position Tracking" }]
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMicrosoftGraphMailboxFolderMessages(
+      "token",
+      "partnerships@example.com",
+      "Inbox/Semrush",
+      { lookbackDays: 21, maxMessagesPerMailbox: 50 }
+    )).resolves.toEqual([
+      expect.objectContaining({ id: "message-1" })
+    ]);
+
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      "users/partnerships%40example.com/mailFolders/inbox/childFolders"
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain(
+      "users/partnerships%40example.com/mailFolders/semrush-folder-id/messages"
+    );
+  });
+
+  it("fails closed when the named child folder is missing", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMicrosoftGraphMailboxFolderMessages(
+      "token",
+      "partnerships@example.com",
+      "Inbox/Semrush",
+      { lookbackDays: 21, maxMessagesPerMailbox: 50 }
+    )).rejects.toThrow("could not find the Semrush mail folder");
   });
 });
 
