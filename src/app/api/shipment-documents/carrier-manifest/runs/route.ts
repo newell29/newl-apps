@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
     if (rows.length === 0) {
       return NextResponse.json(
-        { error: "At least one Midland, Speedy, Suretrack, or Clarke row is required." },
+        { error: "At least one Midland, Speedy, Suretrack, Clarke, or Guilbault Transport row is required." },
         { status: 400 }
       );
     }
@@ -89,6 +89,8 @@ export async function POST(request: Request) {
         suretrackWorkbookBytes: workbooks.SURETRACK ? decodeBase64(workbooks.SURETRACK.base64) : null,
         clarkeFileName: workbooks.CLARKE?.fileName ?? null,
         clarkeWorkbookBytes: workbooks.CLARKE ? decodeBase64(workbooks.CLARKE.base64) : null,
+        guilbaultFileName: workbooks.GUILBAULT?.fileName ?? null,
+        guilbaultWorkbookBytes: workbooks.GUILBAULT ? decodeBase64(workbooks.GUILBAULT.base64) : null,
         createdByUserId: context.userId
       }
     });

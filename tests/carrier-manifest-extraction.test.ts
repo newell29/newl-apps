@@ -56,4 +56,9 @@ describe("Garland carrier manifest pallet extraction", () => {
     expect(normalizeGarlandCarrier("CLARKE")).toBe("CLARKE");
     expect(normalizeGarlandCarrier("Clarke Transport")).toBe("CLARKE");
   });
+
+  it("recognizes Guilbault as a target carrier from the printed BOL carrier box", () => {
+    expect(normalizeGarlandCarrier("GUILBAULT TRANSPORT")).toBe("GUILBAULT");
+    expect(normalizeGarlandCarrier("Guilbault Transport Inc.")).toBe("GUILBAULT");
+  });
 });

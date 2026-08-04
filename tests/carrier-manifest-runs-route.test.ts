@@ -77,7 +77,8 @@ describe("Carrier manifest saved runs", () => {
           MIDLAND: 0,
           SPEEDY: 0,
           SURETRACK: 0,
-          CLARKE: 1
+          CLARKE: 1,
+          GUILBAULT: 0
         },
         clarkeFileName: "Clarke Manifest July 30, 2026.xls",
         clarkeWorkbookBytes: workbookBytes
@@ -113,6 +114,88 @@ describe("Carrier manifest saved runs", () => {
         select: expect.objectContaining({
           clarkeFileName: true,
           clarkeWorkbookBytes: true
+        })
+      })
+    );
+  });
+
+  it("stores a separate Guilbault workbook and count in the tenant-scoped run", async () => {
+    const workbookBytes = Buffer.from("synthetic Guilbault workbook");
+    const response = await POST(
+      new Request("https://newl.test/api/shipment-documents/carrier-manifest/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          shipmentDate: "2026-08-04",
+          documentLabel: "August 4, 2026",
+          sourceBolFileName: "synthetic-bols.pdf",
+          rows: [
+            {
+              carrier: "GUILBAULT",
+              pageNumber: 1,
+              srNumber: "812345",
+              psNumber: "PS123456",
+              cityProvince: "MONTREAL, QC",
+              skids: 2,
+              confidence: "HIGH",
+              notes: null
+            }
+          ],
+          workbooks: {
+            GUILBAULT: {
+              fileName: "Guilbault Transport Manifest August 4, 2026.xls",
+              base64: workbookBytes.toString("base64")
+            }
+          }
+        })
+      })
+    );
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.shipmentCarrierManifestRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        carrierCounts: {
+          MIDLAND: 0,
+          SPEEDY: 0,
+          SURETRACK: 0,
+          CLARKE: 0,
+          GUILBAULT: 1
+        },
+        guilbaultFileName: "Guilbault Transport Manifest August 4, 2026.xls",
+        guilbaultWorkbookBytes: workbookBytes
+      })
+    });
+  });
+
+  it("downloads only the Guilbault workbook from the requested tenant run", async () => {
+    const workbookBytes = Buffer.from("synthetic Guilbault workbook");
+    prismaMock.shipmentCarrierManifestRun.findFirst.mockResolvedValue({
+      guilbaultFileName: "Guilbault Transport Manifest August 4, 2026.xls",
+      guilbaultWorkbookBytes: workbookBytes
+    });
+
+    const response = await GET(
+      new Request("https://newl.test/api/shipment-documents/carrier-manifest/runs/run-1?documentType=guilbault"),
+      { params: Promise.resolve({ runId: "run-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/vnd.ms-excel");
+    expect(response.headers.get("content-disposition")).toContain(
+      'filename="Guilbault Transport Manifest August 4, 2026.xls"'
+    );
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(workbookBytes);
+    expect(prismaMock.shipmentCarrierManifestRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "run-1",
+          tenantId: "tenant-1",
+          deletedAt: null
+        },
+        select: expect.objectContaining({
+          guilbaultFileName: true,
+          guilbaultWorkbookBytes: true
         })
       })
     );

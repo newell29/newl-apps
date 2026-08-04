@@ -92,4 +92,29 @@ describe("Garland carrier manifest workbook", () => {
     expect(html).toContain(">123456</td>");
     expect(html).toContain('<td class="skids">1</td>');
   });
+
+  it("builds the same editable manifest layout for Guilbault rows", () => {
+    const html = buildCarrierManifestWorkbookHtml({
+      carrierLabel: "Guilbault Transport",
+      documentLabel: "August 4, 2026",
+      shipmentDate: "2026-08-04",
+      rows: [
+        {
+          ...manifestRows[0],
+          carrier: "GUILBAULT",
+          srNumber: "812345",
+          psNumber: "PS123456",
+          cityProvince: "MONTREAL, QC",
+          skids: 2
+        }
+      ],
+      rowCount: 16,
+      palletCount: 2
+    });
+
+    expect(html).toContain("Guilbault Transport Manifest August 4, 2026");
+    expect(html).toContain(">812345</td>");
+    expect(html).toContain(">123456</td>");
+    expect(html).toContain('<td class="skids">2</td>');
+  });
 });

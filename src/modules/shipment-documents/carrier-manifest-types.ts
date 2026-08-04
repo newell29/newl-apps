@@ -1,4 +1,4 @@
-export const GARLAND_CARRIERS = ["MIDLAND", "SPEEDY", "SURETRACK", "CLARKE"] as const;
+export const GARLAND_CARRIERS = ["MIDLAND", "SPEEDY", "SURETRACK", "CLARKE", "GUILBAULT"] as const;
 
 export type GarlandCarrierKey = (typeof GARLAND_CARRIERS)[number];
 
@@ -6,7 +6,8 @@ export const GARLAND_CARRIER_LABELS: Record<GarlandCarrierKey, string> = {
   MIDLAND: "Midland",
   SPEEDY: "Speedy",
   SURETRACK: "Suretrack",
-  CLARKE: "Clarke"
+  CLARKE: "Clarke",
+  GUILBAULT: "Guilbault Transport"
 };
 
 export type GarlandCarrierManifestRow = {
@@ -39,6 +40,7 @@ export type GarlandCarrierManifestRunSummary = {
   hasSpeedyWorkbook: boolean;
   hasSuretrackWorkbook: boolean;
   hasClarkeWorkbook: boolean;
+  hasGuilbaultWorkbook: boolean;
   signedCopyFileName: string | null;
   signedCopyUploadedAt: string | null;
   attachments: GarlandCarrierManifestAttachmentSummary[];
@@ -74,6 +76,10 @@ export function normalizeGarlandCarrier(value: unknown): GarlandCarrierKey | nul
 
   if (normalized.includes("CLARKE")) {
     return "CLARKE";
+  }
+
+  if (normalized.includes("GUILBAULT")) {
+    return "GUILBAULT";
   }
 
   return null;
