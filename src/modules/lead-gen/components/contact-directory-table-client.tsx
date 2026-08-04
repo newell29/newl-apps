@@ -58,6 +58,9 @@ type ContactDirectoryRow = {
   sequenceStatus: SequenceStatus;
   apolloPushBlockedReason: string | null;
   apolloPushBlockedAt: string | null;
+  apolloPauseKind: string | null;
+  apolloPauseReason: string | null;
+  apolloPauseResumeAt: string | null;
   effectiveSequenceStatus: ContactSequenceStatusFilter;
   replyStatus: ReplyStatus;
   recommendedSequenceName: string;
@@ -505,7 +508,20 @@ export function ContactDirectoryTableClient({
             return <StatusBadge value="PUSH_BLOCKED" tone="danger" />;
           }
 
-          return <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />;
+          return (
+            <div className="max-w-[220px]">
+              <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />
+              {contact.sequenceStatus === SequenceStatus.PAUSED && contact.apolloPauseKind === "OUT_OF_OFFICE" ? (
+                <p className="mt-2 line-clamp-3 text-xs leading-5 text-mutedForeground">
+                  Out of office
+                  {contact.apolloPauseResumeAt
+                    ? ` · resumes ${formatDateOnly(contact.apolloPauseResumeAt)}`
+                    : ""}
+                  {contact.apolloPauseReason ? ` · ${contact.apolloPauseReason}` : ""}
+                </p>
+              ) : null}
+            </div>
+          );
         }
       },
       {
@@ -1701,6 +1717,17 @@ function formatDateTime(value: string) {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit"
+  }).format(date);
+}
+
+function formatDateOnly(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric"
   }).format(date);
 }
 

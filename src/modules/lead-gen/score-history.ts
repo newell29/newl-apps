@@ -17,7 +17,8 @@ export type LeadOutcomeType =
   | "PIPELINE_STAGE_CHANGED"
   | "APOLLO_SEQUENCE_ENROLLED"
   | "APOLLO_SEQUENCE_STATUS_CHANGED"
-  | "APOLLO_REPLY_STATUS_CHANGED";
+  | "APOLLO_REPLY_STATUS_CHANGED"
+  | "APOLLO_CONTACT_STATUS_CHANGED";
 
 type ScoreHistoryPersistenceClient = {
   leadScoreSnapshot: {

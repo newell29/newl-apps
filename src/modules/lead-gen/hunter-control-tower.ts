@@ -42,6 +42,10 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
         email: { not: null },
         contactStatus: { notIn: [ContactStatus.REJECTED, ContactStatus.DO_NOT_CONTACT] },
         replyStatus: { notIn: [ReplyStatus.POSITIVE, ReplyStatus.MEETING_BOOKED, ReplyStatus.NEGATIVE] },
+        NOT: {
+          sequenceStatus: SequenceStatus.PAUSED,
+          replyStatus: ReplyStatus.OUT_OF_OFFICE
+        },
         sequenceStatus: {
           notIn: [SequenceStatus.ENROLLED, SequenceStatus.FINISHED, SequenceStatus.BOUNCED]
         },
@@ -67,7 +71,13 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
         email: { not: null },
         contactStatus: { notIn: [ContactStatus.REJECTED, ContactStatus.DO_NOT_CONTACT] },
         replyStatus: { notIn: [ReplyStatus.POSITIVE, ReplyStatus.MEETING_BOOKED, ReplyStatus.NEGATIVE] },
-        sequenceStatus: SequenceStatus.ENROLLED
+        OR: [
+          { sequenceStatus: SequenceStatus.ENROLLED },
+          {
+            sequenceStatus: SequenceStatus.PAUSED,
+            replyStatus: ReplyStatus.OUT_OF_OFFICE
+          }
+        ]
       }
     }),
     prisma.contact.count({

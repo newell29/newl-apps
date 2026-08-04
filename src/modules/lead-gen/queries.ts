@@ -1586,6 +1586,7 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
     const rawJson = asObject(contact.rawJson);
     const apolloJson = asObject(rawJson.apollo);
     const deliveryFailure = asObject(apolloJson.deliveryFailure);
+    const pauseReconciliation = asObject(apolloJson.pauseReconciliation);
     const pushBlocker = asObject(apolloJson.pushBlocker);
     const pendingSequenceConfirmation = asObject(apolloJson.pendingSequenceConfirmation);
     const effectiveSequenceStatus: ContactSequenceStatusFilter =
@@ -1643,6 +1644,9 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       apolloDeliveryFailureKind: readString(deliveryFailure, "kind"),
       apolloDeliveryFailureReason: readString(deliveryFailure, "reason"),
       apolloDeliveryFailureDetectedAt: readString(deliveryFailure, "detectedAt"),
+      apolloPauseKind: readString(pauseReconciliation, "kind"),
+      apolloPauseReason: readString(pauseReconciliation, "reason"),
+      apolloPauseResumeAt: readString(pauseReconciliation, "resumeAt"),
       effectiveSequenceStatus,
       replyStatus: contact.replyStatus,
       recommendedSequenceId: useHunterRecommendation ? recommendation.id : contact.recommendedSequenceId ?? recommendation.id,

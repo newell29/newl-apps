@@ -138,10 +138,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 ## Automated sales workspace boundaries
 
 - Hunter Control Tower is the operational decision surface; Found Companies remains a bounded source-data review screen. Research evidence remains available as a collapsed Control Tower drill-down.
-- Outreach Queue defaults to **Needs Attention**. It includes approved, ready, paused, or replied contacts and contacts
+- Outreach Queue defaults to **Needs Attention**. It includes approved, ready, unexplained paused, or replied contacts and contacts
   with a current Newl draft or Outreach Plan, but excludes contacts already enrolled in Apollo.
-- **Active Cadences** contains enrolled, no-reply contacts for monitoring. Enrollment therefore removes a contact from
+- **Active Cadences** contains enrolled, no-reply contacts and temporary out-of-office pauses for monitoring. An out-of-office pause retains Apollo's exact reason and resume date when available. Enrollment therefore removes a contact from
   Needs Attention without deleting the contact, plan, sequence history, or reply-sync state.
+- A paused Apollo contact whose reply says the person no longer works at the company is terminal for that contact. Newl Apps rejects the contact, finishes its local cadence state, preserves the exact Apollo reason for audit, and queues the company for replacement-contact review without treating the company itself as a negative reply.
 - Both views exclude rejected and do-not-contact records, bounced sequences, finished sequences without current outreach work, and positive, meeting-booked, or negative reply outcomes. A current non-archived Outreach Plan keeps a no-reply contact visible in Needs Attention even when an older cadence is finished.
 - A legacy `Lead` row by itself does not remove a researched company from Hunter planning. Hunter blocks a company
   for current-customer, do-not-prospect, rejected/disqualified, do-not-contact, reply, or prior-sequence evidence.

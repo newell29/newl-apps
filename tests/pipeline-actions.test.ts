@@ -27,6 +27,7 @@ const requireMutationAccess = vi.fn();
 const fetchApolloContactsForCompany = vi.fn();
 const fetchApolloContactById = vi.fn();
 const fetchApolloSequenceDeliveryFailures = vi.fn();
+const fetchApolloSequencePauseEvidence = vi.fn();
 const apolloCompanyMatchCreate = vi.fn();
 const outreachPlanUpdateMany = vi.fn();
 const contactOutreachDraftUpdateMany = vi.fn();
@@ -111,7 +112,14 @@ vi.mock("@/server/integrations/apollo", () => ({
   fetchApolloContactById: (...args: unknown[]) => fetchApolloContactById(...args),
   fetchApolloSequenceDeliveryFailures: (...args: unknown[]) =>
     fetchApolloSequenceDeliveryFailures(...args),
+  fetchApolloSequencePauseEvidence: (...args: unknown[]) =>
+    fetchApolloSequencePauseEvidence(...args),
   reconcileApolloContactWithDeliveryFailureEvidence: ({
+    contact
+  }: {
+    contact: unknown;
+  }) => contact,
+  reconcileApolloContactWithPauseEvidence: ({
     contact
   }: {
     contact: unknown;
@@ -150,6 +158,7 @@ import {
 describe("pipeline bulk actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchApolloSequencePauseEvidence.mockResolvedValue([]);
     getAuthenticatedContext.mockResolvedValue({
       tenantId: "tenant-1",
       tenantSlug: "newl-group",

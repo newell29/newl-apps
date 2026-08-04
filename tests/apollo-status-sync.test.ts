@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApolloStatus, JobStatus, ReplyStatus, SequenceStatus } from "@prisma/client";
+import { ApolloStatus, ContactStatus, JobStatus, ReplyStatus, SequenceStatus } from "@prisma/client";
 
 const prismaMock = vi.hoisted(() => ({
   automationJobRun: {
@@ -23,7 +23,10 @@ const prismaMock = vi.hoisted(() => ({
 
 vi.mock("@/server/db", () => ({ prisma: prismaMock }));
 
-import { syncApolloStatusesForTenant } from "@/modules/lead-gen/apollo-status-sync";
+import {
+  getApolloStatusSyncHealth,
+  syncApolloStatusesForTenant
+} from "@/modules/lead-gen/apollo-status-sync";
 import { ApolloRateLimitError, type ApolloContactRecord } from "@/server/integrations/apollo";
 
 const tenant = { tenantId: "tenant-a", tenantSlug: "newl", tenantName: "Newl" };
@@ -36,6 +39,7 @@ function existingContact(id = "contact-1") {
     companyId: "company-1",
     apolloContactId: `apollo-${id}`,
     apolloPersonId: null,
+    contactStatus: ContactStatus.APPROVED,
     sequenceStatus: SequenceStatus.ENROLLED,
     replyStatus: ReplyStatus.NO_REPLY,
     selectedSequenceId: "sequence-1",
@@ -252,6 +256,107 @@ describe("scheduled Apollo status sync", () => {
       data: expect.objectContaining({
         sequenceStatus: SequenceStatus.BOUNCED
       })
+    });
+  });
+
+  it("keeps Nicole's temporary out-of-office pause monitored without returning it to Needs Attention", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([existingContact()]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.PAUSED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "sequence-1",
+      lastReplyAt: null
+    });
+    const fetchPauseEvidence = vi.fn().mockResolvedValue([{
+      apolloContactId: "apollo-contact-1",
+      email: "jordan@example.com",
+      kind: "OUT_OF_OFFICE",
+      reason: "I am out of office and will return Thursday, August 6th.",
+      occurredAt: now,
+      resumeAt: new Date("2026-08-06T12:00:00.000Z"),
+      rawPayload: { id: "reply-1" }
+    }]);
+
+    await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        fetchDeliveryFailures: noDeliveryFailures(),
+        fetchPauseEvidence,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: { id: "contact-1", tenantId: "tenant-a" },
+      data: expect.objectContaining({
+        contactStatus: ContactStatus.APPROVED,
+        sequenceStatus: SequenceStatus.PAUSED,
+        replyStatus: ReplyStatus.OUT_OF_OFFICE,
+        lastReplyAt: now,
+        rawJson: expect.objectContaining({
+          apollo: expect.objectContaining({
+            pauseReconciliation: expect.objectContaining({
+              kind: "OUT_OF_OFFICE",
+              resumeAt: "2026-08-06T12:00:00.000Z"
+            })
+          })
+        })
+      })
+    });
+  });
+
+  it("closes Kameron's departed contact and queues a replacement-contact review", async () => {
+    prismaMock.contact.findMany.mockResolvedValue([existingContact()]);
+    const fetchContact = vi.fn().mockResolvedValue({
+      ...incomingContact(),
+      sequenceStatus: SequenceStatus.PAUSED,
+      replyStatus: ReplyStatus.NO_REPLY,
+      sequenceId: "sequence-1",
+      lastReplyAt: null
+    });
+    const queueReplacementContactReview = vi.fn().mockResolvedValue({
+      state: "queued",
+      runId: "replacement-job"
+    });
+
+    await syncApolloStatusesForTenant(tenant, {
+      dependencies: {
+        fetchContact,
+        fetchDeliveryFailures: noDeliveryFailures(),
+        fetchPauseEvidence: vi.fn().mockResolvedValue([{
+          apolloContactId: "apollo-contact-1",
+          email: "jordan@example.com",
+          kind: "NO_LONGER_EMPLOYED",
+          reason: "Kameron Harper is no longer with the company.",
+          occurredAt: now,
+          resumeAt: null,
+          rawPayload: { id: "reply-2" }
+        }]),
+        queueReplacementContactReview,
+        now: () => now,
+        sleep: vi.fn(),
+        recordScoreSnapshot: vi.fn().mockResolvedValue({ id: "snapshot-1" }),
+        recordOutcome: vi.fn().mockResolvedValue({ id: "outcome-1" })
+      }
+    });
+
+    expect(prismaMock.contact.updateMany).toHaveBeenCalledWith({
+      where: { id: "contact-1", tenantId: "tenant-a" },
+      data: expect.objectContaining({
+        contactStatus: ContactStatus.REJECTED,
+        sequenceStatus: SequenceStatus.FINISHED,
+        replyStatus: ReplyStatus.NO_REPLY
+      })
+    });
+    expect(queueReplacementContactReview).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      companyId: "company-1",
+      forceContactReview: true,
+      authorizePaidEmailEnrichment: false
     });
   });
 
@@ -694,5 +799,36 @@ describe("scheduled Apollo status sync", () => {
         })
       })
     );
+  });
+});
+
+describe("Apollo status sync health", () => {
+  it("identifies the exact contact and error awaiting retry", async () => {
+    prismaMock.integrationCredential.findFirst.mockResolvedValue({ id: "apollo-credential" });
+    prismaMock.contact.count
+      .mockResolvedValueOnce(115)
+      .mockResolvedValueOnce(15)
+      .mockResolvedValueOnce(1);
+    prismaMock.contact.findMany.mockResolvedValue([{
+      id: "contact-failed",
+      fullName: "Failed Contact",
+      apolloSyncFailureCount: 2,
+      apolloSyncLastError: "Apollo returned status 503.",
+      apolloNextSyncAt: now,
+      company: { name: "Example Company" }
+    }]);
+    prismaMock.contact.findFirst.mockResolvedValue({ apolloNextSyncAt: now });
+    prismaMock.automationJobRun.findMany.mockResolvedValue([]);
+
+    const health = await getApolloStatusSyncHealth(tenant);
+
+    expect(health.failedContactDetails).toEqual([{
+      id: "contact-failed",
+      fullName: "Failed Contact",
+      companyName: "Example Company",
+      failureCount: 2,
+      error: "Apollo returned status 503.",
+      nextRetryAt: now
+    }]);
   });
 });

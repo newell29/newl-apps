@@ -10,6 +10,7 @@ const APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT = 3;
 const APOLLO_EQUIVALENT_ACCOUNT_LIMIT = 5;
 const APOLLO_EQUIVALENT_ACCOUNT_QUERY_LIMIT = 4;
 const APOLLO_DELIVERY_FAILURE_MAX_PAGES = 10;
+const APOLLO_PAUSE_EVIDENCE_MAX_PAGES = 10;
 const APOLLO_KEYWORD_MAX_LENGTH = 200;
 const INTERNAL_SEQUENCE_KEYS = new Set([
   "hunter-email-only",
@@ -156,6 +157,20 @@ export type ApolloSequenceDeliveryFailure = {
   email: string | null;
   kind: ApolloDeliveryFailureKind;
   reason: string;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloPauseEvidenceKind =
+  | "OUT_OF_OFFICE"
+  | "NO_LONGER_EMPLOYED";
+
+export type ApolloSequencePauseEvidence = {
+  apolloContactId: string | null;
+  email: string | null;
+  kind: ApolloPauseEvidenceKind;
+  reason: string;
+  occurredAt: Date | null;
+  resumeAt: Date | null;
   rawPayload: Record<string, unknown>;
 };
 
@@ -1681,6 +1696,230 @@ export async function fetchApolloSequenceDeliveryFailures(
   }
 
   return [...contacts.values()];
+}
+
+export async function fetchApolloSequencePauseEvidence(
+  sequenceIdInput: string
+): Promise<ApolloSequencePauseEvidence[]> {
+  const sequenceId = sequenceIdInput.trim();
+  if (!sequenceId) {
+    throw new Error("Apollo pause reconciliation requires a sequence ID.");
+  }
+  if (INTERNAL_SEQUENCE_KEYS.has(sequenceId)) {
+    throw new Error(
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID.`
+    );
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const evidenceByContact = new Map<string, ApolloSequencePauseEvidence>();
+
+  for (let page = 1; page <= APOLLO_PAUSE_EVIDENCE_MAX_PAGES; page += 1) {
+    const params = new URLSearchParams({
+      page: String(page),
+      per_page: String(DEFAULT_PAGE_SIZE)
+    });
+    params.append("emailer_campaign_ids[]", sequenceId);
+
+    const response = await fetch(
+      `${DEFAULT_BASE_URL}/api/v1/emailer_messages/search?${params.toString()}`,
+      {
+        method: "GET",
+        headers: buildApolloHeaders(apiKey),
+        cache: "no-store"
+      }
+    );
+    const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+    if (!response.ok) {
+      const message =
+        extractApolloError(json) ??
+        `Apollo pause reconciliation failed with status ${response.status}.`;
+      if (response.status === 429 || isApolloRateLimitMessage(message)) {
+        throw new ApolloRateLimitError(
+          message,
+          parseRetryAfterMs(response.headers.get("retry-after"))
+        );
+      }
+      if (response.status >= 500) {
+        throw new ApolloTransientError(message, response.status);
+      }
+      throw new Error(message);
+    }
+
+    if (!json) {
+      throw new ApolloTransientError(
+        "Apollo returned an unreadable pause-evidence response.",
+        502
+      );
+    }
+
+    const entries = readApolloActivityEntries(json)
+      .map((entry) => asRecord(entry))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+    for (const entry of entries) {
+      const pauseEvidence = classifyApolloPauseEvidence(entry);
+      if (!pauseEvidence) {
+        continue;
+      }
+      const nestedContact =
+        asRecord(entry.contact) ??
+        asRecord(entry.recipient) ??
+        asRecord(entry.person) ??
+        asRecord(entry.prospect);
+      const apolloContactId =
+        readApolloString(entry, [
+          "contact_id",
+          "apollo_contact_id",
+          "recipient_contact_id",
+          "prospect_id"
+        ]) ?? readApolloString(nestedContact ?? {}, ["contact_id", "apollo_contact_id", "id"]);
+      const email =
+        readApolloString(entry, ["to_email", "recipient_email", "email"]) ??
+        readApolloString(nestedContact ?? {}, ["email"]);
+      const key = apolloContactId ?? email?.trim().toLowerCase() ?? null;
+      if (!key) {
+        continue;
+      }
+
+      const existing = evidenceByContact.get(key);
+      if (
+        !existing ||
+        pauseEvidence.kind === "NO_LONGER_EMPLOYED" ||
+        (pauseEvidence.occurredAt?.getTime() ?? 0) >
+          (existing.occurredAt?.getTime() ?? 0)
+      ) {
+        evidenceByContact.set(key, {
+          apolloContactId,
+          email,
+          ...pauseEvidence,
+          rawPayload: entry
+        });
+      }
+    }
+
+    if (entries.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return [...evidenceByContact.values()];
+}
+
+export function reconcileApolloContactWithPauseEvidence({
+  contact,
+  selectedSequenceId,
+  apolloContactId,
+  email,
+  pauseEvidence
+}: {
+  contact: ApolloContactRecord;
+  selectedSequenceId: string | null;
+  apolloContactId: string;
+  email: string | null;
+  pauseEvidence: ApolloSequencePauseEvidence[];
+}): ApolloContactRecord {
+  if (!selectedSequenceId || contact.sequenceStatus !== SequenceStatus.PAUSED) {
+    return contact;
+  }
+
+  const normalizedEmail = email?.trim().toLowerCase() ?? null;
+  const evidence = pauseEvidence.find(
+    (candidate) =>
+      candidate.apolloContactId === apolloContactId ||
+      (normalizedEmail && candidate.email?.trim().toLowerCase() === normalizedEmail)
+  );
+  if (!evidence) {
+    return contact;
+  }
+
+  return {
+    ...contact,
+    sequenceStatus:
+      evidence.kind === "NO_LONGER_EMPLOYED"
+        ? SequenceStatus.FINISHED
+        : SequenceStatus.PAUSED,
+    replyStatus:
+      evidence.kind === "OUT_OF_OFFICE"
+        ? ReplyStatus.OUT_OF_OFFICE
+        : ReplyStatus.NO_REPLY,
+    sequenceId: selectedSequenceId,
+    lastReplyAt: evidence.occurredAt ?? contact.lastReplyAt,
+    rawPayload: {
+      ...contact.rawPayload,
+      newlPauseReconciliation: {
+        source: "APOLLO_OUTREACH_EMAIL_SEARCH",
+        sequenceId: selectedSequenceId,
+        kind: evidence.kind,
+        reason: evidence.reason,
+        occurredAt: evidence.occurredAt?.toISOString() ?? null,
+        resumeAt: evidence.resumeAt?.toISOString() ?? null,
+        record: evidence.rawPayload
+      }
+    }
+  };
+}
+
+export function classifyApolloPauseEvidence(
+  value: Record<string, unknown>
+): Omit<ApolloSequencePauseEvidence, "apolloContactId" | "email" | "rawPayload"> | null {
+  if (!hasApolloReplyEvidence(value)) {
+    return null;
+  }
+  const text = collectApolloText(value);
+  const reason = readApolloEvidenceReason(value) ?? summarizeApolloEvidenceReason(text);
+  if (!text) {
+    return null;
+  }
+  const occurredAt = parseApolloDate(
+    readApolloString(value, [
+      "replied_at",
+      "last_reply_at",
+      "completed_at",
+      "sent_at",
+      "updated_at",
+      "created_at"
+    ])
+  );
+
+  if (
+    /\b(no longer (?:works?|working|employed|with)|has left|left (?:the )?company|not employed|departed (?:from )?|former employee)\b/iu.test(
+      text
+    )
+  ) {
+    return {
+      kind: "NO_LONGER_EMPLOYED",
+      reason,
+      occurredAt,
+      resumeAt: null
+    };
+  }
+
+  if (
+    /\b(out[ -]?of[ -]?office|automatic reply|auto(?:matic)?[ -]?reply|vacation|away from (?:the )?office)\b/iu.test(
+      text
+    )
+  ) {
+    return {
+      kind: "OUT_OF_OFFICE",
+      reason,
+      occurredAt,
+      resumeAt: readApolloResumeAt(value, text, occurredAt)
+    };
+  }
+
+  return null;
+}
+
+function hasApolloReplyEvidence(value: Record<string, unknown>) {
+  const direction = readApolloString(value, ["direction", "message_direction"]);
+  return (
+    readApolloBoolean(value, ["replied", "has_replied"], false) ||
+    Boolean(readApolloString(value, ["reply_class", "reply_status", "response_status"])) ||
+    Boolean(readApolloString(value, ["replied_at", "last_reply_at", "responded_at"])) ||
+    direction?.toLowerCase() === "inbound"
+  );
 }
 
 export function reconcileApolloContactWithDeliveryFailureEvidence({
@@ -5447,6 +5686,121 @@ function toApolloEmailActivities(record: Record<string, unknown>): ApolloActivit
   }
 
   return activities;
+}
+
+function collectApolloText(value: unknown, depth = 0): string {
+  if (depth > 4 || value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => collectApolloText(item, depth + 1))
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (typeof value !== "object") {
+    return "";
+  }
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !/(token|secret|password|api[_-]?key|authorization)/iu.test(key))
+    .map(([, item]) => collectApolloText(item, depth + 1))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function summarizeApolloEvidenceReason(value: string) {
+  return value.replace(/\s+/gu, " ").trim().slice(0, 500);
+}
+
+function readApolloEvidenceReason(value: unknown, depth = 0): string | null {
+  if (depth > 4 || !value || typeof value !== "object") {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const reason = readApolloEvidenceReason(item, depth + 1);
+      if (reason) return reason;
+    }
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const preferredKeys = [
+    "reply_body",
+    "body_preview",
+    "preview_text",
+    "snippet",
+    "body",
+    "text",
+    "message",
+    "subject"
+  ];
+  for (const key of preferredKeys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return summarizeApolloEvidenceReason(candidate);
+    }
+  }
+  for (const candidate of Object.values(record)) {
+    const reason = readApolloEvidenceReason(candidate, depth + 1);
+    if (reason) return reason;
+  }
+  return null;
+}
+
+function readApolloResumeAt(
+  record: Record<string, unknown>,
+  text: string,
+  occurredAt: Date | null
+) {
+  const structured = parseApolloDate(
+    readApolloString(record, [
+      "resume_at",
+      "resumes_at",
+      "auto_resume_at",
+      "auto_resumes_at",
+      "paused_until",
+      "pause_until",
+      "out_of_office_until"
+    ])
+  );
+  if (structured) {
+    return structured;
+  }
+
+  const monthMatch = text.match(
+    /\b(?:return(?:ing|s)?|back|resume(?:s|d)?)\s+(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?[,]?\s*(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:[,]?\s+(\d{4}))?/iu
+  );
+  if (!monthMatch) {
+    return null;
+  }
+
+  const monthIndex = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december"
+  ].indexOf(monthMatch[1].toLowerCase());
+  const day = Number(monthMatch[2]);
+  let year = Number(monthMatch[3] ?? occurredAt?.getUTCFullYear() ?? new Date().getUTCFullYear());
+  let parsed = new Date(Date.UTC(year, monthIndex, day, 12));
+  if (!monthMatch[3] && occurredAt && parsed.getTime() < occurredAt.getTime() - 24 * 60 * 60 * 1_000) {
+    year += 1;
+    parsed = new Date(Date.UTC(year, monthIndex, day, 12));
+  }
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function mergeApolloPayload(target: Record<string, unknown>, buckets: Map<string, unknown[]>, pagePayload: Record<string, unknown>) {

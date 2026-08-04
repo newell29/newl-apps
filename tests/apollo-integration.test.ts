@@ -3,6 +3,7 @@ import { ReplyStatus, SequenceStatus } from "@prisma/client";
 import {
   createApolloContactForEnrollment,
   classifyApolloDeliveryFailure,
+  classifyApolloPauseEvidence,
   fetchApolloActivitySummary,
   fetchApolloSequenceDeliveryFailures,
   fetchApolloContactById,
@@ -18,9 +19,43 @@ import {
   readReviewerConfirmedApolloOrganizationIdFromMatchQuery,
   resolveApolloOrganizationForCompany,
   reconcileApolloContactWithDeliveryFailureEvidence,
+  reconcileApolloContactWithPauseEvidence,
   removeApolloContactsFromSequences,
   transitionApolloContactsToSequence
 } from "@/server/integrations/apollo";
+
+function apolloContact() {
+  return {
+    recordSource: "SAVED_CONTACT" as const,
+    apolloContactId: "apollo-contact-1",
+    apolloPersonId: "person-1",
+    firstName: "Taylor",
+    lastName: "Example",
+    lastNameObfuscated: null,
+    fullName: "Taylor Example",
+    title: "Supply Chain Manager",
+    department: "Operations",
+    seniority: "manager",
+    email: "taylor@example.com",
+    phone: null,
+    linkedinUrl: null,
+    hasEmailAvailable: true,
+    hasPhoneAvailable: false,
+    hasLinkedinAvailable: false,
+    city: null,
+    state: null,
+    country: null,
+    sequenceStatus: SequenceStatus.NOT_STARTED,
+    replyStatus: ReplyStatus.NO_REPLY,
+    sequenceId: null,
+    sequenceName: null,
+    sequenceOwnerName: null,
+    sequenceOwnerUserId: null,
+    lastTouchAt: null,
+    lastReplyAt: null,
+    rawPayload: {}
+  };
+}
 
 describe("createApolloContactForEnrollment", () => {
   beforeEach(() => {
@@ -459,6 +494,63 @@ describe("Apollo delivery-failure reconciliation", () => {
       })
     ).toMatchObject({ kind: "RECIPIENT_DOMAIN" });
     expect(classifyApolloDeliveryFailure({ contact_stage: "Bad Data" })).toBeNull();
+  });
+
+  it("classifies Nicole's temporary out-of-office pause and its resume date", () => {
+    const evidence = classifyApolloPauseEvidence({
+      replied_at: "2026-08-04T13:00:00.000Z",
+      subject: "Automatic reply",
+      body_preview:
+        "I am out of office and will return Thursday, August 6th."
+    });
+
+    expect(evidence).toMatchObject({
+      kind: "OUT_OF_OFFICE",
+      occurredAt: new Date("2026-08-04T13:00:00.000Z"),
+      resumeAt: new Date("2026-08-06T12:00:00.000Z")
+    });
+  });
+
+  it("classifies Kameron's departed-employee reply ahead of generic automatic-reply text", () => {
+    const evidence = classifyApolloPauseEvidence({
+      replied_at: "2026-07-31T13:00:00.000Z",
+      subject: "Automatic reply",
+      body_preview:
+        "Kameron Harper is no longer with Roechling Industrial Gastonia."
+    });
+
+    expect(evidence).toMatchObject({
+      kind: "NO_LONGER_EMPLOYED",
+      resumeAt: null
+    });
+  });
+
+  it("reconciles a temporary pause without treating it as terminal", () => {
+    const contact = {
+      ...apolloContact(),
+      sequenceStatus: SequenceStatus.PAUSED,
+      sequenceId: "sequence-1"
+    };
+    const reconciled = reconcileApolloContactWithPauseEvidence({
+      contact,
+      selectedSequenceId: "sequence-1",
+      apolloContactId: "apollo-contact-1",
+      email: "taylor@example.com",
+      pauseEvidence: [{
+        apolloContactId: "apollo-contact-1",
+        email: "taylor@example.com",
+        kind: "OUT_OF_OFFICE",
+        reason: "Out of office until August 6.",
+        occurredAt: new Date("2026-08-04T13:00:00.000Z"),
+        resumeAt: new Date("2026-08-06T12:00:00.000Z"),
+        rawPayload: { id: "message-1" }
+      }]
+    });
+
+    expect(reconciled).toMatchObject({
+      sequenceStatus: SequenceStatus.PAUSED,
+      replyStatus: ReplyStatus.OUT_OF_OFFICE
+    });
   });
 });
 

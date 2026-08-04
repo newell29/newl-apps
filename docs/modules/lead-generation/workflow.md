@@ -164,9 +164,9 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 The employee-facing layout follows the lifecycle of a prospect rather than the underlying database tables:
 
 1. **Hunter Control Tower** shows TradeMining, external scout, company research, outreach preparation, and Apollo-sync health; a current-day production summary; separate cross-day workflow inventory; three attention queues; and Hunter-researched Hot, Qualified current account, Watchlist, carry-forward, and blocked evidence in a collapsed drill-down.
-2. **Outreach Queue** defaults to **Needs Attention**, containing drafting, QA, approval, sender assignment, paused-cadence,
+2. **Outreach Queue** defaults to **Needs Attention**, containing drafting, QA, approval, sender assignment, unexplained paused-cadence,
    and Apollo enrollment work. Once Apollo confirms enrollment, the contact moves to **Active Cadences** for reply
-   monitoring. Bounces and explicit permanent delivery failures move to the read-only **Delivery Failures** history,
+   monitoring. Temporary out-of-office pauses stay in Active Cadences with their Apollo reason and resume date. A no-longer-employed automatic reply closes only that contact and queues replacement-contact review for the company. Bounces and explicit permanent delivery failures move to the read-only **Delivery Failures** history,
    which preserves Apollo's exact reason. Terminal, unsafe, finished, and positively engaged contacts do not clutter
    either actionable view. Contacts
    without a concrete syntactically usable email remain stored for audit and Apollo recovery but are excluded from

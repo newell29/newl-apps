@@ -190,8 +190,9 @@ export default async function OutreachQueuePage({
       />
 
       <div className="rounded-lg border border-accentBorder bg-accentSoft px-4 py-3 text-sm text-foreground">
-        Needs Attention contains only drafting, approval, assignment, paused-cadence, and Apollo push work. Once a
+        Needs Attention contains only drafting, approval, assignment, unexplained paused-cadence, and Apollo push work. Once a
         contact is confirmed in its exact selected Apollo cadence, it moves to Active Cadences for reply monitoring.
+        Temporary out-of-office pauses remain in Active Cadences with their Apollo pause reason and resume date.
         If Apollo accepted a push before membership became visible, Newl Apps keeps checking without sending a second
         enrollment request. Rejected, do-not-contact, bounced, finished, and sales-engaged records remain hidden.
         Terminal delivery failures remain available in Delivery Failures for audit without returning to an actionable
@@ -272,6 +273,20 @@ export default async function OutreachQueuePage({
         {apolloSyncHealth.latestJob?.status === "ERROR" ? (
           <div className="border-t border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
             Latest sync issue: {apolloSyncHealth.latestJob.errorMessage ?? "Review the latest Apollo sync run."}
+          </div>
+        ) : null}
+        {apolloSyncHealth.failedContactDetails.length > 0 ? (
+          <div className="space-y-2 border-t border-warning/20 bg-warning/5 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-warning">
+              Contacts awaiting automatic retry
+            </p>
+            {apolloSyncHealth.failedContactDetails.map((contact) => (
+              <div key={contact.id} className="text-xs leading-5 text-foreground">
+                <span className="font-semibold">{contact.fullName} ({contact.companyName})</span>
+                {contact.error ? ` — ${contact.error}` : " — Apollo sync failed."}
+                {contact.nextRetryAt ? ` Next retry ${formatSyncDate(contact.nextRetryAt)}.` : ""}
+              </div>
+            ))}
           </div>
         ) : null}
       </section>

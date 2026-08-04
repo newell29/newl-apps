@@ -273,8 +273,8 @@ Regression coverage must prove:
 
 1. Sales Opportunities contains only engaged, meeting, proposal, won, and lost stages;
 2. New, researching, enriched, qualified, and contacted leads remain stored but do not appear in the revenue view unless a saved Apollo positive reply or meeting-booked status supplies the corresponding effective sales stage;
-3. Outreach Queue **Needs Attention** includes approved, drafted, ready, paused, and unanswered pre-enrollment work;
-4. enrolled no-reply contacts move to **Active Cadences**, while rejected, do-not-contact, bounced, explicit
+3. Outreach Queue **Needs Attention** includes approved, drafted, ready, unexplained paused, and unanswered pre-enrollment work;
+4. enrolled no-reply contacts and temporary out-of-office pauses move to **Active Cadences**, while rejected, do-not-contact, bounced, explicit
    permanent delivery failures, finished, positive, meeting-booked, and negative contacts are excluded from both
    actionable work views; terminal delivery failures remain visible in the read-only Delivery Failures history;
 5. the legacy `/lead-gen/contacts` route redirects to `/lead-gen/outreach`; and
@@ -418,3 +418,6 @@ Regression coverage must prove:
 19. internal Hunter cadence keys are resolved against one live Apollo cadence directory by exact ID or unique exact
     name, while absent, inactive, ambiguous, and unavailable cadences fail before the enrollment endpoint; and the
     low-level Apollo client refuses to transmit known Newl Apps cadence keys.
+20. a temporary out-of-office pause retains its exact Apollo reason and resume date, stays out of Needs Attention, and remains visible in Active Cadences;
+21. a no-longer-employed automatic reply rejects and finishes only that contact, preserves the exact Apollo reason, and queues replacement-contact review for the company;
+22. partial sync failure diagnostics identify the exact contact, company, normalized error, failure count, and next retry rather than reporting only a batch-level failure count.
