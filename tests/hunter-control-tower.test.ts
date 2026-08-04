@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import { readRecoveryState } from "@/modules/lead-gen/hunter-control-tower";
+import {
+  readRecoveryState,
+  resolveTowerResearchSelection
+} from "@/modules/lead-gen/hunter-control-tower";
+
+describe("Hunter control tower research selection", () => {
+  it("uses the normalized selection from the latest successful research run", () => {
+    expect(resolveTowerResearchSelection(
+      { selectedCompanyCount: 30, newCompanyCount: 27 },
+      { selection: null }
+    )).toMatchObject({
+      selectedCompanyCount: 30,
+      newCompanyCount: 27
+    });
+  });
+
+  it("falls back to raw run input for legacy research runs", () => {
+    expect(resolveTowerResearchSelection(null, {
+      selection: { selectedCompanyCount: 12 }
+    })).toMatchObject({ selectedCompanyCount: 12 });
+  });
+});
 
 describe("Hunter control tower recovery state", () => {
   it("shows a scheduled paid-retrieval retry without exposing local paths", () => {

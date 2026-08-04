@@ -129,7 +129,10 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
     ? controlPlane.latestCompanyResearchRun
     : null;
   const researchOutput = record(researchRun?.output);
-  const researchSelection = record(record(researchRun?.input)?.selection);
+  const researchSelection = resolveTowerResearchSelection(
+    controlPlane.latestCompanyResearchSelection,
+    researchRun?.input
+  );
   const researchRecovery = readRecoveryState(researchRun?.input, researchRun?.output);
   const todayResearchSignals = researchRun?.status === "SUCCESS"
     ? controlPlane.latestResearchSignals
@@ -260,6 +263,13 @@ export function readRecoveryState(inputValue: unknown, outputValue: unknown) {
     retryScheduled: recovery?.retryScheduled === true,
     recovered: Boolean(recoveryOfRunId && output?.phase === "COMPANY_RESEARCH_COMPLETE")
   };
+}
+
+export function resolveTowerResearchSelection(
+  normalizedSelection: unknown,
+  runInput: unknown
+) {
+  return record(normalizedSelection) ?? record(record(runInput)?.selection);
 }
 
 function stageTone(input: { failed: number; running: number; complete: boolean }): HunterTowerTone {
