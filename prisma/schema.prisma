@@ -1124,6 +1124,8 @@ model ShipmentCarrierManifestRun {
   suretrackWorkbookBytes Bytes?
   clarkeFileName         String?
   clarkeWorkbookBytes    Bytes?
+  guilbaultFileName      String?
+  guilbaultWorkbookBytes Bytes?
   signedCopyFileName     String?
   signedCopyContentType  String?
   signedCopyBytes        Bytes?

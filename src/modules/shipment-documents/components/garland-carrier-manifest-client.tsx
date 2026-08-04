@@ -144,7 +144,7 @@ export function GarlandCarrierManifestClient({
       setStatus(
         nextWorkbooks.length > 0
           ? `Built ${nextWorkbooks.length} carrier manifest workbook${nextWorkbooks.length === 1 ? "" : "s"}.`
-          : "No Midland, Speedy, Suretrack, or Clarke BOLs were found in this upload."
+          : "No Midland, Speedy, Suretrack, Clarke, or Guilbault Transport BOLs were found in this upload."
       );
     } catch (buildError) {
       const message = buildError instanceof Error ? buildError.message : "Unable to build carrier manifests.";
@@ -417,7 +417,7 @@ export function GarlandCarrierManifestClient({
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             {TARGET_CARRIERS.map((carrier) => (
               <div key={carrier.key} className="rounded-md border border-border bg-muted/20 p-4">
                 <p className="text-sm font-semibold text-foreground">{carrier.label}</p>
@@ -544,6 +544,7 @@ export function GarlandCarrierManifestClient({
                           {run.hasSpeedyWorkbook ? <DownloadLink runId={run.id} type="speedy" label="Speedy XLS" /> : null}
                           {run.hasSuretrackWorkbook ? <DownloadLink runId={run.id} type="suretrack" label="Suretrack XLS" /> : null}
                           {run.hasClarkeWorkbook ? <DownloadLink runId={run.id} type="clarke" label="Clarke XLS" /> : null}
+                          {run.hasGuilbaultWorkbook ? <DownloadLink runId={run.id} type="guilbault" label="Guilbault Transport XLS" /> : null}
                           <button
                             type="button"
                             onClick={() => void handleDeleteRun(run.id)}
