@@ -354,6 +354,21 @@ def build_company_research_message(result: dict[str, Any]) -> str:
         f"{researched} companies reached Luna and Kimi, {accepted} qualified for planning, "
         f"{blocked} blocked, and {missing} omitted after bounded model-output repair. "
     )
+    selection = result.get("selection")
+    if isinstance(selection, dict):
+        selected = int(selection.get("selectedCompanyCount") or 0)
+        new_companies = int(selection.get("newCompanyCount") or 0)
+        scheduled_refreshes = int(selection.get("scheduledRefreshSelectedCount") or 0)
+        material_refreshes = int(selection.get("materialRefreshSelectedCount") or 0)
+        recent_suppressed = int(selection.get("recentResearchSuppressedCount") or 0)
+        active_suppressed = int(selection.get("activeOutreachSuppressedCount") or 0)
+        cooldown_days = int(selection.get("cooldownDays") or 0)
+        message += (
+            f"Cohort selection: {new_companies}/{selected} new companies, "
+            f"{scheduled_refreshes} scheduled refreshes, {material_refreshes} new-trigger refreshes; "
+            f"{recent_suppressed} recent repeats and {active_suppressed} active-outreach companies suppressed "
+            f"under the {cooldown_days}-day cooldown. "
+        )
     luna_comparison = result.get("lunaComparison")
     if isinstance(luna_comparison, dict):
         evaluated = int(luna_comparison.get("evaluatedCompanyCount") or 0)

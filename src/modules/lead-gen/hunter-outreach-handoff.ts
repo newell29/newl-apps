@@ -2165,7 +2165,16 @@ async function finishJob(
       }
     })
   ]);
-  return { failedCount, reviewCount, contactsImported, plansGenerated };
+  return {
+    companyCount: output.results.length,
+    failedCount,
+    reviewCount,
+    contactsImported,
+    plansCreated,
+    existingPlansFound,
+    actionablePlans: plansGenerated,
+    plansGenerated
+  };
 }
 
 function emptyOutput(): HandoffOutput {

@@ -1,6 +1,9 @@
 import { HunterDecisionStatus, type JobStatus, type Prisma } from "@prisma/client";
 import { DEFAULT_HUNTER_POLICY, HUNTER_DRY_RUN_JOB_TYPE } from "@/modules/lead-gen/hunter-planner";
-import { HUNTER_COMPANY_RESEARCH_JOB_TYPE } from "@/modules/lead-gen/hunter-company-research";
+import {
+  HUNTER_COMPANY_RESEARCH_JOB_TYPE,
+  readStoredHunterCompanyResearchSelection
+} from "@/modules/lead-gen/hunter-company-research";
 import {
   readStoredHunterResearchLunaShadow,
   summarizeHunterResearchLunaShadow
@@ -92,6 +95,9 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
   const latestSuccessfulCompanyResearchRun =
     companyResearchRuns.find((run) => run.status === "SUCCESS") ?? null;
   const latestResearchRunId = latestSuccessfulCompanyResearchRun?.id ?? null;
+  const latestCompanyResearchSelection = readStoredHunterCompanyResearchSelection(
+    asRecord(latestSuccessfulCompanyResearchRun?.input)?.selection
+  );
   const {
     latestResearchSignals,
     carryForwardResearchSignals
@@ -117,6 +123,7 @@ export async function getHunterControlPlane(tenant: Pick<TenantContext, "tenantI
     companyResearchRuns,
     latestCompanyResearchRun: companyResearchRuns[0] ?? null,
     latestSuccessfulCompanyResearchRun,
+    latestCompanyResearchSelection,
     latestResearchSignals,
     carryForwardResearchSignals,
     latestLunaShadow: lunaShadow,

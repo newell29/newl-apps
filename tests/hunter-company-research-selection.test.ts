@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHunterCompanyResearchWhere,
+  resolveHunterCompanyResearchSelection,
   rankHunterCompanyResearchCandidates
 } from "@/modules/lead-gen/hunter-company-research";
 
@@ -11,7 +12,7 @@ describe("Hunter company research selection", () => {
     const where = buildHunterCompanyResearchWhere({
       tenantId: "tenant-a",
       requestedKeys: [],
-      recentlyResearchedIds: []
+      suppressedCompanyIds: []
     });
 
     expect(where).not.toHaveProperty("leads");
@@ -32,6 +33,54 @@ describe("Hunter company research selection", () => {
         }
       }
     });
+  });
+
+  it("suppresses recent research and active Hunter outreach while allowing genuinely new triggers", () => {
+    const selection = resolveHunterCompanyResearchSelection({
+      now: new Date("2026-08-04T12:00:00.000Z"),
+      researchHistory: [
+        history("company-a", "domain:a.example", "2026-07-28T12:00:00.000Z"),
+        history("company-b", "domain:b.example", "2026-07-28T12:00:00.000Z"),
+        history("company-c", "domain:c.example", "2026-04-01T12:00:00.000Z"),
+        history("company-d", "domain:d.example", "2026-07-20T12:00:00.000Z")
+      ],
+      materialSignals: [
+        history("company-b", "domain:b.example", "2026-08-02T12:00:00.000Z"),
+        history("company-d", "domain:d.example", "2026-08-03T12:00:00.000Z")
+      ],
+      activeOutreachCompanies: [
+        { companyId: "company-d", identityKey: "domain:d.example" },
+        { companyId: "company-e", identityKey: "domain:e.example" }
+      ]
+    });
+
+    expect(selection.suppressedCompanyIds).toEqual(
+      expect.arrayContaining(["company-a", "company-d", "company-e"])
+    );
+    expect(selection.suppressedCompanyIds).not.toContain("company-b");
+    expect(selection.suppressedCompanyIds).not.toContain("company-c");
+    expect(selection.suppressedIdentityKeys).toEqual(
+      expect.arrayContaining(["domain:a.example", "domain:d.example", "domain:e.example"])
+    );
+    expect(selection.materialRefreshIdentityKeys).toEqual(["domain:b.example"]);
+    expect(selection.recentResearchSuppressedCount).toBe(1);
+    expect(selection.activeOutreachSuppressedCount).toBe(2);
+  });
+
+  it("suppresses a duplicate alias when Apollo, domain, or normalized-name identities overlap", () => {
+    const selection = resolveHunterCompanyResearchSelection({
+      now: new Date("2026-08-04T12:00:00.000Z"),
+      researchHistory: [{
+        ...history("mapped-company", "apollo:org-1", "2026-07-28T12:00:00.000Z"),
+        identityKeys: ["apollo:org-1", "domain:example.com", "name:example-company"]
+      }],
+      materialSignals: [],
+      activeOutreachCompanies: []
+    });
+
+    expect(selection.suppressedIdentityKeys).toEqual(
+      expect.arrayContaining(["apollo:org-1", "domain:example.com", "name:example-company"])
+    );
   });
 
   it("reserves daily research capacity for strong external-news companies without requiring TradeMining", () => {
@@ -94,5 +143,13 @@ function company(id: string, priorityScore: number, externalConfidence?: number)
           }
         ]
       : []
+  };
+}
+
+function history(companyId: string, identityKey: string, observedAt: string) {
+  return {
+    companyId,
+    identityKey,
+    observedAt: new Date(observedAt)
   };
 }

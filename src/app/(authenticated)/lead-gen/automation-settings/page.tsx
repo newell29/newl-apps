@@ -67,6 +67,9 @@ export default async function AutomationSettingsPage({
           {lunaReplayMessage}
         </section>
       ) : null}
+      {data.latestCompanyResearchSelection ? (
+        <ResearchSelectionSummary selection={data.latestCompanyResearchSelection} />
+      ) : null}
       {data.latestSuccessfulCompanyResearchRun ? (
         <LunaComparison
           runId={data.latestSuccessfulCompanyResearchRun.id}
@@ -200,6 +203,44 @@ export default async function AutomationSettingsPage({
         </div>
       </section>
     </div>
+  );
+}
+
+function ResearchSelectionSummary({
+  selection
+}: {
+  selection: NonNullable<
+    Awaited<ReturnType<typeof getHunterControlPlane>>["latestCompanyResearchSelection"]
+  >;
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="border-b border-border bg-muted px-5 py-4">
+        <h2 className="font-semibold text-foreground">Latest research cohort selection</h2>
+        <p className="mt-1 text-sm text-mutedForeground">
+          Automatic research uses a {selection.cooldownDays}-day company cooldown. Active Hunter cadences stay
+          suppressed, while a newer expansion/news/manual signal can reopen a company early. Routine TradeMining
+          shipment refreshes do not bypass the cooldown.
+        </p>
+      </div>
+      <div className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-5">
+        <RunMetric label="Selected" value={selection.selectedCompanyCount} />
+        <RunMetric label="New companies" value={selection.newCompanyCount} />
+        <RunMetric label="Scheduled refreshes" value={selection.scheduledRefreshSelectedCount} />
+        <RunMetric label="New-trigger refreshes" value={selection.materialRefreshSelectedCount} />
+        <RunMetric
+          label="Recent repeats suppressed"
+          value={selection.recentResearchSuppressedCount}
+        />
+      </div>
+      {selection.activeOutreachSuppressedCount > 0 ? (
+        <p className="border-t border-border px-5 py-3 text-sm text-mutedForeground">
+          {selection.activeOutreachSuppressedCount} compan
+          {selection.activeOutreachSuppressedCount === 1 ? "y was" : "ies were"} also excluded because a Hunter
+          cadence is currently active.
+        </p>
+      ) : null}
+    </section>
   );
 }
 

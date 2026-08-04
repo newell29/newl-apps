@@ -392,6 +392,26 @@ describe("Hunter daily profile worker", () => {
     );
   });
 
+  it("reports new, refreshed, and suppressed company-research cohorts in Teams", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_company_research_message({'researchedCount':30,'acceptedCount':9,'blockedCount':3,'missingCompanyCount':0,'selection':{'cooldownDays':90,'selectedCompanyCount':30,'newCompanyCount':27,'scheduledRefreshSelectedCount':1,'materialRefreshSelectedCount':2,'recentResearchSuppressedCount':44,'activeOutreachSuppressedCount':6}})",
+      "print(json.dumps({'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Cohort selection: 27/30 new companies, 1 scheduled refreshes, 2 new-trigger refreshes; 44 recent repeats and 6 active-outreach companies suppressed under the 90-day cooldown."
+    );
+  });
+
   it("sends a sanitized company-research failure alert", () => {
     const python = [
       "import importlib.util, json, pathlib, sys",
