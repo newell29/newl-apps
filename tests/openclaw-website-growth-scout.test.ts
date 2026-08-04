@@ -489,9 +489,60 @@ print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
     ]);
 
     expect(JSON.parse(stdout)).toEqual({
-      calls: [30, 30, 30, 5],
+      calls: [10, 10, 10, 10, 10, 10, 10, 5],
       decisionCount: 65
     });
+  });
+
+  it("retries only omitted Qwen candidates and fails one persistent omission closed", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append([row["id"] for row in rows])
+    returned = []
+    for row in rows:
+        if row["id"] == "candidate-3":
+            continue
+        returned.append({
+            "id": row["id"],
+            "disposition": "REJECT",
+            "category": None,
+            "confidence": 90,
+            "reason": "synthetic"
+        })
+    return returned
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+rows = [{"id": f"candidate-{index}"} for index in range(5)]
+decisions = module["ollama_request"](module["TRIAGE_SCHEMA"], "synthetic prompt", rows)
+print(json.dumps({"calls": calls, "decisions": decisions}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+    const result = JSON.parse(stdout);
+
+    expect(result.calls).toEqual([
+      ["candidate-0", "candidate-1", "candidate-2", "candidate-3", "candidate-4"],
+      ["candidate-3"]
+    ]);
+    expect(result.decisions).toHaveLength(5);
+    expect(result.decisions[3]).toMatchObject({
+      id: "candidate-3",
+      disposition: "REJECT",
+      confidence: 0
+    });
+  });
+
+  it("uses the installed Qwen 3.6 model as the default", async () => {
+    const discovery = await readFile(backlinkDiscoveryPath, "utf8");
+
+    expect(discovery).toContain('DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M"');
+    expect(discovery).toContain("QWEN_BATCH_SIZE = 10");
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {

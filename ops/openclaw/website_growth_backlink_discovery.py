@@ -20,8 +20,8 @@ from hunter_company_research import fetch_page_evidence, search_web  # noqa: E40
 
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_QWEN_MODEL = "qwen3.5:35b"
-QWEN_BATCH_SIZE = 30
+DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M"
+QWEN_BATCH_SIZE = 10
 QWEN_MAX_ATTEMPTS = 2
 ALLOWED_CATEGORIES = [
     "DIRECTORY_CITATION",
@@ -126,37 +126,124 @@ def ollama_request(
     decisions: list[dict[str, Any]] = []
     for batch_number, start in enumerate(range(0, len(rows), QWEN_BATCH_SIZE), start=1):
         batch = rows[start : start + QWEN_BATCH_SIZE]
-        expected_ids = [str(row.get("id") or "") for row in batch]
-        if any(not row_id for row_id in expected_ids) or len(set(expected_ids)) != len(expected_ids):
-            raise RuntimeError("Local Qwen backlink triage received invalid candidate IDs.")
-        last_error: RuntimeError | None = None
-        for _attempt in range(QWEN_MAX_ATTEMPTS):
-            try:
-                batch_decisions = _ollama_batch(schema, system_prompt, batch)
-                actual_ids = [
-                    str(row.get("id") or "")
-                    for row in batch_decisions
-                    if isinstance(row, dict)
-                ]
-                if (
-                    len(actual_ids) != len(expected_ids)
-                    or len(set(actual_ids)) != len(actual_ids)
-                    or set(actual_ids) != set(expected_ids)
-                ):
-                    raise RuntimeError(
-                        "Local Qwen backlink triage did not return one decision per candidate."
-                    )
-                decisions.extend(batch_decisions)
-                last_error = None
-                break
-            except RuntimeError as error:
-                last_error = error
-        if last_error is not None:
-            raise RuntimeError(
-                f"Local Qwen backlink triage batch {batch_number} failed after "
-                f"{QWEN_MAX_ATTEMPTS} bounded attempts."
-            ) from last_error
+        decisions.extend(
+            _ollama_batch_with_recovery(
+                schema,
+                system_prompt,
+                batch,
+                batch_label=str(batch_number),
+            )
+        )
     return decisions
+
+
+def _ollama_batch_with_recovery(
+    schema: dict[str, Any],
+    system_prompt: str,
+    rows: list[dict[str, Any]],
+    *,
+    batch_label: str,
+) -> list[dict[str, Any]]:
+    expected_ids = [str(row.get("id") or "") for row in rows]
+    if any(not row_id for row_id in expected_ids) or len(set(expected_ids)) != len(expected_ids):
+        raise RuntimeError("Local Qwen backlink triage received invalid candidate IDs.")
+
+    collected: dict[str, dict[str, Any]] = {}
+    remaining = list(rows)
+    last_error: RuntimeError | None = None
+    for _attempt in range(QWEN_MAX_ATTEMPTS):
+        if not remaining:
+            break
+        remaining_ids = {str(row["id"]) for row in remaining}
+        try:
+            batch_decisions = _ollama_batch(schema, system_prompt, remaining)
+            actual_ids: list[str] = []
+            for decision in batch_decisions:
+                if not isinstance(decision, dict):
+                    raise RuntimeError("Local Qwen backlink triage returned an invalid decision.")
+                decision_id = str(decision.get("id") or "")
+                if not decision_id or decision_id not in remaining_ids:
+                    raise RuntimeError("Local Qwen backlink triage returned an unexpected candidate ID.")
+                actual_ids.append(decision_id)
+            if len(set(actual_ids)) != len(actual_ids):
+                raise RuntimeError("Local Qwen backlink triage returned duplicate candidate IDs.")
+            for decision in batch_decisions:
+                collected[str(decision["id"])] = decision
+            remaining = [row for row in remaining if str(row["id"]) not in collected]
+            if remaining:
+                last_error = RuntimeError(
+                    "Local Qwen backlink triage did not return one decision per candidate."
+                )
+            else:
+                last_error = None
+        except RuntimeError as error:
+            last_error = error
+
+    if remaining:
+        if len(remaining) == 1:
+            fallback = _safe_qwen_fallback(schema, remaining[0])
+            collected[str(remaining[0]["id"])] = fallback
+            print(
+                f"Local Qwen backlink triage used a fail-closed fallback for batch {batch_label}.",
+                file=sys.stderr,
+            )
+        else:
+            midpoint = max(1, len(remaining) // 2)
+            recovered = [
+                *_ollama_batch_with_recovery(
+                    schema,
+                    system_prompt,
+                    remaining[:midpoint],
+                    batch_label=f"{batch_label}.1",
+                ),
+                *_ollama_batch_with_recovery(
+                    schema,
+                    system_prompt,
+                    remaining[midpoint:],
+                    batch_label=f"{batch_label}.2",
+                ),
+            ]
+            collected.update({str(row["id"]): row for row in recovered})
+
+    if len(collected) != len(expected_ids):
+        raise RuntimeError(
+            f"Local Qwen backlink triage batch {batch_label} could not be recovered."
+        ) from last_error
+    return [collected[row_id] for row_id in expected_ids]
+
+
+def _safe_qwen_fallback(
+    schema: dict[str, Any],
+    row: dict[str, Any],
+) -> dict[str, Any]:
+    disposition_options = (
+        schema.get("properties", {})
+        .get("decisions", {})
+        .get("items", {})
+        .get("properties", {})
+        .get("disposition", {})
+        .get("enum", [])
+    )
+    if "REJECT" in disposition_options:
+        return {
+            "id": str(row["id"]),
+            "disposition": "REJECT",
+            "category": None,
+            "confidence": 0,
+            "reason": "Local Qwen could not complete a structured classification; excluded safely.",
+        }
+
+    initial_triage = row.get("initialTriage")
+    initial_category = initial_triage.get("category") if isinstance(initial_triage, dict) else None
+    category = initial_category if initial_category in ALLOWED_CATEGORIES else "RESOURCE_PAGE"
+    return {
+        "id": str(row["id"]),
+        "disposition": "FETCHED",
+        "category": category,
+        "confidence": 0,
+        "reason": "Local Qwen could not complete a structured finalist review; excluded safely.",
+        "pageSummary": "The candidate was not promoted because its structured review was incomplete.",
+    }
 
 
 def _ollama_batch(
