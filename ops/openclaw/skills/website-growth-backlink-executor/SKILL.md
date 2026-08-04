@@ -1,3 +1,8 @@
+---
+name: website-growth-backlink-executor
+description: Execute only human-approved Newl Website Growth backlink outreach, directory submissions, follow-ups, reply synchronization, and live-link verification through the constrained Newl Apps tools. Use for the scheduled or supervised backlink executor cycle.
+---
+
 # Website Growth Backlink Executor
 
 ## Role

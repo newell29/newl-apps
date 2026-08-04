@@ -196,6 +196,27 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     );
   });
 
+  it("loads the backlink executor skill and repeats claim-safe copy rules in the runtime prompt", async () => {
+    const [skill, prompt] = await Promise.all([
+      readFile(backlinkSkillPath, "utf8"),
+      readFile(backlinkPromptPath, "utf8"),
+    ]);
+
+    expect(skill).toMatch(
+      /^---\nname: website-growth-backlink-executor\ndescription: .+\n---\n/
+    );
+    expect(prompt).toContain(
+      "Apply these copy rules directly even if skill content is unavailable"
+    );
+    expect(prompt).toContain('Do not use the word "best" anywhere');
+    expect(prompt).toContain(
+      "Do not append a salutation sign-off, sender name,"
+    );
+    expect(prompt).toContain(
+      "Newl Apps adds the\napproved sender identity"
+    );
+  });
+
   it("finds and enables the intentionally disabled backlink command job", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-enable-"));
     const openclawPath = path.join(directory, "openclaw");

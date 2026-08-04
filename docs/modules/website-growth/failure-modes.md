@@ -20,6 +20,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Dedicated runtime update failure: the protected worktree remains unchanged, a safe Teams failure notice is attempted, and Scout does not start.
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; the safe failure notice is attempted through the same configured Teams target and may also fail when the channel itself is unavailable.
 - Missing Scout executor tools or an incomplete required call sequence: the backlink wrapper still records and delivers the deterministic no-change summary, then exits non-zero. The Rivet failure monitor records the sanitized failure; the run can no longer appear successful after doing no work.
+- Missing or invalid backlink-skill metadata: OpenClaw omits the skill from Scout's model context. The repository skill must keep valid `name` and `description` frontmatter, while the runtime prompt repeats the critical no-customer-claims and no-signature copy rules so a missing skill cannot authorize unsafe or duplicate footer content.
 - Invalid or truncated local Qwen JSON: discovery processes no more than 30 candidates per local-model call and retries that same batch once. It does not repeat Brave Search, download additional pages, or perform outreach. A second invalid response fails the deep run and records the normal safe failure outcome.
 - Build-notification delivery failure: the notification remains leased for 15 minutes and is then eligible for another deterministic claim. Build state remains authoritative in Newl Apps, GitHub, and Vercel; no build, merge, or deployment is retried by the notifier.
 - Teams/OneDrive file consent rejects Allow: Website Growth reports no longer use that transport. The Teams summary contains a signed Newl Apps download link instead.
@@ -93,6 +94,8 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
 
 For backlink outreach, an empty tool payload, non-JSON tool result, rejected send, or rejected execution report fails the constrained work phase. The deterministic summary is still delivered, but the tenant-scoped run is stored as `ERROR`; the wrapper never treats merely calling a tool as success. Stable per-sequence message IDs and prior-attempt checks prevent an automatic retry from duplicating an uncertain external send.
+
+If Scout appends its own signature or sign-off, the send is rejected before Microsoft Graph is called. Newl Apps adds the approved sender identity, legal entity, address, and opt-out footer deterministically; model-authored subjects and bodies must not include a sign-off, sender name, address, unsubscribe footer, or the prohibited unbounded-comparison terms.
 
 ## Testing
 
