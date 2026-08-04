@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP, isIPv4, isIPv6 } from "node:net";
 
@@ -80,6 +81,23 @@ export type WebsiteGrowthOutreachSendInput = {
   subject: string;
   body: string;
 };
+
+export function buildWebsiteGrowthOutreachAttemptId({
+  tenantId,
+  opportunityId,
+  kind,
+  sequence
+}: {
+  tenantId: string;
+  opportunityId: string;
+  kind: WebsiteGrowthOutreachMessageKind;
+  sequence: number;
+}) {
+  const digest = createHash("sha256")
+    .update(`${tenantId}\u0000${opportunityId}\u0000${kind}\u0000${sequence}`)
+    .digest("hex");
+  return `wgo_${digest}`;
+}
 
 export function readWebsiteGrowthOutreachIdentity(
   env: NodeJS.ProcessEnv = process.env
@@ -174,8 +192,18 @@ export async function sendWebsiteGrowthOutreachEmail({
     country: normalized.recipientCountry,
     identity
   });
+  const attemptSequence =
+    normalized.kind === WebsiteGrowthOutreachMessageKind.FOLLOW_UP
+      ? opportunity.followUpCount + 1
+      : 0;
   const message = await prisma.websiteGrowthOutreachMessage.create({
     data: {
+      id: buildWebsiteGrowthOutreachAttemptId({
+        tenantId,
+        opportunityId: opportunity.id,
+        kind: normalized.kind,
+        sequence: attemptSequence
+      }),
       tenantId,
       opportunityId: opportunity.id,
       kind: normalized.kind,
@@ -287,6 +315,55 @@ export async function sendWebsiteGrowthOutreachEmail({
     ]);
     throw error;
   }
+}
+
+export async function sendWebsiteGrowthOutreachFollowUp({
+  tenantId,
+  opportunityId,
+  subject,
+  body,
+  now = new Date()
+}: {
+  tenantId: string;
+  opportunityId: string;
+  subject: string;
+  body: string;
+  now?: Date;
+}) {
+  const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({
+    where: { id: opportunityId, tenantId },
+    select: {
+      recipientName: true,
+      recipientEmail: true,
+      recipientCountry: true,
+      contactSourceUrl: true,
+      consentBasis: true
+    }
+  });
+  if (
+    !opportunity?.recipientEmail ||
+    (opportunity.recipientCountry !== "CA" && opportunity.recipientCountry !== "US") ||
+    !opportunity.contactSourceUrl ||
+    !opportunity.consentBasis
+  ) {
+    throw new Error("The due follow-up is missing its previously approved recipient evidence.");
+  }
+
+  return sendWebsiteGrowthOutreachEmail({
+    tenantId,
+    input: {
+      opportunityId,
+      kind: WebsiteGrowthOutreachMessageKind.FOLLOW_UP,
+      recipientName: opportunity.recipientName,
+      recipientEmail: opportunity.recipientEmail,
+      recipientCountry: opportunity.recipientCountry,
+      contactSourceUrl: opportunity.contactSourceUrl,
+      consentBasis: opportunity.consentBasis,
+      subject,
+      body
+    },
+    now
+  });
 }
 
 export async function getDueWebsiteGrowthOutreachFollowUps({
@@ -561,11 +638,13 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
   tenantId,
   baseUrl,
   runStartedAt,
+  executionStatus = JobStatus.SUCCESS,
   now = new Date()
 }: {
   tenantId: string;
   baseUrl: string;
   runStartedAt: Date;
+  executionStatus?: JobStatus;
   now?: Date;
 }) {
   const [
@@ -673,7 +752,12 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
     ].join(" — ")
   );
   const message = [
-    "Website Growth outreach update",
+    executionStatus === JobStatus.ERROR
+      ? "Website Growth outreach update — executor failed"
+      : "Website Growth outreach update",
+    ...(executionStatus === JobStatus.ERROR
+      ? ["The constrained work phase did not complete successfully. No uncertain external action was retried; review the recorded run before the next cycle."]
+      : []),
     `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
     `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blockedThisRun.length} blocked this run; ${blockedTotal} blocked total.`,
     `${humanDirectoryActions} directory account${humanDirectoryActions === 1 ? "" : "s"} need your help; ${pendingDirectoryVerifications} email verification${pendingDirectoryVerifications === 1 ? "" : "s"} pending.`,
@@ -712,18 +796,21 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
       reason: blocker.reason,
       nextAction: blocker.nextAction,
       retryGuidance: blocker.retryGuidance
-    }))
+    })),
+    executionStatus
   };
 
   await recordWebsiteGrowthBacklinkOutreachRun({
     tenantId,
     runStartedAt,
     now,
-    output
+    output,
+    executionStatus
   });
 
   return {
     needsAttention:
+      executionStatus === JobStatus.ERROR ||
       needsReview > 0 ||
       replied > 0 ||
       blockedTotal > 0,
@@ -762,12 +849,14 @@ async function recordWebsiteGrowthBacklinkOutreachRun({
   tenantId,
   runStartedAt,
   now,
-  output
+  output,
+  executionStatus
 }: {
   tenantId: string;
   runStartedAt: Date;
   now: Date;
   output: Prisma.InputJsonObject;
+  executionStatus: JobStatus;
 }) {
   const existing = await prisma.automationJobRun.findFirst({
     where: {
@@ -785,9 +874,13 @@ async function recordWebsiteGrowthBacklinkOutreachRun({
         jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE
       },
       data: {
-        status: JobStatus.SUCCESS,
+        status: executionStatus,
         finishedAt: now,
-        output
+        output,
+        errorMessage:
+          executionStatus === JobStatus.ERROR
+            ? "The constrained backlink executor work phase failed validation."
+            : null
       }
     });
     return;
@@ -796,13 +889,17 @@ async function recordWebsiteGrowthBacklinkOutreachRun({
     data: {
       tenantId,
       jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE,
-      status: JobStatus.SUCCESS,
+      status: executionStatus,
       startedAt: runStartedAt,
       finishedAt: now,
       input: {
         source: "OPENCLAW_BACKLINK_EXECUTOR"
       },
-      output
+      output,
+      errorMessage:
+        executionStatus === JobStatus.ERROR
+          ? "The constrained backlink executor work phase failed validation."
+          : null
     }
   });
 }
@@ -1112,9 +1209,7 @@ function validateOutreachState(
     if (
       opportunity.status !== WebsiteGrowthBacklinkStatus.IN_PROGRESS ||
       opportunity.messages.some(
-        (message) =>
-          message.kind === WebsiteGrowthOutreachMessageKind.INITIAL &&
-          Boolean(message.externalMessageId || message.conversationId)
+        (message) => message.kind === WebsiteGrowthOutreachMessageKind.INITIAL
       )
     ) {
       throw new Error("Initial outreach is no longer available for this opportunity.");
@@ -1130,6 +1225,14 @@ function validateOutreachState(
     opportunity.followUpCount >= 2
   ) {
     throw new Error("A follow-up is not due for this opportunity.");
+  }
+  const recordedFollowUpAttempts = opportunity.messages.filter(
+    (message) => message.kind === WebsiteGrowthOutreachMessageKind.FOLLOW_UP
+  ).length;
+  if (recordedFollowUpAttempts > opportunity.followUpCount) {
+    throw new Error(
+      "A follow-up attempt is already recorded for this opportunity. Review the mailbox before retrying."
+    );
   }
   if (
     !opportunity.recipientEmail ||

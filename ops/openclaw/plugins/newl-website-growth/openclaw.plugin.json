@@ -44,6 +44,7 @@
       "newl_backlink_sync_directory_verifications",
       "newl_backlink_summary",
       "newl_backlink_send_email",
+      "newl_backlink_send_follow_up",
       "newl_backlink_fill_directory_credentials",
       "newl_backlink_report"
     ]

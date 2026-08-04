@@ -1,12 +1,14 @@
 import {
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
-  WebsiteGrowthOutreachConsentBasis
+  WebsiteGrowthOutreachConsentBasis,
+  WebsiteGrowthOutreachMessageKind
 } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertSafeWebsiteGrowthOutreachCopy,
+  buildWebsiteGrowthOutreachAttemptId,
   buildCompliantWebsiteGrowthOutreachBody,
   fetchWebsiteGrowthPublicContactEvidence,
   isWebsiteGrowthOutreachOptOut,
@@ -45,6 +47,30 @@ afterEach(() => {
 });
 
 describe("Website Growth backlink curation", () => {
+  it("builds one stable outbound attempt ID per opportunity and message sequence", () => {
+    const initial = buildWebsiteGrowthOutreachAttemptId({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      kind: WebsiteGrowthOutreachMessageKind.INITIAL,
+      sequence: 0
+    });
+    const repeated = buildWebsiteGrowthOutreachAttemptId({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      kind: WebsiteGrowthOutreachMessageKind.INITIAL,
+      sequence: 0
+    });
+    const followUp = buildWebsiteGrowthOutreachAttemptId({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      kind: WebsiteGrowthOutreachMessageKind.FOLLOW_UP,
+      sequence: 1
+    });
+
+    expect(repeated).toBe(initial);
+    expect(followUp).not.toBe(initial);
+  });
+
   it("parses the bounded structured Scout review", () => {
     const review = parseWebsiteGrowthBacklinkReview({
       queried: true,

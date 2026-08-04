@@ -225,12 +225,22 @@ def _safe_qwen_fallback(
         .get("enum", [])
     )
     if "REJECT" in disposition_options:
+        lane_categories = {
+            "DIRECTORY": "DIRECTORY_CITATION",
+            "EDITORIAL": "CONTENT_CONTRIBUTION",
+            "RESOURCE": "RESOURCE_PAGE",
+            "MEDIA": "DIGITAL_PR",
+            "ASSOCIATION": "PARTNER_ECOSYSTEM",
+        }
         return {
             "id": str(row["id"]),
-            "disposition": "REJECT",
-            "category": None,
+            "disposition": "FETCH",
+            "category": lane_categories.get(str(row.get("queryLane") or "").upper(), "RESOURCE_PAGE"),
             "confidence": 0,
-            "reason": "Local Qwen could not complete a structured classification; excluded safely.",
+            "reason": (
+                "Local Qwen could not complete a structured classification; forwarded through the "
+                "bounded public-page fetch for Codex review."
+            ),
         }
 
     initial_triage = row.get("initialTriage")
@@ -238,11 +248,18 @@ def _safe_qwen_fallback(
     category = initial_category if initial_category in ALLOWED_CATEGORIES else "RESOURCE_PAGE"
     return {
         "id": str(row["id"]),
-        "disposition": "FETCHED",
+        "disposition": "FINALIST",
         "category": category,
         "confidence": 0,
-        "reason": "Local Qwen could not complete a structured finalist review; excluded safely.",
-        "pageSummary": "The candidate was not promoted because its structured review was incomplete.",
+        "reason": (
+            "Local Qwen could not complete a structured finalist review; forwarded to Codex for the "
+            "final bounded quality decision."
+        ),
+        "pageSummary": bounded_text(
+            row.get("pageExcerpt"),
+            "The public page was retrieved, but local Qwen did not return a structured summary.",
+            3_000,
+        ),
     }
 
 

@@ -1,4 +1,5 @@
 import {
+  JobStatus,
   ModuleKey,
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
@@ -46,6 +47,8 @@ export default async function WebsiteGrowthBacklinksPage({
   const blockedTotal =
     workspace.statusCounts[WebsiteGrowthBacklinkStatus.BLOCKED] ?? 0;
   const hasRecordedOutreachRun = Boolean(workspace.latestOutreachRun);
+  const latestOutreachFailed = workspace.latestOutreachRun?.status === JobStatus.ERROR;
+  const latestScoutFailed = workspace.latestScoutRun?.status === JobStatus.ERROR;
 
   return (
     <div className="space-y-6">
@@ -81,17 +84,23 @@ export default async function WebsiteGrowthBacklinksPage({
         <MetricCard label="Verified live" value={groups.LIVE.length} caption="Durable backlink wins" />
       </section>
 
-      <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+      <section className={latestOutreachFailed
+        ? "rounded-lg border border-danger/25 bg-danger/10 p-5"
+        : "rounded-lg border border-border bg-card p-5 shadow-sm"}>
         <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
           Latest outreach run
         </p>
         <h2 className="mt-2 text-lg font-semibold text-foreground">
-          {hasRecordedOutreachRun
+          {latestOutreachFailed
+            ? "The latest outreach cycle failed and requires attention."
+            : hasRecordedOutreachRun
             ? `${blockedThisRun} blocked this run; ${blockedTotal} blocked total.`
             : `No outreach run has been recorded with the new reporting yet; ${blockedTotal} blocked total.`}
         </h2>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-mutedForeground">
-          {hasRecordedOutreachRun
+          {latestOutreachFailed
+            ? "The executor did not complete successfully. No uncertain email or submission was retried automatically. "
+            : hasRecordedOutreachRun
             ? "“Blocked this run” counts only items stopped during the latest recorded executor cycle. "
             : "The next executor cycle will establish the first run-specific count. "}
           “Blocked total” is the unresolved lifetime queue. Each blocked card below
@@ -99,17 +108,39 @@ export default async function WebsiteGrowthBacklinksPage({
         </p>
       </section>
 
-      <section className="rounded-lg border border-success/25 bg-success/10 p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-success">Latest Backlink Scout run</p>
-        <h2 className="mt-2 text-lg font-semibold text-foreground">
-          {readNumber(latestSummary.created)} new prospects added after quality review.
-        </h2>
-        <p className="mt-2 max-w-4xl text-sm leading-6 text-mutedForeground">
-          Scout reviewed {readNumber(latestSummary.rawProspectsReviewed).toLocaleString("en-US")} candidates,
-          refreshed {readNumber(latestSummary.refreshed)} existing records, and kept the active queue at{" "}
-          {readNumber(latestSummary.activeQueueCount)} items. Rejected raw links are never stored here.
-        </p>
-      </section>
+      {latestScoutFailed ? (
+        <section className="rounded-lg border border-danger/25 bg-danger/10 p-5" role="alert">
+          <p className="text-xs font-semibold uppercase tracking-wide text-danger">
+            Latest Backlink Scout run failed
+          </p>
+          <h2 className="mt-2 text-lg font-semibold text-foreground">
+            New backlink recommendations may be delayed.
+          </h2>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-mutedForeground">
+            The latest deep Scout run did not finish, so an older “zero opportunities” result should not be treated as a current review.
+          </p>
+          {workspace.latestScoutRun?.errorMessage ? (
+            <p className="mt-3 text-sm font-medium text-danger">
+              {workspace.latestScoutRun.errorMessage}
+            </p>
+          ) : null}
+          <p className="mt-2 text-xs text-mutedForeground">
+            Failed {formatDate(workspace.latestScoutRun?.finishedAt ?? workspace.latestScoutRun?.startedAt)}
+          </p>
+        </section>
+      ) : (
+        <section className="rounded-lg border border-success/25 bg-success/10 p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-success">Latest Backlink Scout run</p>
+          <h2 className="mt-2 text-lg font-semibold text-foreground">
+            {readNumber(latestSummary.created)} new prospects added after quality review.
+          </h2>
+          <p className="mt-2 max-w-4xl text-sm leading-6 text-mutedForeground">
+            Scout reviewed {readNumber(latestSummary.rawProspectsReviewed).toLocaleString("en-US")} candidates,
+            refreshed {readNumber(latestSummary.refreshed)} existing records, and kept the active queue at{" "}
+            {readNumber(latestSummary.activeQueueCount)} items. Rejected raw links are never stored here.
+          </p>
+        </section>
+      )}
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="grid gap-4 lg:grid-cols-4">
@@ -492,7 +523,8 @@ function formatReviewResult(
   return `Declined “${opportunityTitle}”.`;
 }
 
-function formatDate(value: Date) {
+function formatDate(value: Date | null | undefined) {
+  if (!value) return "at an unknown time";
   return new Intl.DateTimeFormat("en-CA", {
     dateStyle: "medium",
     timeZone: "America/Toronto"

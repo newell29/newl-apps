@@ -8,6 +8,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 ## Scout-specific failures
 
+- Truncated, invalid, or incomplete local-Qwen backlink JSON: retry only the affected IDs, split the batch recursively, then forward a persistent single-candidate failure with zero confidence through the existing fetch/finalist limits for Codex's final review. The content recommendation lane continues.
+
 - Missing Google credentials: that source receives an error import, but other first-party sources continue.
 - Missing or expired SEMrush OAuth, or exhausted API units: a Monday or Wednesday deep worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, Brave/Qwen backlink discovery, website review, Teams reporting, and page briefs continue.
 - Codex output outside the stored candidate IDs: completion is rejected.
@@ -89,6 +91,8 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 ## Failure modes
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
+
+For backlink outreach, an empty tool payload, non-JSON tool result, rejected send, or rejected execution report fails the constrained work phase. The deterministic summary is still delivered, but the tenant-scoped run is stored as `ERROR`; the wrapper never treats merely calling a tool as success. Stable per-sequence message IDs and prior-attempt checks prevent an automatic retry from duplicating an uncertain external send.
 
 ## Testing
 

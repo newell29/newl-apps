@@ -1,3 +1,4 @@
+import { JobStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import {
@@ -26,17 +27,21 @@ export async function POST(request: Request) {
       );
     }
     const payload = await request.json().catch(() => ({}));
+    const payloadRecord =
+      payload && typeof payload === "object" && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : {};
     const runStartedAt = parseWebsiteGrowthOutreachRunStartedAt({
-      value:
-        payload && typeof payload === "object" && !Array.isArray(payload)
-          ? (payload as Record<string, unknown>).runStartedAt
-          : null
+      value: payloadRecord.runStartedAt
     });
+    const executionStatus =
+      payloadRecord.executionStatus === "ERROR" ? JobStatus.ERROR : JobStatus.SUCCESS;
     const baseUrl = new URL(request.url).origin;
     const summary = await buildWebsiteGrowthOutreachTeamsSummary({
       tenantId: tenant.id,
       baseUrl,
-      runStartedAt
+      runStartedAt,
+      executionStatus
     });
     return NextResponse.json({ data: summary });
   } catch (error) {

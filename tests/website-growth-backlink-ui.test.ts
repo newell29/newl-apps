@@ -21,5 +21,7 @@ describe("Website Growth backlink blocker workspace", () => {
     expect(source).toContain("Directory account");
     expect(source).toContain("Email verification pending");
     expect(source).toContain("Needs your help");
+    expect(source).toContain("Latest Backlink Scout run failed");
+    expect(source).toContain("older “zero opportunities” result should not be treated as a current review");
   });
 });
