@@ -251,6 +251,22 @@ back to Newl Apps. GPT-5.6 Luna uses strict Structured Outputs, low reasoning, `
 synthesize the operating name, legal name, aliases, parent/brand relationship, official domain, and cited evidence.
 Luna proposes identity only; deterministic Apollo scoring makes the mapping decision.
 
+Resolver version 3 adds a bounded recovery query for noisy legal-owner or facility labels. When a name contains a
+distinctive multi-token tail (for example, a legal owner name whose operating brand omits its first qualifier), the
+tail is searched as an operating-brand candidate. After Luna returns cited identity evidence, Apollo searches the
+verified official domain and operating-name aliases before repeating the original TradeMining label. Alias hints at
+60-84% confidence may widen candidate retrieval, but they cannot satisfy the 90% automatic-mapping gate.
+Legacy direct mappings are eligible for one version-3 repair only when they have the exact empty-shell signature:
+no company or match domain, a score of 19 or lower, and the durable mapped-zero-employees reason. A populated,
+domain-backed, reviewer-confirmed, or higher-scoring direct mapping is not reopened automatically.
+
+Before spending another Apollo organization-search request, the resolver also checks tenant-scoped canonical company
+records for one existing Apollo organization on the independently verified official domain. Exactly one organization
+may be reused; two different organizations on the same domain remain ambiguous. If the canonical company already has
+an Outreach Plan or non-`NOT_STARTED` cadence history, the duplicate alias is mapped for identity/deduplication but a
+second contact-discovery handoff is suppressed. This preserves the TradeMining evidence on both legal names without
+creating duplicate contacts or another Hunter campaign.
+
 Automatic mapping requires all of the following:
 
 - the synthesis is `EXACT_OPERATING_COMPANY` or `VERIFIED_PARENT_OR_BRAND`;

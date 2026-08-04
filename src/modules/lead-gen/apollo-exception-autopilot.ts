@@ -5,16 +5,21 @@ import {
   CandidateStatus,
   HunterAutomationMode,
   JobStatus,
-  Prisma
+  Prisma,
+  SequenceStatus
 } from "@prisma/client";
 
 import {
   evaluateHunterOutreachEligibility,
   getHunterOutreachResearchMaxAgeDays
 } from "@/modules/lead-gen/hunter-outreach-eligibility";
+import { normalizeHunterCompanyDomain } from "@/modules/lead-gen/hunter-company-identity";
 import { enqueueHunterCompanyOutreachHandoff } from "@/modules/lead-gen/hunter-outreach-handoff";
 import { HUNTER_APOLLO_EXCEPTION_RESOLUTION_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
-import { requiresApolloMatchReview } from "@/modules/lead-gen/apollo-contact-discovery-review";
+import {
+  isMappedApolloZeroEmployeeState,
+  requiresApolloMatchReview
+} from "@/modules/lead-gen/apollo-contact-discovery-review";
 import { prisma } from "@/server/db";
 import {
   resolveApolloOrganizationForCompany,
@@ -31,7 +36,7 @@ import {
 
 export { HUNTER_APOLLO_EXCEPTION_RESOLUTION_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
 
-const AUTOPILOT_RESOLVER_VERSION = 2;
+const AUTOPILOT_RESOLVER_VERSION = 3;
 const PROCESSING_LEASE_MS = 15 * 60 * 1_000;
 const DEFAULT_DAILY_COMPANY_LIMIT = 10;
 const MAX_DAILY_COMPANY_LIMIT = 25;
@@ -200,14 +205,28 @@ export async function completeApolloExceptionResolution({
   });
   if (!company) throw new Error("Apollo exception company no longer exists for this tenant.");
 
-  const candidate = await resolveApolloOrganizationForCompany({
-    companyName: company.name,
-    domain: company.domain,
-    verifiedIdentityContext: JSON.stringify({
-      version: AUTOPILOT_RESOLVER_VERSION,
-      identityResolution: synthesis
-    })
+  const existingCanonicalCompanies = synthesis.officialDomain
+    ? await loadExistingCanonicalApolloCompanies({
+        tenantId,
+        companyId: company.id,
+        officialDomain: synthesis.officialDomain
+      })
+    : [];
+  const canonicalReuse = selectCanonicalApolloIdentityReuse({
+    companyId: company.id,
+    synthesis,
+    evidence,
+    companies: existingCanonicalCompanies
   });
+  const candidate = canonicalReuse?.candidate ??
+    await resolveApolloOrganizationForCompany({
+      companyName: company.name,
+      domain: company.domain,
+      verifiedIdentityContext: JSON.stringify({
+        version: AUTOPILOT_RESOLVER_VERSION,
+        identityResolution: synthesis
+      })
+    });
   const decision = decideApolloExceptionResolution({ synthesis, candidate, evidence });
   const recorded = await persistAutopilotMatch({
     tenantId,
@@ -220,7 +239,15 @@ export async function completeApolloExceptionResolution({
     now
   });
   const handoff = decision.autoResolved
-    ? await enqueueResolvedCompanyHandoff({ tenantId, companyId: company.id })
+    ? canonicalReuse?.hasPriorOutreach
+      ? {
+          state: "canonical_duplicate_suppressed",
+          canonicalCompanyId: canonicalReuse.canonicalCompanyId,
+          canonicalCompanyName: canonicalReuse.canonicalCompanyName,
+          reason:
+            "This Apollo organization already has Hunter outreach history under its canonical company record."
+        }
+      : await enqueueResolvedCompanyHandoff({ tenantId, companyId: company.id })
     : null;
   const searchCount = readApolloSearchCount(candidate);
   const output = {
@@ -238,6 +265,13 @@ export async function completeApolloExceptionResolution({
     candidate: candidate ? summarizeCandidate(candidate) : null,
     autoResolutionReason: decision.reason,
     apolloOrganizationSearches: searchCount,
+    canonicalIdentityReuse: canonicalReuse
+      ? {
+          canonicalCompanyId: canonicalReuse.canonicalCompanyId,
+          canonicalCompanyName: canonicalReuse.canonicalCompanyName,
+          hasPriorOutreach: canonicalReuse.hasPriorOutreach
+        }
+      : null,
     modelUsage: usage,
     handoff,
     completedAt: now.toISOString()
@@ -439,6 +473,35 @@ export function decideApolloExceptionResolution({
   };
 }
 
+export function requiresApolloExceptionIdentityResolution({
+  classification,
+  apolloOrganizationId,
+  companyDomain,
+  matchDomain,
+  score,
+  matchReason
+}: {
+  classification: ApolloCompanyMatchClassification;
+  apolloOrganizationId: string | null;
+  companyDomain: string | null;
+  matchDomain: string | null;
+  score: number;
+  matchReason: string | null;
+}) {
+  if (requiresApolloMatchReview(classification)) return true;
+  return Boolean(
+    classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    apolloOrganizationId &&
+    !normalizeHunterCompanyDomain(companyDomain) &&
+    !normalizeHunterCompanyDomain(matchDomain) &&
+    score <= 19 &&
+    isMappedApolloZeroEmployeeState({
+      apolloOrganizationId,
+      matchReason
+    })
+  );
+}
+
 function hasCitedOfficialDomainEvidence(
   synthesis: ApolloIdentityResolutionSynthesis,
   evidence: ApolloIdentityPublicEvidence[]
@@ -457,6 +520,7 @@ export function buildApolloExceptionIdentityQueries(
   packet: Omit<ApolloIdentityResolutionPacket, "publicEvidence">
 ) {
   const geography = packet.shipmentGeography[0] ?? null;
+  const recoveryAliases = buildApolloExceptionRecoveryAliases(packet.companyName);
   const candidateNames = packet.priorApolloCandidates
     .map((candidate) => candidate.companyName?.trim())
     .filter((value): value is string => Boolean(value))
@@ -465,6 +529,9 @@ export function buildApolloExceptionIdentityQueries(
     `"${packet.companyName}" official company website`,
     `"${packet.companyName}" parent company subsidiary operating brand`,
     geography ? `"${packet.companyName}" "${geography}" company` : null,
+    ...recoveryAliases.map(
+      (alias) => `"${alias}" official company website operating brand`
+    ),
     ...candidateNames.map(
       (candidateName) => `"${packet.companyName}" "${candidateName}" company relationship`
     )
@@ -472,6 +539,188 @@ export function buildApolloExceptionIdentityQueries(
     .filter((value): value is string => Boolean(value))
     .filter((value, index, values) => values.indexOf(value) === index)
     .slice(0, MAX_PUBLIC_QUERIES);
+}
+
+export function buildApolloExceptionRecoveryAliases(companyName: string) {
+  const legalTokens = new Set([
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "inc",
+    "incorporated",
+    "llc",
+    "ltd",
+    "limited",
+    "plc",
+    "the"
+  ]);
+  const tokens = companyName
+    .replace(/&/gu, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .filter((token) => !legalTokens.has(token.toLowerCase()));
+  const candidates: string[] = [];
+  if (tokens.length >= 4 || (tokens.length >= 3 && tokens[0]!.length <= 3)) {
+    const tail = tokens.slice(1).join(" ");
+    if (tail.length >= 8) candidates.push(tail);
+  }
+  return candidates.filter(
+    (candidate, index, values) => values.indexOf(candidate) === index
+  ).slice(0, 2);
+}
+
+type ExistingCanonicalApolloCompany = {
+  id: string;
+  name: string;
+  domain: string | null;
+  apolloOrganizationId: string | null;
+  hasPriorOutreach: boolean;
+};
+
+export function selectCanonicalApolloIdentityReuse({
+  companyId,
+  synthesis,
+  evidence,
+  companies
+}: {
+  companyId: string;
+  synthesis: ApolloIdentityResolutionSynthesis;
+  evidence: ApolloIdentityPublicEvidence[];
+  companies: ExistingCanonicalApolloCompany[];
+}) {
+  const officialDomain = normalizeHunterCompanyDomain(synthesis.officialDomain);
+  if (
+    !officialDomain ||
+    synthesis.confidence < MIN_AUTO_RESOLVE_CONFIDENCE ||
+    (
+      synthesis.disposition !== "EXACT_OPERATING_COMPANY" &&
+      synthesis.disposition !== "VERIFIED_PARENT_OR_BRAND"
+    ) ||
+    !hasCitedOfficialDomainEvidence(synthesis, evidence)
+  ) {
+    return null;
+  }
+  const eligible = companies.filter(
+    (company) =>
+      company.id !== companyId &&
+      Boolean(company.apolloOrganizationId) &&
+      normalizeHunterCompanyDomain(company.domain) === officialDomain
+  );
+  const organizationIds = [...new Set(
+    eligible
+      .map((company) => company.apolloOrganizationId)
+      .filter((value): value is string => Boolean(value))
+  )];
+  if (organizationIds.length !== 1) return null;
+  const canonical = eligible.find(
+    (company) => company.apolloOrganizationId === organizationIds[0]
+  );
+  if (!canonical) return null;
+  return {
+    canonicalCompanyId: canonical.id,
+    canonicalCompanyName: canonical.name,
+    hasPriorOutreach: eligible.some(
+      (company) =>
+        company.apolloOrganizationId === organizationIds[0] && company.hasPriorOutreach
+    ),
+    candidate: {
+      id: organizationIds[0],
+      name: synthesis.operatingName ?? canonical.name,
+      domain: officialDomain,
+      linkedinUrl: null,
+      score: 100,
+      nameMatchType: "EXACT" as const,
+      domainMatch: true,
+      logisticsProviderMatch: false,
+      branchLocationMatch: false,
+      strongBaseNameMatch: true,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      matchReason:
+        `direct company; reused tenant canonical Apollo identity from "${canonical.name}" after exact verified-domain resolution`,
+      query: {
+        source: "tenant-canonical-apollo-identity",
+        canonical_company_id: canonical.id,
+        official_domain: officialDomain,
+        organization_ids: [organizationIds[0]]
+      },
+      rawPayload: {
+        source: "tenant-canonical-apollo-identity",
+        canonical_company_id: canonical.id,
+        organization_id: organizationIds[0]
+      }
+    } satisfies ApolloOrganizationCandidate
+  };
+}
+
+async function loadExistingCanonicalApolloCompanies({
+  tenantId,
+  companyId,
+  officialDomain
+}: {
+  tenantId: string;
+  companyId: string;
+  officialDomain: string;
+}): Promise<ExistingCanonicalApolloCompany[]> {
+  const domain = normalizeHunterCompanyDomain(officialDomain);
+  if (!domain) return [];
+  const domainVariants = [domain, `www.${domain}`];
+  const companies = await prisma.company.findMany({
+    where: {
+      tenantId,
+      id: { not: companyId },
+      apolloOrganizationId: { not: null },
+      OR: [
+        { domain: { in: domainVariants } },
+        {
+          apolloCompanyMatches: {
+            some: {
+              tenantId,
+              classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+              apolloDomain: { in: domainVariants }
+            }
+          }
+        }
+      ]
+    },
+    orderBy: { createdAt: "asc" },
+    take: 25,
+    select: {
+      id: true,
+      name: true,
+      domain: true,
+      apolloOrganizationId: true,
+      contacts: {
+        where: { sequenceStatus: { not: SequenceStatus.NOT_STARTED } },
+        take: 1,
+        select: { id: true }
+      },
+      outreachPlans: {
+        take: 1,
+        select: { id: true }
+      },
+      apolloCompanyMatches: {
+        where: {
+          tenantId,
+          classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+          apolloDomain: { in: domainVariants }
+        },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { apolloDomain: true }
+      }
+    }
+  });
+  return companies.map((company) => ({
+    id: company.id,
+    name: company.name,
+    domain: company.apolloCompanyMatches[0]?.apolloDomain ?? company.domain,
+    apolloOrganizationId: company.apolloOrganizationId,
+    hasPriorOutreach:
+      company.contacts.length > 0 || company.outreachPlans.length > 0
+  }));
 }
 
 function isApolloExceptionAutopilotEnabled() {
@@ -524,6 +773,7 @@ async function enqueueNextEligibleException({
       normalizedName: true,
       domain: true,
       primaryIndustry: true,
+      apolloOrganizationId: true,
       apolloCompanyMatches: {
         where: { tenantId },
         orderBy: { createdAt: "desc" },
@@ -531,6 +781,9 @@ async function enqueueNextEligibleException({
         select: {
           id: true,
           classification: true,
+          apolloDomain: true,
+          score: true,
+          matchReason: true,
           reviewedAt: true,
           queryJson: true,
           createdAt: true
@@ -585,7 +838,14 @@ async function enqueueNextEligibleException({
     if (
       !match ||
       match.reviewedAt ||
-      !requiresApolloMatchReview(match.classification) ||
+      !requiresApolloExceptionIdentityResolution({
+        classification: match.classification,
+        apolloOrganizationId: company.apolloOrganizationId,
+        companyDomain: company.domain,
+        matchDomain: match.apolloDomain,
+        score: match.score,
+        matchReason: match.matchReason
+      }) ||
       !signal ||
       !decision
     ) {
@@ -655,6 +915,7 @@ async function loadResolutionPacket({
       normalizedName: true,
       domain: true,
       primaryIndustry: true,
+      apolloOrganizationId: true,
       importRecords: {
         orderBy: [{ arrivalDate: "desc" }, { createdAt: "desc" }],
         take: 25,
@@ -671,6 +932,9 @@ async function loadResolutionPacket({
         select: {
           id: true,
           classification: true,
+          apolloDomain: true,
+          score: true,
+          matchReason: true,
           reviewedAt: true,
           queryJson: true
         }
@@ -715,7 +979,14 @@ async function loadResolutionPacket({
     !currentMatch ||
     currentMatch.id !== input.sourceMatchId ||
     currentMatch.reviewedAt ||
-    !requiresApolloMatchReview(currentMatch.classification)
+    !requiresApolloExceptionIdentityResolution({
+      classification: currentMatch.classification,
+      apolloOrganizationId: company.apolloOrganizationId,
+      companyDomain: company.domain,
+      matchDomain: currentMatch.apolloDomain,
+      score: currentMatch.score,
+      matchReason: currentMatch.matchReason
+    })
   ) {
     throw new Error(
       "Apollo exception identity changed after this job was queued; a fresh resolution is required."

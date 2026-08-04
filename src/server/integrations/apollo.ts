@@ -311,6 +311,7 @@ export type ApolloOrganizationCandidate = {
 
 type ApolloVerifiedIdentityHints = {
   aliases: string[];
+  searchAliases: string[];
   domains: string[];
   logisticsProvider: boolean | null;
 };
@@ -2357,7 +2358,15 @@ function buildApolloOrganizationSearchBodies(
     });
   }
 
-  const nameQueries = [input.companyName, ...identityHints.aliases]
+  // Public identity research exists specifically to recover an operating brand
+  // from noisy legal/facility names. Search those aliases before the original
+  // TradeMining label so the bounded query budget cannot be exhausted by two
+  // variants of the same malformed source name.
+  const nameQueries = [
+    ...identityHints.aliases,
+    ...identityHints.searchAliases,
+    input.companyName
+  ]
     .flatMap((value) => buildApolloOrganizationSearchQueries(value))
     .filter((value, index, values) => values.indexOf(value) === index);
   const maximumSearches = domains.length > 0 ? 3 : 2;
@@ -2377,12 +2386,13 @@ function readApolloVerifiedIdentityHints(
   input: ApolloCompanyLookupInput
 ): ApolloVerifiedIdentityHints {
   const aliases = new Set<string>();
+  const searchAliases = new Set<string>();
   const domains = new Set<string>();
   let logisticsProvider: boolean | null = null;
 
   const context = input.verifiedIdentityContext?.trim();
   if (!context?.startsWith("{")) {
-    return { aliases: [], domains: [], logisticsProvider };
+    return { aliases: [], searchAliases: [], domains: [], logisticsProvider };
   }
 
   try {
@@ -2408,17 +2418,31 @@ function readApolloVerifiedIdentityHints(
         identityDisposition === "VERIFIED_PARENT_OR_BRAND"
       )
     );
+    const identityAliases = [
+      readApolloString(identityResolution ?? {}, ["operatingName"]),
+      readApolloString(identityResolution ?? {}, ["legalName"]),
+      readApolloString(identityResolution ?? {}, ["parentName"]),
+      ...(Array.isArray(identityResolution?.aliases)
+        ? identityResolution.aliases.filter(
+            (value): value is string => typeof value === "string" && Boolean(value.trim())
+          )
+        : [])
+    ];
+    const usableResolutionForSearch = Boolean(
+      identityConfidence >= 60 &&
+      identityEvidenceIndices.length > 0 &&
+      (
+        identityDisposition === "EXACT_OPERATING_COMPANY" ||
+        identityDisposition === "VERIFIED_PARENT_OR_BRAND"
+      )
+    );
+    if (usableResolutionForSearch) {
+      for (const alias of identityAliases) {
+        if (alias?.trim()) searchAliases.add(alias.trim());
+      }
+    }
     if (verifiedResolution) {
-      for (const alias of [
-        readApolloString(identityResolution ?? {}, ["operatingName"]),
-        readApolloString(identityResolution ?? {}, ["legalName"]),
-        readApolloString(identityResolution ?? {}, ["parentName"]),
-        ...(Array.isArray(identityResolution?.aliases)
-          ? identityResolution.aliases.filter(
-              (value): value is string => typeof value === "string" && Boolean(value.trim())
-            )
-          : [])
-      ]) {
+      for (const alias of identityAliases) {
         if (alias?.trim()) aliases.add(alias.trim());
       }
       const officialDomain = normalizeIdentityEvidenceDomain(
@@ -2430,7 +2454,10 @@ function readApolloVerifiedIdentityHints(
     const research = asRecord(researchEvidence?.research) ?? researchEvidence;
     const synthesis = asRecord(research?.synthesis);
     const divisionName = readApolloString(synthesis ?? {}, ["usDivisionName"]);
-    if (divisionName) aliases.add(divisionName);
+    if (divisionName) {
+      aliases.add(divisionName);
+      searchAliases.add(divisionName);
+    }
     if (typeof synthesis?.logisticsProvider === "boolean") {
       logisticsProvider = synthesis.logisticsProvider;
     }
@@ -2455,11 +2482,12 @@ function readApolloVerifiedIdentityHints(
       }
     }
   } catch {
-    return { aliases: [], domains: [], logisticsProvider: null };
+    return { aliases: [], searchAliases: [], domains: [], logisticsProvider: null };
   }
 
   return {
     aliases: [...aliases].slice(0, 3),
+    searchAliases: [...searchAliases].slice(0, 4),
     domains: [...domains].slice(0, 3),
     logisticsProvider
   };
@@ -4658,7 +4686,7 @@ function scoreApolloOrganizationCandidate(
     score -= 4;
   }
 
-  const classification = classifyApolloOrganizationCandidate({
+  const scoredClassification = classifyApolloOrganizationCandidate({
     id: candidate.id,
     score,
     nameMatchType,
@@ -4668,6 +4696,14 @@ function scoreApolloOrganizationCandidate(
     strongBaseNameMatch,
     tokenSimilarity
   });
+  const emptyNameOnlyShell = Boolean(
+    scoredClassification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    !domainMatch &&
+    !hasSubstantiveApolloOrganizationIdentity(candidate)
+  );
+  const classification = emptyNameOnlyShell
+    ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+    : scoredClassification;
 
   return {
     ...candidate,
@@ -4678,7 +4714,7 @@ function scoreApolloOrganizationCandidate(
     branchLocationMatch,
     strongBaseNameMatch,
     classification,
-    matchReason: buildApolloMatchReason({
+    matchReason: [buildApolloMatchReason({
       classification,
       score,
       nameMatchType,
@@ -4687,9 +4723,38 @@ function scoreApolloOrganizationCandidate(
       branchLocationMatch,
       strongBaseNameMatch,
       tokenSimilarity
-    }),
+    }), emptyNameOnlyShell
+      ? "name-only Apollo result had no domain, LinkedIn identity, or positive employee count"
+      : null]
+      .filter(Boolean)
+      .join("; "),
     query
   };
+}
+
+function hasSubstantiveApolloOrganizationIdentity(candidate: {
+  domain: string | null;
+  linkedinUrl: string | null;
+  rawPayload: Record<string, unknown>;
+}) {
+  if (candidate.domain || candidate.linkedinUrl) return true;
+  const nestedOrganization = asRecord(candidate.rawPayload.organization);
+  const employeeCount =
+    readApolloNumber(candidate.rawPayload, [
+      "estimated_num_employees",
+      "employee_count",
+      "employees",
+      "num_employees"
+    ]) ??
+    (nestedOrganization
+      ? readApolloNumber(nestedOrganization, [
+          "estimated_num_employees",
+          "employee_count",
+          "employees",
+          "num_employees"
+        ])
+      : null);
+  return Boolean(employeeCount && employeeCount > 0);
 }
 
 function buildTrustedProvidedApolloOrganization(

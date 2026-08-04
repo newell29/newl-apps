@@ -5,10 +5,14 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  buildApolloExceptionRecoveryAliases,
   buildApolloExceptionIdentityQueries,
   decideApolloExceptionResolution,
+  requiresApolloExceptionIdentityResolution,
+  selectCanonicalApolloIdentityReuse,
   summarizeApolloExceptionAutopilotStatus
 } from "@/modules/lead-gen/apollo-exception-autopilot";
+import { APOLLO_ZERO_CONTACT_REVIEW_REASON } from "@/modules/lead-gen/apollo-contact-discovery-review";
 import type { ApolloOrganizationCandidate } from "@/server/integrations/apollo";
 import type { ApolloIdentityResolutionSynthesis } from "@/server/integrations/openai-apollo-identity";
 
@@ -89,6 +93,112 @@ describe("Apollo exception autopilot guardrails", () => {
       '"Example Distribution LLC" "Charlotte, North Carolina" company',
       '"Example Distribution LLC" "Example Brand" company relationship'
     ]);
+  });
+
+  it("adds a broader operating-brand recovery query for a noisy legal owner name", () => {
+    expect(
+      buildApolloExceptionRecoveryAliases(
+        "THE ASPHALT HERCULES TIRE & RUBBER COMPANY, LLC"
+      )
+    ).toEqual(["HERCULES TIRE RUBBER"]);
+
+    expect(
+      buildApolloExceptionIdentityQueries({
+        companyId: "company-hercules",
+        companyName: "THE ASPHALT HERCULES TIRE & RUBBER COMPANY, LLC",
+        normalizedName: "the-asphalt-hercules-tire-rubber-company-llc",
+        knownDomain: null,
+        primaryIndustry: "Automotive",
+        shipmentGeography: ["Huntersville, North Carolina"],
+        priorApolloCandidates: []
+      })
+    ).toContain(
+      '"HERCULES TIRE RUBBER" official company website operating brand'
+    );
+  });
+
+  it("reuses one tenant canonical Apollo organization and suppresses prior outreach", () => {
+    expect(
+      selectCanonicalApolloIdentityReuse({
+        companyId: "duplicate-hyosung",
+        synthesis: synthesis({
+          operatingName: "HS Hyosung USA",
+          legalName: "HS Hyosung USA Inc.",
+          officialDomain: "hyosungusa.com"
+        }),
+        evidence: [{
+          ...identityEvidence()[0],
+          url: "https://hyosungusa.com/about",
+          sourceDomain: "hyosungusa.com"
+        }],
+        companies: [{
+          id: "canonical-hyosung",
+          name: "HYOSUNG USA, INC.",
+          domain: "https://www.hyosungusa.com",
+          apolloOrganizationId: "apollo-hyosung",
+          hasPriorOutreach: true
+        }]
+      })
+    ).toMatchObject({
+      canonicalCompanyId: "canonical-hyosung",
+      hasPriorOutreach: true,
+      candidate: {
+        id: "apollo-hyosung",
+        domain: "hyosungusa.com",
+        classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+        domainMatch: true
+      }
+    });
+  });
+
+  it("does not reuse a shared domain when it points to multiple Apollo organizations", () => {
+    expect(
+      selectCanonicalApolloIdentityReuse({
+        companyId: "company-new",
+        synthesis: synthesis(),
+        evidence: identityEvidence(),
+        companies: [
+          {
+            id: "company-one",
+            name: "Example Brand One",
+            domain: "example.com",
+            apolloOrganizationId: "apollo-one",
+            hasPriorOutreach: true
+          },
+          {
+            id: "company-two",
+            name: "Example Brand Two",
+            domain: "example.com",
+            apolloOrganizationId: "apollo-two",
+            hasPriorOutreach: false
+          }
+        ]
+      })
+    ).toBeNull();
+  });
+
+  it("reopens only the low-score, domainless, zero-employee direct-shell signature", () => {
+    const shell = {
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      apolloOrganizationId: "apollo-empty-shell",
+      companyDomain: null,
+      matchDomain: null,
+      score: 19,
+      matchReason: APOLLO_ZERO_CONTACT_REVIEW_REASON
+    };
+    expect(requiresApolloExceptionIdentityResolution(shell)).toBe(true);
+    expect(
+      requiresApolloExceptionIdentityResolution({
+        ...shell,
+        companyDomain: "example.com"
+      })
+    ).toBe(false);
+    expect(
+      requiresApolloExceptionIdentityResolution({
+        ...shell,
+        score: 20
+      })
+    ).toBe(false);
   });
 
   it("reports resolved, ambiguous, and failed runs separately", () => {
