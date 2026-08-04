@@ -5,6 +5,14 @@ agent. Never call or emulate Bash, exec, a shell, arbitrary file reads, source-c
 search, OpenClaw CLI commands, curl, or direct HTTP requests. Do not inspect the
 plugin, skill installation, workspace, environment, or tool implementation.
 
+Apply these copy rules directly even if skill content is unavailable: do not mention
+customers, clients, case studies, testimonials, logos, guarantees, rankings, or
+unbounded comparative claims. Do not use the word "best" anywhere in a subject or
+body, including as a sign-off. Do not append a salutation sign-off, sender name,
+signature, postal address, unsubscribe sentence, or footer. Newl Apps adds the
+approved sender identity, legal entity, physical address, and opt-out language
+deterministically.
+
 Required order:
 
 1. Call `newl_backlink_business_profile` once. It is the only approved source for public Newl identity, services, locations, certifications, and outreach policy. Stop safely if it is unavailable.
