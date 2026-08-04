@@ -185,7 +185,11 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
         tone: runTone(researchRun?.status),
         status: researchRun?.status ?? null,
         startedAt: researchRun?.startedAt ?? null,
-        selectedCompanies: count(researchSelection?.selectedCompanyCount),
+        selectedCompanies: resolveTowerSelectedCompanyCount(
+          researchSelection,
+          researchRun?.input,
+          researchRun?.output
+        ),
         newCompanies: count(researchSelection?.newCompanyCount),
         suppressedRepeats: count(researchSelection?.recentResearchSuppressedCount),
         suppressedActiveOutreach: count(researchSelection?.activeOutreachSuppressedCount),
@@ -270,6 +274,25 @@ export function resolveTowerResearchSelection(
   runInput: unknown
 ) {
   return record(normalizedSelection) ?? record(record(runInput)?.selection);
+}
+
+export function resolveTowerSelectedCompanyCount(
+  selectionValue: unknown,
+  runInput: unknown,
+  runOutput: unknown
+) {
+  const selection = record(selectionValue);
+  const auditedCount = count(selection?.selectedCompanyCount);
+  if (auditedCount > 0) return auditedCount;
+
+  const input = record(runInput);
+  const candidateCompanyIds = Array.isArray(input?.candidateCompanyIds)
+    ? input.candidateCompanyIds
+    : [];
+  if (candidateCompanyIds.length > 0) return candidateCompanyIds.length;
+
+  const output = record(runOutput);
+  return count(output?.researchedCount) + count(output?.missingCompanyCount);
 }
 
 function stageTone(input: { failed: number; running: number; complete: boolean }): HunterTowerTone {
