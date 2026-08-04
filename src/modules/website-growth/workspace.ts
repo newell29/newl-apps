@@ -139,6 +139,58 @@ export function readScoutRunSummary(output: unknown) {
   };
 }
 
+export function readSeoRecoverySummary(output: unknown) {
+  const snapshot = readRecord(readRecord(readRecord(output).evidenceRefresh).seoRecovery);
+  const site = readRecord(snapshot.site);
+  const current = readRecord(site.current);
+  const previous = readRecord(site.previous);
+  const counts = readRecord(snapshot.counts);
+  const candidates = Array.isArray(snapshot.candidates)
+    ? snapshot.candidates.map((value) => {
+        const candidate = readRecord(value);
+        const candidateCurrent = readRecord(candidate.current);
+        const candidatePrevious = readRecord(candidate.previous);
+        const status = readString(candidate.status);
+        return {
+          route: readString(candidate.route) ?? "/",
+          status: status === "NEEDS_RECOVERY" || status === "MIGRATION_TRANSITION" || status === "IMPROVING" || status === "MONITOR"
+            ? status
+            : "MONITOR",
+          reason: readString(candidate.reason) ?? "Continue monitoring this route.",
+          currentClicks: readNumber(candidateCurrent.clicks),
+          previousClicks: readNumber(candidatePrevious.clicks),
+          currentImpressions: readNumber(candidateCurrent.impressions),
+          previousImpressions: readNumber(candidatePrevious.impressions)
+        };
+      }).slice(0, 8)
+    : [];
+
+  return {
+    available: Boolean(readString(readRecord(snapshot.currentPeriod).endDate)),
+    currentPeriod: {
+      startDate: readString(readRecord(snapshot.currentPeriod).startDate),
+      endDate: readString(readRecord(snapshot.currentPeriod).endDate)
+    },
+    previousPeriod: {
+      startDate: readString(readRecord(snapshot.previousPeriod).startDate),
+      endDate: readString(readRecord(snapshot.previousPeriod).endDate)
+    },
+    currentClicks: readNumber(current.clicks),
+    previousClicks: readNumber(previous.clicks),
+    currentImpressions: readNumber(current.impressions),
+    previousImpressions: readNumber(previous.impressions),
+    clickChangePercent: readNullableNumber(site.clickChangePercent),
+    impressionChangePercent: readNullableNumber(site.impressionChangePercent),
+    counts: {
+      needsRecovery: readNumber(counts.NEEDS_RECOVERY),
+      migrationTransition: readNumber(counts.MIGRATION_TRANSITION),
+      improving: readNumber(counts.IMPROVING),
+      monitor: readNumber(counts.MONITOR)
+    },
+    candidates
+  };
+}
+
 function normalizeRoute(value: string) {
   try {
     return new URL(value).pathname || "/";
@@ -165,4 +217,8 @@ function readStringArray(value: unknown) {
 
 function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readNullableNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

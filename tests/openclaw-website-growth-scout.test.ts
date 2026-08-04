@@ -35,6 +35,10 @@ const backlinkSkillPath = path.join(
   "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md",
 );
 const runnerPath = path.join(repoRoot, "ops/openclaw/run-website-growth-scout.sh");
+const skillPath = path.join(
+  repoRoot,
+  "ops/openclaw/skills/website-growth-scout/SKILL.md",
+);
 const runtimeRunnerPath = path.join(
   repoRoot,
   "ops/openclaw/run-website-growth-scout-runtime.sh",
@@ -566,8 +570,11 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     expect(helper).toContain('--target "${WEBSITE_GROWTH_TEAMS_TARGET}"');
   });
 
-  it("instructs Scout to review question-led AI-answer opportunities without creating thin pages", async () => {
-    const runner = await readFile(runnerPath, "utf8");
+  it("instructs Scout to review question-led and SEO-recovery opportunities without creating thin pages", async () => {
+    const [runner, skill] = await Promise.all([
+      readFile(runnerPath, "utf8"),
+      readFile(skillPath, "utf8")
+    ]);
 
     expect(runner).toContain(
       "Treat candidates marked questionOpportunity as a dedicated customer-question and AI-answer lane."
@@ -577,6 +584,10 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     );
     expect(runner).toContain("Reject thin FAQ pages");
     expect(runner).toContain("guarantees an AI citation or ranking");
+    expect(runner).toContain("evaluate the combined legacy URLs and their current redirect destination");
+    expect(runner).toContain("Do not recreate thin legacy pages");
+    expect(skill).toContain("reserve up to two positions for deterministic SEO migration-recovery candidates");
+    expect(skill).toContain("Do not recreate thin legacy pages");
   });
 
   it("runs a bounded Brave, Qwen, then Codex backlink funnel", async () => {

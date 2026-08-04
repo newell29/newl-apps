@@ -27,6 +27,7 @@ export type NewlWebsiteContext = {
     contactFormFields: string[];
     faqSignals: Array<{ file: string; count: number }>;
     internalLinks: string[];
+    redirects: Array<{ source: string; destination: string }>;
   };
 };
 
@@ -277,7 +278,8 @@ export const newlWebsiteContext: NewlWebsiteContext = {
     templates: [],
     contactFormFields: [],
     faqSignals: [],
-    internalLinks: []
+    internalLinks: [],
+    redirects: []
   }
 };
 

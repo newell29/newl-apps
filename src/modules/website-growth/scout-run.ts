@@ -43,6 +43,11 @@ import { buildWebsiteGrowthReportDownloadLinks } from "@/modules/website-growth/
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { isWebsiteGrowthQuestionOpportunity } from "@/modules/website-growth/opportunities";
 import {
+  SEO_RECOVERY_PACKET_LIMIT,
+  isWebsiteGrowthSeoRecoveryOpportunity,
+  type WebsiteGrowthSeoRecoverySnapshot
+} from "@/modules/website-growth/seo-recovery";
+import {
   safeSyncWebsiteGrowthSemrushScheduledReports,
   type SemrushScheduledReportSyncResult,
   type SemrushScheduledReportType
@@ -120,13 +125,19 @@ export function selectWebsiteGrowthScoutPacketCandidates<
   }
 >(candidates: T[], maxCandidates: number) {
   const limit = Math.max(1, maxCandidates);
+  const recoveryLimit = Math.min(SEO_RECOVERY_PACKET_LIMIT, limit);
   const questionLimit = Math.min(2, limit);
+  const recoveryCandidates = candidates
+    .filter(isWebsiteGrowthSeoRecoveryOpportunity)
+    .slice(0, recoveryLimit);
+  const selectedIds = new Set(recoveryCandidates.map((candidate) => candidate.id));
   const questionCandidates = candidates
-    .filter(isWebsiteGrowthQuestionOpportunity)
-    .slice(0, questionLimit);
-  const selectedIds = new Set(questionCandidates.map((candidate) => candidate.id));
+    .filter((candidate) => !selectedIds.has(candidate.id) && isWebsiteGrowthQuestionOpportunity(candidate))
+    .slice(0, Math.min(questionLimit, limit - recoveryCandidates.length));
+  for (const candidate of questionCandidates) selectedIds.add(candidate.id);
 
   return [
+    ...recoveryCandidates,
     ...questionCandidates,
     ...candidates.filter((candidate) => !selectedIds.has(candidate.id))
   ].slice(0, limit);
@@ -223,6 +234,9 @@ export async function prepareWebsiteGrowthScoutRun({
     const questionCandidateIds = opportunities
       .filter(isWebsiteGrowthQuestionOpportunity)
       .map((opportunity) => opportunity.id);
+    const recoveryCandidateIds = opportunities
+      .filter(isWebsiteGrowthSeoRecoveryOpportunity)
+      .map((opportunity) => opportunity.id);
     const researchInventory = Object.fromEntries(
       opportunityStatusCounts.map((row) => [row.status, row._count._all])
     );
@@ -307,6 +321,18 @@ export async function prepareWebsiteGrowthScoutRun({
           "Do not claim that a change guarantees an AI citation, AI Overview, ranking, lead, or referral."
         ]
       },
+      seoRecoveryProgram: {
+        candidateIds: recoveryCandidateIds,
+        snapshot: evidenceRefresh.seoRecovery,
+        rules: [
+          "Treat seoRecovery evidence as a dedicated migration-recovery lane and review it before ordinary content ideas.",
+          "Evaluate the combined legacy URL and destination route, not either URL in isolation.",
+          "Inspect redirect handling, canonical metadata, sitemap inclusion, internal links, retained useful content, and query intent in the current website repository.",
+          "Do not recreate thin legacy pages merely to recover impressions. Prefer the strongest existing commercial destination.",
+          "Do not propose duplicate work when an approved, building, preview-ready, or recently published brief already covers the destination.",
+          "Prioritize qualified clicks, country relevance, engagement, and leads over raw impression recovery."
+        ]
+      },
       backlinkProgram: {
         maxReturnedProspects: MAX_BACKLINK_PROSPECTS_PER_RUN,
         maxActiveQueue: MAX_ACTIVE_BACKLINK_QUEUE,
@@ -379,6 +405,7 @@ export async function prepareWebsiteGrowthScoutRun({
           semrushTransport: "official_mcp_oauth",
           candidateIds,
           questionCandidateIds,
+          recoveryCandidateIds,
           semrushCacheObservedAt: semrushCache.observedAt
         },
         output: {
@@ -389,6 +416,7 @@ export async function prepareWebsiteGrowthScoutRun({
           researchSignalCount: opportunityStatusCounts.reduce((sum, row) => sum + row._count._all, 0),
           candidateCount: candidateIds.length,
           questionCandidateCount: questionCandidateIds.length,
+          recoveryCandidateCount: recoveryCandidateIds.length,
           semrushCache: {
             available: semrushCache.available,
             fresh: semrushCache.fresh,
@@ -560,6 +588,9 @@ export async function completeWebsiteGrowthScoutRun({
   const questionCandidateIds = new Set(
     readStringArray(readRecord(job.input).questionCandidateIds)
   );
+  const recoveryCandidateIds = new Set(
+    readStringArray(readRecord(job.input).recoveryCandidateIds)
+  );
   const allowed = new Set(candidateIds);
 
   for (const item of parsed.drafts) {
@@ -633,6 +664,9 @@ export async function completeWebsiteGrowthScoutRun({
   const questionDraftCount = savedDrafts.filter((draft) =>
     questionCandidateIds.has(draft.opportunityId)
   ).length;
+  const recoveryDraftCount = savedDrafts.filter((draft) =>
+    recoveryCandidateIds.has(draft.opportunityId)
+  ).length;
 
   const trackingDrafts = await prisma.websiteGrowthContentDraft.findMany({
     where: {
@@ -700,6 +734,9 @@ export async function completeWebsiteGrowthScoutRun({
     candidateCount: readOptionalInteger(readRecord(job.output).candidateCount) ?? 0,
     questionCandidateCount: questionCandidateIds.size,
     questionDraftCount,
+    recoveryCandidateCount: recoveryCandidateIds.size,
+    recoveryDraftCount,
+    seoRecovery: readRecord(readRecord(job.output).evidenceRefresh).seoRecovery,
     researchSignalCount: readOptionalInteger(readRecord(job.output).researchSignalCount) ?? 0,
     researchInventory: readRecord(readRecord(job.output).researchInventory),
     keywordAdditionCount: keywordAdditions.length,
@@ -730,6 +767,8 @@ export async function completeWebsiteGrowthScoutRun({
           keywordAdditionCount: keywordAdditions.length,
           questionCandidateCount: questionCandidateIds.size,
           questionDraftCount,
+          recoveryCandidateCount: recoveryCandidateIds.size,
+          recoveryDraftCount,
           backlinkSummary,
           reports,
           draftIds: savedDrafts.map((draft) => draft.id),
@@ -755,6 +794,8 @@ export async function completeWebsiteGrowthScoutRun({
           keywordAdditionCount: keywordAdditions.length,
           questionCandidateCount: questionCandidateIds.size,
           questionDraftCount,
+          recoveryCandidateCount: recoveryCandidateIds.size,
+          recoveryDraftCount,
           backlinkSummary,
           draftIds: savedDrafts.map((draft) => draft.id)
         }
@@ -987,6 +1028,9 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   candidateCount,
   questionCandidateCount,
   questionDraftCount,
+  recoveryCandidateCount,
+  recoveryDraftCount,
+  seoRecovery,
   researchSignalCount,
   researchInventory,
   keywordAdditionCount,
@@ -1005,6 +1049,9 @@ export function buildWebsiteGrowthScoutTeamsMessage({
   candidateCount?: number;
   questionCandidateCount?: number;
   questionDraftCount?: number;
+  recoveryCandidateCount?: number;
+  recoveryDraftCount?: number;
+  seoRecovery?: WebsiteGrowthSeoRecoverySnapshot | unknown;
   researchSignalCount?: number;
   researchInventory?: Record<string, unknown>;
   keywordAdditionCount?: number;
@@ -1029,12 +1076,18 @@ export function buildWebsiteGrowthScoutTeamsMessage({
       : semrushSource === "CACHE"
         ? `cached SEMrush evidence${semrushObservedAt ? ` from ${formatReportDate(semrushObservedAt)}` : ""}`
         : "no SEMrush evidence (API units unavailable)";
+  const recoveryLines = buildSeoRecoveryTeamsLines({
+    snapshot: seoRecovery ?? readRecord(sourceSummary).seoRecovery,
+    candidateCount: recoveryCandidateCount,
+    draftCount: recoveryDraftCount
+  });
   const lines = [
     `Website Growth Scout weekday report: ${drafts.length} idea${drafts.length === 1 ? "" : "s"} promoted for approval.`,
     `Evidence used: Search Console, GA4, first-party website forms, and ${semrushEvidenceLabel}.`,
     evidenceRefreshLine,
     `Research funnel: ${researchSignalCount ?? 0} stored signals (${monitoringCount} monitoring); ${reviewedCount} new records reviewed; ${selectedCount} shortlisted; ${candidateCount ?? 0} sent to Codex; ${drafts.length} promoted.`,
     `Question and AI-answer lane: ${questionCandidateCount ?? 0} question-led candidate${(questionCandidateCount ?? 0) === 1 ? "" : "s"} reviewed; ${questionDraftCount ?? 0} promoted.`,
+    ...recoveryLines,
     "The research inventory is intentionally much larger than the approval queue because duplicate queries are clustered by page/topic, weak or branded signals are filtered, weekly lane limits are applied, and Codex promotes only evidence-backed work.",
     semrushSummary ? `SEMrush: ${semrushSummary}` : null,
     tracking
@@ -1096,18 +1149,63 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
       ? `SEMrush mailbox: ${semrushMailSync.imported} new report${semrushMailSync.imported === 1 ? "" : "s"} imported; ${semrushMailSync.duplicates} already seen; ${semrushMailSync.failed} failed.`
       : `SEMrush mailbox: unavailable this run (${semrushMailSync.error ?? "unknown error"}); Scout continued with retained evidence.`
     : null;
+  const recoveryLines = buildSeoRecoveryTeamsLines({
+    snapshot: readRecord(sourceSummary).seoRecovery
+  });
 
   return [
     "Website Growth Scout weekday check-in: first-party evidence refreshed; no SEMrush API units or Codex research were used.",
     formatEvidenceRefresh(sourceSummary),
     `Research queue: ${researchSignalCount} stored signals (${monitoringCount} monitoring); ${reviewingCount} awaiting Scout research; ${selectedCount} newly shortlisted by deterministic planning.`,
     `Question and AI-answer lane: ${questionSelectedCount} question-led candidate${questionSelectedCount === 1 ? "" : "s"} newly shortlisted for the next deep Scout review.`,
+    ...recoveryLines,
     cacheLine,
     mailLine,
     `Backlinks: ${backlinkReviewCount} curated prospect${backlinkReviewCount === 1 ? "" : "s"} currently need review.`,
     `Review page: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth`,
     "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday and Wednesday deep Scout runs."
   ].filter((line): line is string => Boolean(line)).join("\n");
+}
+
+function buildSeoRecoveryTeamsLines({
+  snapshot,
+  candidateCount,
+  draftCount
+}: {
+  snapshot: unknown;
+  candidateCount?: number;
+  draftCount?: number;
+}) {
+  const recovery = readRecord(snapshot);
+  const currentPeriod = readRecord(recovery.currentPeriod);
+  const site = readRecord(recovery.site);
+  const current = readRecord(site.current);
+  const previous = readRecord(site.previous);
+  if (!readOptionalString(currentPeriod.endDate, 20)) {
+    return ["SEO recovery monitor: unavailable this run; Scout continued with its retained opportunity queue."];
+  }
+  const counts = readRecord(recovery.counts);
+  const needsRecovery = readOptionalInteger(counts.NEEDS_RECOVERY) ?? 0;
+  const transitions = readOptionalInteger(counts.MIGRATION_TRANSITION) ?? 0;
+  const improving = readOptionalInteger(counts.IMPROVING) ?? 0;
+  const lines = [
+    `SEO recovery monitor: ${formatCount(previous.clicks)} to ${formatCount(current.clicks)} clicks (${formatPercentChange(site.clickChangePercent)}); ${formatCount(previous.impressions)} to ${formatCount(current.impressions)} impressions (${formatPercentChange(site.impressionChangePercent)}). ${needsRecovery} route${needsRecovery === 1 ? "" : "s"} need recovery; ${transitions} migration transition${transitions === 1 ? "" : "s"}; ${improving} improving.`,
+    candidateCount === undefined
+      ? null
+      : `SEO recovery lane: ${candidateCount} candidate${candidateCount === 1 ? "" : "s"} reviewed by Codex; ${draftCount ?? 0} promoted for approval.`
+  ];
+  return lines.filter((line): line is string => Boolean(line));
+}
+
+function formatCount(value: unknown) {
+  return (readOptionalInteger(value) ?? 0).toLocaleString("en-US");
+}
+
+function formatPercentChange(value: unknown) {
+  const number = typeof value === "number" && Number.isFinite(value) ? value : null;
+  if (number === null) return "new";
+  const percent = Math.round(number * 100);
+  return `${percent > 0 ? "+" : ""}${percent}%`;
 }
 
 export async function loadWebsiteGrowthSemrushCache(
