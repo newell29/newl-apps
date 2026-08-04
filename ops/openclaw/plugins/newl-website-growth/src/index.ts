@@ -1,4 +1,4 @@
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -57,6 +57,11 @@ const sendEmailParameters = Type.Object({
     Type.Literal("PUBLISHER_SUBMISSION"),
     Type.Literal("US_BUSINESS_OUTREACH")
   ]),
+  subject: Type.String({ minLength: 1, maxLength: 180 }),
+  body: Type.String({ minLength: 1, maxLength: 4000 })
+});
+const sendFollowUpParameters = Type.Object({
+  opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
   subject: Type.String({ minLength: 1, maxLength: 180 }),
   body: Type.String({ minLength: 1, maxLength: 4000 })
 });
@@ -176,14 +181,26 @@ const plugin = defineToolPlugin({
       label: "Summarize Backlink Outreach",
       description: "Return deterministic current-run and lifetime Website Growth execution counts, blocker reasons and the Newl Apps review link for the Teams reminder.",
       parameters: summaryParameters,
-      factory: createParameterizedApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary")
+      factory: createParameterizedApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary", summaryParameters)
     }),
     tool({
       name: "newl_backlink_send_email",
       label: "Send Approved Backlink Outreach",
       description: "Send one personalized message through the dedicated Newl mailbox. Newl Apps rechecks human approval, recipient suppression, consent evidence, country rules and volume limits before Microsoft 365 is called.",
       parameters: sendEmailParameters,
-      factory: createParameterizedApiTool("newl_backlink_send_email", "/api/website-growth/backlinks/executor/send-email")
+      factory: createParameterizedApiTool("newl_backlink_send_email", "/api/website-growth/backlinks/executor/send-email", sendEmailParameters)
+    }),
+    tool({
+      name: "newl_backlink_send_follow_up",
+      label: "Send Approved Backlink Follow-up",
+      description:
+        "Send one due follow-up using the recipient, country, contact source and consent evidence already recorded on the approved opportunity. The model supplies only the opportunity ID and message copy.",
+      parameters: sendFollowUpParameters,
+      factory: createParameterizedApiTool(
+        "newl_backlink_send_follow_up",
+        "/api/website-growth/backlinks/executor/send-follow-up",
+        sendFollowUpParameters
+      )
     }),
     tool({
       name: "newl_backlink_fill_directory_credentials",
@@ -198,7 +215,7 @@ const plugin = defineToolPlugin({
       label: "Report Backlink Execution",
       description: "Report a confirmed directory submission, blocked action, lost opportunity or publicly verified live backlink. Never include a password or secret in any field.",
       parameters: reportParameters,
-      factory: createParameterizedApiTool("newl_backlink_report", "/api/website-growth/backlinks/executor/report")
+      factory: createParameterizedApiTool("newl_backlink_report", "/api/website-growth/backlinks/executor/report", reportParameters)
     })
   ]
 });
@@ -221,12 +238,16 @@ export function createApiTool(
   });
 }
 
-export function createParameterizedApiTool(name: string, path: string) {
+export function createParameterizedApiTool(
+  name: string,
+  path: string,
+  parameterSchema: TSchema = Type.Record(Type.String(), Type.Unknown())
+) {
   return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
     name,
     label: "Newl Website Growth API",
     description: "Calls the configured Newl Apps Website Growth executor endpoint.",
-    parameters: Type.Record(Type.String(), Type.Unknown()),
+    parameters: parameterSchema,
     async execute(_toolCallId: string, params: unknown) {
       const payload =
         params && typeof params === "object" && !Array.isArray(params)

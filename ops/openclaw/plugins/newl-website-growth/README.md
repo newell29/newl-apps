@@ -12,4 +12,6 @@ Configure `baseUrl` with the production Newl Apps HTTPS URL. `backlinkTokenEnv` 
 
 Install this plugin together with the repository-owned `website-growth-backlink-executor` skill. The weekday executor cron must remain disabled until the database migration, reviewed Newl Apps deployment, Microsoft 365 mailbox scope, public outreach profile and supervised one-message test are complete.
 
+The plugin exposes separate initial-send and follow-up tools. Follow-ups accept only the approved opportunity ID and personalized message copy; recipient and consent evidence remain authoritative in Newl Apps. Runtime factories must preserve the declared TypeBox schemas so OpenClaw cannot invoke side-effect tools with empty objects.
+
 Free directory accounts use `newl_backlink_fill_directory_credentials`. The plugin reads the dedicated local `NEWL_DIRECTORY_PASSWORD_MASTER_V1`, derives a stable unique 28-character password for the approved directory/account, fills it through OpenClaw's private `--fields-file` browser path, deletes the file, and returns no password. The master belongs only in the protected OpenClaw gateway environment; it must never be placed in Vercel, Newl Apps, prompts, Teams, Git, or the business profile.

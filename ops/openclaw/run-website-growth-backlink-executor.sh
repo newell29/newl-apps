@@ -75,10 +75,13 @@ if [[ "${agent_status}" -eq 0 ]]; then
   fi
 fi
 
-/usr/bin/python3 - "${run_started_at}" "${summary_request_path}" <<'PY'
+/usr/bin/python3 - "${run_started_at}" "${agent_status}" "${summary_request_path}" <<'PY'
 import json, sys
-with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    json.dump({"runStartedAt": sys.argv[1]}, handle)
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    json.dump({
+        "runStartedAt": sys.argv[1],
+        "executionStatus": "SUCCESS" if int(sys.argv[2]) == 0 else "ERROR",
+    }, handle)
 PY
 
 request_headers=(

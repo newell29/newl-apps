@@ -10,6 +10,7 @@ import {
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Type } from "typebox";
 
 describe("Newl Website Growth OpenClaw plugin", () => {
   afterEach(() => {
@@ -81,6 +82,31 @@ describe("Newl Website Growth OpenClaw plugin", () => {
     expect(createBusinessProfileTool()({ config }).name).toBe(
       "newl_backlink_business_profile"
     );
+  });
+
+  it("preserves required parameter schemas in the runtime tool factory", () => {
+    const parameters = Type.Object({
+      opportunityId: Type.String(),
+      subject: Type.String(),
+      body: Type.String()
+    });
+    const tool = createParameterizedApiTool(
+      "newl_backlink_send_follow_up",
+      "/send-follow-up",
+      parameters
+    )({
+      config: {
+        baseUrl: "https://newl-apps.example.com",
+        backlinkTokenEnv: "TEST_BACKLINK_TOKEN"
+      }
+    });
+
+    expect(tool.parameters).toBe(parameters);
+    expect((tool.parameters as unknown as { required?: string[] }).required).toEqual([
+      "opportunityId",
+      "subject",
+      "body"
+    ]);
   });
 
   it("returns only a bounded owner-approved public business profile", async () => {

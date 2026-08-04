@@ -137,6 +137,7 @@ console.log(JSON.stringify({
     "newl_backlink_verification",
     "newl_backlink_claim",
     "newl_backlink_send_email",
+    "newl_backlink_send_follow_up",
     "newl_backlink_fill_directory_credentials",
     "newl_backlink_report"
   ],

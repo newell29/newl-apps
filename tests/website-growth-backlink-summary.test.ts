@@ -1,4 +1,5 @@
 import {
+  JobStatus,
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus
 } from "@prisma/client";
@@ -86,6 +87,26 @@ describe("Website Growth backlink execution summary", () => {
             blockedTotal: 5
           })
         })
+      })
+    });
+  });
+
+  it("records and announces an executor validation failure instead of a false success", async () => {
+    const result = await buildWebsiteGrowthOutreachTeamsSummary({
+      tenantId: "tenant-1",
+      baseUrl: "https://apps.newlgroup.com",
+      runStartedAt: new Date("2026-07-27T14:00:00.000Z"),
+      executionStatus: JobStatus.ERROR,
+      now: new Date("2026-07-27T14:10:00.000Z")
+    });
+
+    expect(result.needsAttention).toBe(true);
+    expect(result.message).toContain("executor failed");
+    expect(result.message).toContain("No uncertain external action was retried");
+    expect(jobCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        status: JobStatus.ERROR,
+        errorMessage: expect.stringContaining("failed validation")
       })
     });
   });

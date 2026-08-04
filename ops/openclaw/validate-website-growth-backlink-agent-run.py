@@ -17,6 +17,34 @@ REQUIRED_TOOL_ORDER = [
     "newl_backlink_verification",
     "newl_backlink_claim",
 ]
+REQUIRED_EXPOSED_TOOLS = [
+    *REQUIRED_TOOL_ORDER,
+    "newl_backlink_send_email",
+    "newl_backlink_send_follow_up",
+    "newl_backlink_fill_directory_credentials",
+    "newl_backlink_report",
+]
+PARAMETER_REQUIREMENTS = {
+    "newl_backlink_send_email": [
+        "opportunityId",
+        "kind",
+        "recipientEmail",
+        "recipientCountry",
+        "contactSourceUrl",
+        "consentBasis",
+        "subject",
+        "body",
+    ],
+    "newl_backlink_send_follow_up": ["opportunityId", "subject", "body"],
+    "newl_backlink_fill_directory_credentials": [
+        "opportunityId",
+        "targetId",
+        "usernameRef",
+        "passwordRef",
+        "confirmPasswordRef",
+    ],
+    "newl_backlink_report": ["opportunityId", "status", "notes"],
+}
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,100}$")
 
 
@@ -29,6 +57,49 @@ def parse_args() -> argparse.Namespace:
 
 def read_record(value: object) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
+
+
+def read_tool_input(block: dict[str, object]) -> dict[str, object]:
+    for key in ("arguments", "input"):
+        value = block.get(key)
+        if isinstance(value, dict) and value:
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                continue
+            if isinstance(parsed, dict) and parsed:
+                return parsed
+    return {}
+
+
+def require_successful_tool_result(
+    call: dict[str, object],
+    results_by_id: dict[str, dict[str, object]],
+) -> None:
+    name = str(call.get("name") or "")
+    call_id = str(call.get("id") or call.get("toolCallId") or "")
+    result = results_by_id.get(call_id)
+    if not result:
+        raise SystemExit(
+            f"Scout outreach failed closed because {name} did not return a recorded result."
+        )
+    content = result.get("content") or result.get("text")
+    if not isinstance(content, str) or not content.strip():
+        raise SystemExit(
+            f"Scout outreach failed closed because {name} returned an empty result."
+        )
+    try:
+        parsed = json.loads(content)
+    except ValueError:
+        raise SystemExit(
+            f"Scout outreach failed closed because {name} returned an unsuccessful result."
+        ) from None
+    if not isinstance(parsed, dict):
+        raise SystemExit(
+            f"Scout outreach failed closed because {name} returned an invalid result."
+        )
 
 
 def main() -> int:
@@ -44,7 +115,7 @@ def main() -> int:
         for entry in tool_entries
         if isinstance(entry, dict)
     } if isinstance(tool_entries, list) else set()
-    missing = [name for name in REQUIRED_TOOL_ORDER if name not in exposed]
+    missing = [name for name in REQUIRED_EXPOSED_TOOLS if name not in exposed]
     if missing:
         raise SystemExit(
             "Scout outreach failed closed because required executor tools were not exposed: "
@@ -60,7 +131,8 @@ def main() -> int:
     if not transcript_path.is_file():
         raise SystemExit("Scout outreach failed closed because its session transcript was unavailable.")
 
-    called: list[str] = []
+    calls: list[dict[str, object]] = []
+    results_by_id: dict[str, dict[str, object]] = {}
     for line in transcript_path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -70,12 +142,34 @@ def main() -> int:
         if not isinstance(content, list):
             continue
         for block in content:
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "toolCall"
-                and isinstance(block.get("name"), str)
-            ):
-                called.append(block["name"])
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "toolCall" and isinstance(block.get("name"), str):
+                calls.append(block)
+            if block.get("type") == "toolResult":
+                call_id = block.get("toolCallId") or block.get("id")
+                if isinstance(call_id, str) and call_id:
+                    results_by_id[call_id] = block
+
+    called = [str(call["name"]) for call in calls]
+    for call in calls:
+        name = str(call["name"])
+        if name.startswith("newl_backlink_"):
+            require_successful_tool_result(call, results_by_id)
+        required_fields = PARAMETER_REQUIREMENTS.get(name)
+        if not required_fields:
+            continue
+        tool_input = read_tool_input(call)
+        missing_fields = [
+            field
+            for field in required_fields
+            if not isinstance(tool_input.get(field), str) or not str(tool_input[field]).strip()
+        ]
+        if missing_fields:
+            raise SystemExit(
+                f"Scout outreach failed closed because {name} omitted required fields: "
+                + ", ".join(missing_fields)
+            )
 
     positions: list[int] = []
     cursor = 0

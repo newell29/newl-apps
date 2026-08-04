@@ -281,6 +281,13 @@ exit 2
       "newl_backlink_verification",
       "newl_backlink_claim"
     ];
+    const exposedTools = [
+      ...requiredTools,
+      "newl_backlink_send_email",
+      "newl_backlink_send_follow_up",
+      "newl_backlink_fill_directory_credentials",
+      "newl_backlink_report"
+    ];
     await mkdir(sessionsDirectory);
 
     try {
@@ -289,17 +296,32 @@ exit 2
           meta: {
             agentMeta: { sessionId },
             systemPromptReport: {
-              tools: { entries: [...requiredTools, "browser"].map((name) => ({ name })) }
+              tools: { entries: [...exposedTools, "browser"].map((name) => ({ name })) }
             }
           }
         }
       }));
       await writeFile(
         path.join(sessionsDirectory, `${sessionId}.jsonl`),
-        requiredTools.map((name) => JSON.stringify({
-          type: "message",
-          message: { role: "assistant", content: [{ type: "toolCall", name }] }
-        })).join("\n")
+        requiredTools.flatMap((name, index) => {
+          const id = `call-${index}`;
+          return [
+            JSON.stringify({
+              type: "message",
+              message: {
+                role: "assistant",
+                content: [{ type: "toolCall", id, name, arguments: {} }]
+              }
+            }),
+            JSON.stringify({
+              type: "message",
+              message: {
+                role: "toolResult",
+                content: [{ type: "toolResult", id, toolCallId: id, name, content: "{}" }]
+              }
+            })
+          ];
+        }).join("\n")
       );
 
       await expect(execFileAsync("/usr/bin/python3", [
@@ -309,6 +331,104 @@ exit 2
         "--sessions-directory",
         sessionsDirectory
       ])).resolves.toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an empty or unsuccessful backlink side-effect call", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-validator-"));
+    const agentOutputPath = path.join(directory, "agent-output.json");
+    const sessionsDirectory = path.join(directory, "sessions");
+    const sessionId = "synthetic-session-789";
+    const requiredTools = [
+      "newl_backlink_business_profile",
+      "newl_backlink_sync_replies",
+      "newl_backlink_sync_directory_verifications",
+      "newl_backlink_follow_ups",
+      "newl_backlink_verification",
+      "newl_backlink_claim"
+    ];
+    const exposedTools = [
+      ...requiredTools,
+      "newl_backlink_send_email",
+      "newl_backlink_send_follow_up",
+      "newl_backlink_fill_directory_credentials",
+      "newl_backlink_report"
+    ];
+    await mkdir(sessionsDirectory);
+
+    try {
+      await writeFile(agentOutputPath, JSON.stringify({
+        result: {
+          meta: {
+            agentMeta: { sessionId },
+            systemPromptReport: {
+              tools: { entries: [...exposedTools, "browser"].map((name) => ({ name })) }
+            }
+          }
+        }
+      }));
+      const transcript = requiredTools.flatMap((name, index) => {
+        const id = `call-${index}`;
+        return [
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [{ type: "toolCall", id, name, arguments: {} }]
+            }
+          },
+          {
+            type: "message",
+            message: {
+              role: "toolResult",
+              content: [{ type: "toolResult", id, toolCallId: id, name, content: "{}" }]
+            }
+          }
+        ];
+      });
+      transcript.push(
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{
+              type: "toolCall",
+              id: "empty-send",
+              name: "newl_backlink_send_follow_up",
+              arguments: {}
+            }]
+          }
+        },
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            content: [{
+              type: "toolResult",
+              id: "empty-send",
+              toolCallId: "empty-send",
+              name: "newl_backlink_send_follow_up",
+              content: "{}"
+            }]
+          }
+        }
+      );
+      await writeFile(
+        path.join(sessionsDirectory, `${sessionId}.jsonl`),
+        transcript.map((record) => JSON.stringify(record)).join("\n")
+      );
+
+      await expect(execFileAsync("/usr/bin/python3", [
+        backlinkValidatorPath,
+        "--agent-output",
+        agentOutputPath,
+        "--sessions-directory",
+        sessionsDirectory
+      ])).rejects.toMatchObject({
+        stderr: expect.stringContaining("omitted required fields")
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -359,10 +479,7 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     await Promise.all([chmod(openclawPath, 0o700), chmod(curlPath, 0o700)]);
 
     try {
-      let failure: {
-        code?: number;
-        stderr?: string;
-      } | null = null;
+      let failure: unknown;
       try {
         await execFileAsync("/bin/zsh", [backlinkRunnerPath], {
           env: {
@@ -376,11 +493,12 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
           },
         });
       } catch (error) {
-        failure = error as typeof failure;
+        failure = error;
       }
 
-      expect(failure?.code).toBe(9);
-      expect(failure?.stderr).toContain(
+      const failedRun = failure as { code?: number; stderr?: string };
+      expect(failedRun.code).toBe(9);
+      expect(failedRun.stderr).toContain(
         "failed after its deterministic summary was delivered",
       );
       expect(await readFile(teamsLogPath, "utf8")).toBe(
@@ -494,7 +612,7 @@ print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
     });
   });
 
-  it("retries only omitted Qwen candidates and fails one persistent omission closed", async () => {
+  it("retries only omitted Qwen candidates and forwards one persistent omission safely", async () => {
     const python = String.raw`
 import json, runpy, sys
 module = runpy.run_path(sys.argv[1])
@@ -533,8 +651,60 @@ print(json.dumps({"calls": calls, "decisions": decisions}))
     expect(result.decisions).toHaveLength(5);
     expect(result.decisions[3]).toMatchObject({
       id: "candidate-3",
-      disposition: "REJECT",
+      disposition: "FETCH",
       confidence: 0
+    });
+  });
+
+  it("forwards persistent invalid Qwen output through the bounded Codex fallback", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append([row["id"] for row in rows])
+    raise RuntimeError("synthetic invalid JSON")
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+triage = module["ollama_request"](
+    module["TRIAGE_SCHEMA"],
+    "synthetic prompt",
+    [{"id": "candidate-1", "queryLane": "DIRECTORY"}]
+)
+finalist = module["ollama_request"](
+    module["FINALIST_SCHEMA"],
+    "synthetic prompt",
+    [{
+        "id": "candidate-1",
+        "initialTriage": triage[0],
+        "pageExcerpt": "Public directory submission information."
+    }]
+)
+print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+    const result = JSON.parse(stdout);
+
+    expect(result.calls).toEqual([
+      ["candidate-1"],
+      ["candidate-1"],
+      ["candidate-1"],
+      ["candidate-1"]
+    ]);
+    expect(result.triage[0]).toMatchObject({
+      disposition: "FETCH",
+      category: "DIRECTORY_CITATION",
+      confidence: 0
+    });
+    expect(result.finalist[0]).toMatchObject({
+      disposition: "FINALIST",
+      category: "DIRECTORY_CITATION",
+      confidence: 0,
+      pageSummary: "Public directory submission information."
     });
   });
 
