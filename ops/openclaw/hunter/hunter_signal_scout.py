@@ -20,7 +20,7 @@ from hunter_ingest import api_request, clean, required_env
 
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_MODEL = "qwen3:30b-instruct"
+DEFAULT_MODEL = "qwen3.6:27b-q4_K_M"
 PROMPT_VERSION = "hunter-signal-classifier-v3"
 ALLOWED_SIGNAL_TYPES = {
     "EXPANSION",

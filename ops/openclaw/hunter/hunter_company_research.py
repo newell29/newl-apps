@@ -12,6 +12,7 @@ import json
 import os
 import re
 import socket
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -24,7 +25,7 @@ from hunter_outreach_handoff import drain_outreach_handoff
 
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_QWEN_MODEL = "qwen3.5:35b"
+DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M"
 DEFAULT_LUNA_MODEL = "gpt-5.6-luna"
 DEFAULT_KIMI_URL = "https://api.moonshot.ai/v1"
 DEFAULT_KIMI_MODEL = "kimi-k2.6"
@@ -1729,8 +1730,9 @@ def score_companies(
     evidence_by_key: dict[str, list[dict[str, Any]]],
     synthesis_by_key: dict[str, dict[str, Any]],
     batch_size: int,
-) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any], dict[str, str]]:
     results: dict[str, dict[str, Any]] = {}
+    failures: dict[str, str] = {}
     usage: dict[str, Any] = {
         "inputTokens": 0,
         "cachedInputTokens": 0,
@@ -1738,7 +1740,7 @@ def score_companies(
         "durationMs": 0,
         "estimatedCostUsd": None,
     }
-    for batch in batched(candidates, batch_size):
+    def score_batch(batch: list[dict[str, Any]], attempt: int = 0) -> None:
         packet = [
             {
                 "companyKey": candidate["companyKey"],
@@ -1758,8 +1760,17 @@ def score_companies(
         try:
             rows, batch_usage = kimi_scoring_request(kimi_url, api_key, model, packet)
         except RuntimeError as error:
-            batch_keys = ", ".join(str(candidate["companyKey"]) for candidate in batch)
-            raise RuntimeError(f"Kimi scoring failed for [{batch_keys}]: {error}") from error
+            if len(batch) > 1:
+                for candidate in batch:
+                    score_batch([candidate])
+                return
+            key = str(batch[0]["companyKey"])
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+                score_batch(batch, attempt + 1)
+                return
+            failures[key] = bounded_text(error, "Kimi scoring failed.", 1_000)
+            return
         rows_by_key = {
             clean(row.get("companyKey")): row
             for row in rows
@@ -1768,15 +1779,27 @@ def score_companies(
         for candidate in batch:
             key = candidate["companyKey"]
             row = rows_by_key.get(key)
-            if not row:
-                raise RuntimeError(f"Kimi did not return companyKey {key}.")
-            results[key] = validate_scoring(row, key)
+            try:
+                if not row:
+                    raise RuntimeError(f"Kimi did not return companyKey {key}.")
+                results[key] = validate_scoring(row, key)
+            except RuntimeError as error:
+                if len(batch) > 1:
+                    score_batch([candidate])
+                elif attempt < 2:
+                    time.sleep(2 ** attempt)
+                    score_batch(batch, attempt + 1)
+                else:
+                    failures[key] = bounded_text(error, "Kimi scoring failed.", 1_000)
         for name in ("inputTokens", "cachedInputTokens", "outputTokens", "durationMs"):
             usage[name] += batch_usage[name]
+
+    for batch in batched(candidates, batch_size):
+        score_batch(batch)
     usage["estimatedCostUsd"] = estimate_kimi_cost(
         usage["inputTokens"], usage["cachedInputTokens"], usage["outputTokens"]
     )
-    return results, usage
+    return results, usage, failures
 
 
 def estimate_kimi_cost(input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
@@ -2282,6 +2305,34 @@ def normalize_synthesis_for_evidence(
     if (
         not material_trigger_indices
         and normalized.get("freshness") == "CURRENT"
+        and normalized.get("signalType")
+        in {
+            "EXPANSION",
+            "FACILITY_OPENING",
+            "RETAIL_ROLLOUT",
+            "LEASE_OR_CONSTRUCTION",
+            "FUNDING_OR_ACQUISITION",
+        }
+    ):
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=548)
+        cited_rows = [
+            evidence[index]
+            for index in normalized.get("triggerEvidenceIndices", [])
+            if isinstance(index, int) and 0 <= index < len(evidence)
+        ]
+        dated_rows = [row for row in cited_rows if clean(row.get("publishedAt"))]
+        if dated_rows and not any(evidence_row_is_recent(row, cutoff) for row in dated_rows):
+            normalized["freshness"] = "STALE"
+            message = (
+                "The cited material event is older than Hunter's 18-month trigger window; "
+                "it was deterministically downgraded to stale."
+            )
+            if message not in missing_evidence:
+                missing_evidence.append(message)
+            rationale = f"{rationale} {message}".strip()
+    if (
+        not material_trigger_indices
+        and normalized.get("freshness") == "CURRENT"
         and vacancy_indices
     ):
         vacancy = evidence[vacancy_indices[0]]
@@ -2366,6 +2417,15 @@ def normalize_synthesis_for_evidence(
         message = "The provider label lacked explicit evidence that the company sells logistics services to others."
         if message not in missing_evidence:
             missing_evidence.append(message)
+    elif normalized.get("logisticsProvider") is False and has_explicit_provider_service_evidence(evidence):
+        normalized["logisticsProvider"] = True
+        message = (
+            "Deterministic evidence review identified explicit third-party logistics services; "
+            "the company is a provider or competitor, not a prospect."
+        )
+        if message not in missing_evidence:
+            missing_evidence.append(message)
+        rationale = f"{rationale} {message}".strip()
     if (
         normalized.get("stableExclusiveProviderEvidence") is True
         and not has_explicit_stable_provider_evidence(evidence)
@@ -2655,8 +2715,14 @@ def submit_luna_primary_batches(
         }
 
     synthesis_batches = batched(candidates, 4)
+    max_attempts = max(
+        1,
+        min(4, int(os.environ.get("HUNTER_RESEARCH_LUNA_MAX_ATTEMPTS", "3"))),
+    )
     latest_report: dict[str, Any] = {}
     failed_batches = 0
+    retried_batches = 0
+    individual_recoveries = 0
     synthesis_by_key: dict[str, dict[str, Any]] = {}
     failures: dict[str, str] = {}
     usage = {
@@ -2666,8 +2732,8 @@ def submit_luna_primary_batches(
         "totalTokens": 0,
         "durationMs": 0,
     }
-    for batch_index, batch in enumerate(synthesis_batches):
-        company_packets = []
+    def build_company_packets(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        company_packets: list[dict[str, Any]] = []
         for candidate in batch:
             key = str(candidate["companyKey"])
             qwen_synthesis = qwen_shadow_by_key.get(key)
@@ -2693,71 +2759,108 @@ def submit_luna_primary_batches(
                     ),
                 }
             )
+        return company_packets
+
+    def submit_batch(
+        batch: list[dict[str, Any]],
+        final_batch: bool,
+        allow_split: bool = True,
+    ) -> None:
+        nonlocal latest_report, retried_batches, individual_recoveries
+        company_packets = build_company_packets(batch)
         if not company_packets:
-            failed_batches += 1
-            continue
-        try:
-            response = api_request(
-                base_url,
-                token,
-                "POST",
-                "/api/lead-gen/hunter/company-research/synthesis",
-                {
-                    "runId": run_id,
-                    "packets": company_packets,
-                    "finalBatch": batch_index == len(synthesis_batches) - 1,
-                },
-            )
-            data = response.get("data") if isinstance(response.get("data"), dict) else {}
-            if isinstance(data.get("report"), dict):
-                latest_report = data["report"]
-            rows = data.get("rows") if isinstance(data.get("rows"), list) else []
-            batch_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-            for name in usage:
-                usage[name] += int(batch_usage.get(name) or 0)
-            returned_keys: set[str] = set()
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                key = clean(row.get("companyKey"))
-                if not key:
-                    continue
-                try:
-                    synthesis_by_key[key] = normalize_synthesis_for_evidence(
-                        next(
-                            candidate
-                            for candidate in batch
-                            if str(candidate["companyKey"]) == key
-                        ),
-                        evidence_by_key.get(key, []),
-                        validate_synthesis(row, key),
-                    )
-                    returned_keys.add(key)
-                except Exception as error:
-                    failures[key] = bounded_text(
-                        str(error),
-                        "Luna returned invalid structured company research.",
-                        1_000,
-                    )
-            for candidate in batch:
-                key = str(candidate["companyKey"])
-                if key not in returned_keys and key not in failures:
-                    failures[key] = "Luna omitted this company from its structured response."
-            if data.get("state") == "error":
-                failed_batches += 1
-        except Exception as error:
-            failed_batches += 1
-            for candidate in batch:
-                failures[str(candidate["companyKey"])] = bounded_text(
-                    str(error),
-                    "Luna primary synthesis failed.",
-                    1_000,
+            return
+        last_error = "Luna primary synthesis failed."
+        unresolved = list(batch)
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = api_request(
+                    base_url,
+                    token,
+                    "POST",
+                    "/api/lead-gen/hunter/company-research/synthesis",
+                    {
+                        "runId": run_id,
+                        "packets": company_packets,
+                        "finalBatch": final_batch,
+                    },
                 )
-            print(
-                "Hunter Luna primary synthesis batch failed; downstream scoring will not use Qwen: "
-                f"{type(error).__name__}",
-                file=sys.stderr,
-            )
+                data = response.get("data") if isinstance(response.get("data"), dict) else {}
+                if isinstance(data.get("report"), dict):
+                    latest_report = data["report"]
+                if data.get("state") == "error":
+                    raise RuntimeError(
+                        bounded_text(
+                            data.get("errorMessage"),
+                            "Luna returned an error state.",
+                            1_000,
+                        )
+                    )
+                rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+                batch_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+                for name in usage:
+                    usage[name] += int(batch_usage.get(name) or 0)
+                candidate_by_key = {
+                    str(candidate["companyKey"]): candidate for candidate in batch
+                }
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    key = clean(row.get("companyKey"))
+                    candidate = candidate_by_key.get(key or "")
+                    if not key or not candidate:
+                        continue
+                    try:
+                        synthesis_by_key[key] = normalize_synthesis_for_evidence(
+                            candidate,
+                            evidence_by_key.get(key, []),
+                            validate_synthesis(row, key),
+                        )
+                        failures.pop(key, None)
+                    except Exception as error:
+                        last_error = bounded_text(
+                            error,
+                            "Luna returned invalid structured company research.",
+                            1_000,
+                        )
+                unresolved = [
+                    candidate
+                    for candidate in batch
+                    if str(candidate["companyKey"]) not in synthesis_by_key
+                ]
+                if not unresolved:
+                    if len(batch) == 1 and allow_split is False:
+                        individual_recoveries += 1
+                    return
+                last_error = "Luna omitted one or more companies from its structured response."
+            except Exception as error:
+                last_error = bounded_text(error, "Luna primary synthesis failed.", 1_000)
+            if attempt < max_attempts:
+                retried_batches += 1
+                time.sleep(min(8, 2 ** (attempt - 1)))
+
+        if allow_split and len(unresolved) > 1:
+            for index, candidate in enumerate(unresolved):
+                submit_batch(
+                    [candidate],
+                    final_batch and index == len(unresolved) - 1,
+                    allow_split=False,
+                )
+            return
+        for candidate in unresolved:
+            key = str(candidate["companyKey"])
+            failures[key] = last_error
+        print(
+            "Hunter Luna primary synthesis remained unavailable after bounded retries: "
+            f"{len(unresolved)} company row(s).",
+            file=sys.stderr,
+        )
+
+    for batch_index, batch in enumerate(synthesis_batches):
+        before_count = len(synthesis_by_key)
+        submit_batch(batch, batch_index == len(synthesis_batches) - 1)
+        if len(synthesis_by_key) - before_count < len(batch):
+            failed_batches += 1
     if latest_report:
         usage = {
             "inputTokens": int(latest_report.get("inputTokens") or usage["inputTokens"]),
@@ -2779,11 +2882,48 @@ def submit_luna_primary_batches(
             else "error"
         ),
         "failedBatchCount": failed_batches,
+        "retriedBatchCount": retried_batches,
+        "individualRecoveryCount": individual_recoveries,
         "report": latest_report,
         "synthesisByKey": synthesis_by_key,
         "usage": usage,
         "failures": failures,
     }
+
+
+def recover_missing_luna_synthesis_with_qwen(
+    enabled: bool,
+    ollama_url: str,
+    model: str,
+    candidates: list[dict[str, Any]],
+    evidence_by_key: dict[str, list[dict[str, Any]]],
+    synthesis_by_key: dict[str, dict[str, Any]],
+    batch_size: int,
+    repair_attempts: int,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, int], dict[str, str]]:
+    missing = [
+        candidate
+        for candidate in candidates
+        if str(candidate["companyKey"]) not in synthesis_by_key
+    ]
+    if not enabled or not missing:
+        return (
+            dict(synthesis_by_key),
+            {},
+            {"inputTokens": 0, "outputTokens": 0, "durationMs": 0},
+            {},
+        )
+    recovered, usage, failures = synthesize_companies(
+        ollama_url,
+        model,
+        missing,
+        evidence_by_key,
+        batch_size,
+        repair_attempts,
+    )
+    merged = dict(synthesis_by_key)
+    merged.update(recovered)
+    return merged, recovered, usage, failures
 
 
 def report_failure(base_url: str, token: str, run_id: Optional[str], error: Exception) -> None:
@@ -2920,6 +3060,9 @@ def run_company_research(
         qwen_shadow_enabled = (
             clean(os.environ.get("HUNTER_RESEARCH_QWEN_SHADOW_ENABLED")) or "true"
         ).lower() == "true"
+        qwen_fallback_enabled = (
+            clean(os.environ.get("HUNTER_RESEARCH_QWEN_FALLBACK_ENABLED")) or "true"
+        ).lower() == "true"
         qwen_model = clean(os.environ.get("HUNTER_RESEARCH_QWEN_MODEL")) or str(
             packet.get("models", {}).get("shadowSynthesis", {}).get("recommended")
             or DEFAULT_QWEN_MODEL
@@ -3035,6 +3178,27 @@ def run_company_research(
                 str(key): str(value)
                 for key, value in (raw_qwen_failures or {}).items()
             } if isinstance(raw_qwen_failures, dict) else {}
+            raw_qwen_fallback = checkpoint.get("qwenFallbackByKey")
+            raw_qwen_fallback_usage = checkpoint.get("qwenFallbackUsage")
+            raw_qwen_fallback_failures = checkpoint.get("qwenFallbackFailures")
+            qwen_fallback_by_key = {
+                str(key): value
+                for key, value in (raw_qwen_fallback or {}).items()
+                if isinstance(value, dict)
+            } if isinstance(raw_qwen_fallback, dict) else {}
+            qwen_fallback_usage = {
+                "inputTokens": int((raw_qwen_fallback_usage or {}).get("inputTokens") or 0),
+                "outputTokens": int((raw_qwen_fallback_usage or {}).get("outputTokens") or 0),
+                "durationMs": int((raw_qwen_fallback_usage or {}).get("durationMs") or 0),
+            } if isinstance(raw_qwen_fallback_usage, dict) else {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "durationMs": 0,
+            }
+            qwen_fallback_failures = {
+                str(key): str(value)
+                for key, value in (raw_qwen_fallback_failures or {}).items()
+            } if isinstance(raw_qwen_fallback_failures, dict) else {}
             luna_comparison = {
                 "state": "checkpoint",
                 "report": None,
@@ -3043,6 +3207,13 @@ def run_company_research(
                 "failures": {},
             }
         else:
+            qwen_fallback_by_key: dict[str, dict[str, Any]] = {}
+            qwen_fallback_usage = {
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "durationMs": 0,
+            }
+            qwen_fallback_failures: dict[str, str] = {}
             qwen_shadow_by_key, qwen_usage, qwen_shadow_failures = synthesize_qwen_shadow(
                 qwen_shadow_enabled,
                 ollama_url,
@@ -3064,17 +3235,33 @@ def run_company_research(
             synthesis_by_key = luna_comparison.get("synthesisByKey", {})
             luna_usage = luna_comparison.get("usage", {})
             synthesis_failures = luna_comparison.get("failures", {})
+            (
+                synthesis_by_key,
+                qwen_fallback_by_key,
+                qwen_fallback_usage,
+                qwen_fallback_failures,
+            ) = recover_missing_luna_synthesis_with_qwen(
+                qwen_fallback_enabled,
+                ollama_url,
+                qwen_model,
+                candidates,
+                evidence_by_key,
+                synthesis_by_key,
+                qwen_batch_size,
+                qwen_repair_attempts,
+            )
             synthesized_candidates = [
                 candidate
                 for candidate in candidates
                 if candidate["companyKey"] in synthesis_by_key
             ]
-            if len(synthesized_candidates) != len(candidates):
+            if not synthesized_candidates:
                 failure_summary = "; ".join(
-                    f"{key}: {message}" for key, message in synthesis_failures.items()
+                    f"{key}: {message}"
+                    for key, message in {**synthesis_failures, **qwen_fallback_failures}.items()
                 )
                 raise RuntimeError(
-                    "Luna could not produce valid structured research for the complete company cohort. "
+                    "Luna and the bounded Qwen fallback could not produce valid structured research. "
                     f"{bounded_text(failure_summary, 'One or more company syntheses were unavailable.', 1_000)}"
                 )
             identity_evidence_added, identity_page_count = collect_identity_discovery_evidence(
@@ -3125,14 +3312,32 @@ def run_company_research(
                 synthesis_by_key = luna_comparison.get("synthesisByKey", {})
                 luna_usage = luna_comparison.get("usage", {})
                 synthesis_failures = luna_comparison.get("failures", {})
+                (
+                    synthesis_by_key,
+                    second_fallback_by_key,
+                    second_fallback_usage,
+                    qwen_fallback_failures,
+                ) = recover_missing_luna_synthesis_with_qwen(
+                    qwen_fallback_enabled,
+                    ollama_url,
+                    qwen_model,
+                    candidates,
+                    evidence_by_key,
+                    synthesis_by_key,
+                    qwen_batch_size,
+                    qwen_repair_attempts,
+                )
+                qwen_fallback_by_key.update(second_fallback_by_key)
+                for usage_name in qwen_fallback_usage:
+                    qwen_fallback_usage[usage_name] += second_fallback_usage[usage_name]
                 synthesized_candidates = [
                     candidate
                     for candidate in candidates
                     if candidate["companyKey"] in synthesis_by_key
                 ]
-                if len(synthesized_candidates) != len(candidates):
+                if not synthesized_candidates:
                     raise RuntimeError(
-                        "Luna could not produce valid structured research for the complete cohort "
+                        "Luna and the bounded Qwen fallback could not produce valid structured research "
                         "after follow-up retrieval."
                     )
             write_checkpoint(
@@ -3151,6 +3356,9 @@ def run_company_research(
                     "qwenShadowByKey": qwen_shadow_by_key,
                     "qwenShadowUsage": qwen_usage,
                     "qwenShadowFailures": qwen_shadow_failures,
+                    "qwenFallbackByKey": qwen_fallback_by_key,
+                    "qwenFallbackUsage": qwen_fallback_usage,
+                    "qwenFallbackFailures": qwen_fallback_failures,
                     "synthesisFailures": synthesis_failures,
                 },
             )
@@ -3161,10 +3369,8 @@ def run_company_research(
                 for candidate in candidates
                 if candidate["companyKey"] in synthesis_by_key
             ]
-            if len(synthesized_candidates) != len(candidates):
-                raise RuntimeError(
-                    "The saved Luna checkpoint does not contain the complete prepared company cohort."
-                )
+            if not synthesized_candidates:
+                raise RuntimeError("The saved synthesis checkpoint contains no usable company research.")
 
         if research_only:
             report_failure(
@@ -3186,12 +3392,18 @@ def run_company_research(
                     "companyCount": len(qwen_shadow_by_key),
                     "failureCount": len(qwen_shadow_failures),
                 },
+                "qwenFallback": {
+                    **qwen_fallback_usage,
+                    "enabled": qwen_fallback_enabled,
+                    "companyCount": len(qwen_fallback_by_key),
+                    "failureCount": len(qwen_fallback_failures),
+                },
                 "checkpoint": checkpoint_output,
-                "synthesisFailureCount": len(synthesis_failures),
+                "synthesisFailureCount": len(candidates) - len(synthesized_candidates),
             }
 
         kimi_api_key = required_env("HUNTER_KIMI_API_KEY")
-        scoring_by_key, kimi_usage = score_companies(
+        scoring_by_key, kimi_usage, kimi_failures = score_companies(
             kimi_url,
             kimi_api_key,
             kimi_model,
@@ -3200,9 +3412,22 @@ def run_company_research(
             synthesis_by_key,
             kimi_batch_size,
         )
+        scored_candidates = [
+            candidate
+            for candidate in synthesized_candidates
+            if candidate["companyKey"] in scoring_by_key
+        ]
+        if not scored_candidates:
+            failure_summary = "; ".join(
+                f"{key}: {message}" for key, message in kimi_failures.items()
+            )
+            raise RuntimeError(
+                "Kimi could not score any synthesized company. "
+                f"{bounded_text(failure_summary, 'No Kimi score was available.', 1_000)}"
+            )
         thresholds = packet.get("thresholds") if isinstance(packet.get("thresholds"), dict) else {}
         k3_candidates = select_k3_candidates(
-            synthesized_candidates,
+            scored_candidates,
             evidence_by_key,
             synthesis_by_key,
             scoring_by_key,
@@ -3239,21 +3464,23 @@ def run_company_research(
                     "name": qwen_model,
                     "promptVersion": PROMPT_VERSION,
                     "structuredOutput": True,
-                    "enabled": qwen_shadow_enabled,
+                    "enabled": qwen_shadow_enabled or qwen_fallback_enabled,
                     "status": (
                         "SUCCESS"
-                        if qwen_shadow_enabled
-                        and len(qwen_shadow_by_key) == len(candidates)
+                        if len({**qwen_shadow_by_key, **qwen_fallback_by_key}) == len(candidates)
                         and not qwen_shadow_failures
+                        and not qwen_fallback_failures
                         else "PARTIAL"
-                        if qwen_shadow_by_key
+                        if qwen_shadow_by_key or qwen_fallback_by_key
                         else "ERROR"
-                        if qwen_shadow_enabled
+                        if qwen_shadow_enabled or qwen_fallback_enabled
                         else "DISABLED"
                     ),
-                    "companyCount": len(qwen_shadow_by_key),
-                    "failureCount": len(qwen_shadow_failures),
-                    **qwen_usage,
+                    "companyCount": len({**qwen_shadow_by_key, **qwen_fallback_by_key}),
+                    "failureCount": len({**qwen_shadow_failures, **qwen_fallback_failures}),
+                    "inputTokens": qwen_usage["inputTokens"] + qwen_fallback_usage["inputTokens"],
+                    "outputTokens": qwen_usage["outputTokens"] + qwen_fallback_usage["outputTokens"],
+                    "durationMs": qwen_usage["durationMs"] + qwen_fallback_usage["durationMs"],
                 },
                 "scoring": {
                     "provider": "KIMI",
@@ -3305,7 +3532,7 @@ def run_company_research(
                         },
                     ),
                 }
-                for candidate in synthesized_candidates
+                for candidate in scored_candidates
             ],
         }
         if replay_output:
@@ -3338,6 +3565,10 @@ def run_company_research(
             {"runId": run_id, "completion": completion},
         )
         result = response.get("data") if isinstance(response.get("data"), dict) else response
+        if isinstance(result, dict):
+            result["qwenFallbackCount"] = len(qwen_fallback_by_key)
+            result["lunaMissingCount"] = max(0, len(candidates) - len(luna_comparison.get("synthesisByKey", {})))
+            result["kimiMissingCount"] = max(0, len(synthesized_candidates) - len(scored_candidates))
         handoff = result.get("handoff") if isinstance(result, dict) else None
         if (
             isinstance(handoff, dict)

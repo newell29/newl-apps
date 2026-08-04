@@ -138,7 +138,7 @@ function completion() {
   return {
     model: {
       provider: "OLLAMA",
-      name: "qwen3:30b-instruct",
+      name: "qwen3.6:27b-q4_K_M",
       promptVersion: "hunter-signal-classifier-v2",
       structuredOutput: true
     },

@@ -118,6 +118,28 @@ describe("Hunter daily profile worker", () => {
     expect(JSON.parse(result.stdout)).toEqual({ before: false, after: true, sameDay: false });
   });
 
+  it("starts research only after every enabled TradeMining profile settles for the local date", () => {
+    const python = [
+      "import datetime as dt, importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "now=dt.datetime(2026,8,3,10,0,tzinfo=dt.timezone.utc)",
+      "base={'schedule':{'timezone':'America/Toronto','metadata':{}},'lastRunStatus':'COMPLETED'}",
+      "ready=[dict(base,lastRunAt='2026-08-03T09:30:00.000Z'),dict(base,lastRunAt='2026-08-03T09:45:00.000Z',lastRunStatus='ERROR')]",
+      "waiting=[ready[0],dict(base,lastRunAt='2026-08-02T09:45:00.000Z')]",
+      "running=[ready[0],dict(base,lastRunAt='2026-08-03T09:45:00.000Z',lastRunStatus='RUNNING')]",
+      "print(json.dumps({'ready':module.trademining_profiles_settled_for_research(ready,now),'waiting':module.trademining_profiles_settled_for_research(waiting,now),'running':module.trademining_profiles_settled_for_research(running,now)}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ ready: true, waiting: false, running: false });
+  });
+
   it("allows an explicit one-day test without changing the configured lookback", () => {
     const python = [
       "import importlib.util, json, os, pathlib, sys",
@@ -368,7 +390,7 @@ describe("Hunter daily profile worker", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout).message).toBe(
-      "Hunter company research completed: 29 companies reached Luna and Kimi, 8 qualified for planning, 4 blocked, and 1 omitted after bounded model-output repair. Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
+      "Hunter company research completed: 29 companies were scored by Kimi, 8 qualified for planning, 4 blocked, and 1 omitted after bounded model-output repair. Luna missed 0; Qwen 3.6 safely recovered 0; Kimi missed 0. Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
     );
   });
 

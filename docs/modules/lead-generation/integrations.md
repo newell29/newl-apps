@@ -93,7 +93,7 @@ generation only and never overrides those identity checks.
 - Both endpoints are fixed in the server-issued packet; the worker refuses arbitrary discovery endpoints.
 - The server rotates an allowlisted topic/geography catalog by local date. The worker cannot add arbitrary queries.
 - Only HTTPS result links and bounded public title/snippet metadata are processed.
-- Ollama is restricted to `http://127.0.0.1` or `http://localhost`; the default model is `qwen3:30b-instruct`.
+- Ollama is restricted to `http://127.0.0.1` or `http://localhost`; the external-signal classifier defaults to `qwen3.6:27b-q4_K_M`.
 - Ollama structured output receives the same JSON Schema represented in the application validator. Invalid, omitted, weak, or unmapped classifications fail closed.
 - The machine prepare, complete, and fail routes reuse ingestion authentication and resolve the configured ingestion tenant server-side.
 - The scout does not use Apollo credentials and has no Apollo, cadence, or messaging client. It may create a
@@ -108,7 +108,7 @@ generation only and never overrides those identity checks.
   bounded public evidence and usage metadata, never either credential.
 - Public page retrieval accepts HTTPS only, validates DNS as globally routable, revalidates redirects,
   caps response sizes, and rejects local/private destinations.
-- Ollama is restricted to loopback and defaults to `qwen3.5:35b` for temporary shadow synthesis. The Kimi client is
+- Ollama is restricted to loopback and defaults to `qwen3.6:27b-q4_K_M` for bounded Luna recovery. The Kimi client is
   restricted to `https://api.moonshot.ai/v1`, defaults to `kimi-k2.6` for scoring, and uses `kimi-k3`
   with low reasoning and strict JSON Schema for at most five top fresh-event validators. Both use the
   same protected local Kimi credential; no Kimi secret is sent to Newl Apps.
@@ -123,6 +123,10 @@ generation only and never overrides those identity checks.
 - The Luna call uses the Responses API, `store: false`, low reasoning, strict Structured Outputs, and
   no web or other tools. A prompt/model/batch fingerprint makes successful batches idempotent, so an
   operator retry does not repeat an already-completed OpenAI call.
+- Hunter retries transient Luna errors up to `HUNTER_RESEARCH_LUNA_MAX_ATTEMPTS`, isolates a failed multi-company
+  batch to individual companies, and uses Qwen only for still-missing rows when
+  `HUNTER_RESEARCH_QWEN_FALLBACK_ENABLED=true`. The fallback reuses the private retrieval checkpoint and cannot
+  bypass deterministic evidence normalization, Kimi scoring, K3 validation, or outreach approval.
 - Luna usage, schema-valid coverage, categorical agreement, evidence-citation overlap, and bounded errors are
   stored in the company-research `AutomationJobRun.output`. Luna rows continue into Kimi scoring and deterministic
   gates. Qwen comparison rows remain audit-only and cannot affect planning, Apollo, or outreach.

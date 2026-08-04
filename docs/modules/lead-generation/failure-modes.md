@@ -132,9 +132,9 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
 - A GDELT 429/5xx response receives bounded retries and is recorded before the worker tries the RSS fallback.
 - If every configured discovery transport fails, the tracked run becomes `ERROR`; it must not be recorded as a successful zero-result day.
 - If Ollama is unavailable, returns non-JSON output, omits source rows, invents an unsupported enum, or emits a confidence below 50, the affected classifications fail closed.
-- A failed daily attempt is not retried every minute. The operator can diagnose the run and use `--signal-scout-now` for one explicit rerun.
-- Turning off `HUNTER_SIGNAL_SCOUT_ENABLED`, the Hunter policy, or the Hunter kill switch prevents the automatic scout from creating new signals.
-- Discovery-source licensing and acceptable-use review remains an enablement prerequisite. The code and example environment default the scout to off.
+- A failed daily signal-scout attempt is not retried every minute. The operator can diagnose the run and use `--signal-scout-now` for one explicit rerun.
+- Turning off `HUNTER_SIGNAL_SCOUT_ENABLED`, the Hunter policy, or the Hunter kill switch prevents the automatic scout from creating new signals. The reviewed Mac-mini configuration enables it; repository code remains bounded and read-only outside Newl Apps signal persistence.
+- Discovery-source licensing and acceptable-use review remains an operating prerequisite.
 
 ## Company deep research fails
 
@@ -151,6 +151,9 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   is written with mode `0600`, is fingerprinted to the local date, prompt version, and ordered tenant
   cohort, and is reused only for an exact same-day match. Therefore a Qwen or Kimi failure does not
   repeat Brave searches during an operator retry.
+- A Luna batch error receives bounded exponential backoff, then individual-company isolation. Remaining Luna
+  omissions may use the configured Qwen 3.6 fallback against the same checkpoint. A Kimi batch is likewise isolated
+  to individual companies with bounded retries. The completion records omissions instead of discarding valid rows.
 - The optional Luna comparison runs only after Qwen has a valid final row and consumes the same bounded
   evidence; it never repeats Brave retrieval. Missing server OpenAI configuration disables the shadow
   visibly. A Luna refusal, timeout, malformed Structured Output, partial batch, or provider failure is

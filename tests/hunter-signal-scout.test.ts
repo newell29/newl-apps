@@ -21,7 +21,7 @@ const runnerPath = path.join(repoRoot, "ops/openclaw/run-hunter-worker.sh");
 
 describe("Hunter external signal scout", () => {
   it("uses the installed local instruct model and retains all external-write gates", () => {
-    expect(HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL).toBe("qwen3:30b-instruct");
+    expect(HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL).toBe("qwen3.6:27b-q4_K_M");
     expect(HUNTER_SIGNAL_SCOUT_PROMPT_VERSION).toBe("hunter-signal-classifier-v3");
     expect(HUNTER_SIGNAL_SCOUT_SAFETY).toEqual({
       externalWrites: false,
@@ -36,7 +36,7 @@ describe("Hunter external signal scout", () => {
 
     expect(parsed.model).toEqual({
       provider: "OLLAMA",
-      name: "qwen3:30b-instruct",
+      name: "qwen3.6:27b-q4_K_M",
       promptVersion: "hunter-signal-classifier-v3",
       structuredOutput: true
     });
@@ -69,11 +69,11 @@ describe("Hunter external signal scout", () => {
     ]);
 
     expect(worker).toContain("signal_scout_due_now");
-    expect(worker).toContain('HUNTER_SIGNAL_SCOUT_DAILY_TIME", "08:30"');
+    expect(worker).toContain('HUNTER_SIGNAL_SCOUT_DAILY_TIME", "02:30"');
     expect(worker).toContain("run_signal_scout");
     expect(worker).toContain("run_signal_scout_with_notification");
     expect(scout).toContain("http://127.0.0.1:11434");
-    expect(scout).toContain("qwen3:30b-instruct");
+    expect(scout).toContain("qwen3.6:27b-q4_K_M");
     expect(scout).toContain("HUNTER_BRAVE_SEARCH_API_KEY");
     expect(scout).toContain("https://api.search.brave.com/res/v1/web/search");
     expect(scout).toContain('"format": CLASSIFICATION_SCHEMA');
@@ -187,7 +187,7 @@ function completion() {
   return {
     model: {
       provider: "OLLAMA",
-      name: "qwen3:30b-instruct",
+      name: "qwen3.6:27b-q4_K_M",
       promptVersion: "hunter-signal-classifier-v3",
       structuredOutput: true
     },
