@@ -7,7 +7,8 @@ import {
   HunterSignalStatus,
   HunterSignalType,
   JobStatus,
-  Prisma
+  Prisma,
+  SequenceStatus
 } from "@prisma/client";
 import { HUNTER_COMPANY_REPLY_HARD_STOP_STATUSES } from "@/modules/lead-gen/apollo-reengagement-policy";
 
@@ -19,7 +20,15 @@ import {
   readStoredHunterResearchLunaShadow,
   summarizeHunterResearchLunaShadow
 } from "@/modules/lead-gen/hunter-company-research-shadow";
-import { dedupeHunterCompaniesByIdentity } from "@/modules/lead-gen/hunter-company-identity";
+import {
+  dedupeHunterCompaniesByIdentity,
+  resolveHunterCompanyIdentityKey,
+  resolveHunterCompanyIdentityKeys
+} from "@/modules/lead-gen/hunter-company-identity";
+import {
+  HUNTER_EMAIL_ONLY_SEQUENCE,
+  HUNTER_EXECUTIVE_REFERRAL_SEQUENCE
+} from "@/modules/lead-gen/sequence-catalog";
 import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
@@ -30,10 +39,19 @@ export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";
 
 const ACTIVE_RUN_WINDOW_MS = 4 * 60 * 60 * 1000;
-const RECENT_RESEARCH_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const HUNTER_COMPANY_RESEARCH_COOLDOWN_DAYS = 90;
+const RECENT_RESEARCH_WINDOW_MS =
+  HUNTER_COMPANY_RESEARCH_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
 const MAX_RESEARCH_COMPANIES = 100;
 const MAX_EVIDENCE_PER_COMPANY = 24;
+const MAX_RESEARCH_HISTORY_ROWS = 10_000;
+const MAX_RESEARCH_CANDIDATE_POOL = 2_000;
 export const HUNTER_COMPANY_RESEARCH_TRANSACTION_TIMEOUT_MS = 30_000;
+
+const HUNTER_MANAGED_SEQUENCE_NAMES = [
+  HUNTER_EMAIL_ONLY_SEQUENCE.name,
+  HUNTER_EXECUTIVE_REFERRAL_SEQUENCE.name
+] as const;
 
 export const HUNTER_RESEARCH_PASSES = [
   {
@@ -226,6 +244,29 @@ type PreparedCandidate = {
   }>;
 };
 
+type ResearchSelectionIdentity = {
+  companyId: string;
+  identityKey: string;
+  identityKeys?: string[];
+};
+
+type ResearchSelectionHistoryRow = ResearchSelectionIdentity & {
+  observedAt: Date;
+};
+
+export type HunterCompanyResearchSelectionAudit = {
+  cooldownDays: number;
+  priorResearchCompanyCount: number;
+  recentResearchSuppressedCount: number;
+  activeOutreachSuppressedCount: number;
+  materialRefreshEligibleCount: number;
+  selectedCompanyCount: number;
+  newCompanyCount: number;
+  refreshCompanyCount: number;
+  materialRefreshSelectedCount: number;
+  scheduledRefreshSelectedCount: number;
+};
+
 export async function prepareHunterCompanyResearchRun({
   tenantId,
   force = false,
@@ -283,33 +324,131 @@ export async function prepareHunterCompanyResearchRun({
   }
 
   const limit = Math.min(MAX_RESEARCH_COMPANIES, Math.max(1, effective.dailyCompanyLimit));
-  const recentResearch = requestedKeys.length === 0 && !force
-    ? await prisma.hunterOpportunitySignal.findMany({
-        where: {
-          tenantId,
-          sourceName: "Hunter company research",
-          observedAt: { gte: new Date(now.getTime() - RECENT_RESEARCH_WINDOW_MS) },
-          companyId: { not: null }
-        },
-        select: { companyId: true },
-        take: 2_000
-      })
-    : [];
-  const recentlyResearchedIds = new Set(
-    recentResearch.map((row) => row.companyId).filter((value): value is string => Boolean(value))
-  );
+  const automaticSelection = requestedKeys.length === 0 && !force;
+  const [researchHistoryRows, materialSignalRows, activeOutreachRows] = automaticSelection
+    ? await Promise.all([
+        prisma.hunterOpportunitySignal.findMany({
+          where: {
+            tenantId,
+            sourceName: "Hunter company research",
+            observedAt: { lte: now },
+            companyId: { not: null }
+          },
+          orderBy: { observedAt: "desc" },
+          select: {
+            companyId: true,
+            observedAt: true,
+            company: {
+              select: {
+                id: true,
+                name: true,
+                normalizedName: true,
+                domain: true,
+                apolloOrganizationId: true
+              }
+            }
+          },
+          take: MAX_RESEARCH_HISTORY_ROWS
+        }),
+        prisma.hunterOpportunitySignal.findMany({
+          where: {
+            tenantId,
+            companyId: { not: null },
+            signalType: { not: HunterSignalType.TRADEMINING },
+            status: { in: [HunterSignalStatus.NEW, HunterSignalStatus.ACTIVE] },
+            observedAt: { lte: now },
+            AND: [
+              {
+                OR: [
+                  { sourceName: null },
+                  { sourceName: { not: "Hunter company research" } }
+                ]
+              },
+              { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] }
+            ]
+          },
+          orderBy: { observedAt: "desc" },
+          select: {
+            companyId: true,
+            observedAt: true,
+            company: {
+              select: {
+                id: true,
+                name: true,
+                normalizedName: true,
+                domain: true,
+                apolloOrganizationId: true
+              }
+            }
+          },
+          take: MAX_RESEARCH_HISTORY_ROWS
+        }),
+        prisma.company.findMany({
+          where: {
+            tenantId,
+            contacts: {
+              some: {
+                sequenceStatus: {
+                  in: [SequenceStatus.ENROLLED, SequenceStatus.PAUSED]
+                },
+                OR: [
+                  { selectedSequenceName: { in: [...HUNTER_MANAGED_SEQUENCE_NAMES] } },
+                  { recommendedSequenceName: { in: [...HUNTER_MANAGED_SEQUENCE_NAMES] } }
+                ]
+              }
+            }
+          },
+          select: {
+            id: true,
+            name: true,
+            normalizedName: true,
+            domain: true,
+            apolloOrganizationId: true
+          },
+          take: MAX_RESEARCH_HISTORY_ROWS
+        })
+      ])
+    : [[], [], []];
+  const researchSelection = resolveHunterCompanyResearchSelection({
+    researchHistory: researchHistoryRows.flatMap((row) =>
+      row.company && row.companyId
+        ? [{
+            companyId: row.companyId,
+            identityKey: resolveHunterCompanyIdentityKey(row.company),
+            identityKeys: resolveHunterCompanyIdentityKeys(row.company),
+            observedAt: row.observedAt
+          }]
+        : []
+    ),
+    materialSignals: materialSignalRows.flatMap((row) =>
+      row.company && row.companyId
+        ? [{
+            companyId: row.companyId,
+            identityKey: resolveHunterCompanyIdentityKey(row.company),
+            identityKeys: resolveHunterCompanyIdentityKeys(row.company),
+            observedAt: row.observedAt
+          }]
+        : []
+    ),
+    activeOutreachCompanies: activeOutreachRows.map((company) => ({
+      companyId: company.id,
+      identityKey: resolveHunterCompanyIdentityKey(company),
+      identityKeys: resolveHunterCompanyIdentityKeys(company)
+    })),
+    now
+  });
 
   const companyRows = await prisma.company.findMany({
     where: buildHunterCompanyResearchWhere({
       tenantId,
       requestedKeys,
-      recentlyResearchedIds: [...recentlyResearchedIds]
+      suppressedCompanyIds: researchSelection.suppressedCompanyIds
     }),
     orderBy: [{ priorityScore: "desc" }, { updatedAt: "desc" }],
     take:
       requestedKeys.length > 0
         ? Math.min(MAX_RESEARCH_COMPANIES, requestedKeys.length)
-        : Math.max(200, limit * 10),
+        : Math.min(MAX_RESEARCH_CANDIDATE_POOL, Math.max(500, limit * 20)),
     select: {
       id: true,
       name: true,
@@ -355,12 +494,25 @@ export async function prepareHunterCompanyResearchRun({
       }
     }
   });
-  const identityResolvedRows = dedupeHunterCompaniesByIdentity(companyRows);
+  const identityResolvedRows = dedupeHunterCompaniesByIdentity(
+    companyRows.filter(
+      (company) =>
+        !resolveHunterCompanyIdentityKeys(company).some((key) =>
+          researchSelection.suppressedIdentityKeys.includes(key)
+        )
+    )
+  );
   const companies =
     requestedKeys.length > 0
       ? identityResolvedRows.slice(0, limit)
       : rankHunterCompanyResearchCandidates(identityResolvedRows, limit);
 
+  const companyIdentityKeysById = new Map(
+    companies.map((company) => [
+      company.id,
+      resolveHunterCompanyIdentityKeys(company)
+    ])
+  );
   const candidates: PreparedCandidate[] = companies.map((company) => ({
     companyId: company.id,
     companyKey: company.normalizedName,
@@ -386,6 +538,32 @@ export async function prepareHunterCompanyResearchRun({
       observedAt: signal.observedAt.toISOString()
     }))
   }));
+  const selectedIdentityKeys = candidates.map((candidate) =>
+    companyIdentityKeysById.get(candidate.companyId) ?? [`company:${candidate.companyId}`]
+  );
+  const priorResearchIdentityKeys = new Set(researchSelection.priorResearchAliasKeys);
+  const materialRefreshIdentityKeys = new Set(researchSelection.materialRefreshAliasKeys);
+  const selectedRefreshIdentityKeys = selectedIdentityKeys.filter((keys) =>
+    keys.some((key) => priorResearchIdentityKeys.has(key))
+  );
+  const selectionAudit: HunterCompanyResearchSelectionAudit = {
+    cooldownDays: HUNTER_COMPANY_RESEARCH_COOLDOWN_DAYS,
+    priorResearchCompanyCount: researchSelection.priorResearchIdentityKeys.length,
+    recentResearchSuppressedCount: researchSelection.recentResearchSuppressedCount,
+    activeOutreachSuppressedCount: researchSelection.activeOutreachSuppressedCount,
+    materialRefreshEligibleCount: researchSelection.materialRefreshIdentityKeys.length,
+    selectedCompanyCount: candidates.length,
+    newCompanyCount: selectedIdentityKeys.filter(
+      (keys) => !keys.some((key) => priorResearchIdentityKeys.has(key))
+    ).length,
+    refreshCompanyCount: selectedRefreshIdentityKeys.length,
+    materialRefreshSelectedCount: selectedRefreshIdentityKeys.filter((keys) =>
+      keys.some((key) => materialRefreshIdentityKeys.has(key))
+    ).length,
+    scheduledRefreshSelectedCount: selectedRefreshIdentityKeys.filter((keys) =>
+      !keys.some((key) => materialRefreshIdentityKeys.has(key))
+    ).length
+  };
   const lunaPrimary = hunterResearchLunaShadowConfiguration();
 
   const job = await prisma.automationJobRun.create({
@@ -415,7 +593,8 @@ export async function prepareHunterCompanyResearchRun({
         lunaPrimaryEnabled: lunaPrimary.enabled,
         lunaPrimaryModel: lunaPrimary.recommended,
         lunaPrimaryPromptVersion: lunaPrimary.promptVersion,
-        qwenShadowModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL
+        qwenShadowModel: HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL,
+        selection: selectionAudit
       }
     }
   });
@@ -490,11 +669,11 @@ export async function prepareHunterCompanyResearchRun({
 export function buildHunterCompanyResearchWhere({
   tenantId,
   requestedKeys,
-  recentlyResearchedIds
+  suppressedCompanyIds
 }: {
   tenantId: string;
   requestedKeys: string[];
-  recentlyResearchedIds: string[];
+  suppressedCompanyIds: string[];
 }): Prisma.CompanyWhereInput {
   return {
     tenantId,
@@ -512,10 +691,158 @@ export function buildHunterCompanyResearchWhere({
     },
     ...(requestedKeys.length > 0
       ? { normalizedName: { in: requestedKeys } }
-      : recentlyResearchedIds.length > 0
-        ? { id: { notIn: recentlyResearchedIds } }
+      : suppressedCompanyIds.length > 0
+        ? { id: { notIn: suppressedCompanyIds } }
         : {})
   };
+}
+
+export function resolveHunterCompanyResearchSelection({
+  researchHistory,
+  materialSignals,
+  activeOutreachCompanies,
+  now
+}: {
+  researchHistory: ResearchSelectionHistoryRow[];
+  materialSignals: ResearchSelectionHistoryRow[];
+  activeOutreachCompanies: ResearchSelectionIdentity[];
+  now: Date;
+}) {
+  const latestResearchByIdentity = latestSelectionTimestampByIdentity(researchHistory);
+  const latestMaterialSignalByIdentity = latestSelectionTimestampByIdentity(materialSignals);
+  const activeOutreachIdentityKeys = new Set(
+    activeOutreachCompanies.flatMap(selectionIdentityKeys)
+  );
+  const recentResearchCutoff = new Date(now.getTime() - RECENT_RESEARCH_WINDOW_MS);
+  const cooldownSuppressedIdentityKeys = new Set<string>();
+  const materialRefreshIdentityKeys = new Set<string>();
+
+  for (const row of researchHistory) {
+    const identityKeys = selectionIdentityKeys(row);
+    const researchedAt = latestTimestampForKeys(latestResearchByIdentity, identityKeys);
+    if (!researchedAt) continue;
+    const materialSignalAt = latestTimestampForKeys(latestMaterialSignalByIdentity, identityKeys);
+    const hasNewMaterialSignal = Boolean(
+      materialSignalAt && materialSignalAt.getTime() > researchedAt.getTime()
+    );
+    if (hasNewMaterialSignal) {
+      identityKeys.forEach((identityKey) => materialRefreshIdentityKeys.add(identityKey));
+      continue;
+    }
+    if (researchedAt.getTime() >= recentResearchCutoff.getTime()) {
+      identityKeys.forEach((identityKey) => cooldownSuppressedIdentityKeys.add(identityKey));
+    }
+  }
+
+  const suppressedIdentityKeys = new Set([
+    ...cooldownSuppressedIdentityKeys,
+    ...activeOutreachIdentityKeys
+  ]);
+  const suppressedCompanyIds = new Set<string>();
+  for (const row of researchHistory) {
+    if (selectionIdentityKeys(row).some((key) => suppressedIdentityKeys.has(key))) {
+      suppressedCompanyIds.add(row.companyId);
+    }
+  }
+  for (const company of activeOutreachCompanies) {
+    suppressedCompanyIds.add(company.companyId);
+  }
+  const activeOutreachPrimaryKeys = new Set(
+    activeOutreachCompanies.map((company) => company.identityKey)
+  );
+  const recentResearchPrimaryKeys = new Set(
+    researchHistory
+      .filter((row) =>
+        selectionIdentityKeys(row).some((key) => cooldownSuppressedIdentityKeys.has(key)) &&
+        !selectionIdentityKeys(row).some((key) => activeOutreachIdentityKeys.has(key))
+      )
+      .map((row) => row.identityKey)
+  );
+  const materialRefreshPrimaryKeys = new Set(
+    researchHistory
+      .filter((row) =>
+        selectionIdentityKeys(row).some((key) => materialRefreshIdentityKeys.has(key)) &&
+        !selectionIdentityKeys(row).some((key) => activeOutreachIdentityKeys.has(key))
+      )
+      .map((row) => row.identityKey)
+  );
+
+  return {
+    suppressedCompanyIds: [...suppressedCompanyIds],
+    suppressedIdentityKeys: [...suppressedIdentityKeys],
+    priorResearchIdentityKeys: [...new Set(researchHistory.map((row) => row.identityKey))],
+    priorResearchAliasKeys: [...latestResearchByIdentity.keys()],
+    materialRefreshIdentityKeys: [...materialRefreshPrimaryKeys],
+    materialRefreshAliasKeys: [...materialRefreshIdentityKeys].filter(
+      (identityKey) => !activeOutreachIdentityKeys.has(identityKey)
+    ),
+    recentResearchSuppressedCount: recentResearchPrimaryKeys.size,
+    activeOutreachSuppressedCount: activeOutreachPrimaryKeys.size
+  };
+}
+
+export function readStoredHunterCompanyResearchSelection(
+  value: unknown
+): HunterCompanyResearchSelectionAudit | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const selection = value as Record<string, unknown>;
+  const cooldownDays = readNonNegativeInteger(selection.cooldownDays);
+  if (cooldownDays < 1) return null;
+  return {
+    cooldownDays,
+    priorResearchCompanyCount: readNonNegativeInteger(
+      selection.priorResearchCompanyCount
+    ),
+    recentResearchSuppressedCount: readNonNegativeInteger(
+      selection.recentResearchSuppressedCount
+    ),
+    activeOutreachSuppressedCount: readNonNegativeInteger(
+      selection.activeOutreachSuppressedCount
+    ),
+    materialRefreshEligibleCount: readNonNegativeInteger(
+      selection.materialRefreshEligibleCount
+    ),
+    selectedCompanyCount: readNonNegativeInteger(selection.selectedCompanyCount),
+    newCompanyCount: readNonNegativeInteger(selection.newCompanyCount),
+    refreshCompanyCount: readNonNegativeInteger(selection.refreshCompanyCount),
+    materialRefreshSelectedCount: readNonNegativeInteger(
+      selection.materialRefreshSelectedCount
+    ),
+    scheduledRefreshSelectedCount: readNonNegativeInteger(
+      selection.scheduledRefreshSelectedCount
+    )
+  };
+}
+
+function latestSelectionTimestampByIdentity(rows: ResearchSelectionHistoryRow[]) {
+  const latestByIdentity = new Map<string, Date>();
+  for (const row of rows) {
+    for (const identityKey of selectionIdentityKeys(row)) {
+      const current = latestByIdentity.get(identityKey);
+      if (!current || row.observedAt.getTime() > current.getTime()) {
+        latestByIdentity.set(identityKey, row.observedAt);
+      }
+    }
+  }
+  return latestByIdentity;
+}
+
+function selectionIdentityKeys(row: ResearchSelectionIdentity) {
+  return row.identityKeys?.length ? row.identityKeys : [row.identityKey];
+}
+
+function latestTimestampForKeys(values: Map<string, Date>, keys: string[]) {
+  return keys.reduce<Date | null>((latest, key) => {
+    const candidate = values.get(key);
+    if (!candidate) return latest;
+    return !latest || candidate.getTime() > latest.getTime() ? candidate : latest;
+  }, null);
+}
+
+function readNonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : 0;
 }
 
 export function rankHunterCompanyResearchCandidates<
@@ -623,6 +950,7 @@ export async function completeHunterCompanyResearchRun({
   if (!run) throw new Error("Hunter company-research run is not active for this tenant.");
 
   const input = record(run.input, "run.input");
+  const selection = readStoredHunterCompanyResearchSelection(input.selection);
   const lunaShadow = readStoredHunterResearchLunaShadow(run.output);
   const lunaShadowSummary = summarizeHunterResearchLunaShadow(lunaShadow);
   const expectedCompanyIds = new Set(
@@ -784,6 +1112,7 @@ export async function completeHunterCompanyResearchRun({
           evidenceCount: completion.companies.reduce((sum, company) => sum + company.evidence.length, 0),
           search: completion.search,
           models: completion.models,
+          selection,
           lunaShadow,
           savedSignalIds,
           completedAt: new Date().toISOString()
@@ -808,6 +1137,7 @@ export async function completeHunterCompanyResearchRun({
           kimiModel: completion.models.scoring.name,
           validatorModel: completion.models.validation.name,
           validatorStatus: completion.models.validation.status,
+          selection,
           lunaComparison: lunaShadowSummary
         }
       }
@@ -859,6 +1189,7 @@ export async function completeHunterCompanyResearchRun({
     blockedCount,
     tierCounts,
     missingCompanyCount: expectedCompanyIds.size - returnedCompanyIds.size,
+    selection,
     lunaComparison: lunaShadowSummary,
     plan,
     handoff

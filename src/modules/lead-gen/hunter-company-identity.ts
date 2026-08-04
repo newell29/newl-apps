@@ -25,6 +25,25 @@ export function resolveHunterCompanyIdentityKey(
   return `name:${identity || company.normalizedName}`;
 }
 
+export function resolveHunterCompanyIdentityKeys(
+  company: Omit<HunterCompanyIdentityInput, "id">
+) {
+  const keys = new Set<string>();
+  const apolloOrganizationId = company.apolloOrganizationId?.trim();
+  if (apolloOrganizationId) keys.add(`apollo:${apolloOrganizationId}`);
+
+  const domain = normalizeHunterCompanyDomain(company.domain);
+  if (domain) keys.add(`domain:${domain}`);
+
+  const identity =
+    normalizeHunterCompanyIdentity(company.name) ||
+    normalizeHunterCompanyIdentity(company.normalizedName);
+  if (identity) keys.add(`name:${identity}`);
+
+  if (keys.size === 0) keys.add(resolveHunterCompanyIdentityKey(company));
+  return [...keys];
+}
+
 export function dedupeHunterCompaniesByIdentity<T extends HunterCompanyIdentityInput>(
   companies: T[]
 ) {

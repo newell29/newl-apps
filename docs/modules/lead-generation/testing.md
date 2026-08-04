@@ -217,7 +217,7 @@ Regression coverage must prove:
 
 1. prepare, complete, and fail routes resolve tenant scope through machine ingestion authentication;
 2. an explicit cohort is bounded to 100 keys and still resolves only eligible companies inside the authenticated tenant;
-3. the default queue follows the saved daily company limit and excludes recently researched companies for seven days;
+3. the default queue follows the saved daily company limit, excludes companies researched during the prior 90 days by Apollo-organization/domain/name identity, suppresses active or paused Hunter-cadence companies, allows only a newer active non-TradeMining expansion/news/manual signal to reopen a recent company, and does not let a routine TradeMining refresh bypass the cooldown;
 4. identity, fresh-event, careers, and distribution-footprint queries are generated for every company;
 5. evidence URLs are HTTPS, source domains match their URLs, redirects cannot reach local/private addresses, and query/evidence sizes are bounded;
 6. Luna receives the bounded evidence in batches of at most four through a tenant-scoped machine route,
