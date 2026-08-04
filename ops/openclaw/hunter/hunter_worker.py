@@ -286,7 +286,7 @@ def profile_daily_time(profile: dict[str, Any]) -> dt.time:
     if isinstance(preferred_hour, int) and 0 <= preferred_hour <= 23:
         return dt.time(preferred_hour, 0)
 
-    configured = os.environ.get("HUNTER_DAILY_RUN_TIME", "07:00").strip()
+    configured = os.environ.get("HUNTER_DAILY_RUN_TIME", "04:00").strip()
     try:
         parsed = dt.time.fromisoformat(configured)
     except ValueError as error:
@@ -349,10 +349,15 @@ def build_company_research_message(result: dict[str, Any]) -> str:
     accepted = int(result.get("acceptedCount") or 0)
     blocked = int(result.get("blockedCount") or 0)
     missing = int(result.get("missingCompanyCount") or 0)
+    qwen_fallback = int(result.get("qwenFallbackCount") or 0)
+    luna_missing = int(result.get("lunaMissingCount") or 0)
+    kimi_missing = int(result.get("kimiMissingCount") or 0)
     message = (
         "Hunter company research completed: "
-        f"{researched} companies reached Luna and Kimi, {accepted} qualified for planning, "
+        f"{researched} companies were scored by Kimi, {accepted} qualified for planning, "
         f"{blocked} blocked, and {missing} omitted after bounded model-output repair. "
+        f"Luna missed {luna_missing}; Qwen 3.6 safely recovered {qwen_fallback}; "
+        f"Kimi missed {kimi_missing}. "
     )
     luna_comparison = result.get("lunaComparison")
     if isinstance(luna_comparison, dict):
@@ -734,7 +739,7 @@ def signal_scout_due_now(now: Optional[dt.datetime] = None) -> bool:
         timezone = ZoneInfo(timezone_name)
     except Exception as error:
         raise RuntimeError("HUNTER_SIGNAL_SCOUT_TIMEZONE must be a valid IANA timezone") from error
-    configured = os.environ.get("HUNTER_SIGNAL_SCOUT_DAILY_TIME", "08:30").strip()
+    configured = os.environ.get("HUNTER_SIGNAL_SCOUT_DAILY_TIME", "02:30").strip()
     try:
         daily_time = dt.time.fromisoformat(configured)
     except ValueError as error:
@@ -754,7 +759,7 @@ def company_research_due_now(now: Optional[dt.datetime] = None) -> bool:
         timezone = ZoneInfo(timezone_name)
     except Exception as error:
         raise RuntimeError("HUNTER_COMPANY_RESEARCH_TIMEZONE must be a valid IANA timezone") from error
-    configured = os.environ.get("HUNTER_COMPANY_RESEARCH_DAILY_TIME", "09:15").strip()
+    configured = os.environ.get("HUNTER_COMPANY_RESEARCH_DAILY_TIME", "05:45").strip()
     try:
         daily_time = dt.time.fromisoformat(configured)
     except ValueError as error:
@@ -763,6 +768,32 @@ def company_research_due_now(now: Optional[dt.datetime] = None) -> bool:
     if current.tzinfo is None:
         current = current.replace(tzinfo=dt.timezone.utc)
     return current.astimezone(timezone).time() >= daily_time
+
+
+def trademining_profiles_settled_for_research(
+    profiles: list[dict[str, Any]],
+    now: Optional[dt.datetime] = None,
+) -> bool:
+    """Wait for every enabled profile to finish or fail today before deep research."""
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    for profile in profiles:
+        last_run_raw = clean(profile.get("lastRunAt"))
+        if not last_run_raw:
+            return False
+        try:
+            last_run = dt.datetime.fromisoformat(last_run_raw.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=dt.timezone.utc)
+        timezone = profile_timezone(profile)
+        if last_run.astimezone(timezone).date() != current.astimezone(timezone).date():
+            return False
+        if (clean(profile.get("lastRunStatus")) or "").upper() == "RUNNING":
+            return False
+    return True
 
 
 def run_outreach_handoff_poller(
@@ -927,6 +958,7 @@ def main() -> int:
 
     last_signal_scout_check_date: Optional[dt.date] = None
     last_company_research_check_date: Optional[dt.date] = None
+    last_company_research_wait_notice_date: Optional[dt.date] = None
     while True:
         process_once(base_url, token, clean(args.profile_id), clean(args.profile_name))
         if not args.profile_id and not args.profile_name and signal_scout_due_now():
@@ -944,11 +976,20 @@ def main() -> int:
             )
             local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
             if last_company_research_check_date != local_date:
-                last_company_research_check_date = local_date
-                try:
-                    print(json.dumps(run_company_research_with_notification(), indent=2))
-                except Exception as error:
-                    print(f"Hunter daily company research failed: {error}", file=sys.stderr)
+                profiles = load_profiles(base_url, token)
+                if not trademining_profiles_settled_for_research(profiles):
+                    if last_company_research_wait_notice_date != local_date:
+                        print(
+                            "Hunter company research is waiting for today's enabled TradeMining "
+                            "profiles to finish or fail."
+                        )
+                        last_company_research_wait_notice_date = local_date
+                else:
+                    last_company_research_check_date = local_date
+                    try:
+                        print(json.dumps(run_company_research_with_notification(), indent=2))
+                    except Exception as error:
+                        print(f"Hunter daily company research failed: {error}", file=sys.stderr)
         if args.once or args.profile_id or args.profile_name:
             return 0
         time.sleep(poll_ms / 1000)

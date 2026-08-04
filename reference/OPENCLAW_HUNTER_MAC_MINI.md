@@ -73,7 +73,7 @@ HUNTER_EXPORT_DIRECTORY=/path/to/runtime/exports
 HUNTER_HTTP_MAX_ATTEMPTS=4
 HUNTER_TRADEMINING_MAX_EXPORT_ROWS=25000
 VERCEL_AUTOMATION_BYPASS_SECRET=<dedicated Preview automation bypass>
-HUNTER_DAILY_RUN_TIME=07:00
+HUNTER_DAILY_RUN_TIME=04:00
 HUNTER_POLL_MS=60000
 ```
 
@@ -88,7 +88,7 @@ The checked-in template is `ops/openclaw/hunter/.env.example`. Store the real fi
 - `ops/openclaw/hunter/hunter_ingest.py`: tenant-bound job creation, batched ingestion, completion/failure reporting.
 - `ops/openclaw/hunter/hunter_worker.py`: live active-profile lookup, manual run-request polling, once-daily eligibility, per-profile lookback/port planning, collection, and ingestion coordination.
 - `ops/openclaw/hunter/hunter_company_research.py`: bounded evidence retrieval, tenant-bound Luna synthesis,
-  optional local Qwen shadow comparison, Kimi scoring, replay ledger generation, and tenant-bound completion
+  local Qwen 3.6 availability recovery, Kimi scoring, replay ledger generation, and tenant-bound completion
   reporting. It has no Apollo or outreach integration.
 - `ops/openclaw/hunter/hunter_signal_scout.py`: bounded Brave discovery, rotating allowlisted
   topic/geography queries, 180-day canonical-URL suppression, local Qwen first-pass classification, and
@@ -107,18 +107,20 @@ Company research stays disabled until its reviewed code reaches the dedicated ru
 the following local-only values are configured:
 
 ```text
-HUNTER_SIGNAL_SCOUT_ENABLED=false
-HUNTER_SIGNAL_SCOUT_DAILY_TIME=08:30
+HUNTER_SIGNAL_SCOUT_ENABLED=true
+HUNTER_SIGNAL_SCOUT_DAILY_TIME=02:30
 HUNTER_SIGNAL_SCOUT_TIMEZONE=America/Toronto
-HUNTER_CLASSIFICATION_MODEL=qwen3:30b-instruct
+HUNTER_CLASSIFICATION_MODEL=qwen3.6:27b-q4_K_M
 HUNTER_CLASSIFICATION_BATCH_SIZE=6
 HUNTER_COMPANY_RESEARCH_ENABLED=false
-HUNTER_COMPANY_RESEARCH_DAILY_TIME=09:15
+HUNTER_COMPANY_RESEARCH_DAILY_TIME=05:45
 HUNTER_COMPANY_RESEARCH_TIMEZONE=America/Toronto
 HUNTER_RESEARCH_SEARCH_PROVIDER=BRAVE
 HUNTER_BRAVE_SEARCH_API_KEY=<dedicated read-only search key>
-HUNTER_RESEARCH_QWEN_MODEL=qwen3.5:35b
-HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=true
+HUNTER_RESEARCH_LUNA_MAX_ATTEMPTS=3
+HUNTER_RESEARCH_QWEN_MODEL=qwen3.6:27b-q4_K_M
+HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=false
+HUNTER_RESEARCH_QWEN_FALLBACK_ENABLED=true
 HUNTER_KIMI_API_KEY=<dedicated Kimi key>
 HUNTER_KIMI_BASE_URL=https://api.moonshot.ai/v1
 HUNTER_KIMI_MODEL=kimi-k2.6
@@ -133,11 +135,9 @@ Luna primary synthesis is enabled only in the deployed Newl Apps environment:
 HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED=true
 ```
 
-It does not change the Mac schedule or trigger a second Brave search. The existing 09:15 company
+It does not trigger a second Brave search. The dependency-safe company
 research run sends each completed public-evidence packet to the tenant-scoped Newl Apps synthesis route.
-Luna is authoritative; Qwen remains a temporary non-blocking shadow unless
-`HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=false`. Teams reports Luna coverage, first-pass schema validity,
-and Qwen/Luna categorical agreement.
+Luna remains primary; Qwen 3.6 processes only still-missing rows after bounded Luna retries unless a comparison shadow is explicitly enabled. Teams reports Luna coverage, Qwen recovery, Kimi omissions, and final cohort counts.
 
 Before enabling the schedule, replay a reviewed cohort:
 
@@ -215,7 +215,7 @@ Do not run the VM and Mac schedulers concurrently against the same profile durin
 
 ## Confirmed daily profile rules
 
-- Every enabled profile is eligible once per local calendar day after 07:00 by default. `scheduleMetadata.preferredRunHourLocal` can override the hour for an existing profile, while `HUNTER_DAILY_RUN_TIME` controls the fallback.
+- Every enabled profile is eligible once per local calendar day after 04:00 by default. `scheduleMetadata.preferredRunHourLocal` can override the hour for an existing profile, while `HUNTER_DAILY_RUN_TIME` controls the fallback. Company research becomes eligible at 05:45 but waits until every enabled profile has finished or failed for that local date.
 - The profile's `lookbackWindowDays` is the actual TradeMining date range. It remains one logical daily run even when the 25,000-row export ceiling requires physical subqueries.
 - Found Companies counts shipment evidence from the matched profile inside that profile's lookback and excludes companies below `minShipmentCount`, below optional `minAggregateTeu`, or outside a hard/exclude industry rule.
 - The Search Profiles screen shows TradeMining matches, exported records, qualifying companies, physical query count, and completeness from the latest run.

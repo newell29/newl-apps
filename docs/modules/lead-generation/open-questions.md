@@ -52,15 +52,13 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
 - Should a future search-profile experiment agent be allowed to propose bounded profile variants in a sandbox ledger? It must not mutate active profiles or trigger TradeMining queries until the owner approves an experiment budget, success metric, holdout design, and automatic rollback rule. Requires owner confirmation.
-- Does the active Brave Search plan grant the storage rights required for Hunter's bounded URL, title, snippet, and
-  evidence ledger? Confirm the plan terms before `HUNTER_SIGNAL_SCOUT_ENABLED` is switched on. Google News RSS is
-  fallback-only and its retained metadata remains bounded.
+- Confirm periodically that the active Brave Search plan continues to grant the storage rights required for Hunter's bounded URL, title, snippet, and evidence ledger. The owner approved enabling the signal scout on 2026-08-03; Google News RSS remains fallback-only and its retained metadata remains bounded.
 - Which jurisdictions, sender identities, daily mailbox volumes, and review thresholds should govern later outreach? Requires owner confirmation before moving beyond dry run.
 - Which named sender should be preferred for each service line/persona, and which mailbox caps should apply? Weighted
   mailbox pools now support deterministic company-level allocation. The approved initial state is Alex 100 with all
   secondary identities inactive at weight 0; later weights and service-line overrides require owner confirmation.
 - How long should a Hunter assessment remain valid for outreach? The implemented default is 30 days through
   `HUNTER_OUTREACH_RESEARCH_MAX_AGE_DAYS`; business-owner confirmation is still required.
-- External-signal discovery uses local `qwen3:30b-instruct` for bounded first-pass classification, followed by the
-  existing Qwen 3.5 35B and Kimi research stages only for promoted companies. A hosted first-pass model is not
+- External-signal discovery uses local `qwen3.6:27b-q4_K_M` for bounded first-pass classification, followed by the
+  Luna-first, Qwen 3.6 recovery, and Kimi research stages only for promoted companies. A hosted first-pass model is not
   currently required.

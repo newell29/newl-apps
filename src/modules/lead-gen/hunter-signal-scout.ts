@@ -17,7 +17,7 @@ import { prisma } from "@/server/db";
 
 export const HUNTER_SIGNAL_SCOUT_JOB_TYPE = "HUNTER_EXTERNAL_SIGNAL_SCOUT";
 export const HUNTER_SIGNAL_SCOUT_PROMPT_VERSION = "hunter-signal-classifier-v3";
-export const HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL = "qwen3:30b-instruct";
+export const HUNTER_SIGNAL_SCOUT_DEFAULT_MODEL = "qwen3.6:27b-q4_K_M";
 const ACTIVE_RUN_WINDOW_MS = 2 * 60 * 60 * 1000;
 const MAX_COMPLETION_CANDIDATES = 100;
 const SOURCE_URL_DEDUPE_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;

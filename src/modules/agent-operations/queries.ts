@@ -360,9 +360,9 @@ function buildAgentSchedules(data: AgentOperationData, runs: AgentRun[], now: Da
   }
 
   schedules.push(
-    declaredSchedule("hunter:imports", "hunter", "Run TradeMining profiles", "DAILY", "07:00", "Daily at 07:00", now, activeRunKeys),
-    declaredSchedule("hunter:signals", "hunter", "Refresh external opportunity signals", "DAILY", "08:30", "Daily at 08:30", now, activeRunKeys),
-    declaredSchedule("hunter:research", "hunter", "Research qualified WMS companies", "DAILY", "09:15", "Daily at 09:15", now, activeRunKeys),
+    declaredSchedule("hunter:signals", "hunter", "Refresh external opportunity signals", "DAILY", "02:30", "Daily at 02:30", now, activeRunKeys),
+    declaredSchedule("hunter:imports", "hunter", "Run TradeMining profiles", "DAILY", "04:00", "Daily at 04:00", now, activeRunKeys),
+    declaredSchedule("hunter:research", "hunter", "Research qualified companies", "DAILY", "05:45", "After 05:45 once today's TradeMining profiles settle", now, activeRunKeys),
     {
       id: "rivet:developer",
       agentKey: "rivet",

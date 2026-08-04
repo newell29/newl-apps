@@ -27,7 +27,7 @@ const runnerPath = path.join(repoRoot, "ops/openclaw/run-hunter-worker.sh");
 describe("Hunter company deep research", () => {
   it("keeps the hosted research pipeline read-only", () => {
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL).toBe("gpt-5.6-luna");
-    expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.5:35b");
+    expect(HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL).toBe("qwen3.6:27b-q4_K_M");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL).toBe("kimi-k2.6");
     expect(HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL).toBe("kimi-k3");
     expect(HUNTER_COMPANY_RESEARCH_PROMPT_VERSION).toBe("hunter-company-research-v18");
@@ -506,7 +506,8 @@ describe("Hunter company deep research", () => {
     ]);
 
     expect(worker).toContain("company_research_due_now");
-    expect(worker).toContain('HUNTER_COMPANY_RESEARCH_DAILY_TIME", "09:15"');
+    expect(worker).toContain('HUNTER_COMPANY_RESEARCH_DAILY_TIME", "05:45"');
+    expect(worker).toContain("trademining_profiles_settled_for_research");
     expect(worker).toContain("--company-research-cohort");
     expect(research).toContain("IDENTITY");
     expect(research).toContain("FRESH_EVENTS");
@@ -526,6 +527,9 @@ describe("Hunter company deep research", () => {
     expect(research).toContain("the material event itself occurred within 18 months");
     expect(research).toContain("/api/lead-gen/hunter/company-research/synthesis");
     expect(research).toContain("submit_luna_primary_batches");
+    expect(research).toContain("recover_missing_luna_synthesis_with_qwen");
+    expect(research).toContain('HUNTER_RESEARCH_LUNA_MAX_ATTEMPTS');
+    expect(research).toContain('HUNTER_RESEARCH_QWEN_FALLBACK_ENABLED');
     expect(research).not.toContain("OPENAI_API_KEY");
     expect(research).toContain('"thinking": {"type": "disabled"}');
     expect(research).toContain('"temperature": 0.6');
@@ -610,6 +614,67 @@ describe("Hunter company deep research", () => {
       alpha: expect.objectContaining({ identityDisposition: "PASS" }),
       beta: expect.objectContaining({ identityDisposition: "PASS" })
     });
+  });
+
+  it("retries a transient Luna batch and preserves the successful cohort", async () => {
+    const program = [
+      "import json,os",
+      "import hunter_company_research as r",
+      "os.environ['HUNTER_RESEARCH_LUNA_MAX_ATTEMPTS']='2'",
+      "r.time.sleep=lambda _seconds: None",
+      "calls=[]",
+      "def valid_row(key):",
+      " return {'companyKey':key,'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'Current fit.','triggerEvidenceIndices':[0],'geography':None,'companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':80,'rationale':'Current fit.','missingEvidence':[],'followUpQueries':[]}",
+      "def fake_api(_base,_token,_method,_path,payload):",
+      " calls.append([item['companyKey'] for item in payload['packets']])",
+      " if len(calls)==1: return {'data':{'state':'error','errorMessage':'provider overloaded','rows':[]}}",
+      " rows=[valid_row(item['companyKey']) for item in payload['packets']]",
+      " return {'data':{'state':'completed','rows':rows,'usage':{},'report':{'status':'SUCCESS'}}}",
+      "r.api_request=fake_api",
+      "candidates=[{'companyId':'1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]} ]",
+      "evidence={'alpha':[{'pass':'IDENTITY','query':'a','title':'Alpha','url':'https://alpha.example','sourceDomain':'alpha.example','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'Alpha identity','firstParty':True}]}",
+      "result=r.submit_luna_primary_batches('https://example.com','token','run',{'models':{'synthesis':{'provider':'OPENAI','enabled':True}}},candidates,evidence,{})",
+      "print(json.dumps({'calls':calls,'result':result}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const output = JSON.parse(stdout);
+
+    expect(output.calls).toEqual([["alpha"], ["alpha"]]);
+    expect(output.result.state).toBe("completed");
+    expect(output.result.retriedBatchCount).toBe(1);
+    expect(output.result.failures).toEqual({});
+  });
+
+  it("uses Qwen 3.6 only for Luna omissions and keeps valid Luna rows", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "def fallback(_url,_model,candidates,_evidence,_batch,_repairs):",
+      " return ({'beta':{'identityDisposition':'PASS'}},{'inputTokens':3,'outputTokens':4,'durationMs':5},{})",
+      "r.synthesize_companies=fallback",
+      "candidates=[{'companyKey':'alpha'},{'companyKey':'beta'}]",
+      "merged,recovered,usage,failures=r.recover_missing_luna_synthesis_with_qwen(True,'local','qwen3.6',candidates,{}, {'alpha':{'identityDisposition':'PASS'}},4,2)",
+      "print(json.dumps({'merged':merged,'recovered':recovered,'usage':usage,'failures':failures}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const output = JSON.parse(stdout);
+
+    expect(Object.keys(output.merged).sort()).toEqual(["alpha", "beta"]);
+    expect(Object.keys(output.recovered)).toEqual(["beta"]);
+    expect(output.usage).toEqual({ inputTokens: 3, outputTokens: 4, durationMs: 5 });
+    expect(output.failures).toEqual({});
   });
 
   it("isolates malformed Qwen batches and retries affected companies independently", async () => {
@@ -1085,6 +1150,30 @@ describe("Hunter company deep research", () => {
       logisticsProvider: false,
       stableExclusiveProviderEvidence: false
     });
+  });
+
+  it("deterministically blocks provider contradictions and downgrades stale event claims", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "candidate={'companyName':'Comfy Logistics','companyKey':'comfy-logistics'}",
+      "evidence=[{'pass':'IDENTITY','firstParty':True,'sourceType':'FIRST_PARTY','title':'Comfy Logistics services','excerpt':'Comfy Logistics provides warehousing services and freight forwarding to customers.','publishedAt':'2026-01-01T00:00:00+00:00'},{'pass':'FRESH_EVENTS','firstParty':False,'sourceType':'NEWS','title':'Old acquisition','excerpt':'Comfy Logistics completed an acquisition.','publishedAt':'2024-01-01T00:00:00+00:00'}]",
+      "synthesis={'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified.','confidence':80,'freshness':'CURRENT','signalType':'FUNDING_OR_ACQUISITION','triggerEvidenceIndices':[1],'missingEvidence':[],'rationale':'Current expansion.','logisticsProvider':False,'stableExclusiveProviderEvidence':False}",
+      "print(json.dumps(r.normalize_synthesis_for_evidence(candidate,evidence,synthesis)))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+    const normalized = JSON.parse(stdout);
+
+    expect(normalized.logisticsProvider).toBe(true);
+    expect(normalized.freshness).toBe("STALE");
+    expect(normalized.rationale).toContain("18-month trigger window");
+    expect(normalized.rationale).toContain("provider or competitor");
   });
 
   it("preserves an existing-facility production-line expansion that Qwen overlooked", async () => {
@@ -1685,7 +1774,7 @@ function completion() {
       },
       shadowSynthesis: {
         provider: "OLLAMA",
-        name: "qwen3.5:35b",
+        name: "qwen3.6:27b-q4_K_M",
         promptVersion: "hunter-company-research-v18",
         structuredOutput: true,
         enabled: true,

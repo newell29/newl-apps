@@ -24,7 +24,7 @@ import { prisma } from "@/server/db";
 
 export { HUNTER_COMPANY_RESEARCH_JOB_TYPE };
 export const HUNTER_COMPANY_RESEARCH_PROMPT_VERSION = "hunter-company-research-v18";
-export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.5:35b";
+export const HUNTER_COMPANY_RESEARCH_DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_LUNA_MODEL = "gpt-5.6-luna";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_KIMI_MODEL = "kimi-k2.6";
 export const HUNTER_COMPANY_RESEARCH_DEFAULT_VALIDATOR_MODEL = "kimi-k3";

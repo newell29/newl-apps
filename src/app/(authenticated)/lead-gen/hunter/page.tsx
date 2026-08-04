@@ -33,6 +33,11 @@ export default async function DailyOpportunitiesPage() {
       carryForward.filter((signal) => researchTier(signal.evidence) === tier)
     ])
   ) as Record<(typeof tierOrder)[number], typeof carryForward>;
+  const scoutSummary = signalScoutRunSummary(data.latestSignalScoutRun?.output);
+  const scoutSignalIds = new Set(scoutSummary.savedSignalIds);
+  const acceptedScoutSignals = data.signals.filter(
+    (signal) => scoutSignalIds.has(signal.id) && signal.status === "ACTIVE"
+  );
 
   return (
     <div className="space-y-6">
@@ -73,6 +78,42 @@ export default async function DailyOpportunitiesPage() {
           carry-forward section so outreach is not lost or mistaken for research completed today.
         </p>
       </section>
+
+      {data.latestSignalScoutRun ? (
+        <details className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <summary className="cursor-pointer font-semibold text-foreground">
+            External signals accepted ({acceptedScoutSignals.length})
+          </summary>
+          <p className="mt-2 text-sm text-mutedForeground">
+            Brave returned {scoutSummary.rawResultCount} rows, selected {scoutSummary.selectedArticleCount}
+            {" "}for local classification, accepted {scoutSummary.acceptedCount}, and promoted
+            {" "}{scoutSummary.promotedCompanyCount} new companies. These are discovery hypotheses until the
+            normal Luna and Kimi research gate assigns an opportunity tier.
+          </p>
+          <div className="mt-4 grid gap-3">
+            {acceptedScoutSignals.map((signal) => (
+              <article key={signal.id} className="rounded-md border border-border bg-muted/30 p-3">
+                <p className="font-semibold text-foreground">{signal.companyName}</p>
+                <p className="mt-1 text-sm text-mutedForeground">{signal.title}</p>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-mutedForeground">
+                  <span>{formatEnum(signal.serviceLine)}</span>
+                  <span>{signal.confidence}% scout confidence</span>
+                  {signal.sourceUrl ? (
+                    <a href={signal.sourceUrl} target="_blank" rel="noreferrer" className="text-primary underline">
+                      Open source
+                    </a>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+            {acceptedScoutSignals.length === 0 ? (
+              <p className="text-sm text-mutedForeground">
+                This run did not retain any active external signal candidates.
+              </p>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -307,6 +348,21 @@ function researchRecord(value: unknown): Record<string, unknown> | null {
 
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function signalScoutRunSummary(value: unknown) {
+  const output = objectRecord(value);
+  const integer = (field: string) => {
+    const candidate = output?.[field];
+    return typeof candidate === "number" && Number.isFinite(candidate) ? Math.max(0, Math.trunc(candidate)) : 0;
+  };
+  return {
+    rawResultCount: integer("rawResultCount"),
+    selectedArticleCount: integer("selectedArticleCount"),
+    acceptedCount: integer("acceptedCount"),
+    promotedCompanyCount: integer("promotedCompanyCount"),
+    savedSignalIds: stringArray(output?.savedSignalIds)
+  };
 }
 
 function researchTier(value: unknown) {
