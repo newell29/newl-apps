@@ -1404,6 +1404,88 @@ describe("fetchApolloContactsForCompany", () => {
     });
   });
 
+  it("searches the verified operating brand before repeating a noisy legal owner name", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (Array.isArray(body.q_organization_domains_list)) {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({ organizations: [] })
+        } as unknown as Response;
+      }
+      if (body.q_organization_name === "The Hercules Tire & Rubber Company") {
+        return {
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({
+            organizations: [{
+              id: "apollo-org-hercules",
+              name: "The Hercules Tire & Rubber Company",
+              primary_domain: "herculestire.com"
+            }]
+          })
+        } as unknown as Response;
+      }
+      throw new Error(`Unexpected Apollo company query: ${JSON.stringify(body)}`);
+    });
+
+    const result = await resolveApolloOrganizationForCompany({
+      companyName: "THE ASPHALT HERCULES TIRE & RUBBER COMPANY, LLC",
+      verifiedIdentityContext: JSON.stringify({
+        identityResolution: {
+          disposition: "EXACT_OPERATING_COMPANY",
+          confidence: 96,
+          operatingName: "The Hercules Tire & Rubber Company",
+          legalName: "The Asphalt Hercules Tire & Rubber Company, LLC",
+          aliases: ["Hercules Tires"],
+          parentName: null,
+          officialDomain: "herculestire.com",
+          evidenceIndices: [0]
+        }
+      })
+    });
+
+    expect(result).toMatchObject({
+      id: "apollo-org-hercules",
+      domain: "herculestire.com",
+      classification: "DIRECT_COMPANY",
+      domainMatch: true
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      page: 1,
+      per_page: 10,
+      q_organization_name: "The Hercules Tire & Rubber Company"
+    });
+  });
+
+  it("does not confirm an exact-name Apollo shell with no domain, LinkedIn identity, or employees", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        organizations: [{
+          id: "apollo-empty-hercules-shell",
+          name: "THE ASPHALT HERCULES TIRE & RUBBER COMPANY, LLC",
+          primary_domain: null,
+          estimated_num_employees: 0
+        }]
+      })
+    } as unknown as Response);
+
+    const result = await resolveApolloOrganizationForCompany({
+      companyName: "THE ASPHALT HERCULES TIRE & RUBBER COMPANY, LLC"
+    });
+
+    expect(result).toMatchObject({
+      id: "apollo-empty-hercules-shell",
+      classification: "MATCH_QUALITY_REVIEW",
+      domainMatch: false,
+      matchReason: expect.stringContaining("name-only Apollo result")
+    });
+  });
+
   it("recovers a unique Apollo brand from a concatenated TradeMining facility label", async () => {
     vi.spyOn(global, "fetch").mockImplementation(async (input) => {
       const url = String(input);
@@ -5035,7 +5117,8 @@ describe("fetchApolloContactsForCompany", () => {
             {
               id: "apollo-org-siemens-3",
               name: "Siemens Energy Branch Houston",
-              primary_domain: null
+              primary_domain: null,
+              estimated_num_employees: 42
             }
           ]
         })

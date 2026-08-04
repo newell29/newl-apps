@@ -40,6 +40,7 @@ vi.mock("@/server/integrations/openai-apollo-identity", () => ({
 }));
 
 import { prepareNextApolloExceptionResolution } from "@/modules/lead-gen/apollo-exception-autopilot";
+import { APOLLO_ZERO_CONTACT_REVIEW_REASON } from "@/modules/lead-gen/apollo-contact-discovery-review";
 
 describe("Apollo exception autopilot idempotency", () => {
   beforeEach(() => {
@@ -80,18 +81,41 @@ describe("Apollo exception autopilot idempotency", () => {
     expect(second).toMatchObject({ state: "idle" });
     expect(prisma.automationJobRun.create).toHaveBeenCalledTimes(1);
   });
+
+  it("prepares one fresh resolver pass for a legacy low-score empty Apollo shell", async () => {
+    prisma.company.findMany.mockResolvedValue([companyQueueRow({ emptyShell: true })]);
+    prisma.company.findFirst.mockResolvedValue(companyPacketRow({ emptyShell: true }));
+    prisma.automationJobRun.findMany.mockResolvedValue([]);
+    prisma.automationJobRun.create.mockImplementation(async ({ data }) => ({
+      id: "resolution-shell",
+      ...data
+    }));
+
+    await expect(
+      prepareNextApolloExceptionResolution({ tenantId: "tenant-a" })
+    ).resolves.toMatchObject({
+      state: "prepared",
+      runId: "resolution-shell"
+    });
+  });
 });
 
-function companyQueueRow() {
+function companyQueueRow({ emptyShell = false } = {}) {
   return {
     id: "company-1",
     name: "EXAMPLE DISTRIBUTION LLC",
     normalizedName: "example-distribution-llc",
     domain: null,
     primaryIndustry: "Retail",
+    apolloOrganizationId: emptyShell ? "apollo-empty-shell" : null,
     apolloCompanyMatches: [{
       id: "match-1",
-      classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+      classification: emptyShell
+        ? ApolloCompanyMatchClassification.DIRECT_COMPANY
+        : ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+      apolloDomain: null,
+      score: emptyShell ? 19 : 4,
+      matchReason: emptyShell ? APOLLO_ZERO_CONTACT_REVIEW_REASON : "Review required.",
       reviewedAt: null,
       queryJson: { identity_resolver: { candidates: [] } },
       createdAt: new Date("2026-08-02T11:00:00.000Z")
@@ -101,13 +125,14 @@ function companyQueueRow() {
   };
 }
 
-function companyPacketRow() {
+function companyPacketRow({ emptyShell = false } = {}) {
   return {
     id: "company-1",
     name: "EXAMPLE DISTRIBUTION LLC",
     normalizedName: "example-distribution-llc",
     domain: null,
     primaryIndustry: "Retail",
+    apolloOrganizationId: emptyShell ? "apollo-empty-shell" : null,
     importRecords: [{
       destinationCity: "Charlotte",
       destinationState: "North Carolina",
@@ -115,7 +140,12 @@ function companyPacketRow() {
     }],
     apolloCompanyMatches: [{
       id: "match-1",
-      classification: ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+      classification: emptyShell
+        ? ApolloCompanyMatchClassification.DIRECT_COMPANY
+        : ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW,
+      apolloDomain: null,
+      score: emptyShell ? 19 : 4,
+      matchReason: emptyShell ? APOLLO_ZERO_CONTACT_REVIEW_REASON : "Review required.",
       reviewedAt: null,
       queryJson: { identity_resolver: { candidates: [] } }
     }],
