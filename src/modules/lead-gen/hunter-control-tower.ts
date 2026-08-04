@@ -93,7 +93,6 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
   ]);
 
   const timeZone = controlPlane.policy.scheduleTimezone;
-  const today = localDate(now, timeZone);
   const enabledProfiles = searchProfiles.profiles.filter((profile) => profile.enabled);
   const profilesRunToday = enabledProfiles.filter(
     (profile) => profile.lastRunAt &&
@@ -121,17 +120,18 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
     0
   );
 
-  const scoutRun = isRunToday(controlPlane.latestSignalScoutRun?.startedAt, today, timeZone)
-    ? controlPlane.latestSignalScoutRun
-    : null;
+  const scoutRun = resolveTowerLocalDayRun(controlPlane.latestSignalScoutRun, now, timeZone);
   const scoutOutput = record(scoutRun?.output);
-  const researchRun = isRunToday(controlPlane.latestCompanyResearchRun?.startedAt, today, timeZone)
-    ? controlPlane.latestCompanyResearchRun
-    : null;
+  const researchRun = resolveTowerLocalDayRun(
+    controlPlane.latestCompanyResearchRun,
+    now,
+    timeZone
+  );
   const researchOutput = record(researchRun?.output);
-  const researchSelection = resolveTowerResearchSelection(
-    controlPlane.latestCompanyResearchSelection,
-    researchRun?.input
+  const researchSelection = resolveTowerResearchSelectionForRun(
+    researchRun,
+    controlPlane.latestSuccessfulCompanyResearchRun?.id,
+    controlPlane.latestCompanyResearchSelection
   );
   const researchRecovery = readRecoveryState(researchRun?.input, researchRun?.output);
   const todayResearchSignals = researchRun?.status === "SUCCESS"
@@ -140,7 +140,11 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
   const controlTowerCarryForwardSignals = researchRun?.status === "SUCCESS"
     ? controlPlane.carryForwardResearchSignals
     : [...controlPlane.latestResearchSignals, ...controlPlane.carryForwardResearchSignals];
-  const handoff = controlPlane.latestOutreachHandoff;
+  const handoff = resolveTowerLocalDayRun(
+    controlPlane.latestOutreachHandoff,
+    now,
+    timeZone
+  );
   const reviewCounts = {
     needsReview: apolloReviewRows.filter((row) => row.status === "NEEDS_REVIEW").length,
     mappedNoEmployees: apolloReviewRows.filter((row) => row.status === "MAPPED_NO_EMPLOYEES").length,
@@ -191,6 +195,7 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
           researchRun?.output
         ),
         newCompanies: count(researchSelection?.newCompanyCount),
+        refreshCompanies: count(researchSelection?.refreshCompanyCount),
         suppressedRepeats: count(researchSelection?.recentResearchSuppressedCount),
         suppressedActiveOutreach: count(researchSelection?.activeOutreachSuppressedCount),
         researchedCompanies: count(researchOutput?.researchedCount),
@@ -237,10 +242,21 @@ export async function getHunterControlTower(tenant: TenantContext, now = new Dat
     },
     funnel: {
       sourceCompanies: tradeMiningQualifyingCompanies + count(scoutOutput?.promotedCompanyCount),
+      selectedCompanies: resolveTowerSelectedCompanyCount(
+        researchSelection,
+        researchRun?.input,
+        researchRun?.output
+      ),
+      newCompanies: count(researchSelection?.newCompanyCount),
+      refreshCompanies: count(researchSelection?.refreshCompanyCount),
+      suppressedRepeats: count(researchSelection?.recentResearchSuppressedCount),
+      suppressedActiveOutreach: count(researchSelection?.activeOutreachSuppressedCount),
       researchedCompanies: count(researchOutput?.researchedCount),
       qualifiedCompanies,
       contactsFound: handoff?.apolloContactsFound ?? 0,
-      plansReady: handoff?.actionablePlans ?? 0,
+      plansReady: handoff?.actionablePlans ?? 0
+    },
+    workflow: {
       needsAttention: needsAttentionContacts,
       activeCadences: activeCadenceContacts,
       deliveryFailures: deliveryFailureContacts,
@@ -293,6 +309,27 @@ export function resolveTowerSelectedCompanyCount(
 
   const output = record(runOutput);
   return count(output?.researchedCount) + count(output?.missingCompanyCount);
+}
+
+export function resolveTowerLocalDayRun<T extends { startedAt: Date | null }>(
+  run: T | null | undefined,
+  now: Date,
+  timeZone: string
+) {
+  if (!run?.startedAt) return null;
+  return isRunToday(run.startedAt, localDate(now, timeZone), timeZone) ? run : null;
+}
+
+export function resolveTowerResearchSelectionForRun(
+  run: { id: string; input: unknown } | null | undefined,
+  latestSuccessfulRunId: string | null | undefined,
+  latestSuccessfulSelection: unknown
+) {
+  if (!run) return null;
+  return resolveTowerResearchSelection(
+    run.id === latestSuccessfulRunId ? latestSuccessfulSelection : null,
+    run.input
+  );
 }
 
 function stageTone(input: { failed: number; running: number; complete: boolean }): HunterTowerTone {

@@ -36,6 +36,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 6. The manual action and `/api/lead-gen/hunter/daily-plan` both run the same deterministic planner. The Vercel route uses the existing `CRON_SECRET` and skips tenants already planned on their local calendar date.
 7. Phase 1 stops after persisting and displaying the plan. It does not search Apollo, create contacts, draft emails, change a cadence, enroll a contact, or send a message.
 8. Post-research decisions record whether they came from the latest research run or from a still-current carry-forward assessment. Hunter Control Tower counts only a successful local-day cohort as today’s research while preserving earlier Hot and Qualified accounts as carry-forward outreach.
+9. Hunter Control Tower's production summary date-gates the source, research, and outreach-handoff runs independently. It reports selected, new, refresh, suppressed-repeat, researched, qualified, contact, and plan counts for the current tenant-local day only. Needs Attention, active cadences, delivery failures, engagements, and meetings remain visible in a separately labeled current-workflow inventory because those states intentionally span days.
 
 ## External signal scout
 
@@ -162,7 +163,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 The employee-facing layout follows the lifecycle of a prospect rather than the underlying database tables:
 
-1. **Hunter Control Tower** shows TradeMining, external scout, company research, outreach preparation, and Apollo-sync health; a stage funnel; three attention queues; and Hunter-researched Hot, Qualified current account, Watchlist, carry-forward, and blocked evidence in a collapsed drill-down.
+1. **Hunter Control Tower** shows TradeMining, external scout, company research, outreach preparation, and Apollo-sync health; a current-day production summary; separate cross-day workflow inventory; three attention queues; and Hunter-researched Hot, Qualified current account, Watchlist, carry-forward, and blocked evidence in a collapsed drill-down.
 2. **Outreach Queue** defaults to **Needs Attention**, containing drafting, QA, approval, sender assignment, paused-cadence,
    and Apollo enrollment work. Once Apollo confirms enrollment, the contact moves to **Active Cadences** for reply
    monitoring. Bounces and explicit permanent delivery failures move to the read-only **Delivery Failures** history,
