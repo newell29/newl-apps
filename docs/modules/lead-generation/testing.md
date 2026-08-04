@@ -233,9 +233,10 @@ Regression coverage must prove:
 11. completion preloads the prepared tenant-scoped company identity map, uses a bounded 30-second
     interactive transaction, stores tenant-scoped evidence atomically, and refreshes only the dry-run plan; and
 12. a retrieval/synthesis checkpoint resumes only against an identical newly prepared tenant cohort; scheduled
-    runs write the paid-retrieval checkpoint atomically before Luna, an exact same-day retry discovers it
-    automatically, malformed batches are isolated to individual companies with bounded repair attempts,
-    and exhausted company-level failures do not discard other valid synthesis results;
+    runs write the paid-retrieval checkpoint atomically before Luna, transient failures retry at most three times,
+    the recovery API accepts only a same-day tenant-owned failed run and reconstructs its exact cohort, preparation
+    failures retry before paid retrieval, malformed batches are isolated to individual companies with bounded repair
+    attempts, and exhausted company-level failures do not discard other valid synthesis results;
 13. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
 14. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion;
 15. a full evidence ledger executes no follow-up search, a partially full ledger appends only to the remaining capacity, resumed evidence is bounded, and no completion company can exceed 24 evidence records; and

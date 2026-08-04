@@ -18,11 +18,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 Hunter Phase 1 creates a daily, tenant-scoped prospecting plan without performing enrichment or outreach. It combines existing TradeMining company evidence with source-agnostic opportunity signals such as expansion, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and manually researched news.
 
-The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The employee-facing Daily Opportunities page presents researched tiers and evidence; policy, kill-switch, manual evidence, and dry-run controls live on the separate Automation Settings page. No Phase 1 path calls Apollo or sends a customer communication.
+The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The employee-facing Hunter Control Tower presents the five operating stages, funnel, attention queues, and a collapsed researched-opportunity evidence drill-down; policy, kill-switch, manual evidence, and dry-run controls live on the separate Automation Settings page. No Phase 1 path calls Apollo or sends a customer communication.
 
 Phase 2 adds an opt-in external signal scout to the existing Mac-mini Hunter service. It reads a bounded set of recent public-news links, falls back between configured discovery transports, and classifies only headline metadata with local structured output. Accepted signals reuse the existing tenant-scoped signal table; rejected samples, source failures, model name, and prompt version remain in `AutomationJobRun`. The scout is disabled by default pending approval of the exact external sources and their terms. It still cannot call Apollo, change a cadence, or send outreach.
 
-The Sales navigation is arranged around operational intent: Daily Opportunities, Outreach Queue, Sales Opportunities,
+The Sales navigation is arranged around operational intent: Hunter Control Tower, Outreach Queue, Sales Opportunities,
 and Apollo Exceptions are daily work; TradeMining Searches and Found Companies are source data; Automation Settings,
 Scoring & Outcomes, and Health & Logs are administrative and quality-control surfaces. Existing records are preserved.
 
@@ -37,7 +37,7 @@ it verifies the latest Apollo company match, imports a bounded set of buyer cont
 and creates grounded Outreach Plans. Ambiguous/missing Apollo matches are recorded for review and are not searched
 again automatically. Assisted mode never approves a contact or plan, enrolls a cadence, or sends communication.
 
-Daily Opportunities separates the latest successful research cohort from carry-forward outreach. Primary tier counts
+Hunter Control Tower separates today’s successful research cohort from carry-forward outreach. Primary tier counts
 represent only companies completed in the latest run; still-current Hot and Qualified accounts from earlier runs
 remain actionable in a distinct carry-forward section. The planner records the cohort and source research run on
 each decision so an older opportunity cannot be presented as research completed today.

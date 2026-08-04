@@ -368,7 +368,7 @@ describe("Hunter daily profile worker", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout).message).toBe(
-      "Hunter company research completed: 29 companies reached Luna and Kimi, 8 qualified for planning, 4 blocked, and 1 omitted after bounded model-output repair. Review Sales → Daily Opportunities and Admin & Quality → Health & Logs."
+      "Hunter company research completed: 29 companies reached Luna and Kimi, 8 qualified for planning, 4 blocked, and 1 omitted after bounded model-output repair. Review Sales → Hunter Control Tower and Admin & Quality → Health & Logs."
     );
   });
 
@@ -422,10 +422,12 @@ describe("Hunter daily profile worker", () => {
       "spec.loader.exec_module(module)",
       "messages=[]",
       "module.send_teams_message=lambda message: messages.append(message) or True",
-      "module.run_company_research=lambda **_kwargs: (_ for _ in ()).throw(RuntimeError('secret provider response'))",
+      "module.required_env=lambda name: 'redacted'",
+      "module.report_failure=lambda *_args, **_kwargs: None",
+      "module.run_company_research=lambda **_kwargs: (_ for _ in ()).throw(module.HunterCompanyResearchRunError(RuntimeError('invalid schema secret provider response'),'run-1','RETRIEVAL_COMPLETE'))",
       "try:",
       " module.run_company_research_with_notification()",
-      "except RuntimeError:",
+      "except module.HunterCompanyResearchRunError:",
       " pass",
       "print(json.dumps({'messages':messages}))"
     ].join("\n");
@@ -435,7 +437,51 @@ describe("Hunter daily profile worker", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toContain("paid-retrieval checkpoint was preserved");
+    expect(messages[0]).toContain("bounded checkpoint recovery");
     expect(messages[0]).not.toContain("secret provider response");
+  });
+
+  it("retries transient company research against the exact failed run", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls=[]",
+      "failures=[]",
+      "messages=[]",
+      "module.required_env=lambda name: 'redacted'",
+      "module.time.sleep=lambda seconds: None",
+      "module.send_teams_message=lambda message: messages.append(message) or True",
+      "module.report_failure=lambda *_args, **kwargs: failures.append(kwargs)",
+      "def research(**kwargs):",
+      " calls.append(kwargs)",
+      " if len(calls)==1: raise module.HunterCompanyResearchRunError(RuntimeError('database connection pool unavailable'),'run-1','RETRIEVAL_COMPLETE')",
+      " return {'runId':'run-2','researchedCount':30,'acceptedCount':8,'blockedCount':3,'missingCompanyCount':0}",
+      "module.run_company_research=research",
+      "result=module.run_company_research_with_notification()",
+      "print(json.dumps({'calls':calls,'failures':failures,'messages':messages,'result':result}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+    const payload = JSON.parse(result.stdout) as {
+      calls: Array<Record<string, unknown>>;
+      failures: Array<Record<string, unknown>>;
+      messages: string[];
+      result: Record<string, unknown>;
+    };
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(payload.calls).toHaveLength(2);
+    expect(payload.calls[1].recovery_of_run_id).toBe("run-1");
+    expect(payload.failures[0]).toMatchObject({
+      retryable: true,
+      retry_scheduled: true,
+      checkpoint_stage: "RETRIEVAL_COMPLETE"
+    });
+    expect(payload.result.automaticRecovery).toEqual({ recovered: true, attempt: 2 });
+    expect(payload.messages.some((message) => message.includes("attempt 2/3"))).toBe(true);
   });
 });

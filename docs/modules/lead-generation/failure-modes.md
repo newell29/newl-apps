@@ -149,16 +149,21 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   research; it does not prevent valid companies from reaching Kimi.
 - Paid retrieval is atomically checkpointed before Luna runs. The checkpoint contains no provider key,
   is written with mode `0600`, is fingerprinted to the local date, prompt version, and ordered tenant
-  cohort, and is reused only for an exact same-day match. Therefore a Qwen or Kimi failure does not
-  repeat Brave searches during an operator retry.
+  cohort, and is reused only for an exact same-day match. Transient preparation, provider, database,
+  rate-limit, connection, and timeout failures receive no more than three worker attempts. Once a run
+  exists, each retry references that tenant-owned failed run and the server reconstructs the exact cohort;
+  therefore a Luna or Kimi failure does not repeat Brave searches. Invalid schemas, identity failures,
+  and configuration errors do not enter an automatic retry loop.
 - The optional Luna comparison runs only after Qwen has a valid final row and consumes the same bounded
   evidence; it never repeats Brave retrieval. Missing server OpenAI configuration disables the shadow
   visibly. A Luna refusal, timeout, malformed Structured Output, partial batch, or provider failure is
   stored as `PARTIAL`/`ERROR`, reported in the Teams comparison summary, and cannot fail or change the
   normal Luna/Kimi completion. Successful batch fingerprints are reused on a same-run retry.
-- With a Teams target configured, a live company-research failure sends a sanitized alert and a
+- With a Teams target configured, a transient company-research failure sends a sanitized recovery notice,
+  an exhausted or permanent failure sends one final sanitized alert, and a
   completion reports researched, accepted, blocked, and model-output-omission counts. Provider response
-  bodies, search excerpts, credentials, and raw exceptions are not sent to Teams.
+  bodies, search excerpts, credentials, local paths, and raw exceptions are not sent to Teams. Control Tower
+  exposes the current attempt and safe checkpoint stage without exposing checkpoint contents.
 - The completion API accepts at most 24 evidence records per company and validates the cohort atomically.
   Follow-up queries therefore stop before a full evidence ledger, append only into remaining capacity,
   and the worker bounds both resumed checkpoints and the final completion payload. A legacy over-cap

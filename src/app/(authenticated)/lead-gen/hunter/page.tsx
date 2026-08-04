@@ -1,7 +1,10 @@
 import { ModuleKey } from "@prisma/client";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
-import { getHunterControlPlane } from "@/modules/lead-gen/hunter-queries";
+import {
+  getHunterControlTower,
+  type HunterTowerTone
+} from "@/modules/lead-gen/hunter-control-tower";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -14,10 +17,10 @@ const tierOrder = [
   "BLOCKED"
 ] as const;
 
-export default async function DailyOpportunitiesPage() {
+export default async function HunterControlTowerPage() {
   const context = await getAuthenticatedContext();
   await requireModule(context, ModuleKey.LEAD_GEN);
-  const data = await getHunterControlPlane(context);
+  const data = await getHunterControlTower(context);
   const researched = data.latestResearchSignals.filter((signal) =>
     Boolean(researchRecord(signal.evidence))
   );
@@ -38,126 +41,241 @@ export default async function DailyOpportunitiesPage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Sales"
-        title="Daily Opportunities"
-        description="Hunter's small, researched shortlist: who is worth pursuing now, why they may talk to Newl, and which evidence supports the recommendation."
+        title="Hunter Control Tower"
+        description="One operational view of today’s lead flow—from TradeMining and external discovery through research, outreach preparation, Apollo, replies, and meetings."
       />
 
       <section className="rounded-lg border border-accentBorder bg-accentSoft p-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="font-semibold text-foreground">Daily workflow</p>
+            <p className="font-semibold text-foreground">Today’s operating picture</p>
             <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
-              Review Hot and Qualified opportunities here. Approved contacts move to Outreach Queue; a meaningful
-              reply or meeting moves the account to Sales Opportunities.
+              Hunter runs the pipeline automatically. Use the attention links only when an Apollo identity,
+              failed plan, delivery problem, or configuration issue genuinely needs you.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-sm font-semibold">
-            <Link href="/lead-gen/outreach" className="rounded-md bg-primary px-3 py-2 text-primaryForeground">Outreach Queue</Link>
+            <Link href="/lead-gen/outreach" className="rounded-md bg-primary px-3 py-2 text-primaryForeground">Review outreach</Link>
+            <Link href="/lead-gen/apollo-review" className="rounded-md border border-border bg-card px-3 py-2">Apollo exceptions</Link>
             <Link href="/lead-gen/automation-settings" className="rounded-md border border-border bg-card px-3 py-2">Automation settings</Link>
           </div>
         </div>
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <TierMetric label="Hot opportunity" value={byTier.HOT_OPPORTUNITY.length} tone="hot" />
-        <TierMetric label="Qualified current account" value={byTier.QUALIFIED_CURRENT_ACCOUNT.length} tone="qualified" />
-        <TierMetric label="Watchlist" value={byTier.WATCHLIST.length} tone="watch" />
-        <TierMetric label="Blocked" value={byTier.BLOCKED.length} tone="blocked" />
-      </div>
-
-      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <h2 className="font-semibold text-foreground">What these lists represent</h2>
-        <p className="mt-1 text-sm leading-6 text-mutedForeground">
-          The tier counts and primary opportunity groups below show only the latest successful company-research
-          cohort. Still-current Hot and Qualified accounts from earlier runs remain available in a separate
-          carry-forward section so outreach is not lost or mistaken for research completed today.
-        </p>
-      </section>
-
       <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="font-semibold text-foreground">Automation status</h2>
-            <p className="mt-1 text-sm text-mutedForeground">A compact health check for today&apos;s research, without exposing the full audit ledger.</p>
+            <h2 className="font-semibold text-foreground">Pipeline stages</h2>
+            <p className="mt-1 text-sm text-mutedForeground">
+              Current local-day state in {data.timeZone}. Green is complete, blue is running, amber needs attention.
+            </p>
           </div>
           <span className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold">
             {data.policy.killSwitch ? "Stopped" : formatEnum(data.policy.mode)}
           </span>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <RunStatus
-            label="Signal scout"
-            status={data.latestSignalScoutRun?.status ?? "Not run"}
-            date={data.latestSignalScoutRun?.startedAt}
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <StageCard
+            label="1. TradeMining"
+            tone={data.stages.tradeMining.tone}
+            value={`${data.stages.tradeMining.completedProfiles}/${data.stages.tradeMining.enabledProfiles} profiles`}
+            detail={`${data.stages.tradeMining.qualifyingCompanies} qualifying companies · ${data.stages.tradeMining.exports} exported records`}
+            href="/lead-gen/search-profiles"
           />
-          <RunStatus
-            label="Company research"
-            status={data.latestCompanyResearchRun?.status ?? "Not run"}
-            date={data.latestCompanyResearchRun?.startedAt}
+          <StageCard
+            label="2. External scout"
+            tone={data.stages.scout.tone}
+            value={data.stages.scout.status ? formatEnum(data.stages.scout.status) : "Waiting"}
+            detail={`${data.stages.scout.promotedCompanies} companies promoted from ${data.stages.scout.selectedArticles} new results`}
+            href="/operations/logs"
           />
-          <RunStatus
-            label="Prospecting plan"
-            status={data.latestRun?.status ?? "Not run"}
-            date={data.latestRun?.startedAt}
+          <StageCard
+            label="3. Company research"
+            tone={data.stages.research.tone}
+            value={data.stages.research.status ? formatEnum(data.stages.research.status) : "Waiting"}
+            detail={`${data.stages.research.researchedCompanies}/${data.stages.research.selectedCompanies} researched · ${data.stages.research.qualifiedCompanies} qualified`}
+            href="/operations/logs"
+          />
+          <StageCard
+            label="4. Outreach prep"
+            tone={data.stages.outreach.tone}
+            value={data.stages.outreach.status ? formatEnum(data.stages.outreach.status) : "Waiting"}
+            detail={`${data.stages.outreach.actionablePlans} plans ready · ${data.stages.outreach.qaFailedPlans} failed QA`}
+            href="/lead-gen/outreach"
+          />
+          <StageCard
+            label="5. Apollo sync"
+            tone={data.stages.apollo.tone}
+            value={data.stages.apollo.lastSuccessfulSyncAt ? "Connected" : "Waiting"}
+            detail={`${data.stages.apollo.reviewCounts.needsReview + data.stages.apollo.reviewCounts.mappedNoEmployees} exceptions · ${data.stages.apollo.failedSyncContacts} sync failures`}
+            href="/lead-gen/apollo-review"
           />
         </div>
       </section>
 
-      <OpportunityGroup
-        title="Hot opportunities"
-        description="Verified recent demand events with strong service fit. These deserve the first human review."
-        signals={byTier.HOT_OPPORTUNITY}
-        empty="No Hot opportunity cleared the evidence and validation gates in the latest research."
-      />
-      <OpportunityGroup
-        title="Qualified current accounts"
-        description="Strong Newl fit without a verified time-sensitive trigger. Good candidates for deliberate outbound."
-        signals={byTier.QUALIFIED_CURRENT_ACCOUNT}
-        empty="No Qualified current accounts are available."
-      />
-      <OpportunityGroup
-        title="Watchlist"
-        description="Useful companies with weaker timing, accessibility, or evidence. Hunter keeps them visible without crowding active outreach."
-        signals={byTier.WATCHLIST}
-        empty="No Watchlist companies are available."
-        collapsed
-      />
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <h2 className="font-semibold text-foreground">Today’s funnel</h2>
+        <p className="mt-1 text-sm text-mutedForeground">
+          Counts are stage-specific, not a promise that every source company advances. They make drop-off visible without opening audit logs.
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-9">
+          <FunnelMetric label="Sourced" value={data.funnel.sourceCompanies} />
+          <FunnelMetric label="Researched" value={data.funnel.researchedCompanies} />
+          <FunnelMetric label="Qualified" value={data.funnel.qualifiedCompanies} />
+          <FunnelMetric label="Contacts" value={data.funnel.contactsFound} />
+          <FunnelMetric label="Plans ready" value={data.funnel.plansReady} />
+          <FunnelMetric label="Needs attention" value={data.funnel.needsAttention} attention={data.funnel.needsAttention > 0} />
+          <FunnelMetric label="Active" value={data.funnel.activeCadences} />
+          <FunnelMetric label="Engaged" value={data.funnel.engagedContacts} />
+          <FunnelMetric label="Meetings" value={data.funnel.meetingContacts} />
+        </div>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-3">
+        <AttentionCard
+          label="Outreach requiring review"
+          value={data.funnel.needsAttention}
+          detail={`${data.stages.outreach.qaFailedPlans} plans failed QA`}
+          href="/lead-gen/outreach"
+        />
+        <AttentionCard
+          label="Apollo identity exceptions"
+          value={data.stages.apollo.reviewCounts.needsReview + data.stages.apollo.reviewCounts.mappedNoEmployees}
+          detail={data.identityMetrics.autoMatchRate === null ? "Auto-match baseline pending" : `${data.identityMetrics.autoMatchRate}% auto-match rate (7d)`}
+          href="/lead-gen/apollo-review"
+        />
+        <AttentionCard
+          label="Delivery failures"
+          value={data.funnel.deliveryFailures}
+          detail={`${data.stages.apollo.failedSyncContacts} Apollo records need sync attention`}
+          href="/lead-gen/outreach?view=delivery-failures"
+        />
+      </section>
+
+      {data.stages.research.recovery.recoveryOfRunId || data.stages.research.recovery.retryScheduled ? (
+        <section className="rounded-lg border border-accentBorder bg-accentSoft p-4">
+          <h2 className="font-semibold text-foreground">Company-research recovery</h2>
+          <p className="mt-1 text-sm text-mutedForeground">
+            {data.stages.research.recovery.recovered
+              ? `Recovered successfully on attempt ${data.stages.research.recovery.attempt} using the preserved ${formatCheckpoint(data.stages.research.recovery.checkpointStage)} checkpoint.`
+              : data.stages.research.recovery.retryScheduled
+                ? `A bounded retry is scheduled from the preserved ${formatCheckpoint(data.stages.research.recovery.checkpointStage)} checkpoint.`
+                : `Recovery attempt ${data.stages.research.recovery.attempt} is being tracked for this exact company cohort.`}
+          </p>
+        </section>
+      ) : null}
 
       <details className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <summary className="cursor-pointer font-semibold text-foreground">
-          Carry-forward outreach ({carryForwardByTier.HOT_OPPORTUNITY.length +
-            carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT.length})
+          Researched opportunity details ({researched.length} today · {carryForward.length} carry-forward)
         </summary>
         <p className="mt-2 text-sm text-mutedForeground">
-          These were researched in an earlier run but still pass the current freshness, suppression, and
-          opportunity-tier rules. Hunter may continue contact discovery for them; they are not counted as
-          today&apos;s research.
+          This replaces the old Daily Opportunities page as the primary view while preserving its evidence-rich
+          research cards for audit and deeper review.
         </p>
-        <div className="mt-4 grid gap-3">
-          {[...carryForwardByTier.HOT_OPPORTUNITY, ...carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT]
-            .map((signal) => <OpportunityCard key={signal.id} signal={signal} />)}
-          {carryForwardByTier.HOT_OPPORTUNITY.length +
-            carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT.length === 0 ? (
-              <p className="text-sm text-mutedForeground">No current carry-forward opportunities.</p>
-            ) : null}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <TierMetric label="Hot opportunity" value={byTier.HOT_OPPORTUNITY.length} tone="hot" />
+          <TierMetric label="Qualified current account" value={byTier.QUALIFIED_CURRENT_ACCOUNT.length} tone="qualified" />
+          <TierMetric label="Watchlist" value={byTier.WATCHLIST.length} tone="watch" />
+          <TierMetric label="Blocked" value={byTier.BLOCKED.length} tone="blocked" />
         </div>
-      </details>
-
-      <details className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <summary className="cursor-pointer font-semibold text-foreground">
-          Blocked and source-candidate audit ({byTier.BLOCKED.length} blocked · {data.latestRun?.hunterProspectingDecisions.length ?? 0} planned)
-        </summary>
-        <p className="mt-2 text-sm text-mutedForeground">
-          This audit area is intentionally collapsed. It contains rejected research and the raw source plan used to
-          create the shortlist; neither belongs in normal daily sales work.
-        </p>
-        <div className="mt-4 grid gap-3">
-          {byTier.BLOCKED.map((signal) => <OpportunityCard key={signal.id} signal={signal} />)}
-          {byTier.BLOCKED.length === 0 ? <p className="text-sm text-mutedForeground">No blocked researched companies.</p> : null}
+        <div className="mt-5 space-y-4">
+          <OpportunityGroup
+            title="Hot opportunities"
+            description="Verified recent demand events with strong service fit."
+            signals={byTier.HOT_OPPORTUNITY}
+            empty="No Hot opportunity cleared the evidence and validation gates today."
+          />
+          <OpportunityGroup
+            title="Qualified current accounts"
+            description="Strong Newl fit without a verified time-sensitive trigger."
+            signals={byTier.QUALIFIED_CURRENT_ACCOUNT}
+            empty="No Qualified current accounts are available today."
+          />
+          <OpportunityGroup
+            title="Watchlist"
+            description="Useful companies with weaker timing, accessibility, or evidence."
+            signals={byTier.WATCHLIST}
+            empty="No Watchlist companies are available."
+            collapsed
+          />
+          <OpportunityGroup
+            title="Carry-forward outreach"
+            description="Still-current Hot and Qualified accounts from earlier runs."
+            signals={[...carryForwardByTier.HOT_OPPORTUNITY, ...carryForwardByTier.QUALIFIED_CURRENT_ACCOUNT]}
+            empty="No current carry-forward opportunities."
+            collapsed
+          />
+          <OpportunityGroup
+            title="Blocked audit"
+            description="Rejected research remains available for quality review but not normal daily sales work."
+            signals={byTier.BLOCKED}
+            empty="No blocked researched companies."
+            collapsed
+          />
         </div>
       </details>
     </div>
   );
+}
+
+function StageCard({
+  label,
+  tone,
+  value,
+  detail,
+  href
+}: {
+  label: string;
+  tone: HunterTowerTone;
+  value: string;
+  detail: string;
+  href: string;
+}) {
+  const styles: Record<HunterTowerTone, string> = {
+    healthy: "border-success/30 bg-success/10",
+    running: "border-primary/30 bg-accentSoft",
+    attention: "border-warning/40 bg-warning/10",
+    waiting: "border-border bg-muted/30"
+  };
+  return (
+    <Link href={href} className={`rounded-md border p-3 transition hover:border-primary ${styles[tone]}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-2 font-semibold text-foreground">{value}</p>
+      <p className="mt-1 text-xs leading-5 text-mutedForeground">{detail}</p>
+    </Link>
+  );
+}
+
+function FunnelMetric({ label, value, attention = false }: { label: string; value: number; attention?: boolean }) {
+  return (
+    <div className={`rounded-md border p-3 ${attention ? "border-warning/40 bg-warning/10" : "border-border bg-muted/30"}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function AttentionCard({ label, value, detail, href }: { label: string; value: number; detail: string; href: string }) {
+  return (
+    <Link href={href} className="rounded-lg border border-border bg-card p-4 shadow-sm transition hover:border-primary">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-foreground">{label}</p>
+          <p className="mt-1 text-sm text-mutedForeground">{detail}</p>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-sm font-semibold ${value > 0 ? "bg-warning/15 text-foreground" : "bg-success/10 text-foreground"}`}>
+          {value}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function formatCheckpoint(value: string | null) {
+  if (value === "SYNTHESIS_COMPLETE") return "retrieval + synthesis";
+  if (value === "RETRIEVAL_COMPLETE") return "paid retrieval";
+  return "available";
 }
 
 function OpportunityGroup({
@@ -293,10 +411,6 @@ function TierMetric({ label, value, tone }: { label: string; value: number; tone
     blocked: "border-border bg-muted"
   };
   return <div className={`rounded-lg border p-4 ${styles[tone]}`}><p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p><p className="mt-2 text-2xl font-semibold text-foreground">{value}</p></div>;
-}
-
-function RunStatus({ label, status, date }: { label: string; status: string; date?: Date }) {
-  return <div className="rounded-md border border-border bg-muted/30 p-3"><p className="text-xs uppercase tracking-wide text-mutedForeground">{label}</p><p className="mt-1 font-semibold text-foreground">{formatEnum(status)}</p><p className="mt-1 text-xs text-mutedForeground">{date ? date.toLocaleString("en-US") : "Waiting for first run"}</p></div>;
 }
 
 function researchRecord(value: unknown): Record<string, unknown> | null {

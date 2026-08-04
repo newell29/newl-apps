@@ -63,12 +63,12 @@ export default async function SalesOpportunitiesPage({
       <section className="rounded-lg border border-accentBorder bg-accentSoft p-4 text-sm text-foreground">
         <p className="font-semibold">A company enters here after a meaningful reply or meeting signal.</p>
         <p className="mt-1 text-mutedForeground">
-          Hunter rankings belong in Daily Opportunities, while contact discovery, message drafts, cadence enrollment,
+          Hunter rankings belong in Hunter Control Tower, while contact discovery, message drafts, cadence enrollment,
           and unanswered follow-ups belong in the Outreach Queue.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <Link className="rounded-md border border-border bg-card px-3 py-1.5 font-semibold" href="/lead-gen/hunter">
-            Daily Opportunities
+            Hunter Control Tower
           </Link>
           <Link className="rounded-md border border-border bg-card px-3 py-1.5 font-semibold" href="/lead-gen/outreach">
             Outreach Queue
@@ -205,7 +205,7 @@ export default async function SalesOpportunitiesPage({
           <div className="px-6 py-14 text-center">
             <h2 className="font-semibold text-foreground">No sales opportunities in this view</h2>
             <p className="mt-2 text-sm text-mutedForeground">
-              That is okay: records remain in Daily Opportunities and Outreach Queue until a real engagement signal occurs.
+              That is okay: records remain in Hunter Control Tower and Outreach Queue until a real engagement signal occurs.
             </p>
             <Link href="/lead-gen/outreach" className="mt-4 inline-flex rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
               Open Outreach Queue

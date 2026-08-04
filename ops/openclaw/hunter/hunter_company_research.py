@@ -107,6 +107,32 @@ PUBLIC_DOMAIN_PATTERN = re.compile(
     r"([A-Za-z0-9](?:[A-Za-z0-9-]{0,62}\.)+[A-Za-z]{2,24})\b",
     re.IGNORECASE,
 )
+TRANSIENT_RESEARCH_ERROR_PATTERN = re.compile(
+    r"\b(?:429|500|502|503|504|connection|database|deadlock|overload(?:ed)?|"
+    r"pool|rate[ -]?limit|temporar(?:y|ily)|time(?:d)?[ -]?out|unavailable)\b",
+    re.IGNORECASE,
+)
+
+
+class HunterCompanyResearchRunError(RuntimeError):
+    def __init__(
+        self,
+        error: Exception,
+        run_id: Optional[str],
+        checkpoint_stage: Optional[str],
+    ) -> None:
+        super().__init__(str(error))
+        self.run_id = run_id
+        self.checkpoint_stage = checkpoint_stage
+        self.retryable = is_retryable_company_research_error(error)
+
+
+def is_retryable_company_research_error(error: Exception) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in {408, 409, 425, 429} or error.code >= 500
+    if isinstance(error, (TimeoutError, ConnectionError, urllib.error.URLError)):
+        return True
+    return bool(TRANSIENT_RESEARCH_ERROR_PATTERN.search(str(error)))
 
 
 SYNTHESIS_SCHEMA = {
@@ -2612,13 +2638,19 @@ def prepare_request(
     token: str,
     force: bool,
     company_keys: Optional[list[str]],
+    recovery_of_run_id: Optional[str] = None,
 ) -> dict[str, Any]:
+    payload: dict[str, Any] = {"force": force}
+    if company_keys is not None:
+        payload["companyKeys"] = company_keys
+    if recovery_of_run_id:
+        payload["recoveryOfRunId"] = recovery_of_run_id
     return api_request(
         base_url,
         token,
         "POST",
         "/api/lead-gen/hunter/company-research/prepare",
-        {"force": force, "companyKeys": company_keys} if company_keys is not None else {"force": force},
+        payload,
     )
 
 
@@ -2786,7 +2818,16 @@ def submit_luna_primary_batches(
     }
 
 
-def report_failure(base_url: str, token: str, run_id: Optional[str], error: Exception) -> None:
+def report_failure(
+    base_url: str,
+    token: str,
+    run_id: Optional[str],
+    error: Exception,
+    *,
+    retryable: bool = False,
+    retry_scheduled: bool = False,
+    checkpoint_stage: Optional[str] = None,
+) -> None:
     if not run_id:
         return
     try:
@@ -2795,7 +2836,13 @@ def report_failure(base_url: str, token: str, run_id: Optional[str], error: Exce
             token,
             "POST",
             "/api/lead-gen/hunter/company-research/fail",
-            {"runId": run_id, "errorMessage": str(error)[:1_000]},
+            {
+                "runId": run_id,
+                "errorMessage": str(error)[:1_000],
+                "retryable": retryable,
+                "retryScheduled": retry_scheduled,
+                "checkpointStage": checkpoint_stage,
+            },
         )
     except Exception:
         pass
@@ -2873,10 +2920,20 @@ def run_company_research(
     replay_output: Optional[str] = None,
     resume_checkpoint: Optional[str] = None,
     research_only: bool = False,
+    recovery_of_run_id: Optional[str] = None,
 ) -> dict[str, Any]:
     base_url = required_env("NEWL_APPS_BASE_URL")
     token = required_env("INGESTION_API_TOKEN")
-    prepared = prepare_request(base_url, token, force, company_keys)
+    try:
+        prepared = prepare_request(
+            base_url,
+            token,
+            force,
+            company_keys,
+            recovery_of_run_id=recovery_of_run_id,
+        )
+    except Exception as error:
+        raise HunterCompanyResearchRunError(error, None, None) from error
     data = prepared.get("data") if isinstance(prepared.get("data"), dict) else {}
     if data.get("state") != "ready":
         return data
@@ -2885,6 +2942,7 @@ def run_company_research(
     if not run_id or packet is None:
         raise RuntimeError("Newl Apps did not return a Hunter company-research packet.")
 
+    checkpoint_stage: Optional[str] = None
     try:
         candidates = packet.get("candidates") if isinstance(packet.get("candidates"), list) else []
         provider = (clean(os.environ.get("HUNTER_RESEARCH_SEARCH_PROVIDER")) or "BRAVE").upper()
@@ -2996,6 +3054,7 @@ def run_company_research(
                     "pageFetchCount": page_fetch_count,
                 },
             )
+            checkpoint_stage = "RETRIEVAL_COMPLETE"
 
         if checkpoint_stage == "SYNTHESIS_COMPLETE":
             raw_synthesis = checkpoint.get("synthesisByKey")
@@ -3154,6 +3213,7 @@ def run_company_research(
                     "synthesisFailures": synthesis_failures,
                 },
             )
+            checkpoint_stage = "SYNTHESIS_COMPLETE"
         if checkpoint_stage == "SYNTHESIS_COMPLETE":
             synthesis_failures: dict[str, str] = {}
             synthesized_candidates = [
@@ -3351,8 +3411,11 @@ def run_company_research(
             )
         return result
     except Exception as error:
-        report_failure(base_url, token, run_id, error)
-        raise
+        raise HunterCompanyResearchRunError(
+            error,
+            run_id,
+            checkpoint_stage,
+        ) from error
 
 
 def read_company_keys(path: Optional[str]) -> Optional[list[str]]:

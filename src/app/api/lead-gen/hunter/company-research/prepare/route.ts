@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({})) as {
       force?: unknown;
       companyKeys?: unknown;
+      recoveryOfRunId?: unknown;
     };
     const force = body.force === true;
     const companyKeys = body.companyKeys === undefined
@@ -22,10 +23,19 @@ export async function POST(request: Request) {
     if (companyKeys === null) {
       return NextResponse.json({ error: "Hunter companyKeys must be an array." }, { status: 400 });
     }
+    const recoveryOfRunId = body.recoveryOfRunId === undefined
+      ? undefined
+      : typeof body.recoveryOfRunId === "string" && body.recoveryOfRunId.trim()
+        ? body.recoveryOfRunId.trim()
+        : null;
+    if (recoveryOfRunId === null) {
+      return NextResponse.json({ error: "Hunter recoveryOfRunId must be a non-empty string." }, { status: 400 });
+    }
     const result = await prepareHunterCompanyResearchRun({
       tenantId: tenant.tenantId,
       force,
-      companyKeys
+      companyKeys,
+      recoveryOfRunId
     });
     return NextResponse.json({ data: result });
   } catch (error) {

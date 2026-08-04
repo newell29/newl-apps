@@ -33,7 +33,7 @@ const navEntries: NavNode[] = [
     id: "sales",
     label: "Sales",
     children: [
-      { id: "lead-hunter", href: "/lead-gen/hunter", label: "Daily Opportunities", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-hunter", href: "/lead-gen/hunter", label: "Hunter Control Tower", moduleKey: "LEAD_GEN" as ModuleKey },
       { id: "lead-outreach", href: "/lead-gen/outreach", label: "Outreach Queue", moduleKey: "LEAD_GEN" as ModuleKey },
       { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Sales Opportunities", moduleKey: "LEAD_GEN" as ModuleKey },
       { id: "lead-apollo-review", href: "/lead-gen/apollo-review", label: "Apollo Exceptions", moduleKey: "LEAD_GEN" as ModuleKey },
