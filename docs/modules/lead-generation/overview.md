@@ -18,7 +18,7 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 Hunter Phase 1 creates a daily, tenant-scoped prospecting plan without performing enrichment or outreach. It combines existing TradeMining company evidence with source-agnostic opportunity signals such as expansion, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and manually researched news.
 
-The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The employee-facing Hunter Control Tower presents the five operating stages, funnel, attention queues, and a collapsed researched-opportunity evidence drill-down; policy, kill-switch, manual evidence, and dry-run controls live on the separate Automation Settings page. No Phase 1 path calls Apollo or sends a customer communication.
+The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The employee-facing Hunter Control Tower presents the five operating stages, a local-day production summary, separate current workflow inventory, attention queues, and a collapsed researched-opportunity evidence drill-down; policy, kill-switch, manual evidence, and dry-run controls live on the separate Automation Settings page. No Phase 1 path calls Apollo or sends a customer communication.
 
 Phase 2 adds an opt-in external signal scout to the existing Mac-mini Hunter service. It reads a bounded set of recent public-news links, falls back between configured discovery transports, and classifies only headline metadata with local structured output. Accepted signals reuse the existing tenant-scoped signal table; rejected samples, source failures, model name, and prompt version remain in `AutomationJobRun`. The scout is disabled by default pending approval of the exact external sources and their terms. It still cannot call Apollo, change a cadence, or send outreach.
 
@@ -41,6 +41,11 @@ Hunter Control Tower separates today’s successful research cohort from carry-f
 represent only companies completed in the latest run; still-current Hot and Qualified accounts from earlier runs
 remain actionable in a distinct carry-forward section. The planner records the cohort and source research run on
 each decision so an older opportunity cannot be presented as research completed today.
+
+The production summary is also local-day scoped across the downstream handoff: source matches, selected companies,
+new versus refresh composition, researched and qualified counts, Apollo contacts found, and plans ready must all
+come from runs started on the current tenant-local day. Needs Attention, active cadences, delivery failures,
+engagements, and meetings are labeled separately as current cross-day workflow inventory.
 
 Research preparation resolves a canonical company identity before selecting the bounded cohort. A normalized company
 domain takes precedence over legal suffixes and branch labels, preventing aliases of the same operating company from

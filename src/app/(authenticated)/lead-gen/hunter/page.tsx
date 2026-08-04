@@ -114,27 +114,43 @@ export default async function HunterControlTowerPage() {
       </section>
 
       <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
-        <h2 className="font-semibold text-foreground">Today’s funnel</h2>
+        <h2 className="font-semibold text-foreground">Today’s production</h2>
         <p className="mt-1 text-sm text-mutedForeground">
-          Counts are stage-specific, not a promise that every source company advances. They make drop-off visible without opening audit logs.
+          Only work tied to the current local day is shown here. Contacts and plans remain zero until today’s outreach handoff runs.
         </p>
-        <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-9">
-          <FunnelMetric label="Sourced" value={data.funnel.sourceCompanies} />
+        <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-8">
+          <FunnelMetric label="Source matches" value={data.funnel.sourceCompanies} />
+          <FunnelMetric label="Selected" value={data.funnel.selectedCompanies} />
+          <FunnelMetric label="New" value={data.funnel.newCompanies} />
+          <FunnelMetric label="Refreshes" value={data.funnel.refreshCompanies} />
           <FunnelMetric label="Researched" value={data.funnel.researchedCompanies} />
           <FunnelMetric label="Qualified" value={data.funnel.qualifiedCompanies} />
-          <FunnelMetric label="Contacts" value={data.funnel.contactsFound} />
+          <FunnelMetric label="Contacts found" value={data.funnel.contactsFound} />
           <FunnelMetric label="Plans ready" value={data.funnel.plansReady} />
-          <FunnelMetric label="Needs attention" value={data.funnel.needsAttention} attention={data.funnel.needsAttention > 0} />
-          <FunnelMetric label="Active" value={data.funnel.activeCadences} />
-          <FunnelMetric label="Engaged" value={data.funnel.engagedContacts} />
-          <FunnelMetric label="Meetings" value={data.funnel.meetingContacts} />
+        </div>
+        <p className="mt-3 text-xs text-mutedForeground">
+          Cohort controls suppressed {data.funnel.suppressedRepeats} companies researched in the prior 90 days and {data.funnel.suppressedActiveOutreach} companies already in active outreach.
+        </p>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
+        <h2 className="font-semibold text-foreground">Current workflow</h2>
+        <p className="mt-1 text-sm text-mutedForeground">
+          Live inventory across all run dates. These are current states, not claims about what Hunter produced today.
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-5">
+          <FunnelMetric label="Needs attention" value={data.workflow.needsAttention} attention={data.workflow.needsAttention > 0} />
+          <FunnelMetric label="Active cadences" value={data.workflow.activeCadences} />
+          <FunnelMetric label="Delivery failures" value={data.workflow.deliveryFailures} attention={data.workflow.deliveryFailures > 0} />
+          <FunnelMetric label="Engaged" value={data.workflow.engagedContacts} />
+          <FunnelMetric label="Meetings" value={data.workflow.meetingContacts} />
         </div>
       </section>
 
       <section className="grid gap-3 md:grid-cols-3">
         <AttentionCard
           label="Outreach requiring review"
-          value={data.funnel.needsAttention}
+          value={data.workflow.needsAttention}
           detail={`${data.stages.outreach.qaFailedPlans} plans failed QA`}
           href="/lead-gen/outreach"
         />
@@ -146,7 +162,7 @@ export default async function HunterControlTowerPage() {
         />
         <AttentionCard
           label="Delivery failures"
-          value={data.funnel.deliveryFailures}
+          value={data.workflow.deliveryFailures}
           detail={`${data.stages.apollo.failedSyncContacts} Apollo records need sync attention`}
           href="/lead-gen/outreach?view=delivery-failures"
         />

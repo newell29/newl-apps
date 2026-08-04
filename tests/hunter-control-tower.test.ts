@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   readRecoveryState,
+  resolveTowerLocalDayRun,
   resolveTowerResearchSelection,
+  resolveTowerResearchSelectionForRun,
   resolveTowerSelectedCompanyCount
 } from "@/modules/lead-gen/hunter-control-tower";
 
@@ -37,6 +39,33 @@ describe("Hunter control tower research selection", () => {
       null,
       { researchedCount: 28, missingCompanyCount: 2 }
     )).toBe(30);
+  });
+
+  it("does not reuse a prior successful run's selection for today's run", () => {
+    expect(resolveTowerResearchSelectionForRun(
+      {
+        id: "today-running",
+        input: { selection: { selectedCompanyCount: 50, newCompanyCount: 48 } }
+      },
+      "yesterday-success",
+      { selectedCompanyCount: 30, newCompanyCount: 0 }
+    )).toMatchObject({ selectedCompanyCount: 50, newCompanyCount: 48 });
+  });
+});
+
+describe("Hunter control tower local-day runs", () => {
+  const now = new Date("2026-08-05T13:00:00.000Z");
+
+  it("includes an outreach handoff from the current Toronto day", () => {
+    const run = { id: "today", startedAt: new Date("2026-08-05T12:15:00.000Z") };
+
+    expect(resolveTowerLocalDayRun(run, now, "America/Toronto")).toBe(run);
+  });
+
+  it("does not carry yesterday's outreach contacts into today's production", () => {
+    const run = { id: "yesterday", startedAt: new Date("2026-08-05T03:59:59.000Z") };
+
+    expect(resolveTowerLocalDayRun(run, now, "America/Toronto")).toBeNull();
   });
 });
 
