@@ -11,6 +11,7 @@ This knowledge base is the approved repository-local starting point for OpenClaw
 - Modules: `docs/modules/README.md`
 - Customer Intelligence: `docs/modules/customer-intelligence/overview.md`
 - AI and OpenClaw: `docs/ai/overview.md`
+- AI Development Engine long-term architecture: `docs/ai/ai-development-engine.md`
 - Nemo Garland production rollout: `docs/ai/nemo-garland-production-rollout.md`
 - Garland customer workflow: `docs/customers/garland/overview.md`
 - WMS / Teamship: `docs/wms/overview.md`

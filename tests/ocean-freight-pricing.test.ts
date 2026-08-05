@@ -26,6 +26,7 @@ import {
 } from "@/modules/ocean-freight-pricing/ingestion";
 import { getComputedOceanRateStatus, getOceanFreightJobsShell, getOceanFreightSourcesShell } from "@/modules/ocean-freight-pricing/queries";
 import { resolveMicrosoftGraphMailboxMessagesPath } from "@/server/integrations/microsoft-graph-mail";
+import type { AuthenticatedContext } from "@/server/tenant-context";
 
 describe("ocean freight pricing status", () => {
   const today = new Date("2026-07-07T12:00:00.000Z");
@@ -44,7 +45,15 @@ describe("ocean freight pricing status", () => {
 });
 
 describe("ocean freight pricing email ingestion", () => {
-  const ctx = { tenantId: "tenant-a", userId: "user-a", role: PlatformRole.MANAGER };
+  const ctx = {
+    tenantId: "tenant-a",
+    tenantSlug: "tenant-a",
+    tenantName: "Tenant A",
+    userId: "user-a",
+    userEmail: "user@example.com",
+    userName: "Synthetic User",
+    role: PlatformRole.MANAGER
+  } satisfies AuthenticatedContext;
 
   beforeEach(() => {
     vi.clearAllMocks();

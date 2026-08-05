@@ -22,7 +22,7 @@ function run(
   command: string,
   args: string[],
   cwd: string,
-  extraEnv: NodeJS.ProcessEnv = {}
+  extraEnv: Partial<NodeJS.ProcessEnv> = {}
 ) {
   return spawnSync(command, args, {
     cwd,

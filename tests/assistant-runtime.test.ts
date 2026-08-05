@@ -137,9 +137,16 @@ describe("runAssistantPrompt", () => {
       intent: "TEAMSHIP_CLARIFICATION",
       sources: []
     });
-    expect(result.answer).toContain("customer identifier");
+    expect(result.answer).toContain("configured customer name");
+    expect(result.answer).toContain("configured warehouse name");
     expect(searchAssistantKnowledge).not.toHaveBeenCalled();
-    expect(integrationCredentialFindFirst).not.toHaveBeenCalled();
+    expect(integrationCredentialFindFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-1",
+        provider: IntegrationProvider.TEAMSHIP,
+        name: "Teamship WMS"
+      }
+    });
   });
 
   it("loads the newest assistant provider row deterministically", async () => {
