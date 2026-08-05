@@ -12,6 +12,7 @@ import json
 import os
 import re
 import socket
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -3436,6 +3437,10 @@ def main() -> int:
     parser.add_argument("--output", help="Optional path for the redacted completion ledger.")
     parser.add_argument("--resume-checkpoint", help="Resume a matching retrieval or Qwen checkpoint.")
     parser.add_argument(
+        "--recovery-run-id",
+        help="Recover the exact tenant-scoped cohort from a failed Newl Apps company-research run.",
+    )
+    parser.add_argument(
         "--research-only",
         action="store_true",
         help="Stop after retrieval, Luna synthesis, and optional Qwen shadow comparison without calling Kimi.",
@@ -3450,6 +3455,7 @@ def main() -> int:
                 replay_output=args.output,
                 resume_checkpoint=args.resume_checkpoint,
                 research_only=args.research_only,
+                recovery_of_run_id=clean(args.recovery_run_id),
             ),
             indent=2,
         )
