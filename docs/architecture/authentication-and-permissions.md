@@ -15,6 +15,10 @@ Key repository evidence: `src/components/app-shell.tsx`, `prisma/schema.prisma`,
 - Background or scheduled work is represented by API routes such as `/api/assistant/automations/run-due`, `/api/shipment-documents/teamship-review/email-intake/scheduled`, scripts under `scripts`, and database run/job models including `AutomationJobRun`, `AssistantAutomationRun`, `TeamshipDailySyncRun`, `GarlandEmailSyncRun`, and `TeamshipUpdateJob`.
 - Environment variable names are documented in `.env.example`; real values must never be committed.
 
+## Customer Intelligence permissions
+
+`CUSTOMER_INTELLIGENCE` is leadership-only in v1. The role matrix grants ADMIN and MANAGER all modules and adds the module to FINANCE; SALES and OPERATIONS lists are unchanged. Because READ_ONLY resolves to `"ALL"`, the module guard enforces leadership access directly: `requireReadAccess` requires ADMIN/MANAGER/FINANCE, `requireMatchApproval` requires ADMIN/FINANCE, and `requireAdminSettings` requires ADMIN. See `docs/modules/customer-intelligence/permissions.md`.
+
 ## Important files
 
 - `package.json` for commands.

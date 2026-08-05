@@ -15,6 +15,10 @@ Key repository evidence: `src/components/app-shell.tsx`, `prisma/schema.prisma`,
 - Background or scheduled work is represented by API routes such as `/api/assistant/automations/run-due`, `/api/shipment-documents/teamship-review/email-intake/scheduled`, scripts under `scripts`, and database run/job models including `AutomationJobRun`, `AssistantAutomationRun`, `TeamshipDailySyncRun`, `GarlandEmailSyncRun`, and `TeamshipUpdateJob`.
 - Environment variable names are documented in `.env.example`; real values must never be committed.
 
+## Customer Intelligence tests
+
+`tests/customer-intelligence-foundation.test.ts`, `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, and `tests/customer-intelligence-lifecycle.test.ts` cover the foundation. The foundation suite uses the real authorization module against a mocked Prisma client, proving permission denials (SALES/OPERATIONS/READ_ONLY, `canMutate=false` across the full 12-mutation facade with no-database-write assertions), lifecycle isolation, identity conflicts (including no-approval-without-company and QuickBooks-operating-company manual-approval invariants), contact normalization/evidence preservation, and deployable entitlement bootstrap; `tests/authorization.test.ts` covers the leadership-only matrix. The full suite reports the same three pre-existing failures as `origin/main` (see `docs/modules/customer-intelligence/testing.md`).
+
 ## Important files
 
 - `package.json` for commands.

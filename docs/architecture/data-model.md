@@ -15,6 +15,10 @@ Key repository evidence: `src/components/app-shell.tsx`, `prisma/schema.prisma`,
 - Background or scheduled work is represented by API routes such as `/api/assistant/automations/run-due`, `/api/shipment-documents/teamship-review/email-intake/scheduled`, scripts under `scripts`, and database run/job models including `AutomationJobRun`, `AssistantAutomationRun`, `TeamshipDailySyncRun`, `GarlandEmailSyncRun`, and `TeamshipUpdateJob`.
 - Environment variable names are documented in `.env.example`; real values must never be committed.
 
+## Customer Intelligence additions
+
+The `CUSTOMER_INTELLIGENCE` foundation adds tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, and `CustomerMonthlyFinancial` models in `prisma/schema.prisma` (migration `20260805120000_add_customer_intelligence_foundation`). All are additive; `CashflowCustomer` and `CashflowLegalEntity` are unchanged. See `docs/modules/customer-intelligence/data-model.md`.
+
 ## Important files
 
 - `package.json` for commands.

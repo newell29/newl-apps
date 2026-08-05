@@ -1720,6 +1720,11 @@ export async function fetchApolloSequencePauseEvidence(
       per_page: String(DEFAULT_PAGE_SIZE)
     });
     params.append("emailer_campaign_ids[]", sequenceId);
+    params.append("emailer_message_reply_classes[]", "out_of_office");
+    params.append(
+      "emailer_message_reply_classes[]",
+      "already_left_company_or_not_right_person"
+    );
 
     const response = await fetch(
       `${DEFAULT_BASE_URL}/api/v1/emailer_messages/search?${params.toString()}`,
@@ -1868,8 +1873,15 @@ export function classifyApolloPauseEvidence(
     return null;
   }
   const text = collectApolloText(value);
-  const reason = readApolloEvidenceReason(value) ?? summarizeApolloEvidenceReason(text);
-  if (!text) {
+  const replyClass = readApolloString(value, [
+    "reply_class",
+    "reply_status",
+    "response_status"
+  ])?.trim().toLowerCase().replace(/[\s-]+/gu, "_") ?? null;
+  const reason =
+    readApolloEvidenceReason(value) ??
+    (replyClass ? `Apollo reply class: ${replyClass}.` : summarizeApolloEvidenceReason(text));
+  if (!text && !replyClass) {
     return null;
   }
   const occurredAt = parseApolloDate(
@@ -1884,6 +1896,7 @@ export function classifyApolloPauseEvidence(
   );
 
   if (
+    replyClass === "already_left_company_or_not_right_person" ||
     /\b(no longer (?:works?|working|employed|with)|has left|left (?:the )?company|not employed|departed (?:from )?|former employee)\b/iu.test(
       text
     )
@@ -1897,6 +1910,7 @@ export function classifyApolloPauseEvidence(
   }
 
   if (
+    replyClass === "out_of_office" ||
     /\b(out[ -]?of[ -]?office|automatic reply|auto(?:matic)?[ -]?reply|vacation|away from (?:the )?office)\b/iu.test(
       text
     )
@@ -5761,6 +5775,7 @@ function readApolloResumeAt(
     readApolloString(record, [
       "resume_at",
       "resumes_at",
+      "auto_unpause_at",
       "auto_resume_at",
       "auto_resumes_at",
       "paused_until",

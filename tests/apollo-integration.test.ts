@@ -6,6 +6,7 @@ import {
   classifyApolloPauseEvidence,
   fetchApolloActivitySummary,
   fetchApolloSequenceDeliveryFailures,
+  fetchApolloSequencePauseEvidence,
   fetchApolloContactById,
   fetchApolloContactsForCompany,
   fetchApolloOrganizationForMapping,
@@ -522,6 +523,56 @@ describe("Apollo delivery-failure reconciliation", () => {
     expect(evidence).toMatchObject({
       kind: "NO_LONGER_EMPLOYED",
       resumeAt: null
+    });
+  });
+
+  it("uses Apollo's reply-class filters and accepts a classified pause without copied message text", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        emailer_messages: [{
+          id: "message-ooo",
+          contact_id: "apollo-contact-1",
+          to_email: "taylor@example.com",
+          reply_class: "out_of_office",
+          replied_at: "2026-08-04T13:00:00.000Z",
+          auto_unpause_at: "2026-08-06T12:00:00.000Z"
+        }]
+      })
+    } as unknown as Response);
+
+    const evidence = await fetchApolloSequencePauseEvidence("sequence-1");
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requestUrl.searchParams.getAll("emailer_campaign_ids[]")).toEqual([
+      "sequence-1"
+    ]);
+    expect(
+      requestUrl.searchParams.getAll("emailer_message_reply_classes[]")
+    ).toEqual([
+      "out_of_office",
+      "already_left_company_or_not_right_person"
+    ]);
+    expect(evidence).toEqual([
+      expect.objectContaining({
+        apolloContactId: "apollo-contact-1",
+        kind: "OUT_OF_OFFICE",
+        reason: "Apollo reply class: out_of_office.",
+        resumeAt: new Date("2026-08-06T12:00:00.000Z")
+      })
+    ]);
+  });
+
+  it("treats Apollo's combined departed-or-wrong-person reply class as terminal for that contact", () => {
+    expect(
+      classifyApolloPauseEvidence({
+        reply_class: "already_left_company_or_not_right_person",
+        replied_at: "2026-08-04T13:00:00.000Z"
+      })
+    ).toMatchObject({
+      kind: "NO_LONGER_EMPLOYED",
+      reason: "Apollo reply class: already_left_company_or_not_right_person."
     });
   });
 

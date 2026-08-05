@@ -36,7 +36,7 @@ import {
 
 export { HUNTER_APOLLO_EXCEPTION_RESOLUTION_JOB_TYPE } from "@/modules/lead-gen/hunter-job-types";
 
-const AUTOPILOT_RESOLVER_VERSION = 3;
+const AUTOPILOT_RESOLVER_VERSION = 4;
 const PROCESSING_LEASE_MS = 15 * 60 * 1_000;
 const DEFAULT_DAILY_COMPANY_LIMIT = 10;
 const MAX_DAILY_COMPANY_LIMIT = 25;
@@ -520,20 +520,21 @@ export function buildApolloExceptionIdentityQueries(
   packet: Omit<ApolloIdentityResolutionPacket, "publicEvidence">
 ) {
   const geography = packet.shipmentGeography[0] ?? null;
+  const cleanCompanyName = stripFreightPartyIdentitySuffix(packet.companyName);
   const recoveryAliases = buildApolloExceptionRecoveryAliases(packet.companyName);
   const candidateNames = packet.priorApolloCandidates
     .map((candidate) => candidate.companyName?.trim())
     .filter((value): value is string => Boolean(value))
     .slice(0, 2);
   return [
-    `"${packet.companyName}" official company website`,
-    `"${packet.companyName}" parent company subsidiary operating brand`,
-    geography ? `"${packet.companyName}" "${geography}" company` : null,
+    `"${cleanCompanyName}" official company website`,
+    `"${cleanCompanyName}" parent company subsidiary operating brand`,
+    geography ? `"${cleanCompanyName}" "${geography}" company` : null,
     ...recoveryAliases.map(
       (alias) => `"${alias}" official company website operating brand`
     ),
     ...candidateNames.map(
-      (candidateName) => `"${packet.companyName}" "${candidateName}" company relationship`
+      (candidateName) => `"${cleanCompanyName}" "${candidateName}" company relationship`
     )
   ]
     .filter((value): value is string => Boolean(value))
@@ -555,7 +556,8 @@ export function buildApolloExceptionRecoveryAliases(companyName: string) {
     "plc",
     "the"
   ]);
-  const tokens = companyName
+  const cleanCompanyName = stripFreightPartyIdentitySuffix(companyName);
+  const tokens = cleanCompanyName
     .replace(/&/gu, " ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
@@ -563,6 +565,28 @@ export function buildApolloExceptionRecoveryAliases(companyName: string) {
     .filter(Boolean)
     .filter((token) => !legalTokens.has(token.toLowerCase()));
   const candidates: string[] = [];
+  const legalStrippedName = tokens.join(" ");
+  if (
+    cleanCompanyName !== companyName.trim() &&
+    legalStrippedName.length >= 4
+  ) {
+    candidates.push(legalStrippedName);
+  }
+  const regionalTokens = new Set(["america", "canada", "usa", "us"]);
+  let brandTokens = [...tokens];
+  while (
+    brandTokens.length > 1 &&
+    regionalTokens.has(brandTokens.at(-1)!.toLowerCase())
+  ) {
+    brandTokens = brandTokens.slice(0, -1);
+  }
+  if (
+    brandTokens.length > 0 &&
+    brandTokens.length < tokens.length &&
+    brandTokens.join(" ").length >= 4
+  ) {
+    candidates.push(brandTokens.join(" "));
+  }
   if (tokens.length >= 4 || (tokens.length >= 3 && tokens[0]!.length <= 3)) {
     const tail = tokens.slice(1).join(" ");
     if (tail.length >= 8) candidates.push(tail);
@@ -570,6 +594,15 @@ export function buildApolloExceptionRecoveryAliases(companyName: string) {
   return candidates.filter(
     (candidate, index, values) => values.indexOf(candidate) === index
   ).slice(0, 2);
+}
+
+export function stripFreightPartyIdentitySuffix(companyName: string) {
+  const trimmed = companyName.replace(/\s+/gu, " ").trim();
+  const marker = /(?:^|[\s,.;:()[\]{}-])(?:c\s*\/\s*o|care\s+of|attn?\.?|attention)(?=$|[\s,.;:()[\]{}-])/iu.exec(
+    trimmed
+  );
+  if (!marker || marker.index === 0) return trimmed;
+  return trimmed.slice(0, marker.index).replace(/[\s,.;:()[\]{}-]+$/gu, "").trim();
 }
 
 type ExistingCanonicalApolloCompany = {
