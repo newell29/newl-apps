@@ -124,6 +124,21 @@ describe("AI workflow structured contracts", () => {
     ).toThrow(/unsafe repository path/);
   });
 
+  it("normalizes trailing slashes for safe expected directories only", () => {
+    expect(
+      validateWorkflowPlan({ ...plan, expectedAreas: ["tools/ai-workflow/"] }).expectedAreas
+    ).toEqual(["tools/ai-workflow"]);
+    expect(() =>
+      validateWorkflowPlan({ ...plan, expectedAreas: ["tools/ai-workflow//nested"] })
+    ).toThrow(/unsafe repository path/);
+    expect(() =>
+      validateWorkflowPlan({
+        ...plan,
+        phases: [{ ...plan.phases[0], expectedFiles: ["tools/ai-workflow/"] }]
+      })
+    ).toThrow(/unsafe repository path/);
+  });
+
   it("rejects contradictory reviewer approval", () => {
     expect(() =>
       validateReviewDecision({
