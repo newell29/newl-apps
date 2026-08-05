@@ -18,6 +18,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Carrier-manifest carrier tests recognize the printed `CLARKE` and `GUILBAULT TRANSPORT` carrier values, generate the same editable workbook layout, store separate carrier bytes and counts, and enforce tenant-scoped history and downloads for both carriers.
 - Operational-feedback regression tests cover tenant-scoped full-message review, conditional issue fields, rejection of identical order decisions, exact PS/SR evidence linking, hash-verified retrieval and caching of the original saved-email PDF, confirmed-only development grouping, specific-family precedence over generic false mismatches, and delivery of approval comments in Rivet's immutable packet.
 - Rivet evidence tests require a tenant-scoped active lease, verify artifact hashes, and confirm that a source PDF is reduced to only the approved Garland review pages before the worker receives it. Worker tests also block evidence files from Git changes.
+- Teamship update-worker regression tests cover a single retry for transient login failures, no retry for rejected credentials, safe failure-message redaction, explicit failure-stage reporting, preservation of successful order evidence after a later batch failure, and exact CSR reporting instead of a generic incomplete-attempt message.
 - Rivet queue tests confirm that a later approved Garland suggestion waits behind active or review-blocked Garland work and is claimed automatically only after that workflow scope clears.
 
 ## Data model
