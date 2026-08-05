@@ -19,7 +19,8 @@
 ## Where to look
 
 | Task | Start with |
-|---|---|
+|---|---|---|
+| Change Customer Intelligence foundation logic | `src/modules/customer-intelligence/actions.ts`, `queries.ts`, `identity.ts`, `service-lines.ts`, `lifecycle.ts`, `cashflow-compatibility.ts`; tests `tests/customer-intelligence-*.test.ts` |
 | Change a chat tool | `src/modules/assistant/runtime.ts`, `rate-tools.ts`, `apollo-workflow.ts`, `shipment-documents-workflow.ts` |
 | Change the chat system prompt/provider | `src/server/integrations/assistant-provider.ts`, `src/modules/assistant/queries.ts` |
 | Add a new AI tool | `src/modules/assistant/runtime.ts` and a dedicated workflow file plus tests in `tests/assistant-*.test.ts` |

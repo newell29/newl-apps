@@ -15,6 +15,10 @@ Key repository evidence: `src/components/app-shell.tsx`, `prisma/schema.prisma`,
 - Background or scheduled work is represented by API routes such as `/api/assistant/automations/run-due`, `/api/shipment-documents/teamship-review/email-intake/scheduled`, scripts under `scripts`, and database run/job models including `AutomationJobRun`, `AssistantAutomationRun`, `TeamshipDailySyncRun`, `GarlandEmailSyncRun`, and `TeamshipUpdateJob`.
 - Environment variable names are documented in `.env.example`; real values must never be committed.
 
+## Customer Intelligence tenant safety
+
+Every Customer Intelligence record carries `tenantId` and a `tenant` relation. `CompanyOperatingRelationship` and `CustomerSourceAccount` use composite tenant-scoped foreign keys (`(tenantId, companyId)`, `(tenantId, operatingCompanyId)`, `(tenantId, companyOperatingRelationshipId)`) so a record can never be read or written across tenants. Service code re-validates every related record within the caller's tenant before writing, and queries use `tenantWhere` on every path. Cross-tenant relation-ID reads return null and writes throw. See `docs/modules/customer-intelligence/overview.md`.
+
 ## Important files
 
 - `package.json` for commands.

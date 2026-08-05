@@ -57,6 +57,55 @@ function normalizeCashflowSourceName(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
+// Synthetic operating-company display records for the Customer Intelligence
+// foundation. Display names remain editable in tenant settings; these are the
+// seeded defaults only. Real QuickBooks realm/credential links are configured
+// later and are never seeded here.
+async function seedOperatingCompanies(tenantId: string) {
+  const operatingCompanies = [
+    {
+      slug: "newl-worldwide",
+      displayName: "Newl Worldwide",
+      legalName: "Newl Worldwide Logistics Ltd.",
+      homeCurrency: "CAD"
+    },
+    {
+      slug: "newl-usa",
+      displayName: "Newl USA",
+      legalName: "Newl USA Inc.",
+      homeCurrency: "USD"
+    },
+    {
+      slug: "newells-express",
+      displayName: "Newell's Express and Warehousing Ltd.",
+      legalName: "Newell's Express and Warehousing Ltd.",
+      homeCurrency: "CAD"
+    }
+  ];
+
+  for (const operatingCompany of operatingCompanies) {
+    await prisma.operatingCompany.upsert({
+      where: {
+        tenantId_slug: {
+          tenantId,
+          slug: operatingCompany.slug
+        }
+      },
+      update: {
+        displayName: operatingCompany.displayName,
+        legalName: operatingCompany.legalName,
+        homeCurrency: operatingCompany.homeCurrency,
+        active: true
+      },
+      create: {
+        tenantId,
+        ...operatingCompany,
+        active: true
+      }
+    });
+  }
+}
+
 async function seedCashflowDemoData(tenantId: string, adminUserId: string) {
   await prisma.cashflowSettings.upsert({
     where: { tenantId },
@@ -543,6 +592,11 @@ async function main() {
       key: ModuleKey.OCEAN_FREIGHT_PRICING,
       name: "Ocean Freight Pricing",
       description: "Manual ocean freight rate management, agent directory, and pricing review workspace"
+    },
+    {
+      key: ModuleKey.CUSTOMER_INTELLIGENCE,
+      name: "Customer Intelligence",
+      description: "Leadership-only customer profiles, operating-company relationships, source accounts, contacts, and identity matching"
     }
   ];
 
@@ -837,6 +891,27 @@ async function main() {
       enabled: true
     }
   });
+
+  const customerIntelligenceModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.CUSTOMER_INTELLIGENCE }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: customerIntelligenceModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: customerIntelligenceModule.id,
+      enabled: true
+    }
+  });
+
+  await seedOperatingCompanies(tenant.id);
 
   await seedUpsTenantDefaults(tenant.id);
   await seedLtlTenantDefaults(tenant.id);
