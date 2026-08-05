@@ -236,7 +236,9 @@ Regression coverage must prove:
     runs write the paid-retrieval checkpoint atomically before Luna, transient failures retry at most three times,
     the recovery API accepts only a same-day tenant-owned failed run and reconstructs its exact cohort, preparation
     failures retry before paid retrieval, malformed batches are isolated to individual companies with bounded repair
-    attempts, and exhausted company-level failures do not discard other valid synthesis results;
+    attempts, exhausted company-level failures do not discard other valid synthesis results, Luna provider errors
+    remain visible and retryable instead of being masked by diagnostic logging, and the explicit failed-run recovery
+    command passes the exact run ID back through that tenant-scoped recovery API;
 13. legal-name, regional, and brand aliases cover known false-negative shapes such as Aalberts IPS Americas, AS Colour, 3F North America, Barnhardt Manufacturing, and Atlas Copco Compressors;
 14. saturated generic results cannot prevent a known-domain identity or fresh-event query from executing or contributing evidence, including Barnhardt's first-party NCFI expansion;
 15. a full evidence ledger executes no follow-up search, a partially full ledger appends only to the remaining capacity, resumed evidence is bounded, and no completion company can exceed 24 evidence records; and

@@ -612,6 +612,40 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("preserves a transient Luna provider error instead of masking it in diagnostics", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "def fail_api(*_args,**_kwargs): raise RuntimeError('HTTP 503: Luna temporarily unavailable')",
+      "r.api_request=fail_api",
+      "candidate={'companyId':'company-1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]}",
+      "evidence={'alpha':[{'pass':'IDENTITY','query':'alpha','title':'Alpha','url':'https://example.com/alpha','sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'identity','firstParty':True}]}",
+      "result=r.submit_luna_primary_batches('https://example.com','token','run-1',{'models':{'synthesis':{'provider':'OPENAI','enabled':True}}},[candidate],evidence,{})",
+      "print(json.dumps(result))"
+    ].join("\n");
+    const { stdout, stderr } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    const result = JSON.parse(stdout) as {
+      state: string;
+      failedBatchCount: number;
+      failures: Record<string, string>;
+    };
+    expect(result).toMatchObject({
+      state: "error",
+      failedBatchCount: 1,
+      failures: { alpha: "HTTP 503: Luna temporarily unavailable" }
+    });
+    expect(stderr).toContain("Hunter Luna primary synthesis batch failed");
+    expect(stderr).toContain("RuntimeError");
+    expect(stderr).not.toContain("NameError");
+  });
+
   it("isolates malformed Qwen batches and retries affected companies independently", async () => {
     const program = [
       "import json",
