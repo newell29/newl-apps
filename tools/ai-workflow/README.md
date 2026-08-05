@@ -12,7 +12,7 @@ It implements only this sequence:
 4. The controller runs every mandatory verification command.
 5. A fresh Qwen reviewer receives the original request, approved plan, phase, cumulative Git diff, bounded surrounding code, and verification evidence.
 6. Exact verification failures or review findings return to DeepSeek.
-7. An approved phase advances to the next phase. Completion is manual.
+7. An approved phase may advance only when the next phase is not owner-gated. Completion is manual.
 
 There is no workflow-state persistence, event journal, lock, migration, checkpoint commit, resume support, dashboard, reporting engine, Codex escalation, automatic push, merge, deployment, or production action.
 
@@ -91,6 +91,22 @@ Optional settings:
 
 The CLI displays the complete plan and accepts only an interactive `yes` or `y` before any builder runs. There is no non-interactive approval flag.
 
+## Reviewer contract and review-boundary recovery
+
+Reviewer status is fail-closed. The only canonical values are `approved`, `changes_requested`, and `escalate`. `approved` must be exact and cannot contain findings, missing tests, scope concerns, or an escalation reason. The controller never converts `pass`, `passed`, `accepted`, `looks_good`, `no_issues`, capitalization variants of approval, or positive prose into approval.
+
+For provider compatibility, the only accepted aliases are `changes_required` and `changes-requested`, which become `changes_requested`. Capitalization variants of canonical `changes_requested` and `escalate` are also normalized. A change request still requires at least one complete actionable finding, and an escalation requires a non-empty reason. The entire normalized object is revalidated; nested, incomplete, truncated, ambiguous, and extra-field envelopes fail closed.
+
+Immediately before each independent review, the controller writes one bounded, owner-only recovery packet to ignored `tmp/ai-workflow/review-recovery.json`. It contains the original request, approved plan, current phase ID, expected branch, base commit, HEAD, and exact diff hash. It is not a general persistence or resume layer. If reviewer parsing fails, the controller separately writes a bounded, redacted diagnostic under `tmp/ai-workflow/failures/` with the OpenCode session, assistant-message, and relevant text-part IDs when available. Reasoning parts, common credential shapes, environment variables, and unbounded OpenCode logs are not stored.
+
+To recover only the pinned review boundary:
+
+```bash
+npm run ai-workflow -- review-current-diff
+```
+
+The command validates the dedicated worktree, exact model configuration, stored provider authentication, owner-only recovery packet, branch, base, HEAD, and diff hash. It reruns all mandatory verification before making a fresh read-only reviewer call. It makes no planner or initial builder call. A validated change request enters the existing correction loop with the exact findings; approval marks only the pinned phase. Recovery always stops before every later phase and requires explicit owner action to continue. Any changed identity, malformed response, reviewer-side Git mutation, commit, or owner-gated current phase is rejected.
+
 ## Deterministic verification
 
 The controller runs these commands once during preflight and again in this order after every builder attempt:
@@ -156,12 +172,13 @@ After completion, inspect the branch, run any risk-specific or browser checks th
 
 ## Known Version 1A.1 limitations
 
-- Stopping the process loses the plan and progress; restart manually.
+- There is no general resume support. Only the most recent independently reviewed boundary has a one-shot, local recovery packet; all other interrupted states restart manually.
 - The reviewer gets the cumulative diff from the workflow starting commit. Later-phase reviews may therefore include earlier approved changes.
 - There is no final cross-phase reviewer beyond the per-phase reviews.
 - OpenCode provider authentication and exact model availability are local prerequisites; preflight validates their local presence but makes no inference request.
 - API cost is `null` when OpenCode does not emit complete cost data.
 - No browser runner is selected automatically. The fixed build and Vitest baseline runs, while any manual UI validation remains part of human acceptance.
 - High-risk work is not delegated to Codex. A reviewer escalation or exhausted loop stops with a manual-escalation error.
+- A phase marked `requiresOwnerApproval` never starts automatically, including after a recovered earlier-phase approval.
 
 The retained future architecture is documented in [`docs/ai/ai-development-engine.md`](../../docs/ai/ai-development-engine.md).

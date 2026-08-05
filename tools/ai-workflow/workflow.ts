@@ -154,6 +154,11 @@ export async function runWorkflow(
   }
 
   for (const [phaseIndex, phase] of planned.plan.phases.entries()) {
+    if (phase.requiresOwnerApproval) {
+      throw new WorkflowEscalationError(
+        `${phase.id} requires explicit owner approval and cannot start automatically.`
+      );
+    }
     let corrections: string[] = [];
     let phaseRetries = 0;
     let phaseReviewCycles = 0;
@@ -197,7 +202,17 @@ export async function runWorkflow(
       }
 
       event(`Starting fresh independent review ${phaseReviewCycles + 1} for ${phase.id}.`);
+      const { writeReviewRecoveryMetadata } = await import("./recovery");
+      await writeReviewRecoveryMetadata({
+        repositoryRoot: options.repositoryRoot,
+        branch: gitState.branch,
+        baseCommit: gitState.baseCommit,
+        originalRequest: options.originalRequest,
+        approvedPlan: planned.plan,
+        phaseId: phase.id
+      });
       const reviewed = await reviewPhase(dependencies.agentRunner, options.reviewerModel, {
+        repositoryRoot: options.repositoryRoot,
         originalRequest: options.originalRequest,
         approvedPlan: planned.plan,
         phase,

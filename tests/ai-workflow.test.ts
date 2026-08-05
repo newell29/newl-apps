@@ -102,7 +102,8 @@ const plan = {
       expectedFiles: ["src/feature.ts", "tests/feature.test.ts"],
       testFiles: ["tests/feature.test.ts"],
       definitionOfDone: ["Feature and regression test exist."],
-      risk: "low"
+      risk: "low",
+      requiresOwnerApproval: false
     }
   ]
 } as const;
@@ -451,8 +452,16 @@ describe("AI workflow review loop", () => {
             text: envelope({
               status: "changes_requested",
               summary: "A regression test is missing.",
-              findings: [],
-              missingTests: ["Add tests/feature.test.ts for the exported behavior."],
+              findings: [
+                {
+                  severity: "medium",
+                  file: "tests/feature.test.ts",
+                  line: null,
+                  evidence: "The exported behavior has no regression test.",
+                  requiredCorrection: "Add tests/feature.test.ts for the exported behavior."
+                }
+              ],
+              missingTests: [],
               scopeConcerns: [],
               escalationReason: null
             }),
@@ -525,7 +534,7 @@ describe("AI workflow review loop", () => {
     expect(reviewerPrompts.every((prompt) => !prompt.includes("PRIVATE_BUILDER_CHAT"))).toBe(true);
     expect(reviewerPrompts[0]).toContain("export const feature = 1");
     expect(requests.filter((request) => request.role === "builder")[1].prompt).toContain(
-      "Missing test coverage: Add tests/feature.test.ts for the exported behavior."
+      "Required correction: Add tests/feature.test.ts for the exported behavior."
     );
     expect(commandSpecs.map((spec) => spec.name)).toEqual([
       "diff-check",

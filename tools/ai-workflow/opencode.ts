@@ -15,6 +15,9 @@ export type AgentRunRequest = {
 export type AgentRunResult = {
   text: string;
   cost: number | null;
+  sessionId?: string;
+  assistantMessageId?: string;
+  textPartIds?: string[];
 };
 
 export interface AgentRunner {
@@ -123,17 +126,60 @@ async function runOpenCodeCommand(binary: string, repositoryRoot: string, args: 
   });
 }
 
-function collectText(value: unknown, output: string[]): void {
+type TextCandidate = {
+  text: string;
+  sessionId?: string;
+  messageId?: string;
+  partId?: string;
+};
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  return typeof record[key] === "string" && record[key] ? (record[key] as string) : undefined;
+}
+
+function collectText(
+  value: unknown,
+  output: TextCandidate[],
+  inherited: { sessionId?: string; messageId?: string } = {}
+): void {
   if (Array.isArray(value)) {
-    for (const item of value) collectText(item, output);
+    for (const item of value) collectText(item, output, inherited);
     return;
   }
   if (!value || typeof value !== "object") return;
 
   const record = value as Record<string, unknown>;
-  if (typeof record.text === "string") output.push(record.text);
+  const sessionId = stringField(record, "sessionID") ?? inherited.sessionId;
+  const messageId = stringField(record, "messageID") ?? inherited.messageId;
+  const type = stringField(record, "type");
+  const nestedPart = record.part;
+  if (
+    type === "text" &&
+    nestedPart &&
+    typeof nestedPart === "object" &&
+    !Array.isArray(nestedPart) &&
+    typeof (nestedPart as Record<string, unknown>).text === "string"
+  ) {
+    const part = nestedPart as Record<string, unknown>;
+    output.push({
+      text: part.text as string,
+      sessionId: stringField(part, "sessionID") ?? sessionId,
+      messageId: stringField(part, "messageID") ?? messageId,
+      partId: stringField(part, "id")
+    });
+  }
+  if (type === "text" && typeof record.text === "string") {
+    output.push({
+      text: record.text,
+      sessionId,
+      messageId,
+      partId: stringField(record, "id")
+    });
+  }
   for (const [key, nested] of Object.entries(record)) {
-    if (key !== "text") collectText(nested, output);
+    if (key !== "text" && !(key === "part" && type === "text")) {
+      collectText(nested, output, { sessionId, messageId });
+    }
   }
 }
 
@@ -147,7 +193,7 @@ function eventCost(value: unknown): number | null {
 }
 
 export function parseOpenCodeOutput(stdout: string): AgentRunResult {
-  const texts: string[] = [];
+  const texts: TextCandidate[] = [];
   const costs: number[] = [];
 
   for (const line of stdout.split(/\r?\n/)) {
@@ -158,18 +204,26 @@ export function parseOpenCodeOutput(stdout: string): AgentRunResult {
       const cost = eventCost(event);
       if (cost !== null) costs.push(cost);
     } catch {
-      texts.push(line);
+      texts.push({ text: line });
     }
   }
 
   const completeText = [...texts]
     .reverse()
-    .find((text) => text.includes(RESULT_OPEN) && text.includes(RESULT_CLOSE));
-  const text = completeText ?? texts.join("");
+    .find((candidate) =>
+      candidate.text.includes(RESULT_OPEN) && candidate.text.includes(RESULT_CLOSE)
+    );
+  const selected = completeText ?? texts.at(-1);
+  const text = completeText?.text ?? texts.map((candidate) => candidate.text).join("");
 
   return {
     text,
-    cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : null
+    cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : null,
+    sessionId: selected?.sessionId,
+    assistantMessageId: selected?.messageId,
+    textPartIds: [
+      ...new Set(texts.map((candidate) => candidate.partId).filter((id): id is string => Boolean(id)))
+    ]
   };
 }
 

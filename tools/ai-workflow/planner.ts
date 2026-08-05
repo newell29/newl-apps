@@ -13,6 +13,7 @@ export type PlanPhase = {
   testFiles: string[];
   definitionOfDone: string[];
   risk: PhaseRisk;
+  requiresOwnerApproval: boolean;
 };
 
 export type WorkflowPlan = {
@@ -73,6 +74,9 @@ function validatePhase(value: unknown, index: number): PlanPhase {
   if (risk !== "low" && risk !== "medium" && risk !== "high") {
     throw new Error(`Planner phase ${index + 1} has an invalid risk classification.`);
   }
+  if (typeof value.requiresOwnerApproval !== "boolean") {
+    throw new Error(`Planner phase ${index + 1} requires an explicit requiresOwnerApproval boolean.`);
+  }
 
   const expectedFiles = stringArray(value, "expectedFiles").map((path) =>
     validateRepositoryPath(path, `Planner phase ${index + 1}`)
@@ -95,7 +99,8 @@ function validatePhase(value: unknown, index: number): PlanPhase {
     expectedFiles,
     testFiles,
     definitionOfDone: stringArray(value, "definitionOfDone"),
-    risk
+    risk,
+    requiresOwnerApproval: value.requiresOwnerApproval
   };
 }
 
@@ -135,7 +140,7 @@ ${originalRequest}
 
 Inspect the real repository. Read AGENTS.md, docs/README.md, docs/architecture/overview.md, docs/modules/README.md, and the nearest relevant module documentation. Trace the requested behavior across every applicable UI, API, action, service, database, permission, test, and documentation layer. Preserve authenticated tenantId filtering and explicit human approval boundaries. Mark inferred business behavior as an open question.
 
-Create the smallest complete sequence of independently reviewable phases. The controller always runs git diff --check, npm run typecheck, npm run lint, npm run build, and the full npm test suite. Do not propose shell commands. testFiles is advisory review evidence describing the concrete regression test files the phase should add or update; it never controls which commands run and may contain only repository-relative tests/**/*.test.ts or tests/**/*.test.tsx paths.
+Create the smallest complete sequence of independently reviewable phases. The controller always runs git diff --check, npm run typecheck, npm run lint, npm run build, and the full npm test suite. Do not propose shell commands. testFiles is advisory review evidence describing the concrete regression test files the phase should add or update; it never controls which commands run and may contain only repository-relative tests/**/*.test.ts or tests/**/*.test.tsx paths. Set requiresOwnerApproval to true for a phase that depends on unresolved owner decisions or would cross a protected human-approval boundary. Such a phase will stop before its builder runs; never place unresolved business decisions inside an automatically executable phase.
 
 Return exactly one JSON object inside these tags, with no text after the closing tag:
 <AI_WORKFLOW_RESULT>
@@ -154,7 +159,8 @@ Return exactly one JSON object inside these tags, with no text after the closing
       "expectedFiles": ["src/...", "tests/example.test.ts", "docs/..."],
       "testFiles": ["tests/example.test.ts"],
       "definitionOfDone": ["..."],
-      "risk": "low"
+      "risk": "low",
+      "requiresOwnerApproval": false
     }
   ]
 }
