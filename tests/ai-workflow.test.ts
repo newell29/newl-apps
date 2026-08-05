@@ -39,6 +39,7 @@ import {
   CommandResult,
   CommandRunner,
   CommandSpec,
+  LocalCommandRunner,
   mandatoryVerificationSpecs,
   sanitizeCommandOutput
 } from "../tools/ai-workflow/verification";
@@ -159,6 +160,21 @@ describe("AI workflow deterministic controls", () => {
       "tests"
     ]);
     expect(specs.at(-1)?.args).toEqual(["run", "test"]);
+  });
+
+  it("uses a test environment for tests and a production environment for builds", async () => {
+    const runner = new LocalCommandRunner();
+    const environmentCommand = (name: "tests" | "build"): CommandSpec => ({
+      name,
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(process.env.NODE_ENV ?? '')"]
+    });
+
+    const tests = await runner.run(environmentCommand("tests"), process.cwd());
+    const build = await runner.run(environmentCommand("build"), process.cwd());
+
+    expect(tests).toMatchObject({ passed: true, output: "test" });
+    expect(build).toMatchObject({ passed: true, output: "production" });
   });
 
   it("redacts common secret shapes from command output", () => {

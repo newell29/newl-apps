@@ -25,7 +25,7 @@ export interface CommandRunner {
   run(spec: CommandSpec, cwd: string): Promise<CommandResult>;
 }
 
-function verificationEnvironment(): NodeJS.ProcessEnv {
+function verificationEnvironment(spec: CommandSpec): NodeJS.ProcessEnv {
   const allowedKeys = [
     "PATH",
     "HOME",
@@ -42,7 +42,12 @@ function verificationEnvironment(): NodeJS.ProcessEnv {
     "npm_config_cache"
   ];
   const environment: NodeJS.ProcessEnv = {
-    NODE_ENV: process.env.NODE_ENV ?? "production"
+    NODE_ENV:
+      spec.name === "tests"
+        ? "test"
+        : spec.name === "build"
+          ? "production"
+          : process.env.NODE_ENV ?? "production"
   };
   for (const key of allowedKeys) {
     if (process.env[key] !== undefined) environment[key] = process.env[key];
@@ -73,7 +78,7 @@ export class LocalCommandRunner implements CommandRunner {
     return new Promise((resolve, reject) => {
       const child = spawn(spec.command, spec.args, {
         cwd,
-        env: verificationEnvironment(),
+        env: verificationEnvironment(spec),
         shell: false,
         stdio: ["ignore", "pipe", "pipe"]
       });
