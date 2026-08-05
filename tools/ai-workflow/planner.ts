@@ -44,8 +44,15 @@ function stringArray(record: Record<string, unknown>, key: string): string[] {
   return value.map((item) => (item as string).trim());
 }
 
-function validateRepositoryPath(value: string, label: string): string {
-  const normalized = value.replace(/\\/g, "/");
+function validateRepositoryPath(
+  value: string,
+  label: string,
+  options: { allowTrailingSlash?: boolean } = {}
+): string {
+  const slashNormalized = value.replace(/\\/g, "/");
+  const normalized = options.allowTrailingSlash
+    ? slashNormalized.replace(/\/+$/, "")
+    : slashNormalized;
   const parts = normalized.split("/");
   if (
     isAbsolute(value) ||
@@ -108,7 +115,7 @@ export function validateWorkflowPlan(value: unknown): WorkflowPlan {
     openQuestions: stringArray(value, "openQuestions"),
     globalRisks: stringArray(value, "globalRisks"),
     expectedAreas: stringArray(value, "expectedAreas").map((path) =>
-      validateRepositoryPath(path, "Planner expectedAreas")
+      validateRepositoryPath(path, "Planner expectedAreas", { allowTrailingSlash: true })
     ),
     phases
   };
