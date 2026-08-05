@@ -2,6 +2,10 @@
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
+## Customer Intelligence relationship (additive)
+
+The `CUSTOMER_INTELLIGENCE` foundation introduces tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, and `CustomerSourceAccount` records. Existing `CashflowCustomer` rows and the `CashflowLegalEntity` enum (`NEWL_WORLDWIDE`/`NEWL_USA`) are preserved and remain the finance source of truth. The additive transition maps the legacy enum to operating-company slugs via `src/modules/customer-intelligence/cashflow-compatibility.ts` (`newl-worldwide`, `newl-usa`); a later reviewed migration may backfill relationships from `CashflowCustomer.legalEntity`. Nothing in the Customer Intelligence foundation rewrites cashflow rows.
+
 ## Purpose and status
 
 Customer cashflow and collections is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/finance/customer-cashflow/*`, `src/modules/customer-cashflow/*`, cashflow Prisma models/tests.

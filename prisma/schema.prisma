@@ -29,6 +29,7 @@ enum ModuleKey {
   WEBSITE_INBOUND
   WEBSITE_GROWTH
   OCEAN_FREIGHT_PRICING
+  CUSTOMER_INTELLIGENCE
 }
 
 enum WebsiteInboundStatus {
@@ -587,6 +588,16 @@ model Tenant {
   websiteGrowthSuppressions               WebsiteGrowthOutreachSuppression[]
   creditChecks                            CreditCheck[]
   assistantRuns                           AssistantRun[]
+  operatingCompanies                      OperatingCompany[]
+  companyOperatingRelationships           CompanyOperatingRelationship[]
+  customerSourceAccounts                  CustomerSourceAccount[]
+  contactPoints                           ContactPoint[]
+  contactEvidence                         ContactEvidence[]
+  customerIdentityMatches                 CustomerIdentityMatch[]
+  quickBooksServiceMappingRules           QuickBooksServiceMappingRule[]
+  customerFxRates                         CustomerFxRate[]
+  customerRevenueLines                    CustomerRevenueLine[]
+  customerMonthlyFinancials               CustomerMonthlyFinancial[]
   assistantRetrievedSources               AssistantRetrievedSource[]
   assistantKnowledgeDocuments             AssistantKnowledgeDocument[]
   assistantKnowledgeChunks                AssistantKnowledgeChunk[]
@@ -1728,6 +1739,12 @@ model Company {
   hunterOpportunitySignals   HunterOpportunitySignal[]
   hunterProspectingDecisions HunterProspectingDecision[]
   hunterOutreachSuppressions HunterOutreachSuppression[]
+  operatingRelationships     CompanyOperatingRelationship[]
+  customerSourceAccounts     CustomerSourceAccount[]
+  contactPoints              ContactPoint[]
+  contactEvidence            ContactEvidence[]
+  customerRevenueLines       CustomerRevenueLine[]
+  customerMonthlyFinancials  CustomerMonthlyFinancial[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
@@ -1938,6 +1955,8 @@ model Contact {
   outreachPlans                OutreachPlan[]
   salesCashflowCustomers       CashflowCustomer[]     @relation("CashflowSalesContact")
   collectionsCashflowCustomers CashflowCustomer[]     @relation("CashflowCollectionsContact")
+  contactPoints                ContactPoint[]
+  contactEvidence              ContactEvidence[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, companyId, id])
@@ -3482,4 +3501,400 @@ model CodexReviewRun {
   @@unique([tenantId, developmentJobId, commitSha, attempt])
   @@index([tenantId, developmentSuggestionId, createdAt])
   @@index([tenantId, verdict, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Customer Intelligence foundation
+//
+// Additive tenant-scoped records for the leadership-only Customer Intelligence
+// Hub. These models extend the existing canonical Company identity; they do not
+// replace or rewrite CashflowCustomer / CashflowLegalEntity. Mapping from the
+// legacy finance enum onto OperatingCompany is documented in
+// docs/modules/customer-intelligence/data-model.md.
+// ---------------------------------------------------------------------------
+
+enum CustomerIntelligenceServiceLine {
+  OCEAN
+  AIR
+  TRUCKING_DRAYAGE
+  LOCAL_TRUCKING
+  WAREHOUSING_FULFILLMENT
+  CUSTOMS_BROKERAGE
+  OTHER
+}
+
+enum CustomerLifecycle {
+  PROSPECT
+  ACTIVE_CUSTOMER
+  DORMANT_CUSTOMER
+  FORMER_CUSTOMER
+}
+
+enum CompanyOperatingRelationshipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CustomerSourceAccountStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ContactPointType {
+  EMAIL
+  PHONE
+  WEBSITE
+  ADDRESS
+  OTHER
+}
+
+enum ContactPointVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum ContactEvidenceSourceType {
+  EMAIL_SIGNATURE
+  QUICKBOOKS
+  MANUAL
+  APOLLO
+  WEBSITE
+  OTHER
+}
+
+enum ContactEvidenceReviewStatus {
+  UNREVIEWED
+  ACCEPTED
+  REJECTED
+  CONFLICT
+}
+
+enum CustomerIdentityMatchKind {
+  QUICKBOOKS_ACCOUNT
+  EMAIL_DOMAIN
+  COMPANY_ALIAS
+  CONTACT
+}
+
+enum CustomerIdentityMatchStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum QuickBooksServiceMappingDimension {
+  ITEM
+  CLASS
+  DEPARTMENT
+  INCOME_ACCOUNT
+  FILE_PREFIX
+  OTHER
+}
+
+enum CustomerFxRateStatus {
+  PROVISIONAL
+  FINAL
+}
+
+enum CustomerFinancialPeriodStatus {
+  RECONCILED
+  INCOMPLETE
+  UNRECONCILED
+}
+
+model OperatingCompany {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  slug                     String
+  displayName              String
+  legalName                String?
+  homeCurrency             String    @default("CAD")
+  active                   Boolean   @default(true)
+  quickBooksRealmId        String?
+  quickBooksCredentialId   String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  tenant             Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relationships      CompanyOperatingRelationship[]
+  sourceAccounts     CustomerSourceAccount[]
+  serviceMappingRules QuickBooksServiceMappingRule[]
+  revenueLines       CustomerRevenueLine[]
+  monthlyFinancials  CustomerMonthlyFinancial[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, slug])
+  @@index([tenantId, active])
+}
+
+model CompanyOperatingRelationship {
+  id                  String                          @id @default(cuid())
+  tenantId            String
+  companyId           String
+  operatingCompanyId  String
+  lifecycle           CustomerLifecycle                @default(PROSPECT)
+  status              CompanyOperatingRelationshipStatus @default(ACTIVE)
+  firstRevenueDate    DateTime?
+  lastRevenueDate     DateTime?
+  assignedOwnerUserId String?
+  notes               String?
+  createdAt           DateTime                         @default(now())
+  updatedAt           DateTime                         @updatedAt
+
+  tenant             Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company            Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany   OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+  sourceAccounts     CustomerSourceAccount[]
+  monthlyFinancials  CustomerMonthlyFinancial[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, companyId, operatingCompanyId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, lifecycle])
+  @@index([tenantId, status])
+}
+
+model CustomerSourceAccount {
+  id                             String                       @id @default(cuid())
+  tenantId                       String
+  realmId                        String
+  quickBooksCustomerId           String
+  companyId                      String
+  operatingCompanyId             String
+  companyOperatingRelationshipId String
+  currency                       String                       @default("CAD")
+  displayName                    String
+  active                         Boolean                      @default(true)
+  status                         CustomerSourceAccountStatus   @default(ACTIVE)
+  email                          String?
+  phone                          String?
+  billingAddress                 Json?
+  shippingAddress                Json?
+  parentQuickBooksCustomerId     String?
+  contactDetails                 Json?
+  lastSyncedAt                   DateTime?
+  createdAt                      DateTime                     @default(now())
+  updatedAt                      DateTime                     @updatedAt
+
+  tenant            Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company           Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany  OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+  relationship      CompanyOperatingRelationship  @relation(fields: [tenantId, companyOperatingRelationshipId], references: [tenantId, id], onDelete: Cascade)
+  revenueLines      CustomerRevenueLine[]
+  monthlyFinancials CustomerMonthlyFinancial[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, realmId, quickBooksCustomerId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, companyOperatingRelationshipId])
+  @@index([tenantId, active])
+  @@index([tenantId, currency])
+}
+
+model ContactPoint {
+  id                 String                          @id @default(cuid())
+  tenantId           String
+  contactId          String
+  companyId          String
+  type               ContactPointType
+  value              String
+  displayValue       String?
+  label              String?
+  primary            Boolean                         @default(false)
+  verificationStatus ContactPointVerificationStatus  @default(UNVERIFIED)
+  firstSeenAt        DateTime?
+  lastSeenAt         DateTime?
+  source             String?
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, contactId, type, value])
+  @@index([tenantId, companyId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, type])
+  @@index([tenantId, primary])
+  @@index([tenantId, verificationStatus])
+}
+
+model ContactEvidence {
+  id               String                      @id @default(cuid())
+  tenantId         String
+  contactId        String
+  companyId        String
+  sourceType       ContactEvidenceSourceType
+  sourceRecordKey  String
+  fieldName        String
+  fieldValue       String
+  confidence       Int                         @default(0)
+  parserVersion    String?
+  observedAt       DateTime
+  reviewStatus     ContactEvidenceReviewStatus @default(UNREVIEWED)
+  evidenceFragment String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, contactId, sourceRecordKey, fieldName])
+  @@index([tenantId, contactId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, sourceType])
+  @@index([tenantId, reviewStatus])
+  @@index([tenantId, observedAt])
+}
+
+model CustomerIdentityMatch {
+  id                  String                        @id @default(cuid())
+  tenantId            String
+  kind                CustomerIdentityMatchKind
+  companyId           String?
+  sourceRecordKey     String?
+  sourceLabel         String?
+  candidateCompanyId  String?
+  score               Int                           @default(0)
+  status              CustomerIdentityMatchStatus   @default(PROPOSED)
+  evidence            Json?
+  reviewerUserId      String?
+  reviewedAt          DateTime?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, kind, companyId, sourceRecordKey])
+  @@index([tenantId, status])
+  @@index([tenantId, kind])
+  @@index([tenantId, companyId])
+  @@index([tenantId, score])
+}
+
+model QuickBooksServiceMappingRule {
+  id                  String                              @id @default(cuid())
+  tenantId            String
+  operatingCompanyId  String
+  dimension           QuickBooksServiceMappingDimension
+  matchValue          String
+  serviceLine         CustomerIntelligenceServiceLine
+  priority            Int                                 @default(0)
+  active              Boolean                             @default(true)
+  reviewerUserId      String?
+  notes               String?
+  createdAt           DateTime                            @default(now())
+  updatedAt           DateTime                            @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operatingCompany  OperatingCompany @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, operatingCompanyId, dimension, matchValue])
+  @@index([tenantId, operatingCompanyId, active])
+  @@index([tenantId, serviceLine])
+}
+
+model CustomerFxRate {
+  id         String                  @id @default(cuid())
+  tenantId   String
+  currency   String
+  monthKey   String
+  rateToCad  Decimal                 @db.Decimal(12, 6)
+  status     CustomerFxRateStatus    @default(PROVISIONAL)
+  source     String?
+  fetchedAt  DateTime?
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, currency, monthKey])
+  @@index([tenantId, currency])
+  @@index([tenantId, status])
+}
+
+model CustomerRevenueLine {
+  id                  String                             @id @default(cuid())
+  tenantId            String
+  realmId             String
+  sourceKey           String
+  sourceAccountId     String?
+  companyId           String
+  operatingCompanyId  String
+  transactionDate     DateTime
+  transactionType     String
+  transactionNumber   String?
+  accountRef          String?
+  classRef            String?
+  itemRef             String?
+  fileRef             String?
+  serviceLine         CustomerIntelligenceServiceLine
+  nativeAmount        Decimal                            @db.Decimal(14, 2)
+  nativeCurrency      String
+  homeAmount          Decimal                            @db.Decimal(14, 2)
+  homeCurrency        String
+  cadAmount           Decimal?                           @db.Decimal(14, 2)
+  fxSource            String?
+  syncMetadata        Json?
+  createdAt           DateTime                           @default(now())
+
+  tenant            Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceAccount     CustomerSourceAccount?         @relation(fields: [tenantId, sourceAccountId], references: [tenantId, id], onDelete: NoAction)
+  company           Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany  OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sourceKey])
+  @@index([tenantId, companyId])
+  @@index([tenantId, sourceAccountId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, transactionDate])
+  @@index([tenantId, serviceLine])
+}
+
+model CustomerMonthlyFinancial {
+  id                       String                          @id @default(cuid())
+  tenantId                 String
+  monthKey                 String
+  companyId                String
+  operatingCompanyId       String
+  companyOperatingRelationshipId String
+  sourceAccountId          String?
+  sourceAccountKey         String                          @default("ALL")
+  serviceLine              CustomerIntelligenceServiceLine
+  currency                 String
+  nativeRevenue            Decimal                         @db.Decimal(14, 2)
+  nativeCost               Decimal                         @db.Decimal(14, 2) @default(0)
+  nativeGrossProfit        Decimal                         @db.Decimal(14, 2) @default(0)
+  cadRevenue               Decimal?                        @db.Decimal(14, 2)
+  reconciliationStatus     CustomerFinancialPeriodStatus   @default(UNRECONCILED)
+  createdAt                DateTime                        @default(now())
+  updatedAt                DateTime                        @updatedAt
+
+  tenant            Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company           Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany  OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+  relationship      CompanyOperatingRelationship  @relation(fields: [tenantId, companyOperatingRelationshipId], references: [tenantId, id], onDelete: Cascade)
+  sourceAccount     CustomerSourceAccount?        @relation(fields: [tenantId, sourceAccountId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, companyOperatingRelationshipId, sourceAccountKey, serviceLine, currency, monthKey])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, sourceAccountId])
+  @@index([tenantId, monthKey])
+  @@index([tenantId, serviceLine])
 }

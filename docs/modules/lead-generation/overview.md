@@ -2,6 +2,10 @@
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
+## Customer Intelligence relationship (additive)
+
+The canonical `Company` used by TradeMining, Hunter, Apollo, and the pipeline is the same identity that Customer Intelligence profiles. The `CUSTOMER_INTELLIGENCE` foundation adds `CompanyOperatingRelationship` and `CustomerSourceAccount` records around `Company` but never rewrites or removes existing company, lead, contact, or prospect data. It also adds `ContactPoint` and `ContactEvidence` around the existing `Contact`; identity matching never merges contacts by name alone. Future Customer Intelligence cross-sell research must keep existing customers out of cold-prospect and automatic-outreach queues.
+
 ## Purpose and status
 
 Lead generation, contacts, TradeMining, Apollo outreach is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/lead-gen/*`, `src/modules/lead-gen/*`, `src/modules/trademining/ingestion.ts`, Apollo integration files, lead/contact/company Prisma models.

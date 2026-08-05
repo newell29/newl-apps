@@ -41,7 +41,8 @@ export const DEFAULT_ROLE_MATRIX: Record<PlatformRole, RolePolicy> = {
       ModuleKey.ASSISTANT,
       ModuleKey.INVOICE_VERIFICATION,
       ModuleKey.QUICKBOOKS_POSTING,
-      ModuleKey.CUSTOMER_CASHFLOW
+      ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.CUSTOMER_INTELLIGENCE
     ],
     canMutate: true
   },
@@ -76,7 +77,7 @@ export const ROLE_DESCRIPTIONS: Record<
   [PlatformRole.FINANCE]: {
     label: "Finance",
     description: "Reserved for invoice verification and accounting-connected workflows.",
-    visibilitySummary: "Starts with Assistant, Invoice Verification, and QuickBooks Posting."
+    visibilitySummary: "Starts with Assistant, Invoice Verification, QuickBooks Posting, Customer Cashflow, and Customer Intelligence."
   },
   [PlatformRole.READ_ONLY]: {
     label: "Read Only",

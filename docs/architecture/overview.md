@@ -47,7 +47,11 @@ flowchart TB
 
 ## Module map
 
-Confirmed module keys: `ASSISTANT`, `LEAD_GEN`, `UPS_TOOLS`, `LTL_RATE_PORTAL`, `TRANSIT_LOOKUP`, `SHIPMENT_DOCUMENTS`, `INVOICE_VERIFICATION`, `QUICKBOOKS_POSTING`, `CUSTOMER_CASHFLOW`, `WEBSITE_INBOUND`, `WEBSITE_GROWTH`, and `OCEAN_FREIGHT_PRICING` in `prisma/schema.prisma`.
+Confirmed module keys: `ASSISTANT`, `LEAD_GEN`, `UPS_TOOLS`, `LTL_RATE_PORTAL`, `TRANSIT_LOOKUP`, `SHIPMENT_DOCUMENTS`, `INVOICE_VERIFICATION`, `QUICKBOOKS_POSTING`, `CUSTOMER_CASHFLOW`, `WEBSITE_INBOUND`, `WEBSITE_GROWTH`, `OCEAN_FREIGHT_PRICING`, and `CUSTOMER_INTELLIGENCE` in `prisma/schema.prisma`.
+
+## Customer Intelligence
+
+The `CUSTOMER_INTELLIGENCE` module is a leadership-only foundation (see `docs/modules/customer-intelligence/overview.md`). It adds tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, and `CustomerMonthlyFinancial` records around the canonical `Company`. It is additive: the legacy `CashflowLegalEntity` / `CashflowCustomer` finance records are preserved and resolved through operating-company relationships in later phases.
 
 ## Major security boundaries
 

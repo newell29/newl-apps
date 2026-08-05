@@ -15,6 +15,10 @@ Key repository evidence: `src/components/app-shell.tsx`, `prisma/schema.prisma`,
 - Background or scheduled work is represented by API routes such as `/api/assistant/automations/run-due`, `/api/shipment-documents/teamship-review/email-intake/scheduled`, scripts under `scripts`, and database run/job models including `AutomationJobRun`, `AssistantAutomationRun`, `TeamshipDailySyncRun`, `GarlandEmailSyncRun`, and `TeamshipUpdateJob`.
 - Environment variable names are documented in `.env.example`; real values must never be committed.
 
+## Customer Intelligence integrations
+
+Phase 1 ships no external calls. The final design is read-only toward Microsoft 365 (`Mail.Read` app-only) and QuickBooks (GET-only), with no posting, sending, or outreach. The foundation stores the identity/financial contract (`CustomerSourceAccount`, `CustomerRevenueLine`, `CustomerMonthlyFinancial`, `CustomerFxRate`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`) that later sync phases write into. See `docs/modules/customer-intelligence/integrations.md`.
+
 ## Important files
 
 - `package.json` for commands.
