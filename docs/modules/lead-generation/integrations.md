@@ -123,6 +123,11 @@ generation only and never overrides those identity checks.
 - The Luna call uses the Responses API, `store: false`, low reasoning, strict Structured Outputs, and
   no web or other tools. A prompt/model/batch fingerprint makes successful batches idempotent, so an
   operator retry does not repeat an already-completed OpenAI call.
+- Hunter never submits an empty public-evidence packet to Luna. Non-transient batch-contract failures are split into
+  one-company repair requests, and an exhausted company is omitted without preventing valid company rows from
+  continuing. Transient provider failures remain whole-run checkpoint recoveries rather than generating a burst of
+  individual model requests. A fully repaired cohort reports successful coverage while retaining the earlier failed
+  batch count as attempt-level audit history.
 - Luna usage, schema-valid coverage, categorical agreement, evidence-citation overlap, and bounded errors are
   stored in the company-research `AutomationJobRun.output`. Luna rows continue into Kimi scoring and deterministic
   gates. Qwen comparison rows remain audit-only and cannot affect planning, Apollo, or outreach.

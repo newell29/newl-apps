@@ -297,6 +297,87 @@ describe("Hunter Luna company-research synthesis service", () => {
     });
     expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
   });
+
+  it("reports complete coverage after individually repairing a failed batch", async () => {
+    let output: Record<string, unknown> | null = null;
+    prisma.automationJobRun.findFirst.mockImplementation(async () => ({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1", "company-2"],
+        candidateCompanyKeys: ["example-retailer", "second-retailer"]
+      },
+      output
+    }));
+    prisma.company.findMany.mockImplementation(async ({ where }) => {
+      const ids = (where.id as { in: string[] }).in;
+      return ids.map((id) => id === "company-1"
+        ? { id, name: "Example Retailer", normalizedName: "example-retailer" }
+        : { id, name: "Second Retailer", normalizedName: "second-retailer" });
+    });
+    generateHunterResearchLunaShadow
+      .mockRejectedValueOnce(new Error("Luna returned invalid structured company research."))
+      .mockImplementation(async ({ packets }) => ({
+        rows: packets.map((item: { companyKey: string }) => ({
+          ...synthesis(),
+          companyKey: item.companyKey
+        })),
+        usage: {
+          inputTokens: 100,
+          cachedInputTokens: 10,
+          outputTokens: 30,
+          totalTokens: 130,
+          durationMs: 500
+        }
+      }));
+
+    const failed = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [
+        packet(),
+        {
+          ...packet(),
+          companyId: "company-2",
+          companyKey: "second-retailer",
+          companyName: "Second Retailer"
+        }
+      ],
+      finalBatch: true
+    });
+    expect(failed).toMatchObject({ state: "error", report: { status: "ERROR" } });
+    output = prisma.automationJobRun.updateMany.mock.calls.at(-1)![0].data.output;
+
+    const firstRepair = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: false
+    });
+    expect(firstRepair).toMatchObject({ state: "completed", report: { status: "RUNNING" } });
+    output = prisma.automationJobRun.updateMany.mock.calls.at(-1)![0].data.output;
+
+    const secondRepair = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [{
+        ...packet(),
+        companyId: "company-2",
+        companyKey: "second-retailer",
+        companyName: "Second Retailer"
+      }],
+      finalBatch: true
+    });
+
+    expect(secondRepair).toMatchObject({
+      state: "completed",
+      report: {
+        status: "SUCCESS",
+        evaluatedCompanyCount: 2,
+        expectedCompanyCount: 2,
+        failedBatchCount: 1
+      }
+    });
+  });
 });
 
 function packet() {
