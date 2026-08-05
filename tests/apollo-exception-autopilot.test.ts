@@ -10,6 +10,7 @@ import {
   decideApolloExceptionResolution,
   requiresApolloExceptionIdentityResolution,
   selectCanonicalApolloIdentityReuse,
+  stripFreightPartyIdentitySuffix,
   summarizeApolloExceptionAutopilotStatus
 } from "@/modules/lead-gen/apollo-exception-autopilot";
 import { APOLLO_ZERO_CONTACT_REVIEW_REASON } from "@/modules/lead-gen/apollo-contact-discovery-review";
@@ -115,6 +116,45 @@ describe("Apollo exception autopilot guardrails", () => {
     ).toContain(
       '"HERCULES TIRE RUBBER" official company website operating brand'
     );
+  });
+
+  it("removes freight-party suffixes before spending the bounded public-search budget", () => {
+    expect(
+      stripFreightPartyIdentitySuffix("TRICORBRAUN CANADA INC.C/O VANTERM")
+    ).toBe("TRICORBRAUN CANADA INC");
+    expect(
+      stripFreightPartyIdentitySuffix("Example Distribution Ltd., care of Port Agent")
+    ).toBe("Example Distribution Ltd");
+    expect(
+      stripFreightPartyIdentitySuffix("Example Distribution LLC ATTN: Receiving")
+    ).toBe("Example Distribution LLC");
+    expect(stripFreightPartyIdentitySuffix("Care Of Design Inc.")).toBe(
+      "Care Of Design Inc."
+    );
+
+    expect(
+      buildApolloExceptionRecoveryAliases(
+        "TRICORBRAUN CANADA INC.C/O VANTERM"
+      )
+    ).toEqual(["TRICORBRAUN CANADA", "TRICORBRAUN"]);
+
+    expect(
+      buildApolloExceptionIdentityQueries({
+        companyId: "company-tricorbraun",
+        companyName: "TRICORBRAUN CANADA INC.C/O VANTERM",
+        normalizedName: "tricorbraun-canada-inc-c-o-vanterm",
+        knownDomain: null,
+        primaryIndustry: "Packaging",
+        shipmentGeography: ["Toronto, Ontario"],
+        priorApolloCandidates: []
+      })
+    ).toEqual([
+      '"TRICORBRAUN CANADA INC" official company website',
+      '"TRICORBRAUN CANADA INC" parent company subsidiary operating brand',
+      '"TRICORBRAUN CANADA INC" "Toronto, Ontario" company',
+      '"TRICORBRAUN CANADA" official company website operating brand',
+      '"TRICORBRAUN" official company website operating brand'
+    ]);
   });
 
   it("reuses one tenant canonical Apollo organization and suppresses prior outreach", () => {
