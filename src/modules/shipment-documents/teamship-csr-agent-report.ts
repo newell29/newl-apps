@@ -9,6 +9,7 @@ import {
   searchTeamshipProductsForShipping,
   type TeamshipShippingProductSearchRow
 } from "@/server/integrations/teamship";
+import { readTeamshipWorkerFailure } from "@/modules/shipment-documents/teamship-worker-failure";
 import { getTenantTeamshipSettings } from "@/server/integrations/teamship-settings";
 import { parseEmailRecipients, sendResendEmail } from "@/server/email/resend";
 import type { TenantContext } from "@/server/tenant-context";
@@ -115,6 +116,8 @@ type UpdateJobForReport = {
   id: string;
   status: string;
   agentMode: string;
+  errorMessage: string | null;
+  agentResult: unknown;
   orders: Array<{
     srNumber: string;
     status: string;
@@ -122,6 +125,8 @@ type UpdateJobForReport = {
     plannedPalletRows: unknown;
     validationIssues: unknown;
     errorMessage: string | null;
+    jobErrorMessage?: string | null;
+    failureStage?: string | null;
   }>;
 };
 
@@ -193,7 +198,10 @@ export async function buildGarlandCsrAgentReport(
     })
     .filter((order): order is GarlandCsrAgentOrderLine => Boolean(order));
   const needsReview = review.reviews
-    .filter((order) => order.status === "FAIL" || updateOrdersBySr.get(normalizeIdentifier(order.srNumber))?.status === "FAILED")
+    .filter((order) => {
+      const updateStatus = updateOrdersBySr.get(normalizeIdentifier(order.srNumber))?.status;
+      return updateStatus === "FAILED" || updateStatus === "NEEDS_REVIEW" || (order.status === "FAIL" && updateStatus !== "SUCCESS");
+    })
     .map((order) => buildIssueLine(order, updateOrdersBySr.get(normalizeIdentifier(order.srNumber))));
   const noPdfOrders = review.reviews
     .filter((order) => order.status === "NO_PDF")
@@ -283,6 +291,8 @@ async function loadRelatedUpdateJobs(tenantId: string, run: ReviewRunForReport):
       id: true,
       status: true,
       agentMode: true,
+      errorMessage: true,
+      agentResult: true,
       orders: {
         select: {
           srNumber: true,
@@ -301,10 +311,15 @@ function indexUpdateOrdersBySr(updateJobs: UpdateJobForReport[]) {
   const index = new Map<string, UpdateJobForReport["orders"][number]>();
 
   for (const job of updateJobs) {
+    const workerFailure = readTeamshipWorkerFailure(job.agentResult);
     for (const order of job.orders) {
       const key = normalizeIdentifier(order.srNumber);
       if (key && !index.has(key)) {
-        index.set(key, order);
+        index.set(key, {
+          ...order,
+          jobErrorMessage: job.errorMessage ?? workerFailure.message,
+          failureStage: workerFailure.stage
+        });
       }
     }
   }
@@ -430,11 +445,12 @@ function buildIssueLine(order: GarlandTeamshipOrderReview, updateOrder: UpdateJo
     .map((field) => `${field.label}: ${field.message}`);
   const updateIssues = [
     ...readStringArray(updateOrder?.validationIssues),
-    updateOrder?.errorMessage
+    updateOrder?.errorMessage,
+    updateOrder?.jobErrorMessage
   ].filter((issue): issue is string => Boolean(issue));
 
   return {
-    ...buildOrderLine(order, updateOrder?.status === "FAILED" ? "The update agent attempted this order and reported a failure." : "PDF and Teamship values need CSR review."),
+    ...buildOrderLine(order, describeUpdateReviewReason(updateOrder)),
     issues: [...fieldIssues, ...updateIssues].slice(0, 8)
   };
 }
@@ -477,12 +493,12 @@ function determineRowTone(
     return "gray";
   }
 
-  if (review.status === "FAIL" || updateOrder?.status === "FAILED") {
-    return "red";
-  }
-
   if (updateOrder?.status === "SUCCESS") {
     return "green";
+  }
+
+  if (review.status === "FAIL" || updateOrder?.status === "FAILED" || updateOrder?.status === "NEEDS_REVIEW") {
+    return "red";
   }
 
   return review.status === "PASS" ? "yellow" : "red";
@@ -504,16 +520,12 @@ function buildRowStatusLabel(
     return "Pending Teamship";
   }
 
-  if (updateOrder?.status === "FAILED") {
-    return "Needs review";
-  }
-
-  if (review.status === "FAIL") {
-    return "Needs review";
-  }
-
   if (updateOrder?.status === "SUCCESS") {
     return "Complete";
+  }
+
+  if (updateOrder?.status === "FAILED" || updateOrder?.status === "NEEDS_REVIEW" || review.status === "FAIL") {
+    return "Needs review";
   }
 
   return "Matched";
@@ -523,8 +535,12 @@ function defaultBotChangeText(
   review: GarlandTeamshipOrderReview | undefined,
   updateOrder: UpdateJobForReport["orders"][number] | undefined
 ) {
-  if (updateOrder?.status === "FAILED") {
-    return "Bot attempted this order but did not complete it.";
+  if (updateOrder?.status === "FAILED" || updateOrder?.status === "NEEDS_REVIEW") {
+    const failure = updateOrder.errorMessage ?? updateOrder.jobErrorMessage;
+    const stage = updateOrder.failureStage ? ` (${formatFailureStage(updateOrder.failureStage)})` : "";
+    return failure
+      ? `No complete update was confirmed${stage}: ${failure}`
+      : `No complete update was confirmed${stage}.`;
   }
 
   if (!review || review.status === "MISSING_TEAMSHIP" || review.status === "PENDING_TEAMSHIP") {
@@ -547,7 +563,8 @@ function summarizeReviewIssues(
     .map((field) => `${field.label}: ${field.message}`);
   const updateIssues = [
     ...readStringArray(updateOrder?.validationIssues),
-    updateOrder?.errorMessage
+    updateOrder?.errorMessage,
+    updateOrder?.jobErrorMessage
   ].filter((issue): issue is string => Boolean(issue));
 
   if (review.status === "MISSING_TEAMSHIP") {
@@ -559,6 +576,19 @@ function summarizeReviewIssues(
   }
 
   return [...fieldIssues, ...updateIssues].slice(0, 8);
+}
+
+function describeUpdateReviewReason(updateOrder: UpdateJobForReport["orders"][number] | undefined) {
+  if (updateOrder?.status !== "FAILED" && updateOrder?.status !== "NEEDS_REVIEW") {
+    return "PDF and Teamship values need CSR review.";
+  }
+
+  const stage = updateOrder.failureStage ? ` during ${formatFailureStage(updateOrder.failureStage)}` : "";
+  return `The update did not complete${stage}; review the exact issue below.`;
+}
+
+function formatFailureStage(value: string) {
+  return value.toLowerCase().replaceAll("_", " ");
 }
 
 function summarizeInventoryItems(items: GarlandCsrAgentInventoryItem[]) {

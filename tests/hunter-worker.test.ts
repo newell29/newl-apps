@@ -484,4 +484,35 @@ describe("Hunter daily profile worker", () => {
     expect(payload.result.automaticRecovery).toEqual({ recovered: true, attempt: 2 });
     expect(payload.messages.some((message) => message.includes("attempt 2/3"))).toBe(true);
   });
+
+  it("can explicitly recover the exact cohort from a failed research run", () => {
+    const python = [
+      "import contextlib, importlib.util, io, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "captured=[]",
+      "module.required_env=lambda name: 'redacted'",
+      "module.run_company_research_with_notification=lambda **kwargs: captured.append(kwargs) or {'state':'recovered'}",
+      "sys.argv=[str(worker_path),'--company-research-recovery-run-id','run-50']",
+      "with contextlib.redirect_stdout(io.StringIO()): status=module.main()",
+      "print(json.dumps({'status':status,'captured':captured}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+    expect(result.status, result.stderr).toBe(0);
+    const lines = result.stdout.trim().split("\n");
+    const payload = JSON.parse(lines.at(-1) ?? "{}") as {
+      status: number;
+      captured: Array<Record<string, unknown>>;
+    };
+    expect(payload.status).toBe(0);
+    expect(payload.captured).toHaveLength(1);
+    expect(payload.captured[0]).toMatchObject({
+      force: true,
+      recovery_of_run_id: "run-50"
+    });
+  });
 });

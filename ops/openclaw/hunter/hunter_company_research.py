@@ -12,6 +12,7 @@ import json
 import os
 import re
 import socket
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -2686,11 +2687,52 @@ def submit_luna_primary_batches(
             },
         }
 
-    synthesis_batches = batched(candidates, 4)
+    candidate_by_key = {
+        str(candidate["companyKey"]): candidate
+        for candidate in candidates
+    }
+    company_packet_by_key: dict[str, dict[str, Any]] = {}
+    failures: dict[str, str] = {}
+    for candidate in candidates:
+        key = str(candidate["companyKey"])
+        public_evidence = select_company_model_evidence(
+            candidate,
+            evidence_by_key.get(key, []),
+            None,
+        )
+        if not public_evidence:
+            failures[key] = (
+                "Hunter retrieved no usable public evidence; the company was omitted "
+                "before Luna synthesis."
+            )
+            continue
+        qwen_synthesis = qwen_shadow_by_key.get(key)
+        company_packet_by_key[key] = {
+            "companyId": candidate["companyId"],
+            "companyKey": key,
+            "companyName": candidate["companyName"],
+            "domain": candidate.get("domain"),
+            "priorityScore": candidate.get("priorityScore"),
+            "primaryIndustry": candidate.get("primaryIndustry"),
+            "shipmentEvidence": candidate.get("shipmentEvidence", []),
+            "existingSignals": candidate.get("existingSignals", []),
+            "publicEvidence": public_evidence,
+            "qwenSynthesis": (
+                {"companyKey": key, **qwen_synthesis}
+                if isinstance(qwen_synthesis, dict)
+                else None
+            ),
+        }
+
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if str(candidate["companyKey"]) in company_packet_by_key
+    ]
+    synthesis_batches = batched(eligible_candidates, 4)
     latest_report: dict[str, Any] = {}
     failed_batches = 0
     synthesis_by_key: dict[str, dict[str, Any]] = {}
-    failures: dict[str, str] = {}
     usage = {
         "inputTokens": 0,
         "cachedInputTokens": 0,
@@ -2698,36 +2740,54 @@ def submit_luna_primary_batches(
         "totalTokens": 0,
         "durationMs": 0,
     }
-    for batch_index, batch in enumerate(synthesis_batches):
-        company_packets = []
+    repair_candidates_by_key: dict[str, dict[str, Any]] = {}
+
+    def consume_response_rows(
+        batch: list[dict[str, Any]],
+        response: dict[str, Any],
+    ) -> set[str]:
+        nonlocal latest_report
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        if isinstance(data.get("report"), dict):
+            latest_report = data["report"]
+        rows = data.get("rows") if isinstance(data.get("rows"), list) else []
+        batch_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        if data.get("state") != "cached":
+            for name in usage:
+                usage[name] += int(batch_usage.get(name) or 0)
+        batch_keys = {str(candidate["companyKey"]) for candidate in batch}
+        returned_keys: set[str] = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = clean(row.get("companyKey"))
+            if not key or key not in batch_keys:
+                continue
+            try:
+                synthesis_by_key[key] = normalize_synthesis_for_evidence(
+                    candidate_by_key[key],
+                    evidence_by_key.get(key, []),
+                    validate_synthesis(row, key),
+                )
+                failures.pop(key, None)
+                returned_keys.add(key)
+            except Exception as error:
+                failures[key] = bounded_text(
+                    str(error),
+                    "Luna returned invalid structured company research.",
+                    1_000,
+                )
         for candidate in batch:
             key = str(candidate["companyKey"])
-            qwen_synthesis = qwen_shadow_by_key.get(key)
-            company_packets.append(
-                {
-                    "companyId": candidate["companyId"],
-                    "companyKey": key,
-                    "companyName": candidate["companyName"],
-                    "domain": candidate.get("domain"),
-                    "priorityScore": candidate.get("priorityScore"),
-                    "primaryIndustry": candidate.get("primaryIndustry"),
-                    "shipmentEvidence": candidate.get("shipmentEvidence", []),
-                    "existingSignals": candidate.get("existingSignals", []),
-                    "publicEvidence": select_company_model_evidence(
-                        candidate,
-                        evidence_by_key.get(key, []),
-                        None,
-                    ),
-                    "qwenSynthesis": (
-                        {"companyKey": key, **qwen_synthesis}
-                        if isinstance(qwen_synthesis, dict)
-                        else None
-                    ),
-                }
-            )
-        if not company_packets:
-            failed_batches += 1
-            continue
+            if key not in returned_keys and key not in failures:
+                failures[key] = "Luna omitted this company from its structured response."
+        return returned_keys
+
+    for batch_index, batch in enumerate(synthesis_batches):
+        company_packets = [
+            company_packet_by_key[str(candidate["companyKey"])]
+            for candidate in batch
+        ]
         try:
             response = api_request(
                 base_url,
@@ -2740,56 +2800,63 @@ def submit_luna_primary_batches(
                     "finalBatch": batch_index == len(synthesis_batches) - 1,
                 },
             )
-            data = response.get("data") if isinstance(response.get("data"), dict) else {}
-            if isinstance(data.get("report"), dict):
-                latest_report = data["report"]
-            rows = data.get("rows") if isinstance(data.get("rows"), list) else []
-            batch_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-            for name in usage:
-                usage[name] += int(batch_usage.get(name) or 0)
-            returned_keys: set[str] = set()
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                key = clean(row.get("companyKey"))
-                if not key:
-                    continue
-                try:
-                    synthesis_by_key[key] = normalize_synthesis_for_evidence(
-                        next(
-                            candidate
-                            for candidate in batch
-                            if str(candidate["companyKey"]) == key
-                        ),
-                        evidence_by_key.get(key, []),
-                        validate_synthesis(row, key),
-                    )
-                    returned_keys.add(key)
-                except Exception as error:
-                    failures[key] = bounded_text(
-                        str(error),
-                        "Luna returned invalid structured company research.",
-                        1_000,
-                    )
+            returned_keys = consume_response_rows(batch, response)
             for candidate in batch:
                 key = str(candidate["companyKey"])
-                if key not in returned_keys and key not in failures:
-                    failures[key] = "Luna omitted this company from its structured response."
+                if key not in returned_keys:
+                    repair_candidates_by_key[key] = candidate
+            data = response.get("data") if isinstance(response.get("data"), dict) else {}
             if data.get("state") == "error":
                 failed_batches += 1
         except Exception as error:
+            if is_retryable_company_research_error(error):
+                raise
             failed_batches += 1
             for candidate in batch:
-                failures[str(candidate["companyKey"])] = bounded_text(
+                key = str(candidate["companyKey"])
+                failures[key] = bounded_text(
                     str(error),
                     "Luna primary synthesis failed.",
                     1_000,
                 )
+                repair_candidates_by_key[key] = candidate
             print(
-                "Hunter Luna primary synthesis batch failed; downstream scoring will not use Qwen: "
+                "Hunter Luna primary synthesis batch failed; retrying affected companies individually: "
                 f"{type(error).__name__}",
                 file=sys.stderr,
             )
+
+    repair_candidates = list(repair_candidates_by_key.values())
+    for repair_index, candidate in enumerate(repair_candidates):
+        key = str(candidate["companyKey"])
+        try:
+            response = api_request(
+                base_url,
+                token,
+                "POST",
+                "/api/lead-gen/hunter/company-research/synthesis",
+                {
+                    "runId": run_id,
+                    "packets": [company_packet_by_key[key]],
+                    "finalBatch": repair_index == len(repair_candidates) - 1,
+                },
+            )
+            returned_keys = consume_response_rows([candidate], response)
+            if key not in returned_keys:
+                failures[key] = bounded_text(
+                    failures.get(key),
+                    "Luna did not return valid company research after an individual repair attempt.",
+                    1_000,
+                )
+        except Exception as error:
+            if is_retryable_company_research_error(error):
+                raise
+            failures[key] = bounded_text(
+                str(error),
+                "Luna individual company repair failed.",
+                1_000,
+            )
+
     if latest_report:
         usage = {
             "inputTokens": int(latest_report.get("inputTokens") or usage["inputTokens"]),
@@ -2805,7 +2872,7 @@ def submit_luna_primary_batches(
     return {
         "state": (
             "completed"
-            if len(synthesis_by_key) == len(candidates) and failed_batches == 0
+            if len(synthesis_by_key) == len(candidates)
             else "partial"
             if synthesis_by_key
             else "error"
@@ -3069,6 +3136,11 @@ def run_company_research(
                 for key, value in raw_synthesis.items()
                 if isinstance(value, dict)
             }
+            raw_synthesis_failures = checkpoint.get("synthesisFailures")
+            synthesis_failures = {
+                str(key): str(value)
+                for key, value in (raw_synthesis_failures or {}).items()
+            } if isinstance(raw_synthesis_failures, dict) else {}
             luna_usage = {
                 "inputTokens": int(raw_luna_usage.get("inputTokens") or 0),
                 "cachedInputTokens": int(raw_luna_usage.get("cachedInputTokens") or 0),
@@ -3099,7 +3171,7 @@ def run_company_research(
                 "report": None,
                 "synthesisByKey": synthesis_by_key,
                 "usage": luna_usage,
-                "failures": {},
+                "failures": synthesis_failures,
             }
         else:
             qwen_shadow_by_key, qwen_usage, qwen_shadow_failures = synthesize_qwen_shadow(
@@ -3128,12 +3200,12 @@ def run_company_research(
                 for candidate in candidates
                 if candidate["companyKey"] in synthesis_by_key
             ]
-            if len(synthesized_candidates) != len(candidates):
+            if not synthesized_candidates:
                 failure_summary = "; ".join(
                     f"{key}: {message}" for key, message in synthesis_failures.items()
                 )
                 raise RuntimeError(
-                    "Luna could not produce valid structured research for the complete company cohort. "
+                    "Luna could not produce valid structured research for any company in the cohort. "
                     f"{bounded_text(failure_summary, 'One or more company syntheses were unavailable.', 1_000)}"
                 )
             identity_evidence_added, identity_page_count = collect_identity_discovery_evidence(
@@ -3163,11 +3235,12 @@ def run_company_research(
                     for key, rows in evidence_by_key.items()
                 }
             if identity_evidence_added > 0 or has_follow_ups:
+                prior_synthesis_failures = dict(synthesis_failures)
                 qwen_shadow_by_key, qwen_usage, qwen_shadow_failures = synthesize_qwen_shadow(
                     qwen_shadow_enabled,
                     ollama_url,
                     qwen_model,
-                    candidates,
+                    synthesized_candidates,
                     evidence_by_key,
                     qwen_batch_size,
                     qwen_repair_attempts,
@@ -3183,15 +3256,18 @@ def run_company_research(
                 )
                 synthesis_by_key = luna_comparison.get("synthesisByKey", {})
                 luna_usage = luna_comparison.get("usage", {})
-                synthesis_failures = luna_comparison.get("failures", {})
+                synthesis_failures = {
+                    **prior_synthesis_failures,
+                    **luna_comparison.get("failures", {}),
+                }
                 synthesized_candidates = [
                     candidate
-                    for candidate in candidates
+                    for candidate in synthesized_candidates
                     if candidate["companyKey"] in synthesis_by_key
                 ]
-                if len(synthesized_candidates) != len(candidates):
+                if not synthesized_candidates:
                     raise RuntimeError(
-                        "Luna could not produce valid structured research for the complete cohort "
+                        "Luna could not produce valid structured research for any company "
                         "after follow-up retrieval."
                     )
             write_checkpoint(
@@ -3215,15 +3291,14 @@ def run_company_research(
             )
             checkpoint_stage = "SYNTHESIS_COMPLETE"
         if checkpoint_stage == "SYNTHESIS_COMPLETE":
-            synthesis_failures: dict[str, str] = {}
             synthesized_candidates = [
                 candidate
                 for candidate in candidates
                 if candidate["companyKey"] in synthesis_by_key
             ]
-            if len(synthesized_candidates) != len(candidates):
+            if not synthesized_candidates:
                 raise RuntimeError(
-                    "The saved Luna checkpoint does not contain the complete prepared company cohort."
+                    "The saved Luna checkpoint does not contain any valid company synthesis."
                 )
 
         if research_only:
@@ -3236,7 +3311,8 @@ def run_company_research(
             return {
                 "state": "research_only",
                 "runId": run_id,
-                "companyCount": len(candidates),
+                "companyCount": len(synthesized_candidates),
+                "missingCompanyCount": len(candidates) - len(synthesized_candidates),
                 "evidenceCount": sum(len(rows) for rows in evidence_by_key.values()),
                 "queryCount": len(query_log),
                 "failedQueryCount": sum(1 for row in query_log if row.get("error")),
@@ -3436,6 +3512,10 @@ def main() -> int:
     parser.add_argument("--output", help="Optional path for the redacted completion ledger.")
     parser.add_argument("--resume-checkpoint", help="Resume a matching retrieval or Qwen checkpoint.")
     parser.add_argument(
+        "--recovery-run-id",
+        help="Recover the exact tenant-scoped cohort from a failed Newl Apps company-research run.",
+    )
+    parser.add_argument(
         "--research-only",
         action="store_true",
         help="Stop after retrieval, Luna synthesis, and optional Qwen shadow comparison without calling Kimi.",
@@ -3450,6 +3530,7 @@ def main() -> int:
                 replay_output=args.output,
                 resume_checkpoint=args.resume_checkpoint,
                 research_only=args.research_only,
+                recovery_of_run_id=clean(args.recovery_run_id),
             ),
             indent=2,
         )

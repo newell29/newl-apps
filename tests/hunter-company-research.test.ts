@@ -612,6 +612,109 @@ describe("Hunter company deep research", () => {
     });
   });
 
+  it("preserves a transient Luna provider error instead of masking it in diagnostics", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "def fail_api(*_args,**_kwargs): raise RuntimeError('HTTP 503: Luna temporarily unavailable')",
+      "r.api_request=fail_api",
+      "candidate={'companyId':'company-1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]}",
+      "evidence={'alpha':[{'pass':'IDENTITY','query':'alpha','title':'Alpha','url':'https://example.com/alpha','sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'identity','firstParty':True}]}",
+      "try:",
+      " r.submit_luna_primary_batches('https://example.com','token','run-1',{'models':{'synthesis':{'provider':'OPENAI','enabled':True}}},[candidate],evidence,{})",
+      "except Exception as error:",
+      " print(json.dumps({'error':str(error),'retryable':r.is_retryable_company_research_error(error)}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      error: "HTTP 503: Luna temporarily unavailable",
+      retryable: true
+    });
+  });
+
+  it("omits zero-evidence companies before Luna while preserving valid synthesis", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "requests=[]",
+      "def valid_row(key):",
+      " return {'companyKey':key,'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified identity.','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'Current operating footprint.','triggerEvidenceIndices':[0],'geography':'Charlotte, North Carolina','companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':80,'rationale':'Evidence supports current fit.','missingEvidence':[],'followUpQueries':[]}",
+      "def fake_api(_base_url,_token,method,path,payload):",
+      " requests.append({'keys':[packet['companyKey'] for packet in payload['packets']],'finalBatch':payload['finalBatch']})",
+      " return {'data':{'state':'completed','rows':[valid_row(packet['companyKey']) for packet in payload['packets']],'usage':{},'report':{'status':'PARTIAL'}}}",
+      "r.api_request=fake_api",
+      "candidates=[{'companyId':'company-1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]},{'companyId':'company-2','companyKey':'beta','companyName':'Beta','priorityScore':70,'shipmentEvidence':[],'existingSignals':[]}]",
+      "evidence={'alpha':[{'pass':'IDENTITY','query':'alpha','title':'Alpha','url':'https://example.com/alpha','sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'identity','firstParty':True}],'beta':[]}",
+      "result=r.submit_luna_primary_batches('https://example.com','token','run-1',{'models':{'synthesis':{'provider':'OPENAI','enabled':True}}},candidates,evidence,{})",
+      "print(json.dumps({'result':result,'requests':requests}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    const output = JSON.parse(stdout);
+    expect(output.requests).toEqual([{ keys: ["alpha"], finalBatch: true }]);
+    expect(output.result).toMatchObject({
+      state: "partial",
+      synthesisByKey: { alpha: expect.objectContaining({ identityDisposition: "PASS" }) },
+      failures: {
+        beta: "Hunter retrieved no usable public evidence; the company was omitted before Luna synthesis."
+      }
+    });
+  });
+
+  it("repairs a failed Luna batch per company without discarding recovered rows", async () => {
+    const program = [
+      "import json",
+      "import hunter_company_research as r",
+      "calls=[]",
+      "def valid_row(key):",
+      " return {'companyKey':key,'identityDisposition':'PASS','identityConfidence':90,'identityReason':'Verified identity.','logisticsProvider':False,'namedExternalLogisticsProvider':False,'stableExclusiveProviderEvidence':False,'providerDisplacementEvidence':False,'freshness':'CURRENT','opportunitySummary':'Current operating footprint.','triggerEvidenceIndices':[0],'geography':'Charlotte, North Carolina','companyCountry':'United States','operatingRegion':'NORTH_AMERICA','verifiedUsDivision':False,'usDivisionName':None,'usDivisionEvidenceIndices':[],'serviceLine':'WAREHOUSING','signalType':'OTHER','confidence':80,'rationale':'Evidence supports current fit.','missingEvidence':[],'followUpQueries':[]}",
+      "def fake_api(_base_url,_token,method,path,payload):",
+      " keys=[packet['companyKey'] for packet in payload['packets']]",
+      " calls.append({'keys':keys,'finalBatch':payload['finalBatch']})",
+      " if len(keys)>1: raise RuntimeError('HTTP 422: malformed Luna batch')",
+      " if keys[0]=='beta': raise RuntimeError('HTTP 422: beta remained invalid')",
+      " return {'data':{'state':'completed','rows':[valid_row(keys[0])],'usage':{},'report':{'status':'PARTIAL'}}}",
+      "r.api_request=fake_api",
+      "candidates=[{'companyId':'company-1','companyKey':'alpha','companyName':'Alpha','priorityScore':80,'shipmentEvidence':[],'existingSignals':[]},{'companyId':'company-2','companyKey':'beta','companyName':'Beta','priorityScore':70,'shipmentEvidence':[],'existingSignals':[]}]",
+      "evidence={key:[{'pass':'IDENTITY','query':key,'title':key,'url':'https://example.com/'+key,'sourceDomain':'example.com','sourceType':'FIRST_PARTY','publishedAt':None,'excerpt':'identity','firstParty':True}] for key in ['alpha','beta']}",
+      "result=r.submit_luna_primary_batches('https://example.com','token','run-1',{'models':{'synthesis':{'provider':'OPENAI','enabled':True}}},candidates,evidence,{})",
+      "print(json.dumps({'result':result,'calls':calls}))"
+    ].join("\n");
+    const { stdout } = await execFileAsync("python3", ["-c", program], {
+      env: {
+        ...process.env,
+        PYTHONPATH: path.join(repoRoot, "ops/openclaw/hunter"),
+        PYTHONPYCACHEPREFIX: "/private/tmp/newl-hunter-company-research-tests"
+      }
+    });
+
+    const output = JSON.parse(stdout);
+    expect(output.calls).toEqual([
+      { keys: ["alpha", "beta"], finalBatch: true },
+      { keys: ["alpha"], finalBatch: false },
+      { keys: ["beta"], finalBatch: true }
+    ]);
+    expect(output.result).toMatchObject({
+      state: "partial",
+      failedBatchCount: 1,
+      synthesisByKey: { alpha: expect.objectContaining({ identityDisposition: "PASS" }) },
+      failures: { beta: "HTTP 422: beta remained invalid" }
+    });
+  });
+
   it("isolates malformed Qwen batches and retries affected companies independently", async () => {
     const program = [
       "import json",

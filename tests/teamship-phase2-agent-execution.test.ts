@@ -459,6 +459,65 @@ PROPER NAME: UN1814`;
     );
   });
 
+  it("retries one transient Teamship login failure before submitting any update", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    plan.orders[0]!.srNumber = "SR812345";
+    plan.orders[0]!.psNumber = "PS123456";
+    plan.orders[0]!.teamshipOrderId = "12345";
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "temporarily unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ data: { token: "synthetic-token" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 12345 } }, 200));
+
+    const result = await executeTeamshipPhase2Job({
+      job: { id: "job_1", agentMode: "LIVE_API", dryRun: false },
+      plan,
+      credentials: {
+        email: "user@example.com",
+        password: "synthetic-password",
+        apiBaseUrl: "https://teamship.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: true,
+        liveAllowlistSrNumbers: ["SR812345"],
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    });
+
+    expect(result.hasFailures).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, "https://teamship.example/api/v1/login", expect.objectContaining({ method: "POST" }));
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, "https://teamship.example/api/v1/login", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("does not retry a rejected Teamship login", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    plan.orders[0]!.srNumber = "SR812345";
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ error: "unauthorized" }, 401));
+
+    await expect(
+      executeTeamshipPhase2Job({
+        job: { id: "job_1", agentMode: "LIVE_API", dryRun: false },
+        plan,
+        credentials: {
+          email: "user@example.com",
+          password: "synthetic-password",
+          apiBaseUrl: "https://teamship.example/api"
+        },
+        options: {
+          agentId: "agent",
+          allowLiveUpdates: true,
+          liveAllowlistSrNumbers: ["SR812345"],
+          fetchImpl: fetchImpl as unknown as typeof fetch
+        }
+      })
+    ).rejects.toThrow("Teamship login failed with status 401");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("preserves per-order evidence when a live Teamship update fails", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const fetchImpl = vi

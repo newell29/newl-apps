@@ -18,6 +18,10 @@ import type {
   GarlandPdfShippingOrder,
   GarlandTeamshipReviewResponse
 } from "@/modules/shipment-documents/teamship-review-types";
+import {
+  readTeamshipWorkerFailure,
+  type TeamshipWorkerFailureStage
+} from "@/modules/shipment-documents/teamship-worker-failure";
 import { prisma } from "@/server/db";
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 import type { AuthenticatedContext, TenantContext } from "@/server/tenant-context";
@@ -56,6 +60,7 @@ export type TeamshipUpdateJobSummary = {
   selectedSrNumbers: string[];
   summary: TeamshipPhase2DryRunPlan["summary"];
   errorMessage: string | null;
+  failureStage: TeamshipWorkerFailureStage | null;
   agentId: string | null;
   createdAt: string;
   approvedAt: string | null;
@@ -433,8 +438,13 @@ export async function completeTeamshipUpdateJobFromAgent({
 
   let verification: GarlandTeamshipReviewResponse | null = null;
   let verificationError: string | null = null;
+  const workerFailure = readTeamshipWorkerFailure(agentResult);
+  const safeAgentResult = workerFailure.message
+    ? { ...readJsonObject(agentResult), error: workerFailure.message }
+    : agentResult;
+  const agentOrderResults = readAgentOrderResults(agentResult);
 
-  if (shouldVerifyAfterAgentCompletion(status)) {
+  if (shouldVerifyAfterAgentCompletion(status, agentOrderResults)) {
     try {
       verification = await verifyTeamshipUpdateJob(context, job);
     } catch (error) {
@@ -442,9 +452,8 @@ export async function completeTeamshipUpdateJobFromAgent({
     }
   }
 
-  const finalStatus = verificationError ? "NEEDS_REVIEW" : status;
+  const finalStatus = determineCompletedJobStatus({ status, verificationError, agentOrderResults });
   const client = prisma as TeamshipUpdateJobClient;
-  const agentOrderResults = readAgentOrderResults(agentResult);
 
   if (agentOrderResults.length > 0) {
     await Promise.all(
@@ -456,13 +465,26 @@ export async function completeTeamshipUpdateJobFromAgent({
             srNumber: order.srNumber
           },
           data: {
-            status: mapAgentOrderStatus(order.status, finalStatus),
-            agentResult: order as unknown as Prisma.InputJsonValue,
+            status: mapAgentOrderStatus(order, finalStatus),
+            agentResult: order.raw as Prisma.InputJsonValue,
             errorMessage: order.error ?? null
           }
         })
       )
     );
+
+    const reportedSrNumbers = agentOrderResults.map((order) => order.srNumber);
+    await client.teamshipUpdateOrder.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        jobId,
+        srNumber: { notIn: reportedSrNumbers }
+      },
+      data: {
+        status: "FAILED",
+        errorMessage: buildUnreportedOrderError(workerFailure.message)
+      }
+    });
   } else {
     await client.teamshipUpdateOrder.updateMany({
       where: {
@@ -470,7 +492,8 @@ export async function completeTeamshipUpdateJobFromAgent({
         jobId
       },
       data: {
-        status: finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus
+        status: finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus,
+        errorMessage: finalStatus === "SUCCESS" ? null : buildUnreportedOrderError(workerFailure.message)
       }
     });
   }
@@ -480,15 +503,15 @@ export async function completeTeamshipUpdateJobFromAgent({
     data: {
       status: finalStatus,
       agentFinishedAt: new Date(),
-      errorMessage: verificationError,
-      agentResult: (agentResult ?? null) as Prisma.InputJsonValue,
+      errorMessage: verificationError ?? workerFailure.message,
+      agentResult: (safeAgentResult ?? null) as Prisma.InputJsonValue,
       verificationResponse: verification ? (verification as unknown as Prisma.InputJsonValue) : undefined,
       lastVerificationAt: verification ? new Date() : undefined
     },
     include: includeJobDetails
   });
 
-  if (finalStatus === "SUCCESS") {
+  if (finalStatus === "SUCCESS" || finalStatus === "NEEDS_REVIEW") {
     await markTeamshipReviewOrdersReadyToPrint({
       tenantId: context.tenantId,
       shipmentDate: job.shipmentDate,
@@ -692,6 +715,7 @@ function mapUpdateJob(job: TeamshipUpdateJobRecord): TeamshipUpdateJobSummary {
     selectedSrNumbers: readStringArray(job.selectedSrNumbers),
     summary: readSummary(job.summary),
     errorMessage: job.errorMessage,
+    failureStage: readTeamshipWorkerFailure(job.agentResult).stage,
     agentId: job.agentId,
     createdAt: job.createdAt.toISOString(),
     approvedAt: job.approvedAt?.toISOString() ?? null,
@@ -710,31 +734,68 @@ function readAgentOrderResults(value: unknown) {
   const orders = Array.isArray(payload?.orders) ? payload.orders : [];
 
   return orders
-    .map((order) => (order && typeof order === "object" ? (order as { srNumber?: unknown; status?: unknown; error?: unknown }) : null))
-    .filter((order): order is { srNumber: string; status: string; error?: string } => {
+    .map((order) => (order && typeof order === "object" ? (order as Record<string, unknown>) : null))
+    .filter((order): order is Record<string, unknown> & { srNumber: string; status: string } => {
       return typeof order?.srNumber === "string" && order.srNumber.trim().length > 0 && typeof order.status === "string";
     })
     .map((order) => ({
       srNumber: order.srNumber.trim(),
       status: order.status,
-      error: typeof order.error === "string" && order.error.trim().length > 0 ? order.error.trim() : null
+      error: typeof order.error === "string" && order.error.trim().length > 0 ? order.error.trim() : null,
+      raw: order
     }));
 }
 
-function shouldVerifyAfterAgentCompletion(status: "SUCCESS" | "FAILED" | "NEEDS_REVIEW") {
-  return status === "SUCCESS" || status === "NEEDS_REVIEW";
+function shouldVerifyAfterAgentCompletion(
+  status: "SUCCESS" | "FAILED" | "NEEDS_REVIEW",
+  agentOrderResults: ReturnType<typeof readAgentOrderResults>
+) {
+  return status === "SUCCESS" || status === "NEEDS_REVIEW" || agentOrderResults.some((order) => order.status === "UPDATED");
 }
 
-function mapAgentOrderStatus(status: string, finalStatus: "SUCCESS" | "FAILED" | "NEEDS_REVIEW"): TeamshipUpdateOrderStatus {
-  if (status === "UPDATED") {
+function determineCompletedJobStatus({
+  status,
+  verificationError,
+  agentOrderResults
+}: {
+  status: "SUCCESS" | "FAILED" | "NEEDS_REVIEW";
+  verificationError: string | null;
+  agentOrderResults: ReturnType<typeof readAgentOrderResults>;
+}): "SUCCESS" | "FAILED" | "NEEDS_REVIEW" {
+  if (verificationError) {
+    return "NEEDS_REVIEW";
+  }
+
+  if (status === "FAILED" && agentOrderResults.some((order) => order.status === "UPDATED")) {
+    return "NEEDS_REVIEW";
+  }
+
+  return status;
+}
+
+function buildUnreportedOrderError(workerError: string | null) {
+  return workerError
+    ? `Worker stopped before this order returned order-level evidence: ${workerError}`
+    : "Worker stopped before this order returned order-level evidence.";
+}
+
+function mapAgentOrderStatus(
+  order: { status: string; error: string | null },
+  finalStatus: "SUCCESS" | "FAILED" | "NEEDS_REVIEW"
+): TeamshipUpdateOrderStatus {
+  if (order.status === "UPDATED") {
     return "SUCCESS";
   }
 
-  if (status === "FAILED") {
+  if (order.status === "FAILED" && /Teamship API update succeeded/i.test(order.error ?? "")) {
+    return "NEEDS_REVIEW";
+  }
+
+  if (order.status === "FAILED") {
     return "FAILED";
   }
 
-  if (status === "READY" || status === "BLOCKED" || status === "SKIPPED") {
+  if (order.status === "READY" || order.status === "BLOCKED" || order.status === "SKIPPED") {
     return finalStatus === "SUCCESS" ? "SUCCESS" : finalStatus;
   }
 
