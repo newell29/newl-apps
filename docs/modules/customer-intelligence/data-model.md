@@ -2,7 +2,7 @@
 
 > Evidence status: Confirmed from schema and migration. Additive to the existing platform; nothing here rewrites `CashflowCustomer` or `CashflowLegalEntity`.
 
-Migrations: `20260805120000_add_customer_intelligence_foundation` (base tables/enums) and `20260805150000_customer_intelligence_corrections` (open AR, operating-company-scoped identity matches, evidence conflicts, one-approved-per-source database index, and the deployable Module/TenantModuleAccess/OperatingCompany bootstrap).
+Migrations: `20260805120000_add_customer_intelligence_foundation` (base tables/enums), `20260805150000_customer_intelligence_corrections` (open AR, operating-company-scoped identity matches, evidence conflicts, one-approved-per-source database index, and the deployable Module/TenantModuleAccess/OperatingCompany bootstrap), and `20260805160000_customer_intelligence_identity_integrity` (tenant-scoped company foreign keys and approved-state CHECK constraints).
 
 ## Canonical structure
 
@@ -26,7 +26,13 @@ One row per QuickBooks customer record, keyed by `(tenantId, realmId, quickBooks
 
 - **ContactPoint**: one row per normalized email/phone/website/address per contact. `value` stores the normalized form (emails lowercased, phones digits-only) so equivalent values deduplicate deterministically; `displayValue` keeps the human form. Fields: `type` (`EMAIL | PHONE | WEBSITE | ADDRESS | OTHER`), `value`, `displayValue`, `label`, `primary`, `verificationStatus` (`UNVERIFIED | VERIFIED | REJECTED | EXPIRED`), `firstSeenAt`, `lastSeenAt`, `source`. Unique `(tenantId, contactId, type, value)`.
 - **ContactEvidence**: extracted field-level facts. Fields: `sourceType` (`EMAIL_SIGNATURE | QUICKBOOKS | MANUAL | APOLLO | WEBSITE | OTHER`), `sourceRecordKey`, `fieldName`, `fieldValue`, `confidence`, `parserVersion`, `observedAt`, `reviewStatus` (`UNREVIEWED | ACCEPTED | REJECTED | CONFLICT`), `evidenceFragment` (capped at 240 characters), `conflictingValue` (the value that conflicts with an accepted/reviewed fact, preserved for review). Unique `(tenantId, contactId, sourceRecordKey, fieldName)`.
-- **CustomerIdentityMatch**: proposed/approved links for QuickBooks accounts, email domains, aliases, and contacts. Fields: `kind` (`QUICKBOOKS_ACCOUNT | EMAIL_DOMAIN | COMPANY_ALIAS | CONTACT`), `companyId` (canonical target), `operatingCompanyId` (required for `QUICKBOOKS_ACCOUNT` so a mapping under one operating company cannot activate another), `sourceRecordKey`, `sourceLabel`, `candidateCompanyId`, `score`, `status` (`PROPOSED | APPROVED | REJECTED | SUPERSEDED`), `evidence` (Json), `reviewerUserId`, `reviewedAt`. A partial unique index enforces one `APPROVED` row per `(tenantId, kind, sourceRecordKey)` at the database level (`CustomerIdentityMatch_one_approved_per_source_key`).
+- **CustomerIdentityMatch**: proposed/approved links for QuickBooks accounts, email domains, aliases, and contacts. Fields: `kind` (`QUICKBOOKS_ACCOUNT | EMAIL_DOMAIN | COMPANY_ALIAS | CONTACT`), `companyId` (canonical target), `operatingCompanyId` (required for `QUICKBOOKS_ACCOUNT` so a mapping under one operating company cannot activate another), `sourceRecordKey`, `sourceLabel`, `candidateCompanyId`, `score`, `status` (`PROPOSED | APPROVED | REJECTED | SUPERSEDED`), `evidence` (Json), `reviewerUserId`, `reviewedAt`.
+
+  Integrity (`20260805160000_customer_intelligence_identity_integrity`):
+  - Partial unique index `CustomerIdentityMatch_one_approved_per_source_key` enforces one `APPROVED` row per `(tenantId, kind, sourceRecordKey)`.
+  - Tenant-scoped foreign keys `(tenantId, companyId)` and `(tenantId, candidateCompanyId)` reference `Company`, both `ON DELETE NO ACTION` (non-destructive: a referenced company cannot be deleted while a match exists, preserving review evidence).
+  - CHECK `CustomerIdentityMatch_approved_requires_company`: an `APPROVED` match must have a non-null `companyId`.
+  - CHECK `CustomerIdentityMatch_qb_approved_requires_operating_company`: an `APPROVED` `QUICKBOOKS_ACCOUNT` match must have a non-null `operatingCompanyId`.
 
 ## Financial records
 

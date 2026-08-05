@@ -38,9 +38,12 @@ Hard rules:
 - Contacts are never merged by name alone. Identity priority is Apollo person/contact ID, LinkedIn URL, exact normalized email, then reviewed phone-plus-name evidence (evidence priority is enforced in later phases that implement Apollo/mailbox ingestion).
 - Every approval, rejection, merge, and unmerge writes an `AuditLog`.
 - Re-running ingestion preserves reviewed decisions and is idempotent: existing `APPROVED`/`REJECTED` matches are returned unchanged.
-- Every referenced company ID is validated within the authenticated tenant before a match is proposed or approved.
-- One `(tenantId, kind, sourceRecordKey)` can be `APPROVED` to at most one canonical company. Automatic approval and manual approval enforce the same conflict invariant, and a partial unique index (`CustomerIdentityMatch_one_approved_per_source_key`) backstops concurrent or repeated processing.
+- Every referenced company ID is validated within the authenticated tenant before a match is proposed or approved (shared `identity-approval.ts` invariant validator used by both automatic and manual approval).
+- No match enters `APPROVED` without a non-null, tenant-valid canonical `companyId`. A high-scoring automatic proposal without a canonical company stays `PROPOSED` so a reviewer can assign the target; manual approval of such a match is rejected.
+- Manual approval of a `QUICKBOOKS_ACCOUNT` match requires a non-null `operatingCompanyId` belonging to the authenticated tenant; missing or cross-tenant references fail before the status update.
+- One `(tenantId, kind, sourceRecordKey)` can be `APPROVED` to at most one canonical company. Automatic approval defers a conflicting proposal to `PROPOSED`; manual approval rejects it. A partial unique index (`CustomerIdentityMatch_one_approved_per_source_key`) backstops concurrent or repeated processing.
 - `QUICKBOOKS_ACCOUNT` matches require an `operatingCompanyId` so mappings stay operating-company-scoped.
+- The database enforces these invariants directly (`20260805160000_customer_intelligence_identity_integrity`): CHECK constraints require `companyId` on every `APPROVED` row and `operatingCompanyId` on every `APPROVED` `QUICKBOOKS_ACCOUNT` row, and tenant-scoped foreign keys on `companyId`/`candidateCompanyId` (`ON DELETE NO ACTION`) block cross-tenant references and prevent deletion of a company still referenced by an identity match.
 
 ## Contact points
 

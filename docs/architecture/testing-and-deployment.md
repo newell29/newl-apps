@@ -17,7 +17,7 @@ Key repository evidence: `src/components/app-shell.tsx`, `prisma/schema.prisma`,
 
 ## Customer Intelligence tests
 
-`tests/customer-intelligence-foundation.test.ts`, `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, and `tests/customer-intelligence-lifecycle.test.ts` cover the foundation. The foundation suite uses the real authorization module against a mocked Prisma client, proving permission denials (SALES/OPERATIONS/READ_ONLY, `canMutate=false`), lifecycle isolation, identity conflicts, contact normalization/evidence preservation, and deployable entitlement bootstrap; `tests/authorization.test.ts` covers the leadership-only matrix. The full suite reports the same three pre-existing failures as `origin/main` (see `docs/modules/customer-intelligence/testing.md`).
+`tests/customer-intelligence-foundation.test.ts`, `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, and `tests/customer-intelligence-lifecycle.test.ts` cover the foundation. The foundation suite uses the real authorization module against a mocked Prisma client, proving permission denials (SALES/OPERATIONS/READ_ONLY, `canMutate=false` across the full 12-mutation facade with no-database-write assertions), lifecycle isolation, identity conflicts (including no-approval-without-company and QuickBooks-operating-company manual-approval invariants), contact normalization/evidence preservation, and deployable entitlement bootstrap; `tests/authorization.test.ts` covers the leadership-only matrix. The full suite reports the same three pre-existing failures as `origin/main` (see `docs/modules/customer-intelligence/testing.md`).
 
 ## Important files
 

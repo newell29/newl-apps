@@ -25,6 +25,11 @@ import {
   type IdentityEvidenceInput
 } from "@/modules/customer-intelligence/identity";
 import {
+  assertCanApproveIdentityMatch,
+  findApprovedConflict,
+  validateReferencedCompanies
+} from "@/modules/customer-intelligence/identity-approval";
+import {
   requireAdminSettings,
   requireMatchApproval,
   requireWrite
@@ -385,10 +390,12 @@ export async function upsertSourceAccount(
 
 /**
  * Propose an identity match. Auto-links only when the deterministic score is at
- * least 90 and there is no conflicting approved canonical company for the same
- * source record. Every referenced company ID is validated within the caller's
- * tenant. Reviewed decisions are preserved: re-running with the same source
- * record does not overwrite an existing APPROVED or REJECTED match, and the
+ * least 90, the input carries a canonical company, and there is no conflicting
+ * approved canonical company for the same source record. A high-confidence
+ * proposal without a canonical company remains PROPOSED (never APPROVED).
+ * Every referenced company ID is validated within the caller's tenant.
+ * Reviewed decisions are preserved: re-running with the same source record does
+ * not overwrite an existing APPROVED or REJECTED match, and the
  * one-approved-per-source invariant is enforced both in code and by the
  * database backstop index.
  */
@@ -422,31 +429,14 @@ export async function proposeIdentityMatch(
     throw new Error("operatingCompanyId is required for QUICKBOOKS_ACCOUNT identity matches.");
   }
 
-  // Validate every referenced canonical company within the caller's tenant.
-  if (input.companyId) {
-    const company = await prisma.company.findFirst({
-      where: tenantWhere(ctx, { id: input.companyId })
-    });
-    if (!company) {
-      throw new Error("Company does not exist in this tenant.");
-    }
-  }
-  if (input.candidateCompanyId) {
-    const candidate = await prisma.company.findFirst({
-      where: tenantWhere(ctx, { id: input.candidateCompanyId })
-    });
-    if (!candidate) {
-      throw new Error("Candidate company does not exist in this tenant.");
-    }
-  }
-  if (input.operatingCompanyId) {
-    const operatingCompany = await prisma.operatingCompany.findFirst({
-      where: tenantWhere(ctx, { id: input.operatingCompanyId })
-    });
-    if (!operatingCompany) {
-      throw new Error("Operating company does not exist in this tenant.");
-    }
-  }
+  // Validate every referenced canonical company within the caller's tenant
+  // (PROPOSED matches may carry a null canonical company but never a
+  // cross-tenant reference).
+  await validateReferencedCompanies(ctx, {
+    companyId: input.companyId,
+    operatingCompanyId: input.operatingCompanyId,
+    candidateCompanyId: input.candidateCompanyId
+  });
 
   const score = computeIdentityMatchScore(input);
   const existing = await prisma.customerIdentityMatch.findFirst({
@@ -461,21 +451,26 @@ export async function proposeIdentityMatch(
     return existing;
   }
 
-  const conflicting = input.companyId
-    ? await prisma.customerIdentityMatch.findFirst({
-        where: tenantWhere(ctx, {
-          kind: input.kind,
-          sourceRecordKey,
-          status: CustomerIdentityMatchStatus.APPROVED,
-          companyId: { not: input.companyId }
-        })
-      })
-    : null;
-
-  const status =
-    shouldAutoLink(score) && !conflicting
-      ? CustomerIdentityMatchStatus.APPROVED
-      : CustomerIdentityMatchStatus.PROPOSED;
+  // A canonical company is required for approval. Without it, a high-scoring
+  // proposal stays PROPOSED so a human can assign the target.
+  let status: CustomerIdentityMatchStatus = CustomerIdentityMatchStatus.PROPOSED;
+  if (shouldAutoLink(score) && input.companyId) {
+    await assertCanApproveIdentityMatch(ctx, {
+      kind: input.kind,
+      companyId: input.companyId,
+      operatingCompanyId: input.operatingCompanyId,
+      candidateCompanyId: input.candidateCompanyId
+    });
+    const conflicting = await findApprovedConflict(ctx, {
+      kind: input.kind,
+      sourceRecordKey,
+      companyId: input.companyId,
+      selfId: existing?.id
+    });
+    if (!conflicting) {
+      status = CustomerIdentityMatchStatus.APPROVED;
+    }
+  }
 
   let record;
   try {
@@ -556,30 +551,29 @@ export async function reviewIdentityMatch(
     throw new Error("Identity match does not exist in this tenant.");
   }
 
-  // Manual approval enforces the same one-approved-per-source invariant as
-  // automatic approval.
+  // Manual approval enforces the same approval-invariant validator as
+  // automatic approval: a canonical company is required, a QUICKBOOKS_ACCOUNT
+  // approval requires an operating company, and one source cannot be approved
+  // to two canonical companies.
   if (decision === "APPROVE") {
-    if (!existing.companyId) {
+    await assertCanApproveIdentityMatch(ctx, {
+      kind: existing.kind,
+      companyId: existing.companyId,
+      operatingCompanyId: existing.operatingCompanyId,
+      candidateCompanyId: existing.candidateCompanyId
+    });
+    const companyId = existing.companyId;
+    if (!companyId) {
       throw new Error("Cannot approve an identity match without a canonical company.");
     }
-    const company = await prisma.company.findFirst({
-      where: tenantWhere(ctx, { id: existing.companyId })
+    const conflicting = await findApprovedConflict(ctx, {
+      kind: existing.kind,
+      sourceRecordKey: existing.sourceRecordKey,
+      companyId,
+      selfId: existing.id
     });
-    if (!company) {
-      throw new Error("Match canonical company does not exist in this tenant.");
-    }
-    if (existing.kind && existing.sourceRecordKey) {
-      const conflicting = await prisma.customerIdentityMatch.findFirst({
-        where: tenantWhere(ctx, {
-          kind: existing.kind,
-          sourceRecordKey: existing.sourceRecordKey,
-          status: CustomerIdentityMatchStatus.APPROVED,
-          companyId: { not: existing.companyId }
-        })
-      });
-      if (conflicting) {
-        throw new Error("Source record is already approved to another canonical company.");
-      }
+    if (conflicting) {
+      throw new Error("Source record is already approved to another canonical company.");
     }
   }
 

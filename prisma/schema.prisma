@@ -1745,6 +1745,8 @@ model Company {
   contactEvidence            ContactEvidence[]
   customerRevenueLines       CustomerRevenueLine[]
   customerMonthlyFinancials  CustomerMonthlyFinancial[]
+  canonicalIdentityMatches   CustomerIdentityMatch[] @relation("CustomerIdentityMatchCanonicalCompany")
+  candidateIdentityMatches   CustomerIdentityMatch[] @relation("CustomerIdentityMatchCandidateCompany")
 
   @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
@@ -3778,6 +3780,8 @@ model CustomerIdentityMatch {
 
   tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   operatingCompany  OperatingCompany? @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: NoAction)
+  company           Company?          @relation("CustomerIdentityMatchCanonicalCompany", fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+  candidateCompany  Company?          @relation("CustomerIdentityMatchCandidateCompany", fields: [tenantId, candidateCompanyId], references: [tenantId, id], onDelete: NoAction)
 
   @@unique([tenantId, id])
   @@unique([tenantId, kind, companyId, sourceRecordKey])

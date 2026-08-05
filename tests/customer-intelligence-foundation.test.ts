@@ -2,10 +2,12 @@ import {
   CashflowLegalEntity,
   CustomerIdentityMatchKind,
   CustomerIdentityMatchStatus,
+  CustomerIntelligenceServiceLine,
   CustomerLifecycle,
   CustomerSourceAccountStatus,
   PlatformRole,
-  Prisma
+  Prisma,
+  QuickBooksServiceMappingDimension
 } from "@prisma/client";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -74,6 +76,7 @@ vi.mock("@/server/db", () => ({
 
 import {
   proposeIdentityMatch,
+  recordRevenueLine,
   refreshRelationshipLifecycle,
   registerOperatingCompany,
   reviewIdentityMatch,
@@ -81,6 +84,8 @@ import {
   upsertContactEvidence,
   upsertContactPoint,
   upsertFxRate,
+  upsertMonthlyFinancial,
+  upsertServiceMappingRule,
   upsertSourceAccount
 } from "@/modules/customer-intelligence/actions";
 import {
@@ -145,6 +150,54 @@ function configureAuth(input: { canMutate?: boolean; moduleEnabled?: boolean } =
     canMutate: input.canMutate ?? true
   });
 }
+
+const WRITE_METHODS = new Set([
+  "create",
+  "createMany",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany"
+]);
+
+/** Proves a denied call never reached a database write (create/update/upsert/delete). */
+function assertNoDatabaseWrites() {
+  const writes = prismaTest.modelCalls.filter((call) => WRITE_METHODS.has(call.method));
+  expect(writes).toEqual([]);
+}
+
+function qbPayload() {
+  return {
+    kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+    companyId: "company-1",
+    operatingCompanyId: "oc-ww",
+    sourceRecordKey: "realm-1:1001",
+    sourceLabel: "Customer ABC",
+    exactPersistedMapping: true,
+    compatibleName: true,
+    uniqueDomain: false,
+    phoneOrAddressMatch: false,
+    previouslyApprovedStableId: false,
+    domainIsFreeMail: false
+  };
+}
+
+/** Every exported Customer Intelligence mutation, invoked through a real guard. */
+const MUTATIONS: Array<[name: string, call: (c: AuthenticatedContext) => Promise<unknown>]> = [
+  ["registerOperatingCompany", (c) => registerOperatingCompany(c, { slug: "acme", displayName: "Acme" })],
+  ["upsertCompanyOperatingRelationship", (c) => upsertCompanyOperatingRelationship(c, { companyId: "company-1", operatingCompanyId: "oc-ww" })],
+  ["refreshRelationshipLifecycle", (c) => refreshRelationshipLifecycle(c, "rel-1")],
+  ["upsertSourceAccount", (c) => upsertSourceAccount(c, { realmId: "realm-1", quickBooksCustomerId: "1001", companyId: "company-1", operatingCompanyId: "oc-ww", companyOperatingRelationshipId: "rel-1", displayName: "Acme" })],
+  ["proposeIdentityMatch", (c) => proposeIdentityMatch(c, qbPayload())],
+  ["reviewIdentityMatch", (c) => reviewIdentityMatch(c, "match-1", "APPROVE")],
+  ["upsertServiceMappingRule", (c) => upsertServiceMappingRule(c, { operatingCompanyId: "oc-ww", dimension: QuickBooksServiceMappingDimension.ITEM, matchValue: "Ocean", serviceLine: CustomerIntelligenceServiceLine.OCEAN })],
+  ["upsertFxRate", (c) => upsertFxRate(c, { currency: "USD", monthKey: "2026-07", rateToCad: 1.3 })],
+  ["recordRevenueLine", (c) => recordRevenueLine(c, { realmId: "realm-1", sourceKey: "k1", companyId: "company-1", operatingCompanyId: "oc-ww", transactionDate: new Date(), transactionType: "Invoice", serviceLine: CustomerIntelligenceServiceLine.OCEAN, nativeAmount: 1, nativeCurrency: "CAD", homeAmount: 1, homeCurrency: "CAD" })],
+  ["upsertMonthlyFinancial", (c) => upsertMonthlyFinancial(c, { monthKey: "2026-07", companyId: "company-1", operatingCompanyId: "oc-ww", companyOperatingRelationshipId: "rel-1", serviceLine: CustomerIntelligenceServiceLine.OCEAN, currency: "CAD", nativeRevenue: 1 })],
+  ["upsertContactPoint", (c) => upsertContactPoint(c, { contactId: "contact-1", companyId: "company-1", type: "EMAIL", value: "buyer@example.com" })],
+  ["upsertContactEvidence", (c) => upsertContactEvidence(c, { contactId: "contact-1", companyId: "company-1", sourceType: "EMAIL_SIGNATURE", sourceRecordKey: "k1", fieldName: "phone", fieldValue: "4165550134", confidence: 1, observedAt: new Date() })]
+];
 
 describe("entitlement bootstrap is deployable without the development seed", () => {
   beforeEach(() => {
@@ -219,22 +272,36 @@ describe("permissions: real authorization boundary at every entry point", () => 
     expect(rows).toEqual([{ id: "oc-1" }]);
   });
 
-  it("denies SALES and OPERATIONS on every mutation", async () => {
-    await expect(
-      registerOperatingCompany(SALES, { slug: "acme", displayName: "Acme" })
-    ).rejects.toBeInstanceOf(AuthorizationError);
-    await expect(
-      registerOperatingCompany(OPERATIONS, { slug: "acme", displayName: "Acme" })
-    ).rejects.toBeInstanceOf(AuthorizationError);
+  it("denies every exported mutation for SALES and OPERATIONS before any database write", async () => {
+    expect(MUTATIONS).toHaveLength(12);
+    for (const role of [SALES, OPERATIONS]) {
+      for (const [name, call] of MUTATIONS) {
+        prismaTest.reset();
+        configureAuth();
+        await expect(call(role), `${name} (${role.role})`).rejects.toBeInstanceOf(
+          AuthorizationError
+        );
+        assertNoDatabaseWrites();
+      }
+    }
   });
 
-  it("denies a READ_ONLY mutation and a FINANCE role whose tenant policy sets canMutate=false", async () => {
-    await expect(upsertFxRate(READ_ONLY, { currency: "USD", monthKey: "2026-07", rateToCad: 1.3 }))
-      .rejects.toBeInstanceOf(AuthorizationError);
+  it("denies every exported mutation for READ_ONLY and a permitted role with canMutate=false before any database write", async () => {
+    for (const [name, call] of MUTATIONS) {
+      prismaTest.reset();
+      configureAuth({ canMutate: true });
+      await expect(call(READ_ONLY), `${name} (READ_ONLY)`).rejects.toBeInstanceOf(
+        AuthorizationError
+      );
+      assertNoDatabaseWrites();
 
-    prismaTest.model("tenantRolePolicy").findUnique.mockResolvedValue({ canMutate: false });
-    await expect(upsertFxRate(FINANCE, { currency: "USD", monthKey: "2026-07", rateToCad: 1.3 }))
-      .rejects.toBeInstanceOf(AuthorizationError);
+      prismaTest.reset();
+      configureAuth({ canMutate: false });
+      await expect(call(FINANCE), `${name} (FINANCE canMutate=false)`).rejects.toBeInstanceOf(
+        AuthorizationError
+      );
+      assertNoDatabaseWrites();
+    }
   });
 
   it("requires mutation access when refreshing a lifecycle (write path)", async () => {
@@ -439,10 +506,12 @@ describe("identity target integrity", () => {
       tenantId: "tenant-a",
       kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
       companyId: "company-2",
+      operatingCompanyId: "oc-ww",
       sourceRecordKey: "realm-1:1001",
       status: CustomerIdentityMatchStatus.PROPOSED
     });
     prismaTest.model("company").findFirst.mockResolvedValue({ id: "company-2" });
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue({ id: "oc-ww" });
     prismaTest.model("customerIdentityMatch").findFirst.mockResolvedValueOnce({
       id: "match-approved-other",
       tenantId: "tenant-a",
@@ -454,6 +523,60 @@ describe("identity target integrity", () => {
 
     await expect(reviewIdentityMatch(ADMIN, "match-proposed", "APPROVE")).rejects.toThrow(
       /already approved to another canonical company/
+    );
+  });
+
+  it("keeps a high-scoring proposal with no canonical company PROPOSED (never APPROVED)", async () => {
+    prismaTest.model("company").findFirst.mockResolvedValue({ id: "company-1" });
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue({ id: "oc-ww" });
+    prismaTest.model("customerIdentityMatch").findFirst.mockResolvedValue(null);
+    prismaTest.model("customerIdentityMatch").create.mockImplementation(
+      ({ data }: { data: Record<string, unknown> }) => ({ id: "match-new", ...data })
+    );
+
+    const result = await proposeIdentityMatch(ADMIN, qbMatch({ companyId: null }));
+
+    expect(result.status).toBe(CustomerIdentityMatchStatus.PROPOSED);
+    expect(result.score).toBe(100);
+    expect(result.companyId).toBeNull();
+    const createArg = prismaTest.model("customerIdentityMatch").create.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(createArg.data.status).toBe(CustomerIdentityMatchStatus.PROPOSED);
+  });
+
+  it("requires an operating company when manually approving a QUICKBOOKS_ACCOUNT match", async () => {
+    prismaTest.model("customerIdentityMatch").findFirst.mockResolvedValue({
+      id: "match-proposed",
+      tenantId: "tenant-a",
+      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+      companyId: "company-1",
+      sourceRecordKey: "realm-1:1001",
+      operatingCompanyId: null,
+      status: CustomerIdentityMatchStatus.PROPOSED
+    });
+    prismaTest.model("company").findFirst.mockResolvedValue({ id: "company-1" });
+
+    await expect(reviewIdentityMatch(ADMIN, "match-proposed", "APPROVE")).rejects.toThrow(
+      /operatingCompanyId is required/
+    );
+  });
+
+  it("rejects a cross-tenant operating company when manually approving a QUICKBOOKS_ACCOUNT match", async () => {
+    prismaTest.model("customerIdentityMatch").findFirst.mockResolvedValue({
+      id: "match-proposed",
+      tenantId: "tenant-a",
+      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+      companyId: "company-1",
+      sourceRecordKey: "realm-1:1001",
+      operatingCompanyId: "oc-owned-by-b",
+      status: CustomerIdentityMatchStatus.PROPOSED
+    });
+    prismaTest.model("company").findFirst.mockResolvedValue({ id: "company-1" });
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue(null);
+
+    await expect(reviewIdentityMatch(ADMIN, "match-proposed", "APPROVE")).rejects.toThrow(
+      /Operating company does not exist in this tenant/
     );
   });
 
