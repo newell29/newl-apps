@@ -900,6 +900,10 @@ def main() -> int:
         help="Resume a matching company-research retrieval or synthesis checkpoint.",
     )
     parser.add_argument(
+        "--company-research-recovery-run-id",
+        help="Recover the exact tenant-scoped cohort from a failed Newl Apps company-research run.",
+    )
+    parser.add_argument(
         "--company-research-only",
         action="store_true",
         help="Stop after web retrieval and local Qwen without calling Kimi.",
@@ -948,6 +952,7 @@ def main() -> int:
         or args.company_research_dry_run
         or args.company_research_only
         or args.company_research_resume
+        or args.company_research_recovery_run_id
     ):
         from hunter_company_research import read_company_keys
 
@@ -960,6 +965,7 @@ def main() -> int:
                     replay_output=args.company_research_output,
                     resume_checkpoint=args.company_research_resume,
                     research_only=args.company_research_only,
+                    recovery_of_run_id=clean(args.company_research_recovery_run_id),
                 ),
                 indent=2,
             )
