@@ -157,12 +157,14 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   and the same-day three-attempt budget remains, an operator can pass the failed run ID to
   `--company-research-recovery-run-id`; Newl Apps reconstructs only that tenant-owned cohort and Hunter resumes
   its matching checkpoint.
-- Luna is authoritative and consumes the same bounded evidence already retrieved from Brave. A Luna refusal,
-  timeout, malformed Structured Output, partial batch, or provider failure is stored as `PARTIAL`/`ERROR`
-  with a bounded diagnostic and fails the complete cohort closed. The worker preserves the original provider
-  error for retry classification; diagnostic logging must never replace it with a secondary exception.
-  Successful Luna batch fingerprints are reused on a same-run retry. Qwen remains an optional non-blocking
-  comparison and cannot replace a missing Luna row.
+- Luna is authoritative and consumes the same bounded evidence already retrieved from Brave. A company with no
+  usable evidence is omitted before the Luna endpoint, preventing an avoidable 422 and model charge. A malformed,
+  omitted, or contract-invalid row is retried once in an isolated company request; an exhausted company remains
+  omitted with a bounded diagnostic while valid rows continue. If every company is omitted, or Luna has a refusal,
+  timeout, or provider failure, the run fails closed. The worker preserves the original provider error for retry
+  classification; diagnostic logging must never replace it with a secondary exception. Successful Luna batch
+  fingerprints are reused on a same-run retry. Qwen remains an optional non-blocking comparison and cannot replace
+  a missing Luna row.
 - With a Teams target configured, a transient company-research failure sends a sanitized recovery notice,
   an exhausted or permanent failure sends one final sanitized alert, and a
   completion reports researched, accepted, blocked, and model-output-omission counts. Provider response
@@ -172,7 +174,9 @@ Hunter retries transient TradeMining network failures and HTTP 429/5xx responses
   Follow-up queries therefore stop before a full evidence ledger, append only into remaining capacity,
   and the worker bounds both resumed checkpoints and the final completion payload. A legacy over-cap
   synthesis checkpoint is resynthesized against its bounded evidence so saved indices remain valid.
-- A failed completion is not partially persisted and does not refresh the prospecting plan. The
+- A completion containing at least one valid Luna/Kimi company may persist those valid companies atomically and
+  records the remainder as `missingCompanyCount`; omitted companies remain eligible for a later research day. A
+  completion transaction that fails is not partially persisted and does not refresh the prospecting plan. The
   operator may recover the failed run ID, use the exact-cohort dry run, or inspect a local replay ledger.
 - A 30-company completion can exceed Prisma's default five-second interactive-transaction timeout
   when tenant identity is re-read one company at a time before each evidence upsert. Completion

@@ -663,7 +663,7 @@ function mergeShadowReport({
   );
   const failedBatchCount = batches.filter((item) => item.status === "ERROR").length;
   const status = finalBatch
-    ? mergedResults.length === expectedCompanyCount && failedBatchCount === 0
+    ? mergedResults.length === expectedCompanyCount
       ? "SUCCESS"
       : mergedResults.length > 0
         ? "PARTIAL"
