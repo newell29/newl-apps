@@ -588,31 +588,58 @@ function assertLiveAllowlist(plan: TeamshipPhase2DryRunPlan, allowlistSrNumbers:
 }
 
 async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipPhase2AgentCredentials, apiBaseUrl: string) {
-  const response = await fetchImpl(`${apiBaseUrl}/v1/login`, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      email: credentials.email,
-      password: credentials.password
-    }),
-    cache: "no-store"
-  });
-  const json = (await response.json().catch(() => null)) as TeamshipLoginResponse | null;
+  let lastError: unknown = null;
 
-  if (!response.ok || !json) {
-    throw new Error(`Teamship login failed with status ${response.status}.`);
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${apiBaseUrl}/v1/login`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password
+        }),
+        cache: "no-store"
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipLoginResponse | null;
+
+      if (!response.ok || !json) {
+        const error = new Error(`Teamship login failed with status ${response.status}.`);
+        if (attempt === 1 && isTransientLoginStatus(response.status)) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+
+      const token = json.data?.token ?? json.token;
+
+      if (!token) {
+        throw new Error("Teamship login succeeded but did not return an API token.");
+      }
+
+      return token;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1 && isRetryableNetworkError(error)) {
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const token = json.data?.token ?? json.token;
+  throw lastError instanceof Error ? lastError : new Error("Teamship login failed after one safe retry.");
+}
 
-  if (!token) {
-    throw new Error("Teamship login succeeded but did not return an API token.");
-  }
+function isTransientLoginStatus(status: number) {
+  return status === 429 || status >= 500;
+}
 
-  return token;
+function isRetryableNetworkError(error: unknown) {
+  return error instanceof TypeError;
 }
 
 async function updateTeamshipShippingOrder({
