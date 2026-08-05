@@ -3625,6 +3625,7 @@ model OperatingCompany {
   serviceMappingRules QuickBooksServiceMappingRule[]
   revenueLines       CustomerRevenueLine[]
   monthlyFinancials  CustomerMonthlyFinancial[]
+  identityMatches    CustomerIdentityMatch[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, slug])
@@ -3741,6 +3742,7 @@ model ContactEvidence {
   observedAt       DateTime
   reviewStatus     ContactEvidenceReviewStatus @default(UNREVIEWED)
   evidenceFragment String?
+  conflictingValue String?
   createdAt        DateTime                    @default(now())
   updatedAt        DateTime                    @updatedAt
 
@@ -3762,6 +3764,7 @@ model CustomerIdentityMatch {
   tenantId            String
   kind                CustomerIdentityMatchKind
   companyId           String?
+  operatingCompanyId  String?
   sourceRecordKey     String?
   sourceLabel         String?
   candidateCompanyId  String?
@@ -3773,13 +3776,15 @@ model CustomerIdentityMatch {
   createdAt           DateTime                      @default(now())
   updatedAt           DateTime                      @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operatingCompany  OperatingCompany? @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: NoAction)
 
   @@unique([tenantId, id])
   @@unique([tenantId, kind, companyId, sourceRecordKey])
   @@index([tenantId, status])
   @@index([tenantId, kind])
   @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
   @@index([tenantId, score])
 }
 
@@ -3880,6 +3885,8 @@ model CustomerMonthlyFinancial {
   nativeCost               Decimal                         @db.Decimal(14, 2) @default(0)
   nativeGrossProfit        Decimal                         @db.Decimal(14, 2) @default(0)
   cadRevenue               Decimal?                        @db.Decimal(14, 2)
+  nativeOpenAr             Decimal                         @db.Decimal(14, 2) @default(0)
+  cadOpenAr                Decimal?                        @db.Decimal(14, 2)
   reconciliationStatus     CustomerFinancialPeriodStatus   @default(UNRECONCILED)
   createdAt                DateTime                        @default(now())
   updatedAt                DateTime                        @updatedAt

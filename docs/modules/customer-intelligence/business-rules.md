@@ -10,12 +10,14 @@
 
 ## Lifecycle
 
-Per operating-company relationship (deterministic in `lifecycle.ts`):
+Per operating-company relationship (deterministic in `lifecycle.ts`, evidence gathered in `refreshRelationshipLifecycle`):
 
 - `PROSPECT`: no approved QuickBooks customer mapping.
 - `ACTIVE_CUSTOMER`: recognized revenue or open AR within the trailing 12 months.
 - `DORMANT_CUSTOMER`: linked QuickBooks account but no revenue/open AR in 12 months.
 - `FORMER_CUSTOMER`: all linked source accounts inactive and no open AR.
+
+Isolation: revenue evidence is scoped to `(companyId, operatingCompanyId)` and approved QuickBooks mappings are scoped to `(companyId, operatingCompanyId)`, so activity under one operating company can never activate another operating-company relationship. Open AR is read from relationship-scoped `CustomerMonthlyFinancial.nativeOpenAr > 0` in a trailing 12-month window, so a relationship can be active with zero revenue but positive open AR.
 
 Rollup to the canonical company: ACTIVE beats DORMANT beats FORMER beats PROSPECT. (Ordering inferred; Requires employee confirmation.)
 
@@ -36,6 +38,21 @@ Hard rules:
 - Contacts are never merged by name alone. Identity priority is Apollo person/contact ID, LinkedIn URL, exact normalized email, then reviewed phone-plus-name evidence (evidence priority is enforced in later phases that implement Apollo/mailbox ingestion).
 - Every approval, rejection, merge, and unmerge writes an `AuditLog`.
 - Re-running ingestion preserves reviewed decisions and is idempotent: existing `APPROVED`/`REJECTED` matches are returned unchanged.
+- Every referenced company ID is validated within the authenticated tenant before a match is proposed or approved.
+- One `(tenantId, kind, sourceRecordKey)` can be `APPROVED` to at most one canonical company. Automatic approval and manual approval enforce the same conflict invariant, and a partial unique index (`CustomerIdentityMatch_one_approved_per_source_key`) backstops concurrent or repeated processing.
+- `QUICKBOOKS_ACCOUNT` matches require an `operatingCompanyId` so mappings stay operating-company-scoped.
+
+## Contact points
+
+- `upsertContactPoint` stores a normalized value (emails lowercased, phones digits-only, others lowercased) as the unique key and keeps a human `displayValue`, so equivalent emails and phone formatting deduplicate deterministically.
+
+## Contact evidence
+
+- `upsertContactEvidence` rejects empty field values: extraction never invents a value.
+- A later extraction cannot silently overwrite an accepted or manually approved fact. A differing value for an `ACCEPTED`/`REJECTED` evidence row sets `reviewStatus = CONFLICT`, preserves `fieldValue` (the reviewed fact) and its source `evidenceFragment`, and records the new value in `conflictingValue` for review.
+- Re-observing the same value for an accepted/rejected fact leaves the reviewed decision stable.
+- `UNREVIEWED` pending values are replaced by fresh extraction (nothing reviewed is overwritten).
+- Partial and completely missing signature evidence is safe: no invented values are created.
 
 ## Service-line mapping
 
@@ -48,7 +65,7 @@ Mapping precedence (`service-lines.ts`): QuickBooks item, then class/department,
 - CAD consolidation is directional management reporting, not a statutory accounting entry.
 - Closed months use Bank of Canada monthly average rates; the current month uses an available-to-date average marked `PROVISIONAL`.
 - `CustomerRevenueLine` is immutable: re-inserting the same `sourceKey` returns the existing row rather than rewriting it.
-- `CustomerMonthlyFinancial` carries a `reconciliationStatus`; unreconciled periods remain visible as `INCOMPLETE`/`UNRECONCILED` and must not silently update headline totals (computation is a later phase).
+- `CustomerMonthlyFinancial` carries a `reconciliationStatus` and open-AR balances (`nativeOpenAr`, `cadOpenAr`); unreconciled periods remain visible as `INCOMPLETE`/`UNRECONCILED` and must not silently update headline totals (computation is a later phase).
 - No QuickBooks posting or mutation is performed.
 
 ## Data-retention and privacy

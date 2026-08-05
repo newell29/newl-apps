@@ -51,7 +51,7 @@ Confirmed module keys: `ASSISTANT`, `LEAD_GEN`, `UPS_TOOLS`, `LTL_RATE_PORTAL`, 
 
 ## Customer Intelligence
 
-The `CUSTOMER_INTELLIGENCE` module is a leadership-only foundation (see `docs/modules/customer-intelligence/overview.md`). It adds tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, and `CustomerMonthlyFinancial` records around the canonical `Company`. It is additive: the legacy `CashflowLegalEntity` / `CashflowCustomer` finance records are preserved and resolved through operating-company relationships in later phases.
+The `CUSTOMER_INTELLIGENCE` module is a leadership-only foundation (see `docs/modules/customer-intelligence/overview.md`). It adds tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, and `CustomerMonthlyFinancial` records around the canonical `Company`. It is additive: the legacy `CashflowLegalEntity` / `CashflowCustomer` finance records are preserved and resolved through operating-company relationships in later phases. The `20260805150000_customer_intelligence_corrections` migration bootstraps the module record, the `newl-group` entitlement, and the three Newl operating companies so the module is deployable through `prisma migrate deploy` without the development seed.
 
 ## Major security boundaries
 

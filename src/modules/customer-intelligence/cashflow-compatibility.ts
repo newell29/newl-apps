@@ -1,8 +1,9 @@
 import { CashflowLegalEntity } from "@prisma/client";
 
 import { prisma } from "@/server/db";
-import type { TenantContext } from "@/server/tenant-context";
+import type { AuthenticatedContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
+import { requireReadAccess } from "@/modules/customer-intelligence/permissions";
 
 /**
  * Additive transition from the legacy two-company finance enum to tenant-scoped
@@ -23,13 +24,19 @@ export function cashflowLegalEntityToOperatingCompanySlug(
   }
 }
 
-/** Tenant-scoped lookup of the OperatingCompany that maps to a legacy legal entity. */
+/**
+ * Tenant-scoped lookup of the OperatingCompany that maps to a legacy legal
+ * entity. Guarded like every other Customer Intelligence read. Later phases
+ * that call this from a scheduled job must use an authenticated/ingestion
+ * context rather than an unguarded helper.
+ */
 export async function resolveOperatingCompanyForLegalEntity(
-  tenant: TenantContext,
+  ctx: AuthenticatedContext,
   legalEntity: CashflowLegalEntity
 ) {
+  await requireReadAccess(ctx);
   const slug = cashflowLegalEntityToOperatingCompanySlug(legalEntity);
   return prisma.operatingCompany.findFirst({
-    where: tenantWhere(tenant, { slug })
+    where: tenantWhere(ctx, { slug })
   });
 }

@@ -1,26 +1,42 @@
-import { CustomerIdentityMatchKind, CustomerIdentityMatchStatus, CustomerLifecycle, CustomerSourceAccountStatus } from "@prisma/client";
+import {
+  CustomerIdentityMatchKind,
+  CustomerIdentityMatchStatus,
+  CustomerLifecycle,
+  CustomerSourceAccountStatus
+} from "@prisma/client";
 
 import { prisma } from "@/server/db";
-import type { TenantContext } from "@/server/tenant-context";
+import type { AuthenticatedContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
+import { requireReadAccess } from "@/modules/customer-intelligence/permissions";
 import { rollupCompanyLifecycle } from "@/modules/customer-intelligence/lifecycle";
 
-export async function listOperatingCompanies(tenant: TenantContext) {
+/**
+ * Public Customer Intelligence read facade. Every externally consumable read
+ * requires the module entitlement and an ADMIN, MANAGER, or FINANCE role
+ * (see permissions.ts). Raw database access stays inside these guarded
+ * functions; no unguarded model delegates are exported.
+ */
+
+export async function listOperatingCompanies(ctx: AuthenticatedContext) {
+  await requireReadAccess(ctx);
   return prisma.operatingCompany.findMany({
-    where: tenantWhere(tenant),
+    where: tenantWhere(ctx),
     orderBy: [{ active: "desc" }, { displayName: "asc" }]
   });
 }
 
-export async function getOperatingCompany(tenant: TenantContext, operatingCompanyId: string) {
+export async function getOperatingCompany(ctx: AuthenticatedContext, operatingCompanyId: string) {
+  await requireReadAccess(ctx);
   return prisma.operatingCompany.findFirst({
-    where: tenantWhere(tenant, { id: operatingCompanyId })
+    where: tenantWhere(ctx, { id: operatingCompanyId })
   });
 }
 
-export async function listRelationshipsForCompany(tenant: TenantContext, companyId: string) {
+export async function listRelationshipsForCompany(ctx: AuthenticatedContext, companyId: string) {
+  await requireReadAccess(ctx);
   return prisma.companyOperatingRelationship.findMany({
-    where: tenantWhere(tenant, { companyId }),
+    where: tenantWhere(ctx, { companyId }),
     include: {
       operatingCompany: true,
       sourceAccounts: {
@@ -33,9 +49,10 @@ export async function listRelationshipsForCompany(tenant: TenantContext, company
   });
 }
 
-export async function getRelationship(tenant: TenantContext, relationshipId: string) {
+export async function getRelationship(ctx: AuthenticatedContext, relationshipId: string) {
+  await requireReadAccess(ctx);
   return prisma.companyOperatingRelationship.findFirst({
-    where: tenantWhere(tenant, { id: relationshipId }),
+    where: tenantWhere(ctx, { id: relationshipId }),
     include: {
       operatingCompany: true,
       sourceAccounts: true
@@ -43,9 +60,10 @@ export async function getRelationship(tenant: TenantContext, relationshipId: str
   });
 }
 
-export async function listSourceAccountsForCompany(tenant: TenantContext, companyId: string) {
+export async function listSourceAccountsForCompany(ctx: AuthenticatedContext, companyId: string) {
+  await requireReadAccess(ctx);
   return prisma.customerSourceAccount.findMany({
-    where: tenantWhere(tenant, { companyId }),
+    where: tenantWhere(ctx, { companyId }),
     include: {
       operatingCompany: true,
       relationship: true
@@ -55,11 +73,12 @@ export async function listSourceAccountsForCompany(tenant: TenantContext, compan
 }
 
 export async function listSourceAccountsForRelationship(
-  tenant: TenantContext,
+  ctx: AuthenticatedContext,
   relationshipId: string
 ) {
+  await requireReadAccess(ctx);
   return prisma.customerSourceAccount.findMany({
-    where: tenantWhere(tenant, { companyOperatingRelationshipId: relationshipId }),
+    where: tenantWhere(ctx, { companyOperatingRelationshipId: relationshipId }),
     include: {
       operatingCompany: true
     },
@@ -67,9 +86,10 @@ export async function listSourceAccountsForRelationship(
   });
 }
 
-export async function getSourceAccount(tenant: TenantContext, sourceAccountId: string) {
+export async function getSourceAccount(ctx: AuthenticatedContext, sourceAccountId: string) {
+  await requireReadAccess(ctx);
   return prisma.customerSourceAccount.findFirst({
-    where: tenantWhere(tenant, { id: sourceAccountId }),
+    where: tenantWhere(ctx, { id: sourceAccountId }),
     include: {
       operatingCompany: true,
       relationship: true
@@ -77,64 +97,75 @@ export async function getSourceAccount(tenant: TenantContext, sourceAccountId: s
   });
 }
 
-export async function listContactPoints(tenant: TenantContext, contactId: string) {
+export async function listContactPoints(ctx: AuthenticatedContext, contactId: string) {
+  await requireReadAccess(ctx);
   return prisma.contactPoint.findMany({
-    where: tenantWhere(tenant, { contactId }),
+    where: tenantWhere(ctx, { contactId }),
     orderBy: [{ primary: "desc" }, { type: "asc" }, { value: "asc" }]
   });
 }
 
-export async function listContactEvidence(tenant: TenantContext, contactId: string) {
+export async function listContactEvidence(ctx: AuthenticatedContext, contactId: string) {
+  await requireReadAccess(ctx);
   return prisma.contactEvidence.findMany({
-    where: tenantWhere(tenant, { contactId }),
+    where: tenantWhere(ctx, { contactId }),
     orderBy: [{ observedAt: "desc" }]
   });
 }
 
 export async function listIdentityMatches(
-  tenant: TenantContext,
+  ctx: AuthenticatedContext,
   input?: {
     status?: CustomerIdentityMatchStatus;
     kind?: CustomerIdentityMatchKind;
     companyId?: string;
   }
 ) {
+  await requireReadAccess(ctx);
   return prisma.customerIdentityMatch.findMany({
-    where: tenantWhere(tenant, input ?? {}),
+    where: tenantWhere(ctx, input ?? {}),
     orderBy: [{ createdAt: "desc" }]
   });
 }
 
-export async function getIdentityMatch(tenant: TenantContext, matchId: string) {
+export async function getIdentityMatch(ctx: AuthenticatedContext, matchId: string) {
+  await requireReadAccess(ctx);
   return prisma.customerIdentityMatch.findFirst({
-    where: tenantWhere(tenant, { id: matchId })
+    where: tenantWhere(ctx, { id: matchId })
   });
 }
 
-export async function listServiceMappingRules(tenant: TenantContext, operatingCompanyId?: string) {
+export async function listServiceMappingRules(
+  ctx: AuthenticatedContext,
+  operatingCompanyId?: string
+) {
+  await requireReadAccess(ctx);
   return prisma.quickBooksServiceMappingRule.findMany({
-    where: tenantWhere(tenant, operatingCompanyId ? { operatingCompanyId } : {}),
+    where: tenantWhere(ctx, operatingCompanyId ? { operatingCompanyId } : {}),
     orderBy: [{ operatingCompanyId: "asc" }, { dimension: "asc" }, { priority: "desc" }]
   });
 }
 
-export async function listFxRates(tenant: TenantContext, currency?: string) {
+export async function listFxRates(ctx: AuthenticatedContext, currency?: string) {
+  await requireReadAccess(ctx);
   return prisma.customerFxRate.findMany({
-    where: tenantWhere(tenant, currency ? { currency } : {}),
+    where: tenantWhere(ctx, currency ? { currency } : {}),
     orderBy: [{ currency: "asc" }, { monthKey: "asc" }]
   });
 }
 
-export async function listRevenueLines(tenant: TenantContext, companyId?: string) {
+export async function listRevenueLines(ctx: AuthenticatedContext, companyId?: string) {
+  await requireReadAccess(ctx);
   return prisma.customerRevenueLine.findMany({
-    where: tenantWhere(tenant, companyId ? { companyId } : {}),
+    where: tenantWhere(ctx, companyId ? { companyId } : {}),
     orderBy: [{ transactionDate: "desc" }]
   });
 }
 
-export async function listMonthlyFinancials(tenant: TenantContext, companyId?: string) {
+export async function listMonthlyFinancials(ctx: AuthenticatedContext, companyId?: string) {
+  await requireReadAccess(ctx);
   return prisma.customerMonthlyFinancial.findMany({
-    where: tenantWhere(tenant, companyId ? { companyId } : {}),
+    where: tenantWhere(ctx, companyId ? { companyId } : {}),
     orderBy: [{ monthKey: "desc" }]
   });
 }
@@ -159,11 +190,13 @@ export type CustomerIntelligenceProfileSummary = {
 };
 
 export async function getCompanyIntelligenceSummary(
-  tenant: TenantContext,
+  ctx: AuthenticatedContext,
   companyId: string
 ): Promise<CustomerIntelligenceProfileSummary | null> {
+  await requireReadAccess(ctx);
+
   const company = await prisma.company.findFirst({
-    where: tenantWhere(tenant, { id: companyId }),
+    where: tenantWhere(ctx, { id: companyId }),
     select: { id: true, name: true }
   });
 
@@ -172,7 +205,7 @@ export async function getCompanyIntelligenceSummary(
   }
 
   const relationships = await prisma.companyOperatingRelationship.findMany({
-    where: tenantWhere(tenant, { companyId }),
+    where: tenantWhere(ctx, { companyId }),
     include: {
       operatingCompany: true,
       sourceAccounts: {
@@ -200,10 +233,10 @@ export async function getCompanyIntelligenceSummary(
   }));
 
   const sourceAccounts = await prisma.customerSourceAccount.count({
-    where: tenantWhere(tenant, { companyId })
+    where: tenantWhere(ctx, { companyId })
   });
   const activeSourceAccounts = await prisma.customerSourceAccount.count({
-    where: tenantWhere(tenant, {
+    where: tenantWhere(ctx, {
       companyId,
       active: true,
       status: CustomerSourceAccountStatus.ACTIVE

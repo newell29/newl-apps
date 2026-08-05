@@ -4,7 +4,7 @@
 
 ## Customer Intelligence relationship (additive)
 
-The `CUSTOMER_INTELLIGENCE` foundation introduces tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, and `CustomerSourceAccount` records. Existing `CashflowCustomer` rows and the `CashflowLegalEntity` enum (`NEWL_WORLDWIDE`/`NEWL_USA`) are preserved and remain the finance source of truth. The additive transition maps the legacy enum to operating-company slugs via `src/modules/customer-intelligence/cashflow-compatibility.ts` (`newl-worldwide`, `newl-usa`); a later reviewed migration may backfill relationships from `CashflowCustomer.legalEntity`. Nothing in the Customer Intelligence foundation rewrites cashflow rows.
+The `CUSTOMER_INTELLIGENCE` foundation introduces tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, and `CustomerSourceAccount` records. Existing `CashflowCustomer` rows and the `CashflowLegalEntity` enum (`NEWL_WORLDWIDE`/`NEWL_USA`) are preserved and remain the finance source of truth. The additive transition maps the legacy enum to operating-company slugs via `src/modules/customer-intelligence/cashflow-compatibility.ts` (`newl-worldwide`, `newl-usa`); the `20260805150000_customer_intelligence_corrections` migration bootstraps the three Newl operating companies, and a later reviewed migration may backfill relationships from `CashflowCustomer.legalEntity`. Nothing in the Customer Intelligence foundation rewrites cashflow rows, and the operating-company resolver is permission-guarded like every other Customer Intelligence read.
 
 ## Purpose and status
 

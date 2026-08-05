@@ -13,14 +13,14 @@
 
 ## Implementation
 
-- `ModuleKey.CUSTOMER_INTELLIGENCE` was added to the enum, the seed module list, and the tenant module access seeding.
+- `ModuleKey.CUSTOMER_INTELLIGENCE` was added to the enum. The `20260805150000_customer_intelligence_corrections` migration bootstraps the `Module` catalog record, enables the module for the approved `newl-group` tenant only, and seeds the three Newl operating companies — so the module is deployable through the normal `prisma migrate deploy` path without the broad development seed. Unrelated tenants are not enabled and get no Newl operating companies.
 - `DEFAULT_ROLE_MATRIX` grants ADMIN and MANAGER all modules (`"ALL"`) and adds `CUSTOMER_INTELLIGENCE` to the FINANCE list. SALES and OPERATIONS lists are unchanged, so they have no access.
-- READ_ONLY resolves to `"ALL"` with `canMutate: false`, so the leadership-only boundary is enforced at the module guard, not the matrix:
+- READ_ONLY resolves to `"ALL"` with `canMutate: false`, so the leadership-only boundary is enforced at the module guard, not the matrix. Guards live in `src/modules/customer-intelligence/permissions.ts`:
 
-  - `requireReadAccess` (`actions.ts`): `requireModule(CUSTOMER_INTELLIGENCE)` then `requireRole([ADMIN, MANAGER, FINANCE])`. This excludes READ_ONLY.
+  - `requireReadAccess`: `requireModule(CUSTOMER_INTELLIGENCE)` then `requireRole([ADMIN, MANAGER, FINANCE])`. Excludes READ_ONLY.
   - `requireMatchApproval`: read access then `requireRole([ADMIN, FINANCE])`.
   - `requireAdminSettings`: read access then `requireRole([ADMIN])`.
-  - `requireWrite` additionally calls `requireMutationAccess`.
+  - `requireWrite`: read access then `requireMutationAccess` (blocks READ_ONLY and tenant roles with `canMutate=false`).
 
-- Every service entry point is guarded server-side; there is no UI or route yet (later phase).
-- Tenant module access for the seeded tenant is created in `prisma/seed.ts` (`seedOperatingCompanies` + module access upsert).
+- Every exported query in `queries.ts` and the guarded resolver in `cashflow-compatibility.ts` call `requireReadAccess`; every mutation action calls the appropriate guard plus `requireWrite`. `refreshRelationshipLifecycle` also calls `requireMutationAccess` because it writes.
+- Tenant module access for the seeded tenant is created in `prisma/seed.ts` and by the corrections migration (both idempotent).

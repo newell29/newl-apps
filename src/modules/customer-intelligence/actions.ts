@@ -4,18 +4,12 @@ import {
   CustomerIntelligenceServiceLine,
   CustomerLifecycle,
   CustomerSourceAccountStatus,
-  ModuleKey,
-  PlatformRole,
   Prisma,
   QuickBooksServiceMappingDimension
 } from "@prisma/client";
 
 import { prisma } from "@/server/db";
-import {
-  requireModule,
-  requireMutationAccess,
-  requireRole
-} from "@/server/auth/authorization";
+import { requireMutationAccess } from "@/server/auth/authorization";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
 import { auditEntry } from "@/modules/customer-intelligence/audit";
@@ -23,9 +17,18 @@ import {
   computeRelationshipLifecycle,
   type RelationshipActivityInput
 } from "@/modules/customer-intelligence/lifecycle";
-import { computeIdentityMatchScore, shouldAutoLink, type IdentityEvidenceInput } from "@/modules/customer-intelligence/identity";
-
-const LEADERSHIP_ROLES = [PlatformRole.ADMIN, PlatformRole.MANAGER, PlatformRole.FINANCE];
+import {
+  computeIdentityMatchScore,
+  normalizeEmail,
+  normalizePhone,
+  shouldAutoLink,
+  type IdentityEvidenceInput
+} from "@/modules/customer-intelligence/identity";
+import {
+  requireAdminSettings,
+  requireMatchApproval,
+  requireWrite
+} from "@/modules/customer-intelligence/permissions";
 
 function toInputJson(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined
@@ -36,27 +39,11 @@ function toInputJson(
   return value as Prisma.InputJsonValue;
 }
 
-/** Read access for Customer Intelligence is leadership-only in v1. */
-async function requireReadAccess(ctx: AuthenticatedContext): Promise<void> {
-  await requireModule(ctx, ModuleKey.CUSTOMER_INTELLIGENCE);
-  requireRole(ctx, LEADERSHIP_ROLES);
-}
-
-/** Match/service-rule approval is ADMIN or FINANCE. */
-async function requireMatchApproval(ctx: AuthenticatedContext): Promise<void> {
-  await requireReadAccess(ctx);
-  requireRole(ctx, [PlatformRole.ADMIN, PlatformRole.FINANCE]);
-}
-
-/** Operating-company, integration, mailbox, retention, and schedule settings are ADMIN. */
-async function requireAdminSettings(ctx: AuthenticatedContext): Promise<void> {
-  await requireReadAccess(ctx);
-  requireRole(ctx, [PlatformRole.ADMIN]);
-}
-
-async function requireWrite(ctx: AuthenticatedContext): Promise<void> {
-  await requireReadAccess(ctx);
-  await requireMutationAccess(ctx);
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
 }
 
 export async function registerOperatingCompany(
@@ -203,15 +190,17 @@ export async function upsertCompanyOperatingRelationship(
 }
 
 /**
- * Deterministic lifecycle refresh for one relationship. Revenue activity comes
- * from tenant-scoped CustomerRevenueLine records; account inactivity comes from
- * the relationship's CustomerSourceAccount rows.
+ * Deterministic lifecycle refresh for one relationship. Revenue and approved
+ * QuickBooks mappings are scoped to the relationship's operating company so
+ * activity under one operating company can never activate another. Open AR is
+ * read from tenant-scoped, relationship-scoped CustomerMonthlyFinancial rows.
  */
 export async function refreshRelationshipLifecycle(
   ctx: AuthenticatedContext,
   relationshipId: string
 ) {
   await requireMatchApproval(ctx);
+  await requireMutationAccess(ctx);
 
   const relationship = await prisma.companyOperatingRelationship.findFirst({
     where: tenantWhere(ctx, { id: relationshipId })
@@ -220,11 +209,19 @@ export async function refreshRelationshipLifecycle(
     throw new Error("Relationship does not exist in this tenant.");
   }
 
-  const [recentRevenue, sourceAccounts, approvedMapping] = await Promise.all([
+  const [recentRevenue, openArEvidence, sourceAccounts, approvedMapping] = await Promise.all([
     prisma.customerRevenueLine.count({
       where: tenantWhere(ctx, {
         companyId: relationship.companyId,
+        operatingCompanyId: relationship.operatingCompanyId,
         transactionDate: { gte: trailingMonthsAgo(12) }
+      })
+    }),
+    prisma.customerMonthlyFinancial.count({
+      where: tenantWhere(ctx, {
+        companyOperatingRelationshipId: relationshipId,
+        nativeOpenAr: { gt: 0 },
+        monthKey: { gte: trailingMonthKey(12) }
       })
     }),
     prisma.customerSourceAccount.findMany({
@@ -234,14 +231,15 @@ export async function refreshRelationshipLifecycle(
       where: tenantWhere(ctx, {
         kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
         status: CustomerIdentityMatchStatus.APPROVED,
-        companyId: relationship.companyId
+        companyId: relationship.companyId,
+        operatingCompanyId: relationship.operatingCompanyId
       })
     })
   ]);
 
   const activity: RelationshipActivityInput = {
     hasApprovedMapping: approvedMapping > 0 || sourceAccounts.length > 0,
-    hasRevenueOrOpenArInLast12Months: recentRevenue > 0,
+    hasRevenueOrOpenArInLast12Months: recentRevenue > 0 || openArEvidence > 0,
     allSourceAccountsInactive:
       sourceAccounts.length > 0 &&
       sourceAccounts.every(
@@ -273,6 +271,13 @@ function trailingMonthsAgo(months: number): Date {
   const date = new Date();
   date.setMonth(date.getMonth() - months);
   return date;
+}
+
+/** Returns the "YYYY-MM" key for the month `months` before the current month. */
+function trailingMonthKey(months: number): string {
+  const date = new Date();
+  date.setMonth(date.getMonth() - months);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export async function upsertSourceAccount(
@@ -381,14 +386,18 @@ export async function upsertSourceAccount(
 /**
  * Propose an identity match. Auto-links only when the deterministic score is at
  * least 90 and there is no conflicting approved canonical company for the same
- * source record. Reviewed decisions are preserved: re-running with the same
- * source record does not overwrite an existing APPROVED or REJECTED match.
+ * source record. Every referenced company ID is validated within the caller's
+ * tenant. Reviewed decisions are preserved: re-running with the same source
+ * record does not overwrite an existing APPROVED or REJECTED match, and the
+ * one-approved-per-source invariant is enforced both in code and by the
+ * database backstop index.
  */
 export async function proposeIdentityMatch(
   ctx: AuthenticatedContext,
   input: IdentityEvidenceInput & {
     kind: CustomerIdentityMatchKind;
     companyId: string | null;
+    operatingCompanyId?: string;
     sourceRecordKey: string;
     sourceLabel?: string;
     candidateCompanyId?: string;
@@ -398,12 +407,53 @@ export async function proposeIdentityMatch(
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
+  const sourceRecordKey = input.sourceRecordKey.trim();
+  if (!sourceRecordKey) {
+    throw new Error("Identity match sourceRecordKey is required.");
+  }
+
+  // QUICKBOOKS_ACCOUNT matches are operating-company-scoped so a mapping under
+  // one operating company can never make another operating-company relationship
+  // mapped or active.
+  if (
+    input.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT &&
+    !input.operatingCompanyId
+  ) {
+    throw new Error("operatingCompanyId is required for QUICKBOOKS_ACCOUNT identity matches.");
+  }
+
+  // Validate every referenced canonical company within the caller's tenant.
+  if (input.companyId) {
+    const company = await prisma.company.findFirst({
+      where: tenantWhere(ctx, { id: input.companyId })
+    });
+    if (!company) {
+      throw new Error("Company does not exist in this tenant.");
+    }
+  }
+  if (input.candidateCompanyId) {
+    const candidate = await prisma.company.findFirst({
+      where: tenantWhere(ctx, { id: input.candidateCompanyId })
+    });
+    if (!candidate) {
+      throw new Error("Candidate company does not exist in this tenant.");
+    }
+  }
+  if (input.operatingCompanyId) {
+    const operatingCompany = await prisma.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: input.operatingCompanyId })
+    });
+    if (!operatingCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+  }
+
   const score = computeIdentityMatchScore(input);
   const existing = await prisma.customerIdentityMatch.findFirst({
     where: tenantWhere(ctx, {
       kind: input.kind,
       companyId: input.companyId,
-      sourceRecordKey: input.sourceRecordKey
+      sourceRecordKey
     })
   });
 
@@ -415,7 +465,7 @@ export async function proposeIdentityMatch(
     ? await prisma.customerIdentityMatch.findFirst({
         where: tenantWhere(ctx, {
           kind: input.kind,
-          sourceRecordKey: input.sourceRecordKey,
+          sourceRecordKey,
           status: CustomerIdentityMatchStatus.APPROVED,
           companyId: { not: input.companyId }
         })
@@ -428,31 +478,52 @@ export async function proposeIdentityMatch(
       : CustomerIdentityMatchStatus.PROPOSED;
 
   let record;
-  if (existing) {
-    record = await prisma.customerIdentityMatch.update({
-      where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
-      data: {
-        score,
-        status,
-        sourceLabel: input.sourceLabel ?? existing.sourceLabel ?? null,
-        candidateCompanyId: input.candidateCompanyId ?? existing.candidateCompanyId ?? null,
-        evidence: toInputJson(input.evidence ?? existing.evidence)
+  try {
+    if (existing) {
+      record = await prisma.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
+        data: {
+          score,
+          status,
+          operatingCompanyId: input.operatingCompanyId ?? existing.operatingCompanyId ?? null,
+          sourceLabel: input.sourceLabel ?? existing.sourceLabel ?? null,
+          candidateCompanyId: input.candidateCompanyId ?? existing.candidateCompanyId ?? null,
+          evidence: toInputJson(input.evidence ?? existing.evidence)
+        }
+      });
+    } else {
+      record = await prisma.customerIdentityMatch.create({
+        data: {
+          tenantId: ctx.tenantId,
+          kind: input.kind,
+          companyId: input.companyId,
+          operatingCompanyId: input.operatingCompanyId ?? null,
+          sourceRecordKey,
+          sourceLabel: input.sourceLabel ?? null,
+          candidateCompanyId: input.candidateCompanyId ?? null,
+          score,
+          status,
+          evidence: toInputJson(input.evidence)
+        }
+      });
+    }
+  } catch (error) {
+    // The one-approved-per-source database index rejected a second approved
+    // target (concurrent or repeated processing). Re-read the authoritative
+    // approved match and return it so no two canonical targets can be approved.
+    if (isUniqueConstraintError(error) && status === CustomerIdentityMatchStatus.APPROVED) {
+      const approved = await prisma.customerIdentityMatch.findFirst({
+        where: tenantWhere(ctx, {
+          kind: input.kind,
+          sourceRecordKey,
+          status: CustomerIdentityMatchStatus.APPROVED
+        })
+      });
+      if (approved) {
+        return approved;
       }
-    });
-  } else {
-    record = await prisma.customerIdentityMatch.create({
-      data: {
-        tenantId: ctx.tenantId,
-        kind: input.kind,
-        companyId: input.companyId,
-        sourceRecordKey: input.sourceRecordKey,
-        sourceLabel: input.sourceLabel ?? null,
-        candidateCompanyId: input.candidateCompanyId ?? null,
-        score,
-        status,
-        evidence: toInputJson(input.evidence)
-      }
-    });
+    }
+    throw error;
   }
 
   if (!existing || existing.status !== record.status) {
@@ -483,6 +554,33 @@ export async function reviewIdentityMatch(
   });
   if (!existing) {
     throw new Error("Identity match does not exist in this tenant.");
+  }
+
+  // Manual approval enforces the same one-approved-per-source invariant as
+  // automatic approval.
+  if (decision === "APPROVE") {
+    if (!existing.companyId) {
+      throw new Error("Cannot approve an identity match without a canonical company.");
+    }
+    const company = await prisma.company.findFirst({
+      where: tenantWhere(ctx, { id: existing.companyId })
+    });
+    if (!company) {
+      throw new Error("Match canonical company does not exist in this tenant.");
+    }
+    if (existing.kind && existing.sourceRecordKey) {
+      const conflicting = await prisma.customerIdentityMatch.findFirst({
+        where: tenantWhere(ctx, {
+          kind: existing.kind,
+          sourceRecordKey: existing.sourceRecordKey,
+          status: CustomerIdentityMatchStatus.APPROVED,
+          companyId: { not: existing.companyId }
+        })
+      });
+      if (conflicting) {
+        throw new Error("Source record is already approved to another canonical company.");
+      }
+    }
   }
 
   const status =
@@ -776,6 +874,8 @@ export async function upsertMonthlyFinancial(
     nativeCost?: number;
     nativeGrossProfit?: number;
     cadRevenue?: number;
+    nativeOpenAr?: number;
+    cadOpenAr?: number;
     reconciliationStatus?: "RECONCILED" | "INCOMPLETE" | "UNRECONCILED";
   }
 ) {
@@ -833,6 +933,8 @@ export async function upsertMonthlyFinancial(
       nativeCost: input.nativeCost ?? existing?.nativeCost ?? 0,
       nativeGrossProfit: input.nativeGrossProfit ?? existing?.nativeGrossProfit ?? 0,
       cadRevenue: input.cadRevenue ?? existing?.cadRevenue ?? null,
+      nativeOpenAr: input.nativeOpenAr ?? existing?.nativeOpenAr ?? 0,
+      cadOpenAr: input.cadOpenAr ?? existing?.cadOpenAr ?? null,
       reconciliationStatus:
         input.reconciliationStatus ?? existing?.reconciliationStatus ?? "UNRECONCILED"
     },
@@ -850,6 +952,8 @@ export async function upsertMonthlyFinancial(
       nativeCost: input.nativeCost ?? 0,
       nativeGrossProfit: input.nativeGrossProfit ?? 0,
       cadRevenue: input.cadRevenue ?? null,
+      nativeOpenAr: input.nativeOpenAr ?? 0,
+      cadOpenAr: input.cadOpenAr ?? null,
       reconciliationStatus: input.reconciliationStatus ?? "UNRECONCILED"
     }
   });
@@ -883,10 +987,29 @@ export async function upsertContactPoint(
     throw new Error("Contact does not exist in this tenant for the given company.");
   }
 
-  const value = input.value.trim();
-  if (!value) {
+  const rawValue = input.value.trim();
+  if (!rawValue) {
     throw new Error("Contact point value is required.");
   }
+
+  // Store a normalized value (the unique key) so equivalent emails and phone
+  // numbers deduplicate deterministically, and keep a human display value.
+  let value: string;
+  switch (input.type) {
+    case "EMAIL":
+      value = normalizeEmail(rawValue);
+      break;
+    case "PHONE":
+      value = normalizePhone(rawValue);
+      break;
+    default:
+      value = rawValue.toLowerCase();
+      break;
+  }
+  if (!value) {
+    throw new Error("Contact point value is not valid for its type.");
+  }
+  const displayValue = input.displayValue ?? rawValue;
 
   const existing = await prisma.contactPoint.findFirst({
     where: tenantWhere(ctx, {
@@ -906,7 +1029,7 @@ export async function upsertContactPoint(
       }
     },
     update: {
-      displayValue: input.displayValue ?? existing?.displayValue ?? null,
+      displayValue: input.displayValue ?? existing?.displayValue ?? displayValue,
       label: input.label ?? existing?.label ?? null,
       primary: input.primary ?? existing?.primary ?? false,
       verificationStatus:
@@ -921,7 +1044,7 @@ export async function upsertContactPoint(
       companyId: input.companyId,
       type: input.type,
       value,
-      displayValue: input.displayValue ?? null,
+      displayValue,
       label: input.label ?? null,
       primary: input.primary ?? false,
       verificationStatus: input.verificationStatus ?? "UNVERIFIED",
@@ -959,6 +1082,11 @@ export async function upsertContactEvidence(
     throw new Error("Contact does not exist in this tenant for the given company.");
   }
 
+  const fieldValue = input.fieldValue.trim();
+  if (!fieldValue) {
+    throw new Error("Evidence fieldValue is required; empty extraction never invents a value.");
+  }
+
   const evidenceFragment = input.evidenceFragment ?? null;
   if (evidenceFragment && evidenceFragment.length > 240) {
     throw new Error("Evidence fragments are capped at 240 characters.");
@@ -972,36 +1100,80 @@ export async function upsertContactEvidence(
     })
   });
 
-  const record = await prisma.contactEvidence.upsert({
-    where: {
-      tenantId_contactId_sourceRecordKey_fieldName: {
+  if (!existing) {
+    const record = await prisma.contactEvidence.create({
+      data: {
         tenantId: ctx.tenantId,
         contactId: input.contactId,
+        companyId: input.companyId,
+        sourceType: input.sourceType,
         sourceRecordKey: input.sourceRecordKey,
-        fieldName: input.fieldName
+        fieldName: input.fieldName,
+        fieldValue,
+        confidence: input.confidence,
+        parserVersion: input.parserVersion ?? null,
+        observedAt: input.observedAt,
+        evidenceFragment
       }
-    },
-    update: {
-      fieldValue: input.fieldValue,
+    });
+    return record;
+  }
+
+  const sameValue = existing.fieldValue === fieldValue;
+
+  // A later extraction must never silently overwrite an accepted or manually
+  // approved fact. Conflicting values enter a reviewable CONFLICT state while
+  // the accepted fact (fieldValue) and its source evidence are preserved.
+  if (existing.reviewStatus === "ACCEPTED" || existing.reviewStatus === "REJECTED") {
+    if (sameValue) {
+      return prisma.contactEvidence.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
+        data: {
+          confidence: input.confidence,
+          parserVersion: input.parserVersion ?? existing.parserVersion ?? null,
+          observedAt: input.observedAt,
+          evidenceFragment
+        }
+      });
+    }
+    return prisma.contactEvidence.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
+      data: {
+        confidence: input.confidence,
+        parserVersion: input.parserVersion ?? existing.parserVersion ?? null,
+        observedAt: input.observedAt,
+        evidenceFragment,
+        reviewStatus: "CONFLICT",
+        conflictingValue: fieldValue
+      }
+    });
+  }
+
+  if (existing.reviewStatus === "CONFLICT") {
+    return prisma.contactEvidence.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
+      data: {
+        confidence: input.confidence,
+        parserVersion: input.parserVersion ?? existing.parserVersion ?? null,
+        observedAt: input.observedAt,
+        evidenceFragment,
+        ...(sameValue ? {} : { conflictingValue: fieldValue })
+      }
+    });
+  }
+
+  // UNREVIEWED: a fresh extraction replaces the pending value; nothing was
+  // accepted, so nothing is overwritten.
+  return prisma.contactEvidence.update({
+    where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
+    data: {
+      fieldValue,
       confidence: input.confidence,
-      parserVersion: input.parserVersion ?? existing?.parserVersion ?? null,
+      parserVersion: input.parserVersion ?? existing.parserVersion ?? null,
       observedAt: input.observedAt,
-      evidenceFragment
-    },
-    create: {
-      tenantId: ctx.tenantId,
-      contactId: input.contactId,
-      companyId: input.companyId,
-      sourceType: input.sourceType,
-      sourceRecordKey: input.sourceRecordKey,
-      fieldName: input.fieldName,
-      fieldValue: input.fieldValue,
-      confidence: input.confidence,
-      parserVersion: input.parserVersion ?? null,
-      observedAt: input.observedAt,
-      evidenceFragment
+      evidenceFragment,
+      reviewStatus: "UNREVIEWED",
+      conflictingValue: null
     }
   });
-
-  return record;
 }

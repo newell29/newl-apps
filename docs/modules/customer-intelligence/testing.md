@@ -4,15 +4,14 @@
 
 ## Test files
 
-- `tests/customer-intelligence-foundation.test.ts` — tenant-safe actions and queries with a hermetic Prisma mock. Covers:
-  - One customer shared across three operating companies with rolled-up lifecycle.
-  - Multiple CAD/USD QuickBooks accounts mapping to one canonical customer relationship.
-  - Same-name companies isolated across tenants on every query and write.
-  - Cross-tenant relation-ID read/write attacks.
-  - Reviewed match decisions preserved across re-runs; auto-link at score >= 90; no auto-link when the source record is approved to another company; free-mail deferral.
-  - Partial and completely missing external evidence.
-  - Lifecycle refresh from tenant-scoped revenue and account evidence.
-  - Cashflow compatibility: legacy enum mapping, operating-company lookup scoped to tenant, no cashflow row rewrites, and a structural guard that the migration does not touch `CashflowCustomer`/`CashflowLegalEntity`.
+- `tests/customer-intelligence-foundation.test.ts` — 36 tests. Prisma is mocked, but the authorization module is REAL (only `@/server/db` is mocked), so the tests prove the true permission boundary. Covers:
+  - Entitlement bootstrap: the corrections migration creates the module, the `newl-group` entitlement, and the three operating companies idempotently; `vercel-build.ts` runs `migrate deploy` without the broad seed.
+  - Permissions: SALES denied on every exported query (explicit per-function coverage); OPERATIONS and READ_ONLY denied on reads; FINANCE allowed; SALES/OPERATIONS/READ_ONLY denied on mutations; FINANCE with `canMutate=false` denied; `refreshRelationshipLifecycle` requires mutation access; the cashflow resolver is guarded.
+  - Lifecycle isolation: revenue scoped by operating company; approved mappings scoped by operating company; zero revenue + positive open AR activates; inactive accounts with no revenue/open AR → FORMER; three-company rollup.
+  - Identity integrity: cross-tenant `companyId`/`candidateCompanyId` rejected; `QUICKBOOKS_ACCOUNT` requires an operating company; second manual approval rejected; competing proposals keep one approved target; DB unique-violation backstop returns the authoritative approved match; re-running approved/rejected decisions is idempotent.
+  - Contact points: email casing and phone formatting deduplicate; display values preserved; empty values rejected.
+  - Contact evidence: accepted facts are never overwritten (CONFLICT + `conflictingValue`); same-value re-observations stay stable; pending values replaced; empty extraction rejected.
+  - Regression: operating-company audit, one customer across three operating companies, multiple CAD/USD accounts, same-name tenant isolation, cross-tenant relation-ID attacks, cashflow compatibility, and a structural guard that no migration touches `CashflowCustomer`/`CashflowLegalEntity`.
 - `tests/customer-intelligence-identity.test.ts` — pure identity scoring, normalization, free-mail rules, name-alone never auto-links.
 - `tests/customer-intelligence-service-lines.test.ts` — the seven service lines and deterministic precedence.
 - `tests/customer-intelligence-lifecycle.test.ts` — per-relationship lifecycle and rollup ordering.
