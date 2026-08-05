@@ -9,6 +9,10 @@ import {
   type TeamshipPhase2ExecutionResult
 } from "@/modules/shipment-documents/teamship-phase2-agent-execution";
 import type { TeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
+import {
+  readWorkerFailureStage,
+  TeamshipWorkerStageError
+} from "@/modules/shipment-documents/teamship-worker-failure";
 
 type WorkerOptions = {
   baseUrl: string;
@@ -98,6 +102,7 @@ async function runOnce(options: WorkerOptions) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Teamship Phase 2 worker error.";
+    const failureStage = readWorkerFailureStage(error, "WORKER_PREFLIGHT");
     await completeJob({
       options,
       jobId: claimed.job.id,
@@ -109,6 +114,7 @@ async function runOnce(options: WorkerOptions) {
         executedAt: new Date().toISOString(),
         agentId: options.agentId,
         jobId: claimed.job.id,
+        failureStage,
         error: message
       }
     });
@@ -129,23 +135,47 @@ async function executeJob({
     throw new Error("This approved job requires live mode, but the VM worker is running in dry-run mode.");
   }
 
-  const result = await executeTeamshipPhase2Job({
-    job: {
-      id: claimed.job.id,
-      agentMode: claimed.job.agentMode,
-      dryRun: claimed.job.dryRun
-    },
-    plan: claimed.executionPayload,
-    credentials: claimed.teamshipCredentials!,
-    options: {
-      agentId: options.agentId,
-      allowLiveUpdates: options.allowLiveUpdates,
-      liveAllowlistSrNumbers: options.liveAllowlistSrNumbers
-    }
-  });
+  let result: TeamshipPhase2ExecutionResult;
+
+  try {
+    result = await executeTeamshipPhase2Job({
+      job: {
+        id: claimed.job.id,
+        agentMode: claimed.job.agentMode,
+        dryRun: claimed.job.dryRun
+      },
+      plan: claimed.executionPayload,
+      credentials: claimed.teamshipCredentials!,
+      options: {
+        agentId: options.agentId,
+        allowLiveUpdates: options.allowLiveUpdates,
+        liveAllowlistSrNumbers: options.liveAllowlistSrNumbers
+      }
+    });
+  } catch (error) {
+    throw new TeamshipWorkerStageError("TEAMSHIP_API", error);
+  }
 
   if (claimed.job.agentMode === "LIVE_API" && options.mode === "live-api" && options.browserBolCleanupEnabled) {
-    return runPostApiBolCleanup({ options, claimed, result });
+    try {
+      return await runPostApiBolCleanup({ options, claimed, result });
+    } catch (error) {
+      const stagedError = new TeamshipWorkerStageError("BOL_CLEANUP", error);
+      return {
+        ...result,
+        hasFailures: true,
+        orders: result.orders.map((order) =>
+          order.status === "UPDATED"
+            ? {
+                ...order,
+                status: "FAILED" as const,
+                error: `Teamship API update succeeded, but editable-BOL cleanup stopped unexpectedly: ${stagedError.message}`
+              }
+            : order
+        ),
+        notes: [...result.notes, `BOL cleanup stopped unexpectedly after Teamship API updates: ${stagedError.message}`]
+      };
+    }
   }
 
   return result;

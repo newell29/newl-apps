@@ -199,6 +199,7 @@ type TeamshipUpdateJobSummary = {
     plannedBolCleanupCount: number;
   };
   errorMessage: string | null;
+  failureStage: "WORKER_PREFLIGHT" | "TEAMSHIP_LOGIN" | "TEAMSHIP_API" | "BOL_CLEANUP" | "UNKNOWN" | null;
   agentId: string | null;
   createdAt: string;
   approvedAt: string | null;
@@ -1988,6 +1989,7 @@ function TeamshipUpdateJobsPanel({
                 </div>
                 {job.errorMessage ? (
                   <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
+                    {job.failureStage ? `Stopped during ${formatFailureStage(job.failureStage)}: ` : ""}
                     {job.errorMessage}
                   </div>
                 ) : null}
@@ -2959,6 +2961,9 @@ function TeamshipReviewHistorySection({
             <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
               One compact place to confirm which Garland PDF batches were processed, which orders need CSR review, and
               which records are ready to open, email, or mark complete.
+            </p>
+            <p className="mt-2 max-w-3xl text-xs text-mutedForeground">
+              These totals show the saved PDF-versus-Teamship comparison. Live update and editable-BOL completion are tracked separately under Bot drafts and run history.
             </p>
             <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
               {history.allDates
@@ -5107,6 +5112,10 @@ function stringifyValue(value: unknown) {
   }
 
   return String(value);
+}
+
+function formatFailureStage(value: TeamshipUpdateJobSummary["failureStage"]) {
+  return value?.toLowerCase().replaceAll("_", " ") ?? "worker execution";
 }
 
 function isErrorResponse(value: unknown): value is { error: string } {

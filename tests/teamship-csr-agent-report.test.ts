@@ -124,6 +124,68 @@ describe("Garland CSR agent report", () => {
       })
     );
   });
+
+  it("reports a successfully updated mismatch as complete instead of repeating the original failure", async () => {
+    prismaMock.teamshipUpdateJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        status: "SUCCESS",
+        agentMode: "LIVE_API",
+        errorMessage: null,
+        agentResult: { orders: [] },
+        orders: [
+          {
+            srNumber: "SR810465",
+            status: "SUCCESS",
+            plannedFieldUpdates: [{ label: "Freight terms", proposedValue: "PPADD-CD" }],
+            plannedPalletRows: [],
+            validationIssues: [],
+            errorMessage: null
+          }
+        ]
+      }
+    ]);
+
+    const report = await buildGarlandCsrAgentReport(context, "run-1");
+    const row = report.orderTable.find((candidate) => candidate.srNumber === "SR810465");
+
+    expect(row).toMatchObject({ tone: "green", statusLabel: "Complete" });
+    expect(report.needsReview.map((order) => order.srNumber)).not.toContain("SR810465");
+    expect(report.completedUpdates.map((order) => order.srNumber)).toContain("SR810465");
+  });
+
+  it("includes the exact top-level worker stage and error when an order returned no evidence", async () => {
+    prismaMock.teamshipUpdateJob.findMany.mockResolvedValue([
+      {
+        id: "job-1",
+        status: "FAILED",
+        agentMode: "LIVE_API",
+        errorMessage: null,
+        agentResult: {
+          failureStage: "TEAMSHIP_LOGIN",
+          error: "Teamship login failed with status 503."
+        },
+        orders: [
+          {
+            srNumber: "SR810465",
+            status: "FAILED",
+            plannedFieldUpdates: [],
+            plannedPalletRows: [],
+            validationIssues: [],
+            errorMessage: null
+          }
+        ]
+      }
+    ]);
+
+    const report = await buildGarlandCsrAgentReport(context, "run-1");
+    const row = report.orderTable.find((candidate) => candidate.srNumber === "SR810465");
+
+    expect(row?.botChanges).toEqual([
+      "No complete update was confirmed (teamship login): Teamship login failed with status 503."
+    ]);
+    expect(row?.matchIssues).toContain("Teamship login failed with status 503.");
+  });
 });
 
 function sampleReview(): GarlandTeamshipReviewResponse {
