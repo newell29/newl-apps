@@ -51,9 +51,9 @@ describe("Garland Teamship review workspace client helpers", () => {
       getWorkspaceWorkflowStatus(passedRow, [
         {
           id: "job-1",
-          tenantId: "tenant-1",
           shipmentDate: "2026-07-12T00:00:00.000Z",
           documentLabel: "July 12, 2026",
+          sourcePdfFileName: null,
           dryRun: true,
           agentMode: "DRY_RUN",
           status: "SUCCESS",
@@ -84,10 +84,16 @@ describe("Garland Teamship review workspace client helpers", () => {
             }
           ],
           createdAt: "2026-07-12T12:00:00.000Z",
+          errorMessage: null,
+          failureStage: null,
+          agentId: null,
           approvedAt: null,
-          cancelledAt: null,
+          agentClaimedAt: null,
           agentStartedAt: null,
-          agentFinishedAt: null
+          agentFinishedAt: null,
+          lastVerificationAt: null,
+          createdByName: null,
+          approvedByName: null
         }
       ])
     ).toBe("READY_TO_PRINT");

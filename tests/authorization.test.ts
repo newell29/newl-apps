@@ -82,6 +82,7 @@ describe("ROLE_MATRIX", () => {
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.TRANSIT_LOOKUP)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.OCEAN_FREIGHT_PRICING)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.INVOICE_VERIFICATION)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.WEBSITE_GROWTH)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.QUICKBOOKS_POSTING)).toBe(false);
   });
 
@@ -95,6 +96,7 @@ describe("ROLE_MATRIX", () => {
       ModuleKey.SHIPMENT_DOCUMENTS,
       ModuleKey.INVOICE_VERIFICATION,
       ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.WEBSITE_GROWTH,
       ModuleKey.OCEAN_FREIGHT_PRICING
     ]);
   });

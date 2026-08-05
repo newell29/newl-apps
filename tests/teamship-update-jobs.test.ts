@@ -52,6 +52,7 @@ vi.mock("@/modules/shipment-documents/teamship-csr-agent-report", () => ({
 }));
 
 import { completeTeamshipUpdateJobFromAgent, createTeamshipUpdateJob } from "@/modules/shipment-documents/teamship-update-jobs";
+import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
 describe("Teamship update jobs", () => {
   beforeEach(() => {
@@ -494,7 +495,7 @@ function sampleCreatedJob() {
   };
 }
 
-function sampleReviewWithCsrOverride() {
+function sampleReviewWithCsrOverride(): GarlandTeamshipReviewResponse {
   return {
     summary: {
       pdfOrderCount: 1,
