@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
@@ -162,13 +163,13 @@ function safeChangedPath(repositoryRoot: string, path: string): string {
   return absolute;
 }
 
-export async function getWorkflowDiff(repositoryRoot: string, baseCommit: string): Promise<string> {
+async function collectRawWorkflowDiff(repositoryRoot: string, baseCommit: string): Promise<string> {
   let diff = (
     await git(repositoryRoot, ["diff", "--no-ext-diff", "--binary", "--unified=80", baseCommit, "--"])
   ).stdout;
   const status = await git(repositoryRoot, ["ls-files", "-z", "--others", "--exclude-standard"]);
 
-  for (const path of status.stdout.split("\0").filter(Boolean)) {
+  for (const path of status.stdout.split("\0").filter(Boolean).sort()) {
     safeChangedPath(repositoryRoot, path);
     const untrackedDiff = await git(
       repositoryRoot,
@@ -178,12 +179,61 @@ export async function getWorkflowDiff(repositoryRoot: string, baseCommit: string
     diff += `\n${untrackedDiff.stdout}`;
   }
 
+  return diff;
+}
+
+export async function getWorkflowDiffHash(
+  repositoryRoot: string,
+  baseCommit: string
+): Promise<string> {
+  const diff = await collectRawWorkflowDiff(repositoryRoot, baseCommit);
+  return createHash("sha256").update(diff, "utf8").digest("hex");
+}
+
+export async function getWorkflowDiff(repositoryRoot: string, baseCommit: string): Promise<string> {
+  const diff = await collectRawWorkflowDiff(repositoryRoot, baseCommit);
+
   if (!diff.trim()) return "(no Git diff)";
   const bounded =
     diff.length <= MAX_DIFF_CHARACTERS
       ? diff
       : `${diff.slice(0, MAX_DIFF_CHARACTERS)}\n...[Git diff truncated; inspect changed files directly]...`;
   return sanitizeCommandOutput(bounded);
+}
+
+export type RecoveryGitIdentity = {
+  branch: string;
+  baseRefCommit: string;
+  headCommit: string;
+  mergeBaseCommit: string;
+  diffHash: string;
+};
+
+export async function inspectRecoveryGitIdentity(
+  repositoryRoot: string,
+  baseRef: string,
+  baseCommit: string
+): Promise<RecoveryGitIdentity> {
+  if (!/^[0-9a-f]{40,64}$/i.test(baseCommit)) {
+    throw new Error("Recovery base commit must be a full Git object ID.");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$/.test(baseRef) || baseRef.includes("..")) {
+    throw new Error("Recovery base ref is unsafe.");
+  }
+  const [branch, baseRefResult, head, mergeBaseCommit, diffHash] = await Promise.all([
+    git(repositoryRoot, ["branch", "--show-current"]),
+    git(repositoryRoot, ["rev-parse", "--verify", `${baseRef}^{commit}`]),
+    git(repositoryRoot, ["rev-parse", "HEAD"]),
+    git(repositoryRoot, ["merge-base", baseCommit, "HEAD"]),
+    getWorkflowDiffHash(repositoryRoot, baseCommit)
+  ]);
+  return {
+    branch: branch.stdout.trim(),
+    baseRefCommit: baseRefResult.stdout.trim(),
+    headCommit: head.stdout.trim(),
+    mergeBaseCommit: mergeBaseCommit.stdout.trim(),
+    diffHash
+  };
 }
 
 export async function getSurroundingCode(repositoryRoot: string): Promise<string> {
