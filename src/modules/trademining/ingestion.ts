@@ -623,10 +623,16 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
       tenantId: tenant.tenantId
     },
     select: {
-      input: true
+      input: true,
+      output: true
     }
   });
   const searchProfileId = readSearchProfileIdFromJobInput(existingJobRun?.input);
+  const previousOutput = jsonObject(existingJobRun?.output);
+  const previousMetadata = jsonObject(previousOutput.metadata);
+  const previousRecordsProcessed = jsonNumber(previousOutput.recordsProcessed);
+  const previousRecordsCreated = jsonNumber(previousOutput.recordsCreated);
+  const previousRecordsUpdated = jsonNumber(previousOutput.recordsUpdated);
   const qualifyingCompanies =
     searchProfileId && (input.status === "COMPLETED" || input.status === "PARTIAL")
       ? (
@@ -636,6 +642,7 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
         ).length
       : null;
   const completionMetadata = {
+    ...previousMetadata,
     ...(input.metadata ?? {}),
     ...(qualifyingCompanies === null ? {} : { qualifyingCompanies })
   };
@@ -650,10 +657,11 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
       finishedAt: isFinished ? new Date() : undefined,
       errorMessage: input.errorMessage ?? null,
       output: {
+        ...previousOutput,
         externalStatus: input.status,
-        recordsProcessed: input.recordsProcessed ?? null,
-        recordsCreated: input.recordsCreated ?? null,
-        recordsUpdated: input.recordsUpdated ?? null,
+        recordsProcessed: input.recordsProcessed ?? previousRecordsProcessed,
+        recordsCreated: input.recordsCreated ?? previousRecordsCreated,
+        recordsUpdated: input.recordsUpdated ?? previousRecordsUpdated,
         metadata: completionMetadata,
         completedAt: input.completedAt ?? new Date().toISOString()
       }
@@ -1270,6 +1278,18 @@ function readJsonString(value: unknown, key: string) {
 
   const field = (value as Record<string, unknown>)[key];
   return typeof field === "string" && field.trim() ? field : null;
+}
+
+function jsonObject(value: unknown): Record<string, Prisma.JsonValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, Prisma.JsonValue>;
+}
+
+function jsonNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function mapExternalJobStatus(status: string) {
