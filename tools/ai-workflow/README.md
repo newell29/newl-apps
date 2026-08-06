@@ -20,7 +20,7 @@ It implements only this sequence:
 6. Exact verification failures or review findings return to DeepSeek.
 7. Every approved phase stops before every later phase. Progression is always a new explicit operator action.
 
-Version 1B.1 adds bounded local feature state, append-only progress events, structured owner decisions, safe review recovery, conservative resume checks, and one optional premium-model remediation attempt after the ordinary builder exhausts its correction limit. There is still no database, checkpoint commit, web dashboard, mobile service, Codex escalation, automatic push, merge, deployment, migration execution, or production/external action.
+Version 1B.1 adds bounded local feature state, append-only progress events, structured owner decisions, safe review recovery, conservative resume checks, a small loopback-only operator UI, and one optional premium-model remediation attempt after the ordinary builder exhausts its correction limit. There is still no database, checkpoint commit, hosted dashboard, mobile service, Codex escalation, automatic push, merge, deployment, migration execution, or production/external action.
 
 ## Operator commands
 
@@ -40,9 +40,30 @@ npm run ai:feature -- answer customer-profile QUESTION-ID
 npm run ai:feature -- readiness customer-profile
 npm run ai:feature -- models list
 npm run ai:feature -- models configure
+npm run ai:feature:ui
 ```
 
 Running `npm run ai:feature` without arguments opens the guided menu. The launcher labels approval prompts, shows the selected worktree and models, creates internal request files, and reports when a model is active even if no safe content is available to display.
+
+### Small local operator UI
+
+Run:
+
+```bash
+npm run ai:feature:ui
+```
+
+The command prints a one-time local URL. Open that URL in the same computer's browser and keep the terminal process running. The server binds only to `127.0.0.1`, uses a random in-memory access token, rejects cross-origin actions, sends no-store and restrictive browser headers, and stops when the process exits. It is not reachable from another computer or phone and is not deployed.
+
+The first UI increment deliberately covers the recurring operator actions rather than every launcher command:
+
+- view registered features, stage, branch, exact Git identity, roadmap, models, recent verification evidence, and safe progress events;
+- read and confirm structured owner questions against the exact question and plan hashes;
+- approve one eligible phase only, with the same risk-based typed confirmation as the terminal launcher;
+- see exact saved verification failures or reviewer findings; and
+- resume one saved correction boundary without another planner or initial builder call.
+
+Starting and adopting features, model configuration, readiness diagnostics, planner-envelope recovery, and review-envelope recovery remain terminal commands for this small first UI. Unexpected prompts fail closed instead of being guessed or silently defaulted by the browser.
 
 The launcher entry point stays alive until the current command finishes, while terminal input is opened only for the question currently on screen. Each approval, model-selection, or owner-question prompt gets a fresh input interface, so a long preflight or model operation cannot leave the later prompt attached to a stale closed interface.
 
@@ -204,6 +225,8 @@ npm run ai:feature -- recover-review <feature-slug>
 
 The command validates the dedicated worktree, exact model configuration, stored provider authentication, owner-only recovery packet, branch, base, HEAD, and diff hash. It reruns all mandatory verification before making a fresh read-only reviewer call. It makes no planner or initial builder call. A validated change request enters the existing correction loop with the exact findings; approval marks only the pinned phase. Recovery always stops before every later phase and requires explicit owner action to continue. Any changed identity, malformed response, reviewer-side Git mutation, commit, or owner-gated current phase is rejected.
 
+Validated verification failures and reviewer change requests are also saved as a structured correction boundary in the feature state before the next model call. The boundary records the exact sanitized corrections, source, retry/review counters, selected next role, and branch/base/HEAD/diff identity. If the process stops, the launcher or local UI can resume that boundary without replanning, without repeating the initial builder pass, and without losing the reviewer's actual findings. Exhausting the bounded automatic allowance requires the owner to type the exact phase ID before one additional attempt. Changed Git identity refuses recovery, and successful verification or approval clears the saved boundary.
+
 ## Deterministic verification
 
 The controller runs these commands once during preflight and again in this order after every builder attempt:
@@ -306,6 +329,6 @@ When a HIGH or OWNER_GATED phase is independently reviewable, prefer ending the 
 - A phase marked `requiresOwnerApproval` never starts automatically, including after a recovered earlier-phase approval.
 - Low-risk auto-continuation is deliberately not enabled. Every phase stops during the initial trust-building period.
 - Concurrent active workflow execution is unsupported. A stale active-run guard is not automatically removed.
-- OpenCode remains CLI-driven. The mobile status service and SDK/server transport are deferred.
+- The local operator UI is a loopback-only convenience surface, not a remote dashboard. It cannot create/adopt features, configure models, recover malformed planner/reviewer envelopes, pause a running OpenCode subprocess, or provide phone access. OpenCode remains CLI-driven; mobile status and SDK/server transport are deferred.
 
 The retained future architecture is documented in [`docs/ai/ai-development-engine.md`](../../docs/ai/ai-development-engine.md).

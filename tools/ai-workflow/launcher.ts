@@ -58,8 +58,19 @@ import { LocalCommandRunner } from "./verification";
 import {
   runWorkflow,
   WorkflowCancelledError,
+  WorkflowEscalationError,
   WorkflowOptions
 } from "./workflow";
+
+export type RunFeatureOptions = {
+  phaseApproval?: {
+    phaseId: string;
+    planHash: string;
+    diffHash: string;
+    confirmation: string;
+  };
+  allowOwnerCorrectionRetry?: boolean;
+};
 
 function command(cwd: string, executable: string, args: string[]): Promise<void> {
   return new Promise((resolveCommand, reject) => {
@@ -389,10 +400,11 @@ async function readGitHead(worktree: string): Promise<string> {
   });
 }
 
-async function runFeature(
+export async function runFeature(
   coordinationRoot: string,
   initialState: FeatureState,
-  readline: OperatorReadline
+  readline: OperatorReadline,
+  runOptions: RunFeatureOptions = {}
 ): Promise<void> {
   const release = await acquireFeatureRun(coordinationRoot, initialState.featureSlug);
   let state = initialState;
@@ -412,7 +424,31 @@ async function runFeature(
     state = { ...state, selectedModels: models, updatedAt: new Date().toISOString() };
     await saveFeatureState(coordinationRoot, state);
 
-    let phase = nextPendingPhase(state);
+    const correctionBoundary = state.correctionBoundary;
+    if (
+      correctionBoundary &&
+      (correctionBoundary.branch !== state.branch ||
+        correctionBoundary.baseCommit !== state.baseCommit ||
+        correctionBoundary.headCommit !== state.headCommit ||
+        correctionBoundary.diffHash !== state.currentDiffHash)
+    ) {
+      throw new WorkflowEscalationError(
+        `${correctionBoundary.phaseId} cannot resume because its saved branch, base, HEAD, or diff identity changed.`
+      );
+    }
+    if (correctionBoundary?.ownerActionRequired && !runOptions.allowOwnerCorrectionRetry) {
+      throw new WorkflowEscalationError(
+        `${correctionBoundary.phaseId} has exhausted its automatic correction allowance. Explicit owner approval is required for another bounded correction attempt.`
+      );
+    }
+    if (correctionBoundary?.nextModel === "escalation" && !models.escalationModel) {
+      throw new WorkflowEscalationError(
+        `${correctionBoundary.phaseId} requires the saved escalation model, but no escalation model is configured.`
+      );
+    }
+    let phase = correctionBoundary
+      ? state.plan?.phases.find((candidate) => candidate.id === correctionBoundary.phaseId) ?? null
+      : nextPendingPhase(state);
     if (state.plan && !phase) {
       throw new Error("The stored roadmap has no pending phase. Review the completed feature manually.");
     }
@@ -439,7 +475,26 @@ async function runFeature(
       confirmedDecisions: confirmedDecisionMap(state.questions),
       ownerGateSatisfied: phase
         ? unresolvedBlockingQuestions(state.questions, phase.id).length === 0
-        : false
+        : false,
+      phaseAlreadyApproved: Boolean(correctionBoundary),
+      resumeCorrection: correctionBoundary
+        ? {
+            corrections: correctionBoundary.corrections,
+            phaseRetries: runOptions.allowOwnerCorrectionRetry
+              ? 0
+              : correctionBoundary.phaseRetries,
+            phaseReviewCycles: runOptions.allowOwnerCorrectionRetry
+              ? 0
+              : correctionBoundary.phaseReviewCycles,
+            escalationUsed: runOptions.allowOwnerCorrectionRetry
+              ? false
+              : correctionBoundary.escalationUsed,
+            useEscalationRemediation:
+              correctionBoundary.nextModel === "escalation" ||
+              Boolean(runOptions.allowOwnerCorrectionRetry && models.escalationModel),
+            singleAttempt: Boolean(runOptions.allowOwnerCorrectionRetry)
+          }
+        : undefined
     };
     const commandRunner = new LocalCommandRunner();
     const inspector = new OpenCodeCliInspector(state.worktree);
@@ -520,10 +575,25 @@ async function runFeature(
         workflowOptions.ownerGateSatisfied = true;
 
         const risk = effectivePhaseRisk(selected);
-        const approved =
-          risk === "high" || risk === "owner_gated"
-            ? (await ask(readline, `\nType ${phaseId} to approve this phase only: `)) === phaseId
-            : await confirm(readline, `\nApprove ${phaseId} only?`, false);
+        let approved: boolean;
+        if (runOptions.phaseApproval) {
+          if (
+            runOptions.phaseApproval.phaseId !== phaseId ||
+            runOptions.phaseApproval.planHash !== hashJson(plan) ||
+            runOptions.phaseApproval.diffHash !== state.currentDiffHash
+          ) {
+            throw new Error("The local UI approval does not match the current phase, plan, or diff.");
+          }
+          approved =
+            risk === "high" || risk === "owner_gated"
+              ? runOptions.phaseApproval.confirmation === phaseId
+              : runOptions.phaseApproval.confirmation === "approve";
+        } else {
+          approved =
+            risk === "high" || risk === "owner_gated"
+              ? (await ask(readline, `\nType ${phaseId} to approve this phase only: `)) === phaseId
+              : await confirm(readline, `\nApprove ${phaseId} only?`, false);
+        }
         if (!approved) return false;
         state = {
           ...state,
@@ -607,6 +677,49 @@ async function runFeature(
         };
         await saveFeatureState(coordinationRoot, state);
       },
+      onCorrectionRequired: async (boundary) => {
+        const identity = await gitIdentity(state);
+        state = {
+          ...state,
+          headCommit: identity.headCommit,
+          currentDiffHash: identity.diffHash,
+          currentPhaseId: boundary.phaseId,
+          correctionBoundary: {
+            schemaVersion: 1,
+            phaseId: boundary.phaseId,
+            source: boundary.source,
+            corrections: boundary.corrections,
+            reviewDecision: boundary.reviewDecision ?? null,
+            phaseRetries: boundary.phaseRetries,
+            phaseReviewCycles: boundary.phaseReviewCycles,
+            escalationUsed: boundary.escalationUsed,
+            nextModel: boundary.nextModel,
+            ownerActionRequired: boundary.ownerActionRequired,
+            branch: state.branch,
+            baseCommit: state.baseCommit,
+            headCommit: identity.headCommit,
+            diffHash: identity.diffHash,
+            recordedAt: new Date().toISOString()
+          },
+          finalOutcome: boundary.ownerActionRequired
+            ? `${boundary.phaseId} requires owner approval for another correction attempt.`
+            : `${boundary.phaseId} has a saved correction and can resume without replanning.`
+        };
+        await saveFeatureState(coordinationRoot, state);
+        progress.emit({
+          stage: state.stage,
+          type: "workflow.correction_saved",
+          message: `${boundary.corrections.length} correction(s) saved from ${boundary.source}.`,
+          phaseId: boundary.phaseId,
+          data: { ownerActionRequired: boundary.ownerActionRequired }
+        });
+      },
+      onCorrectionCleared: async (phaseId) => {
+        if (state.correctionBoundary?.phaseId === phaseId) {
+          state = { ...state, correctionBoundary: null, updatedAt: new Date().toISOString() };
+          await saveFeatureState(coordinationRoot, state);
+        }
+      },
       onEvent: (message) =>
         progress.emit({ stage: state.stage, type: "workflow.progress", message, phaseId: state.currentPhaseId })
     });
@@ -623,6 +736,7 @@ async function runFeature(
       retryCount: state.retryCount + result.metrics.retryCount,
       reviewCycles: state.reviewCycles + result.metrics.reviewCycles,
       eventSequence: progress.sequence(),
+      correctionBoundary: null,
       phases: state.phases.map((record) =>
         record.id === result.phaseId
           ? {
@@ -672,7 +786,15 @@ async function runFeature(
           state.stage === "reviewing" &&
           error instanceof Error &&
           (/Reviewer/.test(error.message) || /Diagnostic:/.test(error.message));
-        state = transitionFeatureState(state, reviewFailure ? "review_failed" : "interrupted");
+        const correctionFailure =
+          error instanceof WorkflowEscalationError && Boolean(state.correctionBoundary);
+        const failureStage = correctionFailure
+          ? "correction_required"
+          : reviewFailure
+            ? "review_failed"
+            : "interrupted";
+        state =
+          state.stage === failureStage ? state : transitionFeatureState(state, failureStage);
         state = {
           ...state,
           headCommit: identity.headCommit,
@@ -869,6 +991,19 @@ async function showStatus(state: FeatureState): Promise<void> {
     console.log(
       `Latest phase: ${(metrics.totalTimeMs / 60_000).toFixed(1)}m, cost ${metrics.totalApiCost === null ? "unavailable" : `$${metrics.totalApiCost.toFixed(4)}`}, ${metrics.reviewCycles} review cycle(s)`
     );
+  }
+  if (state.correctionBoundary) {
+    console.log(`\nSaved corrections: ${state.correctionBoundary.corrections.length}`);
+    console.log(`Source: ${state.correctionBoundary.source}`);
+    console.log(`Next model: ${state.correctionBoundary.nextModel}`);
+    console.log(
+      state.correctionBoundary.ownerActionRequired
+        ? "Owner approval is required before another bounded attempt."
+        : "The workflow can resume directly from this correction boundary."
+    );
+    for (const correction of state.correctionBoundary.corrections) {
+      console.log(`  - ${correction.split("\n", 1)[0]}`);
+    }
   }
   if (state.finalOutcome) console.log(`Outcome: ${state.finalOutcome}`);
 }
@@ -1221,6 +1356,16 @@ export async function runLauncher(): Promise<void> {
         await showQuestions(state);
         return;
       }
+      if (state.stage === "correction_required") {
+        if (state.correctionBoundary?.ownerActionRequired) {
+          await showStatus(state);
+          console.log(
+            `\nUse resume when you explicitly want one more bounded correction attempt for ${state.currentPhaseId}.`
+          );
+          return;
+        }
+        return runFeature(coordinationRoot, state, readline);
+      }
       return runFeature(coordinationRoot, state, readline);
     }
     if (action === "next") {
@@ -1230,14 +1375,33 @@ export async function runLauncher(): Promise<void> {
       return runFeature(coordinationRoot, state, readline);
     }
     if (action === "resume") {
-      if (state.stage !== "interrupted" && state.stage !== "paused") {
-        throw new Error(`Feature is ${state.stage}; resume is only available after interruption or pause.`);
+      if (
+        state.stage !== "interrupted" &&
+        state.stage !== "paused" &&
+        state.stage !== "correction_required"
+      ) {
+        throw new Error(
+          `Feature is ${state.stage}; resume is available only after interruption, pause, or a saved correction.`
+        );
       }
       if (state.stage === "interrupted" && state.plan === null) {
         console.log(`Plan recovery is available: npm run ai:feature -- recover-plan ${state.featureSlug}`);
         return;
       }
-      return runFeature(coordinationRoot, state, readline);
+      let allowOwnerCorrectionRetry = false;
+      if (state.correctionBoundary?.ownerActionRequired) {
+        await showStatus(state);
+        const phaseId = state.correctionBoundary.phaseId;
+        allowOwnerCorrectionRetry =
+          (await ask(
+            readline,
+            `\nType ${phaseId} to authorize one additional bounded correction attempt: `
+          )) === phaseId;
+        if (!allowOwnerCorrectionRetry) {
+          throw new WorkflowCancelledError("The additional correction attempt was not approved.");
+        }
+      }
+      return runFeature(coordinationRoot, state, readline, { allowOwnerCorrectionRetry });
     }
     throw new Error(`Unknown ai:feature action ${action}.`);
   });

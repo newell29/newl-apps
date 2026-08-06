@@ -12,6 +12,7 @@ import {
 import { join } from "node:path";
 
 import { validateWorkflowPlan, WorkflowPlan } from "./planner";
+import { validateReviewDecision, type ReviewDecision } from "./reviewer";
 
 export const FEATURE_STATE_SCHEMA_VERSION = 1;
 
@@ -25,6 +26,7 @@ export type WorkflowStage =
   | "implementing"
   | "verifying"
   | "correcting"
+  | "correction_required"
   | "reviewing"
   | "review_failed"
   | "recovering_review"
@@ -71,6 +73,24 @@ export type PhaseRecord = {
   approvedDiffHash: string | null;
   reviewCycles: number;
   retryCount: number;
+};
+
+export type CorrectionBoundary = {
+  schemaVersion: 1;
+  phaseId: string;
+  source: "verification" | "review";
+  corrections: string[];
+  reviewDecision: ReviewDecision | null;
+  phaseRetries: number;
+  phaseReviewCycles: number;
+  escalationUsed: boolean;
+  nextModel: "builder" | "escalation";
+  ownerActionRequired: boolean;
+  branch: string;
+  baseCommit: string;
+  headCommit: string;
+  diffHash: string;
+  recordedAt: string;
 };
 
 export type FeatureState = {
@@ -139,6 +159,7 @@ export type FeatureState = {
   }>;
   retryCount: number;
   reviewCycles: number;
+  correctionBoundary: CorrectionBoundary | null;
   diagnosticArtifacts: string[];
   finalOutcome: string | null;
   eventSequence: number;
@@ -169,20 +190,27 @@ const allowedTransitions: Record<WorkflowStage, WorkflowStage[]> = {
     "interrupted",
     "paused"
   ],
-  preflight: ["planning", "awaiting_phase_approval", "recovering_review", "interrupted"],
+  preflight: [
+    "planning",
+    "awaiting_phase_approval",
+    "recovering_review",
+    "correcting",
+    "interrupted"
+  ],
   planning: ["awaiting_phase_approval", "waiting_questions", "interrupted", "escalated"],
   awaiting_phase_approval: ["preflight", "implementing", "waiting_questions", "paused", "interrupted"],
   waiting_questions: ["awaiting_phase_approval", "paused", "interrupted"],
   implementing: ["verifying", "interrupted", "escalated"],
-  verifying: ["correcting", "reviewing", "interrupted", "escalated"],
-  correcting: ["implementing", "verifying", "interrupted", "escalated"],
-  reviewing: ["correcting", "phase_approved", "review_failed", "interrupted", "escalated"],
+  verifying: ["correcting", "correction_required", "reviewing", "interrupted", "escalated"],
+  correcting: ["implementing", "verifying", "correction_required", "interrupted", "escalated"],
+  correction_required: ["preflight", "correcting", "paused", "interrupted"],
+  reviewing: ["correcting", "correction_required", "phase_approved", "review_failed", "interrupted", "escalated"],
   review_failed: ["recovering_review", "paused"],
   recovering_review: ["verifying", "reviewing", "correcting", "phase_approved", "review_failed", "escalated"],
   phase_approved: ["awaiting_next_action", "complete"],
   awaiting_next_action: ["preflight", "awaiting_phase_approval", "complete", "paused"],
   paused: ["ready", "preflight", "awaiting_phase_approval", "waiting_questions", "interrupted"],
-  interrupted: ["preflight", "recovering_review", "paused", "escalated"],
+  interrupted: ["preflight", "recovering_review", "correction_required", "paused", "escalated"],
   escalated: ["paused"],
   complete: []
 };
@@ -253,6 +281,48 @@ function validateFeatureState(value: unknown): FeatureState {
     !Array.isArray(state.phaseMetrics)
   ) {
     throw new Error("Feature state arrays are malformed.");
+  }
+  state.correctionBoundary ??= null;
+  if (state.correctionBoundary) {
+    const boundary = state.correctionBoundary;
+    if (
+      boundary.schemaVersion !== 1 ||
+      !boundary.phaseId?.trim() ||
+      !["verification", "review"].includes(boundary.source) ||
+      !Array.isArray(boundary.corrections) ||
+      boundary.corrections.length < 1 ||
+      boundary.corrections.length > 32 ||
+      boundary.corrections.some(
+        (correction) => typeof correction !== "string" || !correction.trim() || correction.length > 30_000
+      ) ||
+      !Number.isInteger(boundary.phaseRetries) ||
+      boundary.phaseRetries < 0 ||
+      !Number.isInteger(boundary.phaseReviewCycles) ||
+      boundary.phaseReviewCycles < 0 ||
+      !["builder", "escalation"].includes(boundary.nextModel) ||
+      boundary.branch !== state.branch ||
+      boundary.baseCommit !== state.baseCommit ||
+      !/^[0-9a-f]{40,64}$/.test(boundary.headCommit) ||
+      !/^[0-9a-f]{64}$/.test(boundary.diffHash) ||
+      Number.isNaN(Date.parse(boundary.recordedAt))
+    ) {
+      throw new Error("Feature correction boundary is malformed.");
+    }
+    if (boundary.source === "verification" && boundary.reviewDecision !== null) {
+      throw new Error("A verification correction boundary cannot contain a reviewer decision.");
+    }
+    if (boundary.source === "review" && boundary.reviewDecision === null) {
+      throw new Error("A reviewer correction boundary must preserve its validated decision.");
+    }
+    if (boundary.reviewDecision !== null) {
+      boundary.reviewDecision = validateReviewDecision(boundary.reviewDecision);
+      if (boundary.reviewDecision.status !== "changes_requested") {
+        throw new Error("A saved reviewer correction boundary must contain changes_requested.");
+      }
+    }
+    if (state.plan && !state.plan.phases.some((phase) => phase.id === boundary.phaseId)) {
+      throw new Error("Feature correction boundary references a phase outside the approved plan.");
+    }
   }
   return state;
 }
