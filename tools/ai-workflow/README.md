@@ -110,7 +110,7 @@ Handoff Markdown, JSON, and review evidence are copied byte-for-byte into bounde
 
 The roadmap is context, not blanket implementation approval. The controller always selects one phase, displays its risk, objective, expected files, tests, and completion criteria, and records approval for that phase only. HIGH and OWNER_GATED phases require typing the exact phase ID.
 
-Planner questions have stable IDs, phase IDs, types, evidence, and blocking flags. Answers are stored with exact plan and question hashes. A changed question or plan requires reconfirmation. Models cannot default or infer missing owner decisions. Later owner-gated questions do not block an earlier phase unless they are explicitly global.
+Planner questions have stable IDs, phase IDs, types, evidence, and blocking flags. The selected answer and the owner's optional confirmed explanation are stored with exact plan and question hashes. Both fields are preserved as structured evidence in the generated phase request, builder packet, deterministic evaluator context, fresh reviewer packet, and review-recovery boundary. Mandatory verification commands remain fixed and do not interpret owner prose. A changed question or plan requires reconfirmation. Models cannot default or infer missing owner decisions. Later owner-gated questions do not block an earlier phase unless they are explicitly global.
 
 Risk may be raised deterministically but never lowered. Migration files and `prisma/schema.prisma` are at least HIGH. Protected production writes, deployment, OAuth consent, permission changes, Teamship writes, Apollo enrollment, customer communications, and destructive actions are OWNER_GATED and remain outside automatic engine authority.
 
