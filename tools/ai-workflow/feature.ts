@@ -11,7 +11,12 @@ import {
 } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
 
-import { confirmedDecisionMap, effectivePhaseRisk, hashJson } from "./decisions";
+import {
+  confirmedDecisionMap,
+  effectivePhaseRisk,
+  hashJson,
+  unresolvedBlockingQuestions
+} from "./decisions";
 import { PlanPhase, WorkflowPlan } from "./planner";
 import {
   featureDirectory,
@@ -110,6 +115,18 @@ export function phaseRecordsFromPlan(plan: WorkflowPlan): PhaseRecord[] {
     reviewCycles: 0,
     retryCount: 0
   }));
+}
+
+export function reconcilePhaseQuestionGates(
+  phases: PhaseRecord[],
+  questions: OwnerQuestionRecord[]
+): PhaseRecord[] {
+  return phases.map((phase) => {
+    const unresolved = unresolvedBlockingQuestions(questions, phase.id).length > 0;
+    if (unresolved && phase.status === "pending") return { ...phase, status: "blocked" };
+    if (!unresolved && phase.status === "blocked") return { ...phase, status: "pending" };
+    return phase;
+  });
 }
 
 function safeWorktreeRelativePath(worktree: string, path: string): string {

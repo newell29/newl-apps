@@ -43,6 +43,8 @@ npm run ai:feature -- models configure
 
 Running `npm run ai:feature` without arguments opens the guided menu. The launcher labels approval prompts, shows the selected worktree and models, creates internal request files, and reports when a model is active even if no safe content is available to display.
 
+For a new feature, the operator may describe the request directly in ordinary text. Handoff Markdown, JSON, and review evidence are optional inputs for continuing or transferring existing work; they are not required to start a feature. The planner turns the operator's text plus repository evidence into the validated roadmap.
+
 Feature state is owner-only and local under the coordination checkout:
 
 ```text
@@ -98,6 +100,8 @@ The compatibility command writes a worktree override with user-only permissions 
 ## Feature registration, handoffs, and requests
 
 `start` creates a repository-standard `work/codex/<slug>` task from freshly fetched `origin/main`. `adopt` registers an existing dedicated `codex/...` worktree after checking its branch, base, HEAD, and current diff. If owner-only `review-recovery.json` metadata exists, the launcher can import its request and roadmap, but it asks the owner whether the current phase actually received final approval.
+
+Legacy Version 1A plans may predate structured `ownerQuestions`. During adoption, Version 1B.1 deterministically imports stable deferred IDs from an imported handoff JSON `open_business_questions` array. It also reads only plan-referenced `docs/**/open-questions.md` files and imports question bullets from sections that explicitly say they are blocking or gate the owner-approved phase. This compatibility path requires exactly one explicitly owner-gated phase, preserves the documented IDs and wording, rejects conflicting definitions, and performs no planner call. Unanswered imported blocking questions mark that phase blocked; answering the final blocker returns it to pending status.
 
 Handoff Markdown, JSON, and review evidence are copied byte-for-byte into bounded, owner-only ignored storage and hashed with SHA-256. Symlinks, directories, devices, unsupported types, malformed top-level JSON, and files over 2 MB are rejected. The launcher never rewrites an artifact's internal paths; generated planning and phase requests refer to validated worktree-local copies.
 
@@ -241,6 +245,19 @@ If the workflow changes any unexpected file, stop and review it instead of using
 ## Manual finish
 
 After completion, inspect the branch, run any risk-specific or browser checks the approved plan requires, commit intentionally, and follow the repository's normal reviewed pull-request process. Version 1A deliberately stops before those actions.
+
+### Git and pull-request boundary
+
+Engine phase approval is an AI quality gate, not automatically a Git commit or pull-request boundary. Version 1B.1 pins the registered HEAD and cumulative diff for safe resume and recovery, so do not commit between phases of one active registered workflow. The normal path is:
+
+1. Complete every approved phase intended for the current branch, stopping for owner decisions between phases.
+2. Inspect the complete cumulative diff and run any risk-specific acceptance checks.
+3. Commit intentionally after the engine workflow for that branch is complete.
+4. Run `npm run codex:task:publish -- ...` or ask Codex to create a draft pull request.
+5. Review CI and any applicable Vercel Preview, mark the pull request ready, and merge only through human review.
+6. After confirmed merge, run `npm run codex:task:cleanup -- <task-slug>`.
+
+When a HIGH or OWNER_GATED phase is independently reviewable, prefer ending the current workflow and opening a pull request for that phase, then start the later phase in a fresh task worktree from merged `origin/main`. Do not reuse or silently repoint the existing registered workflow across that Git boundary. The launcher never commits, pushes, opens, merges, or deploys a pull request itself.
 
 ## Known Version 1B.1 limitations
 

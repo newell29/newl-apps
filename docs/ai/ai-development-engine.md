@@ -483,6 +483,7 @@ No persistence, checkpoints, resume, final cross-phase review, report engine, da
 - atomic feature snapshots, append-only safe events, and an exclusive active-run guard;
 - exact single-phase approval and mandatory stop after review;
 - LOW, MEDIUM, HIGH, and OWNER_GATED phase handling with structured decisions;
+- Version 1B.1.1 compatibility import for stable legacy handoff/document questions without replanning;
 - status, watch, readiness, adoption, next, resume, and review-recovery commands;
 - compact successful verification evidence for lower reviewer cost;
 - schema-validated workflow evaluator extension point; and
