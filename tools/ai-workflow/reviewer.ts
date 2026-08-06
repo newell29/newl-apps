@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import type { ConfirmedOwnerDecisions } from "./decisions";
 import { AgentRunner, AgentRunResult, extractStructuredResult } from "./opencode";
 import { PlanPhase, WorkflowPlan } from "./planner";
 import { EvaluationResult } from "./evaluator";
@@ -196,7 +197,7 @@ export async function reviewPhase(
     gitDiff: string;
     surroundingCode: string;
     verification: VerificationResult;
-    confirmedDecisions?: Record<string, string>;
+    confirmedDecisions?: ConfirmedOwnerDecisions;
     evaluations?: EvaluationResult[];
   }
 ): Promise<{ decision: ReviewDecision; cost: number | null; run: AgentRunResult }> {

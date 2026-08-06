@@ -2,6 +2,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 
 import { implementPhase } from "./builder";
+import type { ConfirmedOwnerDecisions } from "./decisions";
 import {
   getSurroundingCode,
   getWorkflowDiff,
@@ -48,7 +49,7 @@ export type WorkflowOptions = {
   approvedPlan?: WorkflowPlan;
   phaseId?: string;
   featureSlug?: string;
-  confirmedDecisions?: Record<string, string>;
+  confirmedDecisions?: ConfirmedOwnerDecisions;
   ownerGateSatisfied?: boolean;
   evaluators?: WorkflowEvaluator[];
 };
@@ -272,7 +273,8 @@ export async function runWorkflow(
         baseCommit: gitState.baseCommit,
         originalRequest: options.originalRequest,
         approvedPlan: plan,
-        phaseId: phase.id
+        phaseId: phase.id,
+        confirmedDecisions: options.confirmedDecisions
       });
       const diffHash = await getWorkflowDiffHash(options.repositoryRoot, gitState.baseCommit);
       const evaluations: EvaluationResult[] = [];
