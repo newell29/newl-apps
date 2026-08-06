@@ -35,8 +35,10 @@ import {
   generatePhaseRequest,
   generatePlanningRequest,
   importFeatureArtifact,
-  phaseRecordsFromPlan
+  phaseRecordsFromPlan,
+  reconcilePhaseQuestionGates
 } from "../tools/ai-workflow/feature";
+import { importLegacyOwnerQuestions } from "../tools/ai-workflow/legacy-questions";
 import { AgentRunRequest, AgentRunner } from "../tools/ai-workflow/opencode";
 import { PlanPhase, validateWorkflowPlan, WorkflowPlan } from "../tools/ai-workflow/planner";
 import { reviewPhase } from "../tools/ai-workflow/reviewer";
@@ -323,6 +325,128 @@ describe("Version 1B.1 phase and owner-decision controls", () => {
         questionHash: question.questionHash
       })
     ).toThrow(/reconfirmed/);
+  });
+
+  it("imports stable legacy handoff and explicitly gated Markdown questions without planning", async () => {
+    const coordinationRoot = temporaryDirectory("newl-v1b1-legacy-questions-");
+    const worktree = join(coordinationRoot, "work", "codex", "synthetic-feature");
+    mkdirSync(join(worktree, "docs", "modules", "synthetic"), { recursive: true });
+    writeFileSync(
+      join(worktree, "docs", "modules", "synthetic", "open-questions.md"),
+      `# Synthetic questions
+
+## Deferred decisions
+
+- **SYNTHETIC-LATER-1 — Later decision**: this question does not gate the owner phase.
+
+## Blocking legacy policy questions
+
+These questions gate the same owner-gated phase.
+
+- **SYNTHETIC-BLOCK-1 — Selection policy**: which exact selection policy is approved?
+
+## Additional compatibility questions
+
+These questions gate the same owner-gated phase.
+
+- **SYNTHETIC-BLOCK-2 — Re-run policy**: how should an existing manually created record be treated?
+`
+    );
+    const source = join(temporaryDirectory("newl-v1b1-legacy-handoff-"), "handoff.json");
+    writeFileSync(
+      source,
+      JSON.stringify({
+        open_business_questions: [
+          { question_id: "SYNTHETIC-Q-1", question: "Which later display name is approved?" }
+        ]
+      })
+    );
+    const artifact = await importFeatureArtifact({
+      coordinationRoot,
+      worktree,
+      featureSlug: "synthetic-feature",
+      kind: "handoff_json",
+      sourcePath: source
+    });
+    const legacyPlan: WorkflowPlan = {
+      ...plan,
+      ownerQuestions: undefined,
+      openQuestions: [
+        "Which later display name is approved?",
+        "BLOCKING (SYNTHETIC-BLOCK-1): Which exact selection policy is approved?"
+      ],
+      phases: [
+        phaseOne,
+        {
+          ...ownerPhase,
+          expectedFiles: ["docs/modules/synthetic/open-questions.md"]
+        }
+      ]
+    };
+    const planHash = hashJson(legacyPlan);
+    const questions = await importLegacyOwnerQuestions({
+      worktree,
+      plan: legacyPlan,
+      planHash,
+      artifacts: [artifact],
+      planQuestions: questionsFromPlan(legacyPlan, planHash)
+    });
+
+    expect(questions.map((question) => question.id)).toEqual([
+      "SYNTHETIC-Q-1",
+      "SYNTHETIC-BLOCK-1",
+      "SYNTHETIC-BLOCK-2"
+    ]);
+    expect(questions[0]).toMatchObject({ phaseId: null, blocking: false });
+    expect(questions[1]).toMatchObject({ phaseId: ownerPhase.id, blocking: true });
+    expect(questions[1].text).toBe(
+      "Selection policy: which exact selection policy is approved?"
+    );
+    expect(unresolvedBlockingQuestions(questions, phaseOne.id)).toHaveLength(0);
+    expect(unresolvedBlockingQuestions(questions, ownerPhase.id)).toHaveLength(2);
+    const gatedPhases = reconcilePhaseQuestionGates(phaseRecordsFromPlan(legacyPlan), questions);
+    expect(gatedPhases.map((phase) => [phase.id, phase.status])).toEqual([
+      [phaseOne.id, "pending"],
+      [ownerPhase.id, "blocked"]
+    ]);
+    const answeredQuestions = questions.map((question) =>
+      question.blocking
+        ? answerOwnerQuestion(
+            question,
+            "Confirmed synthetic policy.",
+            null,
+            { planHash: question.planHash, questionHash: question.questionHash }
+          )
+        : question
+    );
+    expect(reconcilePhaseQuestionGates(gatedPhases, answeredQuestions)[1].status).toBe("pending");
+  });
+
+  it("fails closed when legacy blocking questions cannot map to exactly one gated phase", async () => {
+    const worktree = temporaryDirectory("newl-v1b1-legacy-ambiguous-");
+    mkdirSync(join(worktree, "docs"), { recursive: true });
+    writeFileSync(
+      join(worktree, "docs", "open-questions.md"),
+      "## Blocking questions\n\n- **SYNTHETIC-BLOCK-1 — Policy**: which policy is approved?\n"
+    );
+    const ambiguousPlan: WorkflowPlan = {
+      ...plan,
+      ownerQuestions: undefined,
+      openQuestions: [],
+      phases: [
+        { ...ownerPhase, id: "OWNER-ONE", expectedFiles: ["docs/open-questions.md"] },
+        { ...ownerPhase, id: "OWNER-TWO", expectedFiles: ["docs/open-questions.md"] }
+      ]
+    };
+    await expect(
+      importLegacyOwnerQuestions({
+        worktree,
+        plan: ambiguousPlan,
+        planHash: hashJson(ambiguousPlan),
+        artifacts: [],
+        planQuestions: []
+      })
+    ).rejects.toThrow(/exactly one owner-gated phase/);
   });
 
   it("only raises deterministic risk and never lowers owner gates", () => {

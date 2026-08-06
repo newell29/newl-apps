@@ -24,7 +24,8 @@ import {
   generatePhaseRequest,
   generatePlanningRequest,
   importFeatureArtifact,
-  phaseRecordsFromPlan
+  phaseRecordsFromPlan,
+  reconcilePhaseQuestionGates
 } from "./feature";
 import {
   findCoordinationRoot,
@@ -32,6 +33,7 @@ import {
   inspectGitWorktree,
   inspectRecoveryGitIdentity
 } from "./git";
+import { importLegacyOwnerQuestions } from "./legacy-questions";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
 import { PlanPhase, WorkflowPlan } from "./planner";
 import {
@@ -324,14 +326,27 @@ async function adoptExistingFeature(
 
   if (recovery) {
     const planHash = hashJson(recovery.plan);
+    const questions = await importLegacyOwnerQuestions({
+      worktree,
+      plan: recovery.plan,
+      planHash,
+      artifacts: state.artifacts,
+      planQuestions: questionsFromPlan(recovery.plan, planHash)
+    });
     state = {
       ...state,
       plan: recovery.plan,
       planHash,
-      phases: phaseRecordsFromPlan(recovery.plan),
-      questions: questionsFromPlan(recovery.plan, planHash),
+      phases: reconcilePhaseQuestionGates(phaseRecordsFromPlan(recovery.plan), questions),
+      questions,
       currentPhaseId: recovery.phase.id
     };
+    const importedBlocking = questions.filter((question) => question.blocking);
+    if (importedBlocking.length > 0) {
+      console.log(
+        `\nImported ${importedBlocking.length} legacy blocking owner question(s); later gated work remains blocked.`
+      );
+    }
     const approved = await confirm(
       readline,
       `Has ${recovery.phase.id} already received an unambiguous final reviewer approval?`,
@@ -462,13 +477,7 @@ async function runFeature(
           ...state,
           plan,
           planHash,
-          phases: phaseRecordsFromPlan(plan).map((record) => ({
-            ...record,
-            status:
-              unresolvedBlockingQuestions(questions, record.id).length > 0
-                ? "blocked"
-                : record.status
-          })),
+          phases: reconcilePhaseQuestionGates(phaseRecordsFromPlan(plan), questions),
           questions,
           updatedAt: new Date().toISOString()
         };
@@ -771,6 +780,10 @@ async function answerQuestion(
     ...state,
     questions: state.questions.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
     updatedAt: new Date().toISOString()
+  };
+  next = {
+    ...next,
+    phases: reconcilePhaseQuestionGates(next.phases, next.questions)
   };
   if (
     next.stage === "waiting_questions" &&
