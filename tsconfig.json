@@ -35,6 +35,7 @@
     "tests/**/*.tsx",
     "tools/**/*.ts",
     "tools/**/*.tsx",
+    "tools/**/*.mts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
     ".next-dev/types/**/*.ts"

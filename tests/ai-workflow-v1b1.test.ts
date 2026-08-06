@@ -9,9 +9,10 @@ import {
   symlinkSync,
   writeFileSync
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -41,6 +42,7 @@ import {
 } from "../tools/ai-workflow/feature";
 import { importLegacyOwnerQuestions } from "../tools/ai-workflow/legacy-questions";
 import { AgentRunRequest, AgentRunner } from "../tools/ai-workflow/opencode";
+import { createOperatorInput } from "../tools/ai-workflow/operator-input";
 import { PlanPhase, validateWorkflowPlan, WorkflowPlan } from "../tools/ai-workflow/planner";
 import { reviewPhase } from "../tools/ai-workflow/reviewer";
 import {
@@ -154,6 +156,63 @@ afterEach(() => {
 });
 
 describe("Version 1B.1 local state", () => {
+  it("keeps operator input active until the launcher explicitly closes it", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operatorInput = createOperatorInput(input, output);
+
+    expect(input.readableFlowing).toBe(true);
+    const answer = operatorInput.readline.question("Selection: ");
+    input.write("2\n");
+    await expect(answer).resolves.toBe("2");
+
+    operatorInput.close();
+    expect(input.readableFlowing).toBe(false);
+  });
+
+  it("keeps a real tsx launcher process alive while an operator prompt is unanswered", async () => {
+    const script = `
+      import { createOperatorInput } from "./tools/ai-workflow/operator-input.ts";
+      const operatorInput = createOperatorInput();
+      const answer = await operatorInput.readline.question("Selection: ");
+      process.stdout.write("ANSWER=" + answer);
+      operatorInput.close();
+    `;
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }
+    );
+    let stdout = "";
+    let stderr = "";
+    let answered = false;
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+      if (!answered && stdout.includes("Selection: ")) {
+        answered = true;
+        setTimeout(() => child.stdin.end("2\n"), 50);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const exitCode = await new Promise<number | null>((resolveExit, rejectExit) => {
+      const timeout = setTimeout(() => {
+        child.kill();
+        rejectExit(new Error("Operator prompt child process did not finish."));
+      }, 3_000);
+      child.on("error", rejectExit);
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        resolveExit(code);
+      });
+    });
+
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Selection: ANSWER=2");
+  });
+
   it("writes and reloads owner-only atomic feature state and append-only events", async () => {
     const coordinationRoot = temporaryDirectory("newl-v1b1-state-");
     const state = createFeatureState({

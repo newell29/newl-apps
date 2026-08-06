@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync, watch } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { createInterface, Interface } from "node:readline/promises";
+import type { Interface } from "node:readline/promises";
 
 import {
   DEFAULT_USER_MODEL_CONFIG_FILE,
@@ -35,6 +35,7 @@ import {
 } from "./git";
 import { importLegacyOwnerQuestions } from "./legacy-questions";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
+import { createOperatorInput } from "./operator-input";
 import { PlanPhase, recoverPlanFromSession, WorkflowPlan } from "./planner";
 import {
   authenticatedModelIds,
@@ -58,7 +59,6 @@ import { LocalCommandRunner } from "./verification";
 import {
   runWorkflow,
   WorkflowCancelledError,
-  WorkflowEscalationError,
   WorkflowOptions
 } from "./workflow";
 
@@ -1098,10 +1098,11 @@ async function interactiveCommand(readline: Interface): Promise<string> {
   )[selection] ?? "";
 }
 
-async function main(): Promise<void> {
+export async function runLauncher(): Promise<void> {
   const repositoryRoot = await findRepositoryRoot(process.cwd());
   const coordinationRoot = await findCoordinationRoot(repositoryRoot);
-  const readline = createInterface({ input: process.stdin, output: process.stdout });
+  const operatorInput = createOperatorInput();
+  const readline = operatorInput.readline;
   try {
     const args = process.argv.slice(2);
     let action = args[0] ?? "";
@@ -1231,21 +1232,6 @@ async function main(): Promise<void> {
     }
     throw new Error(`Unknown ai:feature action ${action}.`);
   } finally {
-    readline.close();
+    operatorInput.close();
   }
 }
-
-main().catch((error: unknown) => {
-  if (error instanceof WorkflowCancelledError) {
-    console.error(`[ai-workflow] Cancelled: ${error.message}`);
-    process.exitCode = 2;
-    return;
-  }
-  if (error instanceof WorkflowEscalationError) {
-    console.error(`[ai-workflow] Manual escalation required: ${error.message}`);
-    process.exitCode = 3;
-    return;
-  }
-  console.error(`[ai-workflow] Failed: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});
