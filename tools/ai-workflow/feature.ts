@@ -233,6 +233,7 @@ export function createFeatureState(input: {
     phaseMetrics: [],
     retryCount: 0,
     reviewCycles: 0,
+    correctionBoundary: null,
     diagnosticArtifacts: [],
     finalOutcome: null,
     eventSequence: 0,

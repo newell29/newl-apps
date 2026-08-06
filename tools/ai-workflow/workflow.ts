@@ -55,6 +55,27 @@ export type WorkflowOptions = {
   confirmedDecisions?: ConfirmedOwnerDecisions;
   ownerGateSatisfied?: boolean;
   evaluators?: WorkflowEvaluator[];
+  phaseAlreadyApproved?: boolean;
+  resumeCorrection?: {
+    corrections: string[];
+    phaseRetries: number;
+    phaseReviewCycles: number;
+    escalationUsed: boolean;
+    useEscalationRemediation: boolean;
+    singleAttempt?: boolean;
+  };
+};
+
+export type WorkflowCorrectionBoundary = {
+  phaseId: string;
+  source: "verification" | "review";
+  corrections: string[];
+  phaseRetries: number;
+  phaseReviewCycles: number;
+  escalationUsed: boolean;
+  nextModel: "builder" | "escalation";
+  ownerActionRequired: boolean;
+  reviewDecision?: ReviewDecision;
 };
 
 export type WorkflowDependencies = {
@@ -73,6 +94,8 @@ export type WorkflowDependencies = {
   ) => Promise<void>;
   onDiagnostic?: (path: string) => Promise<void>;
   onVerification?: (phaseId: string, result: VerificationResult) => Promise<void>;
+  onCorrectionRequired?: (boundary: WorkflowCorrectionBoundary) => Promise<void>;
+  onCorrectionCleared?: (phaseId: string) => Promise<void>;
   onEvent?: (message: string) => void;
   now?: () => Date;
 };
@@ -210,22 +233,28 @@ export async function runWorkflow(
     );
   }
 
-  event(`Roadmap ready with ${plan.phases.length} phase(s); awaiting approval for ${phase.id} only.`);
-  await dependencies.onStage?.("awaiting_phase_approval", phase.id);
-  const approved = dependencies.approvePhase
-    ? await dependencies.approvePhase(plan, phase.id)
-    : dependencies.approvePlan
-      ? await dependencies.approvePlan(plan)
-      : false;
-  if (!approved) {
-    throw new WorkflowCancelledError(`The operator did not approve ${phase.id}.`);
+  if (!options.phaseAlreadyApproved) {
+    event(`Roadmap ready with ${plan.phases.length} phase(s); awaiting approval for ${phase.id} only.`);
+    await dependencies.onStage?.("awaiting_phase_approval", phase.id);
+    const approved = dependencies.approvePhase
+      ? await dependencies.approvePhase(plan, phase.id)
+      : dependencies.approvePlan
+        ? await dependencies.approvePlan(plan)
+        : false;
+    if (!approved) {
+      throw new WorkflowCancelledError(`The operator did not approve ${phase.id}.`);
+    }
+  } else {
+    event(`Resuming the already-approved ${phase.id} correction boundary; no planner or phase approval is required.`);
   }
 
-    let corrections: string[] = [];
-    let phaseRetries = 0;
-    let phaseReviewCycles = 0;
-    let escalationUsed = false;
-    let useEscalationRemediation = false;
+    let corrections: string[] = [...(options.resumeCorrection?.corrections ?? [])];
+    let phaseRetries = options.resumeCorrection?.phaseRetries ?? 0;
+    let phaseReviewCycles = options.resumeCorrection?.phaseReviewCycles ?? 0;
+    let escalationUsed = options.resumeCorrection?.escalationUsed ?? false;
+    let useEscalationRemediation =
+      options.resumeCorrection?.useEscalationRemediation ?? false;
+    const singleResumedAttempt = options.resumeCorrection?.singleAttempt ?? false;
     event(`Starting approved phase ${phase.id}: ${phase.title}`);
 
     while (true) {
@@ -266,7 +295,32 @@ export async function runWorkflow(
         phaseRetries += 1;
         retryCount += 1;
         corrections = failedVerificationCorrections(verification);
+        if (singleResumedAttempt) {
+          await dependencies.onCorrectionRequired?.({
+            phaseId: phase.id,
+            source: "verification",
+            corrections,
+            phaseRetries,
+            phaseReviewCycles,
+            escalationUsed: escalationUsed || isEscalationRemediation,
+            nextModel: isEscalationRemediation ? "escalation" : "builder",
+            ownerActionRequired: true
+          });
+          throw new WorkflowEscalationError(
+            `${phase.id} still failed verification after the additional owner-approved correction attempt.`
+          );
+        }
         if (isEscalationRemediation) {
+          await dependencies.onCorrectionRequired?.({
+            phaseId: phase.id,
+            source: "verification",
+            corrections,
+            phaseRetries,
+            phaseReviewCycles,
+            escalationUsed: true,
+            nextModel: "escalation",
+            ownerActionRequired: true
+          });
           throw new WorkflowEscalationError(
             `${phase.id} still failed mandatory verification after its single escalation remediation attempt.`
           );
@@ -278,15 +332,47 @@ export async function runWorkflow(
             event(
               `${phase.id} exhausted ${maxRetriesPerPhase} ordinary builder failures; preserving exact verification failures for escalation remediation.`
             );
+            await dependencies.onCorrectionRequired?.({
+              phaseId: phase.id,
+              source: "verification",
+              corrections,
+              phaseRetries,
+              phaseReviewCycles,
+              escalationUsed,
+              nextModel: "escalation",
+              ownerActionRequired: false
+            });
             continue;
           }
+          await dependencies.onCorrectionRequired?.({
+            phaseId: phase.id,
+            source: "verification",
+            corrections,
+            phaseRetries,
+            phaseReviewCycles,
+            escalationUsed,
+            nextModel: "builder",
+            ownerActionRequired: true
+          });
           throw new WorkflowEscalationError(
             `${phase.id} reached ${maxRetriesPerPhase} failed ordinary builder attempts after mandatory verification failures.`
           );
         }
+        await dependencies.onCorrectionRequired?.({
+          phaseId: phase.id,
+          source: "verification",
+          corrections,
+          phaseRetries,
+          phaseReviewCycles,
+          escalationUsed,
+          nextModel: "builder",
+          ownerActionRequired: false
+        });
         event(`Verification failed for ${phase.id}; returning exact failures to the builder.`);
         continue;
       }
+
+      await dependencies.onCorrectionCleared?.(phase.id);
 
       if (phaseReviewCycles >= maxReviewCycles) {
         throw new WorkflowEscalationError(
@@ -343,6 +429,7 @@ export async function runWorkflow(
       reviewCycles += 1;
 
       if (reviewed.decision.status === "approved") {
+        await dependencies.onCorrectionCleared?.(phase.id);
         event(`Independent reviewer approved ${phase.id}.`);
         await dependencies.onStage?.("phase_approved", phase.id);
         break;
@@ -356,7 +443,34 @@ export async function runWorkflow(
       phaseRetries += 1;
       retryCount += 1;
       corrections = reviewerCorrections(reviewed.decision);
+      if (singleResumedAttempt) {
+        await dependencies.onCorrectionRequired?.({
+          phaseId: phase.id,
+          source: "review",
+          corrections,
+          phaseRetries,
+          phaseReviewCycles,
+          escalationUsed: escalationUsed || isEscalationRemediation,
+          nextModel: options.escalationModel ? "escalation" : "builder",
+          ownerActionRequired: true,
+          reviewDecision: reviewed.decision
+        });
+        throw new WorkflowEscalationError(
+          `${phase.id} still has reviewer findings after the additional owner-approved correction attempt.`
+        );
+      }
       if (phaseReviewCycles >= maxReviewCycles) {
+        await dependencies.onCorrectionRequired?.({
+          phaseId: phase.id,
+          source: "review",
+          corrections,
+          phaseRetries,
+          phaseReviewCycles,
+          escalationUsed,
+          nextModel: options.escalationModel ? "escalation" : "builder",
+          ownerActionRequired: true,
+          reviewDecision: reviewed.decision
+        });
         throw new WorkflowEscalationError(
           `${phase.id} could not be approved within the configured correction and review limits.`
         );
@@ -368,12 +482,45 @@ export async function runWorkflow(
           event(
             `${phase.id} exhausted ${maxRetriesPerPhase} ordinary correction attempts; preserving exact reviewer findings for escalation remediation.`
           );
+          await dependencies.onCorrectionRequired?.({
+            phaseId: phase.id,
+            source: "review",
+            corrections,
+            phaseRetries,
+            phaseReviewCycles,
+            escalationUsed,
+            nextModel: "escalation",
+            ownerActionRequired: false,
+            reviewDecision: reviewed.decision
+          });
           continue;
         }
+        await dependencies.onCorrectionRequired?.({
+          phaseId: phase.id,
+          source: "review",
+          corrections,
+          phaseRetries,
+          phaseReviewCycles,
+          escalationUsed,
+          nextModel: "builder",
+          ownerActionRequired: true,
+          reviewDecision: reviewed.decision
+        });
         throw new WorkflowEscalationError(
           `${phase.id} could not be approved within the configured correction limit.`
         );
       }
+      await dependencies.onCorrectionRequired?.({
+        phaseId: phase.id,
+        source: "review",
+        corrections,
+        phaseRetries,
+        phaseReviewCycles,
+        escalationUsed,
+        nextModel: "builder",
+        ownerActionRequired: false,
+        reviewDecision: reviewed.decision
+      });
       event(`Reviewer requested ${corrections.length} correction(s) for ${phase.id}.`);
     }
 

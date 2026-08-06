@@ -487,9 +487,11 @@ No persistence, checkpoints, resume, final cross-phase review, report engine, da
 - LOW, MEDIUM, HIGH, and OWNER_GATED phase handling with structured decisions;
 - Version 1B.1.1 compatibility import for stable legacy handoff/document questions without replanning;
 - status, watch, readiness, adoption, next, resume, and review-recovery commands;
+- a loopback-only local operator UI for status, structured questions, exact one-phase approval, and saved-correction resume;
+- durable exact verification/reviewer correction boundaries pinned to branch, base, HEAD, and diff identity;
 - compact successful verification evidence for lower reviewer cost;
 - schema-validated workflow evaluator extension point; and
-- no checkpoint commits, mobile service, OpenCode SDK transport, or automatic external action.
+- no checkpoint commits, hosted dashboard, mobile service, OpenCode SDK transport, or automatic external action.
 
 ### Version 2 — durability and Git checkpoints
 
