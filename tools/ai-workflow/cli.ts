@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 
 import { loadModelConfiguration, saveModelConfiguration } from "./config";
-import { findRepositoryRoot } from "./git";
+import { findRepositoryRoot, inspectGitWorktree } from "./git";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
 import { WorkflowPlan } from "./planner";
 import {
@@ -16,6 +16,7 @@ import {
   validateOpenCodeCatalog
 } from "./preflight";
 import { LocalCommandRunner } from "./verification";
+import { loadReviewRecovery, runReviewCurrentDiff } from "./recovery";
 import {
   runWorkflow,
   WorkflowCancelledError,
@@ -64,7 +65,7 @@ function printPlan(plan: WorkflowPlan): void {
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     options: {
       request: { type: "string" },
       "request-file": { type: "string" },
@@ -80,18 +81,26 @@ async function main(): Promise<void> {
       "validate-models": { type: "boolean" },
       "save-model-config": { type: "boolean" },
       "preflight-only": { type: "boolean" },
+      "recovery-file": { type: "string" },
       help: { type: "boolean", short: "h" }
     },
-    allowPositionals: false
+    allowPositionals: true
   });
+
+  if (positionals.length > 1 || (positionals[0] && positionals[0] !== "review-current-diff")) {
+    throw new Error("The only supported command is review-current-diff.");
+  }
+  const command = positionals[0];
 
   if (values.help) {
     console.log(`Usage:
+  npm run ai:feature                    Recommended interactive Version 1B.1 launcher
   npm run ai-workflow -- --request "Feature request" [options]
   npm run ai-workflow -- --request-file requests/feature.md [options]
   npm run ai-workflow:models
   npm run ai-workflow:configure -- --planner-model provider/model --builder-model provider/model --reviewer-model provider/model
   npm run ai-workflow:preflight
+  npm run ai-workflow -- review-current-diff [--recovery-file tmp/ai-workflow/review-recovery.json]
 
 Models are read from tmp/ai-workflow/models.json by default. CLI flags or matching
 AI_WORKFLOW_*_MODEL environment variables may override that local ignored file:
@@ -103,6 +112,7 @@ Other options:
   --branch codex/name                Create a new simple feature branch
   --model-config tmp/name.json       Select another ignored model configuration
   --metrics-file tmp/name.jsonl      Ignored local metrics output
+  --recovery-file tmp/name.json      Owner-only pinned review recovery metadata
   --max-review-cycles 3              Fresh Qwen reviews allowed per phase
   --max-retries 3                    Builder corrections allowed per phase`);
     return;
@@ -141,6 +151,7 @@ Other options:
     reviewerModel: values["reviewer-model"]
   });
   const commandRunner = new LocalCommandRunner();
+  const agentRunner = new OpenCodeCliRunner(repositoryRoot);
 
   if (values["save-model-config"] || values["validate-models"]) {
     const catalog = await inspector.inspect();
@@ -151,6 +162,31 @@ Other options:
     } else {
       console.log("Selected model IDs, provider authentication, and agent profiles are valid.");
     }
+    return;
+  }
+
+  if (command === "review-current-diff") {
+    const worktree = await inspectGitWorktree(repositoryRoot);
+    if (!worktree.isDedicatedWorktree) {
+      throw new Error("Review recovery must run inside its existing dedicated task worktree.");
+    }
+    const catalog = await inspector.inspect();
+    validateOpenCodeCatalog(catalog, models);
+    const recovery = await loadReviewRecovery(repositoryRoot, values["recovery-file"]);
+    const result = await runReviewCurrentDiff({
+      repositoryRoot,
+      recovery,
+      agentRunner,
+      commandRunner,
+      builderModel: models.builderModel,
+      reviewerModel: models.reviewerModel,
+      maxReviewCycles: numberOption(values["max-review-cycles"], "--max-review-cycles"),
+      maxRetries: numberOption(values["max-retries"], "--max-retries"),
+      onEvent: (message) => console.log(`[ai-workflow] ${message}`)
+    });
+    console.log("\nReview recovery complete. The current phase is the only phase approved.");
+    console.log("No later phase was started. Explicit owner approval is required before any continuation.");
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
 
@@ -206,22 +242,26 @@ Other options:
         maxRetriesPerPhase: numberOption(values["max-retries"], "--max-retries")
       },
       {
-        agentRunner: new OpenCodeCliRunner(repositoryRoot),
+        agentRunner,
         commandRunner,
         preflight,
-        approvePlan: async (plan) => {
+        approvePhase: async (plan, phaseId) => {
           if (!process.stdin.isTTY || !process.stdout.isTTY) {
-            throw new Error("Plan approval requires an interactive terminal.");
+            throw new Error("Phase approval requires an interactive terminal.");
           }
           printPlan(plan);
-          const answer = await readline.question("\nApprove this entire plan and begin implementation? [y/N] ");
+          const answer = await readline.question(
+            `\nApprove ${phaseId} only and begin implementation? [y/N] `
+          );
           return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
         },
         onEvent: (message) => console.log(`[ai-workflow] ${message}`)
       }
     );
 
-    console.log("\nWorkflow complete. No commit, push, merge, or deployment was performed.");
+    console.log(
+      `\n${result.phaseId} complete. The workflow stopped before every later phase; no commit, push, merge, or deployment was performed.`
+    );
     console.log(JSON.stringify(result, null, 2));
   } finally {
     readline.close();

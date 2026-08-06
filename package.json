@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
     "dev:fresh": "npm run sync:main && npm run dev",
+    "ai:feature": "node --import tsx tools/ai-workflow/launcher.ts",
     "ai-workflow": "node --import tsx tools/ai-workflow/cli.ts",
     "ai-workflow:models": "node --import tsx tools/ai-workflow/cli.ts --list-models",
     "ai-workflow:configure": "node --import tsx tools/ai-workflow/cli.ts --save-model-config",

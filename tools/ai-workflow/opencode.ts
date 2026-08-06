@@ -15,11 +15,20 @@ export type AgentRunRequest = {
 export type AgentRunResult = {
   text: string;
   cost: number | null;
+  sessionId?: string;
+  assistantMessageId?: string;
+  textPartIds?: string[];
 };
 
 export interface AgentRunner {
   run(request: AgentRunRequest): Promise<AgentRunResult>;
 }
+
+export type OpenCodeProgressEvent = {
+  role: AgentRole;
+  type: "started" | "active" | "heartbeat" | "completed" | "failed";
+  elapsedMs: number;
+};
 
 export type OpenCodeCatalog = {
   version: string;
@@ -123,17 +132,60 @@ async function runOpenCodeCommand(binary: string, repositoryRoot: string, args: 
   });
 }
 
-function collectText(value: unknown, output: string[]): void {
+type TextCandidate = {
+  text: string;
+  sessionId?: string;
+  messageId?: string;
+  partId?: string;
+};
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  return typeof record[key] === "string" && record[key] ? (record[key] as string) : undefined;
+}
+
+function collectText(
+  value: unknown,
+  output: TextCandidate[],
+  inherited: { sessionId?: string; messageId?: string } = {}
+): void {
   if (Array.isArray(value)) {
-    for (const item of value) collectText(item, output);
+    for (const item of value) collectText(item, output, inherited);
     return;
   }
   if (!value || typeof value !== "object") return;
 
   const record = value as Record<string, unknown>;
-  if (typeof record.text === "string") output.push(record.text);
+  const sessionId = stringField(record, "sessionID") ?? inherited.sessionId;
+  const messageId = stringField(record, "messageID") ?? inherited.messageId;
+  const type = stringField(record, "type");
+  const nestedPart = record.part;
+  if (
+    type === "text" &&
+    nestedPart &&
+    typeof nestedPart === "object" &&
+    !Array.isArray(nestedPart) &&
+    typeof (nestedPart as Record<string, unknown>).text === "string"
+  ) {
+    const part = nestedPart as Record<string, unknown>;
+    output.push({
+      text: part.text as string,
+      sessionId: stringField(part, "sessionID") ?? sessionId,
+      messageId: stringField(part, "messageID") ?? messageId,
+      partId: stringField(part, "id")
+    });
+  }
+  if (type === "text" && typeof record.text === "string") {
+    output.push({
+      text: record.text,
+      sessionId,
+      messageId,
+      partId: stringField(record, "id")
+    });
+  }
   for (const [key, nested] of Object.entries(record)) {
-    if (key !== "text") collectText(nested, output);
+    if (key !== "text" && !(key === "part" && type === "text")) {
+      collectText(nested, output, { sessionId, messageId });
+    }
   }
 }
 
@@ -147,7 +199,7 @@ function eventCost(value: unknown): number | null {
 }
 
 export function parseOpenCodeOutput(stdout: string): AgentRunResult {
-  const texts: string[] = [];
+  const texts: TextCandidate[] = [];
   const costs: number[] = [];
 
   for (const line of stdout.split(/\r?\n/)) {
@@ -158,18 +210,26 @@ export function parseOpenCodeOutput(stdout: string): AgentRunResult {
       const cost = eventCost(event);
       if (cost !== null) costs.push(cost);
     } catch {
-      texts.push(line);
+      texts.push({ text: line });
     }
   }
 
   const completeText = [...texts]
     .reverse()
-    .find((text) => text.includes(RESULT_OPEN) && text.includes(RESULT_CLOSE));
-  const text = completeText ?? texts.join("");
+    .find((candidate) =>
+      candidate.text.includes(RESULT_OPEN) && candidate.text.includes(RESULT_CLOSE)
+    );
+  const selected = completeText ?? texts.at(-1);
+  const text = completeText?.text ?? texts.map((candidate) => candidate.text).join("");
 
   return {
     text,
-    cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : null
+    cost: costs.length > 0 ? costs.reduce((total, cost) => total + cost, 0) : null,
+    sessionId: selected?.sessionId,
+    assistantMessageId: selected?.messageId,
+    textPartIds: [
+      ...new Set(texts.map((candidate) => candidate.partId).filter((id): id is string => Boolean(id)))
+    ]
   };
 }
 
@@ -193,7 +253,11 @@ export function extractStructuredResult(text: string): unknown {
 export class OpenCodeCliRunner implements AgentRunner {
   private readonly binary: string;
 
-  constructor(private readonly repositoryRoot: string, binary?: string) {
+  constructor(
+    private readonly repositoryRoot: string,
+    binary?: string,
+    private readonly onProgress?: (event: OpenCodeProgressEvent) => void
+  ) {
     this.binary = resolveOpenCodeBinary(repositoryRoot, binary);
   }
 
@@ -221,6 +285,8 @@ export class OpenCodeCliRunner implements AgentRunner {
       request.prompt
     ];
 
+    const startedAt = Date.now();
+    this.onProgress?.({ role: request.role, type: "started", elapsedMs: 0 });
     const stdout = await new Promise<string>((resolveOutput, reject) => {
       const child = spawn(this.binary, args, {
         cwd: this.repositoryRoot,
@@ -230,11 +296,28 @@ export class OpenCodeCliRunner implements AgentRunner {
       });
       let output = "";
       let errorOutput = "";
+      let reportedActive = false;
+      const heartbeat = setInterval(() => {
+        this.onProgress?.({
+          role: request.role,
+          type: "heartbeat",
+          elapsedMs: Date.now() - startedAt
+        });
+      }, 15_000);
+      heartbeat.unref();
 
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         output += chunk;
+        if (!reportedActive) {
+          reportedActive = true;
+          this.onProgress?.({
+            role: request.role,
+            type: "active",
+            elapsedMs: Date.now() - startedAt
+          });
+        }
         if (Buffer.byteLength(output) > MAX_OUTPUT_BYTES) {
           child.kill("SIGTERM");
           reject(new Error("OpenCode output exceeded the 8 MB safety limit."));
@@ -243,12 +326,31 @@ export class OpenCodeCliRunner implements AgentRunner {
       child.stderr.on("data", (chunk: string) => {
         if (Buffer.byteLength(errorOutput) < MAX_OUTPUT_BYTES) errorOutput += chunk;
       });
-      child.on("error", reject);
+      child.on("error", (error) => {
+        clearInterval(heartbeat);
+        this.onProgress?.({
+          role: request.role,
+          type: "failed",
+          elapsedMs: Date.now() - startedAt
+        });
+        reject(error);
+      });
       child.on("close", (code) => {
+        clearInterval(heartbeat);
         if (code === 0) {
+          this.onProgress?.({
+            role: request.role,
+            type: "completed",
+            elapsedMs: Date.now() - startedAt
+          });
           resolveOutput(output);
           return;
         }
+        this.onProgress?.({
+          role: request.role,
+          type: "failed",
+          elapsedMs: Date.now() - startedAt
+        });
         reject(
           new Error(
             `OpenCode ${request.role} failed with exit code ${code ?? "unknown"}: ${
