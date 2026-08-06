@@ -42,7 +42,10 @@ import {
 } from "../tools/ai-workflow/feature";
 import { importLegacyOwnerQuestions } from "../tools/ai-workflow/legacy-questions";
 import { AgentRunRequest, AgentRunner } from "../tools/ai-workflow/opencode";
-import { createOperatorInput } from "../tools/ai-workflow/operator-input";
+import {
+  createOperatorInput,
+  withOperatorInput
+} from "../tools/ai-workflow/operator-input";
 import { PlanPhase, validateWorkflowPlan, WorkflowPlan } from "../tools/ai-workflow/planner";
 import { reviewPhase } from "../tools/ai-workflow/reviewer";
 import {
@@ -203,6 +206,26 @@ describe("Version 1B.1 local state", () => {
     await expect(operatorInput.readline.question("Selection: ")).rejects.toThrow(
       "Operator input is closed."
     );
+  });
+
+  it("keeps operator input open until a returned asynchronous launcher operation settles", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operation = withOperatorInput(
+      async (readline) => {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+        return readline.question("Approve: ");
+      },
+      input,
+      output
+    );
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    expect(input.readableFlowing).toBe(true);
+    input.write("CP-PHASE-02B-1\n");
+
+    await expect(operation).resolves.toBe("CP-PHASE-02B-1");
+    expect(input.readableFlowing).toBe(false);
   });
 
   it("keeps a real tsx launcher process alive while an operator prompt is unanswered", async () => {

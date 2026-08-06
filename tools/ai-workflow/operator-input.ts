@@ -44,3 +44,16 @@ export function createOperatorInput(
     }
   };
 }
+
+export async function withOperatorInput<T>(
+  operation: (readline: OperatorReadline) => Promise<T>,
+  input: Readable = process.stdin,
+  output: Writable = process.stdout
+): Promise<T> {
+  const operatorInput = createOperatorInput(input, output);
+  try {
+    return await operation(operatorInput.readline);
+  } finally {
+    operatorInput.close();
+  }
+}
