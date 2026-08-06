@@ -1,4 +1,4 @@
-import { AgentRunner, extractStructuredResult } from "./opencode";
+import { AgentRunner, AgentRunResult, extractStructuredResult } from "./opencode";
 import { PlanPhase } from "./planner";
 
 export type BuilderReport = {
@@ -37,8 +37,9 @@ export async function implementPhase(
   runner: AgentRunner,
   model: string,
   phase: PlanPhase,
-  corrections: string[]
-): Promise<{ report: BuilderReport; cost: number | null }> {
+  corrections: string[],
+  context: { confirmedDecisions?: Record<string, string> } = {}
+): Promise<{ report: BuilderReport; cost: number | null; run: AgentRunResult }> {
   const correctionBlock =
     corrections.length === 0
       ? "This is the initial implementation attempt."
@@ -50,6 +51,9 @@ export async function implementPhase(
 
 Current approved phase:
 ${JSON.stringify(phase, null, 2)}
+
+Confirmed owner decisions for this phase (empty means none were required):
+${JSON.stringify(context.confirmedDecisions ?? {}, null, 2)}
 
 ${correctionBlock}
 
@@ -68,6 +72,7 @@ After editing, return exactly one JSON object inside these tags, with no text af
   const result = await runner.run({ role: "builder", model, prompt });
   return {
     report: validateBuilderReport(extractStructuredResult(result.text)),
-    cost: result.cost
+    cost: result.cost,
+    run: result
   };
 }

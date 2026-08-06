@@ -1,0 +1,476 @@
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  loadModelConfiguration,
+  saveUserModelConfiguration
+} from "../tools/ai-workflow/config";
+import {
+  answerOwnerQuestion,
+  effectivePhaseRisk,
+  hashJson,
+  questionsFromPlan,
+  unresolvedBlockingQuestions
+} from "../tools/ai-workflow/decisions";
+import {
+  evaluatorBlocksApproval,
+  validateEvaluationResult
+} from "../tools/ai-workflow/evaluator";
+import {
+  createFeatureState,
+  generatePhaseRequest,
+  generatePlanningRequest,
+  importFeatureArtifact,
+  phaseRecordsFromPlan
+} from "../tools/ai-workflow/feature";
+import { AgentRunRequest, AgentRunner } from "../tools/ai-workflow/opencode";
+import { PlanPhase, validateWorkflowPlan, WorkflowPlan } from "../tools/ai-workflow/planner";
+import { reviewPhase } from "../tools/ai-workflow/reviewer";
+import {
+  acquireFeatureRun,
+  appendWorkflowEvent,
+  loadFeatureState,
+  saveFeatureState,
+  transitionFeatureState
+} from "../tools/ai-workflow/state";
+import {
+  reviewerVerificationEvidence,
+  VerificationResult
+} from "../tools/ai-workflow/verification";
+import { runWorkflow } from "../tools/ai-workflow/workflow";
+
+const temporaryDirectories: string[] = [];
+
+function temporaryDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+function envelope(value: unknown): string {
+  return `<AI_WORKFLOW_RESULT>${JSON.stringify(value)}</AI_WORKFLOW_RESULT>`;
+}
+
+function git(cwd: string, ...args: string[]): string {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
+function initializeRepository(root: string): string {
+  git(root, "init");
+  git(root, "config", "user.name", "AI Workflow Test");
+  git(root, "config", "user.email", "ai-workflow@example.com");
+  writeFileSync(join(root, ".gitignore"), "tmp/\n");
+  writeFileSync(join(root, "README.md"), "synthetic\n");
+  git(root, "add", ".gitignore", "README.md");
+  git(root, "commit", "-m", "Initial fixture");
+  git(root, "branch", "-M", "main");
+  git(root, "switch", "-c", "codex/synthetic-feature");
+  return git(root, "rev-parse", "HEAD");
+}
+
+const phaseOne: PlanPhase = {
+  id: "FEATURE-PHASE-01",
+  title: "Safe tooling phase",
+  objective: "Add one isolated tooling behavior.",
+  requirements: ["Do not change production behavior."],
+  expectedFiles: ["tools/ai-workflow/example.ts", "tests/example.test.ts"],
+  testFiles: ["tests/example.test.ts"],
+  definitionOfDone: ["The isolated behavior has regression coverage."],
+  risk: "low",
+  requiresOwnerApproval: false
+};
+
+const ownerPhase: PlanPhase = {
+  ...phaseOne,
+  id: "FEATURE-PHASE-02",
+  title: "Owner-gated policy phase",
+  objective: "Apply only the explicitly selected policy.",
+  risk: "owner_gated",
+  requiresOwnerApproval: true
+};
+
+const plan: WorkflowPlan = {
+  summary: "Synthetic Version 1B.1 roadmap.",
+  assumptions: [],
+  openQuestions: [],
+  globalRisks: [],
+  expectedAreas: ["tools/ai-workflow", "tests"],
+  ownerQuestions: [
+    {
+      id: "FEATURE-POLICY-1",
+      phaseId: "FEATURE-PHASE-02",
+      text: "Which synthetic policy is approved?",
+      type: "multiple_choice",
+      choices: [
+        { value: "POLICY_A", label: "Policy A" },
+        { value: "POLICY_B", label: "Policy B" }
+      ],
+      evidence: ["The repository does not define a default."],
+      whyItMatters: "The builder cannot infer policy.",
+      blocking: true
+    }
+  ],
+  phases: [phaseOne, ownerPhase]
+};
+
+const passingVerification: VerificationResult = {
+  passed: true,
+  commands: [
+    {
+      name: "tests",
+      command: "npm",
+      args: ["run", "test"],
+      passed: true,
+      exitCode: 0,
+      durationMs: 25,
+      output: `${"large successful output\n".repeat(2_000)}Tests 20 passed`
+    }
+  ]
+};
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("Version 1B.1 local state", () => {
+  it("writes and reloads owner-only atomic feature state and append-only events", async () => {
+    const coordinationRoot = temporaryDirectory("newl-v1b1-state-");
+    const state = createFeatureState({
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Add a synthetic tooling feature.",
+      branch: "codex/synthetic-feature",
+      worktree: join(coordinationRoot, "work", "codex", "synthetic-feature"),
+      baseCommit: "a".repeat(40),
+      headCommit: "a".repeat(40),
+      diffHash: "b".repeat(64),
+      now: new Date("2026-08-05T12:00:00.000Z")
+    });
+    const path = await saveFeatureState(coordinationRoot, state);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect((await loadFeatureState(coordinationRoot, "synthetic-feature")).stage).toBe("ready");
+
+    const withEvent = await appendWorkflowEvent(coordinationRoot, state, {
+      phaseId: null,
+      type: "workflow.ready",
+      message: "Feature is ready."
+    });
+    expect(withEvent.eventSequence).toBe(1);
+    const eventsPath = join(coordinationRoot, "tmp", "ai-workflow", "features", "synthetic-feature", "events.jsonl");
+    expect(statSync(eventsPath).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(readFileSync(eventsPath, "utf8")).message).toBe("Feature is ready.");
+  });
+
+  it("rejects illegal transitions and concurrent feature runs", async () => {
+    const coordinationRoot = temporaryDirectory("newl-v1b1-lock-");
+    const state = createFeatureState({
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Synthetic request.",
+      branch: "codex/synthetic-feature",
+      worktree: coordinationRoot,
+      baseCommit: "a".repeat(40),
+      headCommit: "a".repeat(40),
+      diffHash: "b".repeat(64)
+    });
+    expect(() => transitionFeatureState(state, "reviewing")).toThrow(/Illegal workflow transition/);
+    const release = await acquireFeatureRun(coordinationRoot, state.featureSlug);
+    await expect(acquireFeatureRun(coordinationRoot, state.featureSlug)).rejects.toThrow(/active or interrupted run/);
+    await release();
+    const releaseAgain = await acquireFeatureRun(coordinationRoot, state.featureSlug);
+    await releaseAgain();
+  });
+
+  it("rejects unknown state schema versions", async () => {
+    const coordinationRoot = temporaryDirectory("newl-v1b1-schema-");
+    const directory = join(coordinationRoot, "tmp", "ai-workflow", "features", "synthetic-feature");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const path = join(directory, "state.json");
+    writeFileSync(path, JSON.stringify({ schemaVersion: 99, featureSlug: "synthetic-feature" }), {
+      mode: 0o600
+    });
+    chmodSync(path, 0o600);
+    await expect(loadFeatureState(coordinationRoot, "synthetic-feature")).rejects.toThrow(/Unsupported/);
+  });
+});
+
+describe("Version 1B.1 model defaults and artifact import", () => {
+  it("falls back to credential-free user model defaults when a worktree override is absent", async () => {
+    const repositoryRoot = temporaryDirectory("newl-v1b1-model-repo-");
+    const userConfig = join(temporaryDirectory("newl-v1b1-model-user-"), "models.json");
+    const models = {
+      plannerModel: "provider/qwen-planner",
+      builderModel: "provider/deepseek-builder",
+      reviewerModel: "provider/qwen-reviewer"
+    };
+    await saveUserModelConfiguration(models, userConfig);
+    expect(
+      await loadModelConfiguration({ repositoryRoot, userConfigFile: userConfig })
+    ).toEqual(models);
+    expect(statSync(userConfig).mode & 0o777).toBe(0o600);
+    expect(readFileSync(userConfig, "utf8")).not.toMatch(/api.?key|password|token/i);
+  });
+
+  it("imports bounded artifacts into registry and worktree storage without rewriting them", async () => {
+    const coordinationRoot = temporaryDirectory("newl-v1b1-artifacts-");
+    const worktree = join(coordinationRoot, "work", "codex", "synthetic-feature");
+    mkdirSync(worktree, { recursive: true });
+    const source = join(temporaryDirectory("newl-v1b1-source-"), "handoff.md");
+    writeFileSync(source, "# Synthetic handoff\nOriginal/path/should/remain\n");
+    const artifact = await importFeatureArtifact({
+      coordinationRoot,
+      worktree,
+      featureSlug: "synthetic-feature",
+      kind: "handoff_markdown",
+      sourcePath: source
+    });
+    expect(readFileSync(artifact.registryPath, "utf8")).toBe(readFileSync(source, "utf8"));
+    expect(readFileSync(artifact.worktreePath, "utf8")).toBe(readFileSync(source, "utf8"));
+    expect(statSync(artifact.registryPath).mode & 0o777).toBe(0o600);
+    expect(artifact.sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("rejects symlinked handoff artifacts", async () => {
+    const coordinationRoot = temporaryDirectory("newl-v1b1-symlink-");
+    const worktree = join(coordinationRoot, "worktree");
+    mkdirSync(worktree);
+    const sourceDirectory = temporaryDirectory("newl-v1b1-symlink-source-");
+    const target = join(sourceDirectory, "target.md");
+    const link = join(sourceDirectory, "link.md");
+    writeFileSync(target, "safe target\n");
+    symlinkSync(target, link);
+    await expect(
+      importFeatureArtifact({
+        coordinationRoot,
+        worktree,
+        featureSlug: "synthetic-feature",
+        kind: "handoff_markdown",
+        sourcePath: link
+      })
+    ).rejects.toThrow(/not links/);
+  });
+
+  it("generates planning and exact single-phase requests in ignored worktree storage", async () => {
+    const worktree = temporaryDirectory("newl-v1b1-request-");
+    const planning = await generatePlanningRequest({
+      worktree,
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Add the synthetic feature.",
+      artifacts: []
+    });
+    const questions = questionsFromPlan(plan);
+    const phaseRequest = await generatePhaseRequest({
+      worktree,
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Add the synthetic feature.",
+      plan,
+      phase: phaseOne,
+      artifacts: [],
+      questions
+    });
+    expect(existsSync(planning.path)).toBe(true);
+    expect(phaseRequest.contents).toContain("Implement only FEATURE-PHASE-01");
+    expect(phaseRequest.contents).toContain("Excluded later phases: FEATURE-PHASE-02");
+    expect(phaseRequest.hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("Version 1B.1 phase and owner-decision controls", () => {
+  it("validates structured owner questions for owner-gated phases", () => {
+    const validated = validateWorkflowPlan(plan, { requireOwnerQuestions: true });
+    expect(validated.ownerQuestions?.[0].id).toBe("FEATURE-POLICY-1");
+    expect(() =>
+      validateWorkflowPlan({ ...plan, ownerQuestions: [] }, { requireOwnerQuestions: true })
+    ).toThrow(/phase-scoped blocking owner question/);
+  });
+
+  it("ties confirmed answers to exact question and plan hashes", () => {
+    const planHash = hashJson(plan);
+    const question = questionsFromPlan(plan, planHash)[0];
+    expect(unresolvedBlockingQuestions([question], ownerPhase.id)).toHaveLength(1);
+    const answered = answerOwnerQuestion(
+      question,
+      "POLICY_A",
+      "Synthetic explanation.",
+      { planHash, questionHash: question.questionHash },
+      new Date("2026-08-05T12:00:00.000Z")
+    );
+    expect(unresolvedBlockingQuestions([answered], ownerPhase.id)).toHaveLength(0);
+    expect(answered.answer).toBe("POLICY_A");
+    expect(() =>
+      answerOwnerQuestion(question, "POLICY_A", null, {
+        planHash: "changed",
+        questionHash: question.questionHash
+      })
+    ).toThrow(/reconfirmed/);
+  });
+
+  it("only raises deterministic risk and never lowers owner gates", () => {
+    expect(effectivePhaseRisk(ownerPhase)).toBe("owner_gated");
+    expect(
+      effectivePhaseRisk({
+        ...phaseOne,
+        expectedFiles: ["prisma/migrations/20260101000000_synthetic/migration.sql"]
+      })
+    ).toBe("high");
+    expect(phaseRecordsFromPlan(plan).map((phase) => phase.risk)).toEqual(["low", "owner_gated"]);
+  });
+
+  it("uses a stored roadmap without a planner call and stops after one phase", async () => {
+    const requests: AgentRunRequest[] = [];
+    const runner: AgentRunner = {
+      run: async (request) => {
+        requests.push(request);
+        if (request.role === "builder") {
+          return {
+            text: envelope({
+              summary: "Implemented the stored phase.",
+              changedFiles: ["tools/ai-workflow/example.ts"],
+              testsChanged: ["tests/example.test.ts"],
+              limitations: []
+            }),
+            cost: null
+          };
+        }
+        return {
+          text: envelope({
+            status: "approved",
+            summary: "The stored phase is complete.",
+            findings: [],
+            missingTests: [],
+            scopeConcerns: [],
+            escalationReason: null
+          }),
+          cost: null
+        };
+      }
+    };
+    const repositoryRoot = temporaryDirectory("newl-v1b1-stored-plan-");
+    const baseCommit = initializeRepository(repositoryRoot);
+    const result = await runWorkflow(
+      {
+        repositoryRoot,
+        originalRequest: "Use the stored roadmap.",
+        plannerModel: "provider/qwen",
+        builderModel: "provider/deepseek",
+        reviewerModel: "provider/qwen",
+        approvedPlan: plan,
+        phaseId: phaseOne.id
+      },
+      {
+        agentRunner: runner,
+        commandRunner: {
+          run: async (spec) => ({
+            ...spec,
+            passed: true,
+            exitCode: 0,
+            durationMs: 1,
+            output: "passed"
+          })
+        },
+        preflight: async () => ({
+          branch: "codex/synthetic-feature",
+          baseCommit,
+          openCodeVersion: "test",
+          authenticatedProviders: ["provider"],
+          selectedModels: {
+            plannerModel: "provider/qwen",
+            builderModel: "provider/deepseek",
+            reviewerModel: "provider/qwen"
+          },
+          baselineVerification: { passed: true, commands: [] }
+        }),
+        approvePhase: async () => true
+      }
+    );
+    expect(requests.map((request) => request.role)).toEqual(["builder", "reviewer"]);
+    expect(result).toMatchObject({ phaseId: phaseOne.id, stoppedBeforeNextPhase: true });
+  });
+});
+
+describe("Version 1B.1 evidence packets and evaluators", () => {
+  it("compacts successful verification output while preserving hashes and totals", () => {
+    const evidence = reviewerVerificationEvidence(passingVerification);
+    expect(evidence.commands[0].summary).toContain("Tests 20 passed");
+    expect(evidence.commands[0].summary.length).toBeLessThanOrEqual(2_000);
+    expect(evidence.commands[0].outputHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(evidence)).not.toContain("large successful output\n".repeat(100));
+  });
+
+  it("sends compact verification evidence rather than full successful logs to the reviewer", async () => {
+    let prompt = "";
+    await reviewPhase(
+      {
+        run: async (request) => {
+          prompt = request.prompt;
+          return {
+            text: envelope({
+              status: "approved",
+              summary: "Complete.",
+              findings: [],
+              missingTests: [],
+              scopeConcerns: [],
+              escalationReason: null
+            }),
+            cost: null
+          };
+        }
+      },
+      "provider/qwen",
+      {
+        repositoryRoot: "/synthetic",
+        originalRequest: "Synthetic request.",
+        approvedPlan: plan,
+        phase: phaseOne,
+        gitDiff: "synthetic diff",
+        surroundingCode: "synthetic code",
+        verification: passingVerification
+      }
+    );
+    expect(prompt).toContain("Tests 20 passed");
+    expect(prompt.length).toBeLessThan(20_000);
+  });
+
+  it("allows evaluators to block but never to approve a phase", () => {
+    const result = validateEvaluationResult(
+      {
+        schemaVersion: 1,
+        evaluatorId: "default-software",
+        status: "failed",
+        findings: [{ code: "TEST_THRESHOLD", message: "Threshold failed.", blocking: true }],
+        measurements: { testsPassed: 19 },
+        artifactHashes: [],
+        durationMs: 10,
+        diffHash: "a".repeat(64)
+      },
+      { evaluatorId: "default-software", diffHash: "a".repeat(64) }
+    );
+    expect(evaluatorBlocksApproval(result)).toBe(true);
+    expect(() =>
+      validateEvaluationResult(
+        { ...result, status: "passed" },
+        { evaluatorId: "default-software", diffHash: "a".repeat(64) }
+      )
+    ).toThrow(/passing evaluator/);
+  });
+});

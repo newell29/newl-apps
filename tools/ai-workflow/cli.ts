@@ -94,6 +94,7 @@ async function main(): Promise<void> {
 
   if (values.help) {
     console.log(`Usage:
+  npm run ai:feature                    Recommended interactive Version 1B.1 launcher
   npm run ai-workflow -- --request "Feature request" [options]
   npm run ai-workflow -- --request-file requests/feature.md [options]
   npm run ai-workflow:models
@@ -244,19 +245,23 @@ Other options:
         agentRunner,
         commandRunner,
         preflight,
-        approvePlan: async (plan) => {
+        approvePhase: async (plan, phaseId) => {
           if (!process.stdin.isTTY || !process.stdout.isTTY) {
-            throw new Error("Plan approval requires an interactive terminal.");
+            throw new Error("Phase approval requires an interactive terminal.");
           }
           printPlan(plan);
-          const answer = await readline.question("\nApprove this entire plan and begin implementation? [y/N] ");
+          const answer = await readline.question(
+            `\nApprove ${phaseId} only and begin implementation? [y/N] `
+          );
           return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
         },
         onEvent: (message) => console.log(`[ai-workflow] ${message}`)
       }
     );
 
-    console.log("\nWorkflow complete. No commit, push, merge, or deployment was performed.");
+    console.log(
+      `\n${result.phaseId} complete. The workflow stopped before every later phase; no commit, push, merge, or deployment was performed.`
+    );
     console.log(JSON.stringify(result, null, 2));
   } finally {
     readline.close();

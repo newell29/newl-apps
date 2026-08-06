@@ -34,7 +34,7 @@ import {
   writeReviewerFailureDiagnostic
 } from "../tools/ai-workflow/reviewer";
 import { CommandRunner } from "../tools/ai-workflow/verification";
-import { runWorkflow, WorkflowEscalationError } from "../tools/ai-workflow/workflow";
+import { runWorkflow } from "../tools/ai-workflow/workflow";
 
 const temporaryDirectories: string[] = [];
 
@@ -110,6 +110,18 @@ const plan: WorkflowPlan = {
   openQuestions: ["Owner must decide Phase 2 behavior."],
   globalRisks: [],
   expectedAreas: ["README.md", "tests/recovery.test.ts"],
+  ownerQuestions: [
+    {
+      id: "PHASE-2-OWNER-DECISION",
+      phaseId: "phase-2",
+      text: "Which synthetic owner policy is approved?",
+      type: "yes_no",
+      choices: [],
+      evidence: ["The synthetic fixture has no default policy."],
+      whyItMatters: "Phase 2 cannot infer owner intent.",
+      blocking: true
+    }
+  ],
   phases: [phaseOne, phaseTwo]
 };
 
@@ -397,7 +409,7 @@ describe("review-current-diff recovery", () => {
     ).toThrow(/diff changed/);
   });
 
-  it("never auto-advances an owner-gated phase in the normal workflow", async () => {
+  it("stops after the approved phase and never invokes an owner-gated later phase", async () => {
     const repository = createRepository();
     const requests: AgentRunRequest[] = [];
     const runner: AgentRunner = {
@@ -419,8 +431,7 @@ describe("review-current-diff recovery", () => {
       }
     };
 
-    await expect(
-      runWorkflow(
+    const result = await runWorkflow(
         {
           repositoryRoot: repository,
           originalRequest: "Run only resolved phases.",
@@ -445,9 +456,14 @@ describe("review-current-diff recovery", () => {
           }),
           approvePlan: async () => true
         }
-      )
-    ).rejects.toBeInstanceOf(WorkflowEscalationError);
+      );
+    expect(result).toMatchObject({ phaseId: "phase-1", stoppedBeforeNextPhase: true });
     expect(requests.map((request) => request.role)).toEqual(["planner", "builder", "reviewer"]);
-    expect(requests.filter((request) => request.prompt.includes('"id": "phase-2"'))).toHaveLength(1);
+    expect(
+      requests.filter(
+        (request) =>
+          request.role === "builder" && request.prompt.includes('"id": "phase-2"')
+      )
+    ).toHaveLength(0);
   });
 });
