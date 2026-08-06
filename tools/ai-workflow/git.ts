@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 
 import { sanitizeCommandOutput } from "./verification";
 
@@ -101,6 +101,17 @@ export async function inspectGitWorktree(repositoryRoot: string): Promise<GitWor
     commonGitDirectory: resolvedCommonDirectory,
     isDedicatedWorktree: resolvedGitDirectory !== resolvedCommonDirectory
   };
+}
+
+export async function findCoordinationRoot(repositoryRoot: string): Promise<string> {
+  const inspection = await inspectGitWorktree(repositoryRoot);
+  const coordinationRoot = dirname(inspection.commonGitDirectory);
+  const packagePath = resolve(coordinationRoot, "package.json");
+  const agentsPath = resolve(coordinationRoot, "AGENTS.md");
+  if (!existsSync(packagePath) || !existsSync(agentsPath)) {
+    throw new Error("Could not locate the Newl Apps coordination checkout from the Git common directory.");
+  }
+  return coordinationRoot;
 }
 
 export async function ensureWorkflowBranch(

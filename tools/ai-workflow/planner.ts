@@ -1,8 +1,19 @@
 import { isAbsolute } from "node:path";
 
-import { AgentRunner, extractStructuredResult } from "./opencode";
+import { AgentRunner, AgentRunResult, extractStructuredResult } from "./opencode";
 
-export type PhaseRisk = "low" | "medium" | "high";
+export type PhaseRisk = "low" | "medium" | "high" | "owner_gated";
+
+export type OwnerQuestionProposal = {
+  id: string;
+  phaseId: string | null;
+  text: string;
+  type: "multiple_choice" | "yes_no" | "free_text";
+  choices: Array<{ value: string; label: string }>;
+  evidence: string[];
+  whyItMatters: string;
+  blocking: boolean;
+};
 
 export type PlanPhase = {
   id: string;
@@ -22,6 +33,7 @@ export type WorkflowPlan = {
   openQuestions: string[];
   globalRisks: string[];
   expectedAreas: string[];
+  ownerQuestions?: OwnerQuestionProposal[];
   phases: PlanPhase[];
 };
 
@@ -71,11 +83,14 @@ function validatePhase(value: unknown, index: number): PlanPhase {
   if (!isRecord(value)) throw new Error(`Planner phase ${index + 1} must be an object.`);
 
   const risk = value.risk;
-  if (risk !== "low" && risk !== "medium" && risk !== "high") {
+  if (risk !== "low" && risk !== "medium" && risk !== "high" && risk !== "owner_gated") {
     throw new Error(`Planner phase ${index + 1} has an invalid risk classification.`);
   }
   if (typeof value.requiresOwnerApproval !== "boolean") {
     throw new Error(`Planner phase ${index + 1} requires an explicit requiresOwnerApproval boolean.`);
+  }
+  if (risk === "owner_gated" && value.requiresOwnerApproval !== true) {
+    throw new Error(`Planner phase ${index + 1} marked owner_gated must require owner approval.`);
   }
 
   const expectedFiles = stringArray(value, "expectedFiles").map((path) =>
@@ -104,7 +119,64 @@ function validatePhase(value: unknown, index: number): PlanPhase {
   };
 }
 
-export function validateWorkflowPlan(value: unknown): WorkflowPlan {
+function validateOwnerQuestions(value: unknown, phaseIds: Set<string>): OwnerQuestionProposal[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 40) {
+    throw new Error("Planner ownerQuestions must be an array with at most 40 questions.");
+  }
+  const questions = value.map((question, index): OwnerQuestionProposal => {
+    if (!isRecord(question)) throw new Error(`Planner owner question ${index + 1} must be an object.`);
+    const id = stringValue(question, "id");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(id)) {
+      throw new Error(`Planner owner question ${index + 1} has an unsafe stable ID.`);
+    }
+    const phaseId = question.phaseId;
+    if (phaseId !== null && (typeof phaseId !== "string" || !phaseIds.has(phaseId))) {
+      throw new Error(`Planner owner question ${id} refers to an unknown phase.`);
+    }
+    const type = question.type;
+    if (type !== "multiple_choice" && type !== "yes_no" && type !== "free_text") {
+      throw new Error(`Planner owner question ${id} has an invalid type.`);
+    }
+    if (!Array.isArray(question.choices)) {
+      throw new Error(`Planner owner question ${id} choices must be an array.`);
+    }
+    const choices = question.choices.map((choice, choiceIndex) => {
+      if (!isRecord(choice)) {
+        throw new Error(`Planner owner question ${id} choice ${choiceIndex + 1} must be an object.`);
+      }
+      return { value: stringValue(choice, "value"), label: stringValue(choice, "label") };
+    });
+    if (type === "multiple_choice" && choices.length < 2) {
+      throw new Error(`Planner owner question ${id} requires at least two choices.`);
+    }
+    if (type !== "multiple_choice" && choices.length > 0) {
+      throw new Error(`Planner owner question ${id} may not define choices for ${type}.`);
+    }
+    if (typeof question.blocking !== "boolean") {
+      throw new Error(`Planner owner question ${id} requires a blocking boolean.`);
+    }
+    return {
+      id,
+      phaseId,
+      text: stringValue(question, "text"),
+      type,
+      choices,
+      evidence: stringArray(question, "evidence"),
+      whyItMatters: stringValue(question, "whyItMatters"),
+      blocking: question.blocking
+    };
+  });
+  if (new Set(questions.map((question) => question.id)).size !== questions.length) {
+    throw new Error("Planner owner question IDs must be unique.");
+  }
+  return questions;
+}
+
+export function validateWorkflowPlan(
+  value: unknown,
+  options: { requireOwnerQuestions?: boolean } = {}
+): WorkflowPlan {
   if (!isRecord(value)) throw new Error("Planner output must be an object.");
   if (!Array.isArray(value.phases) || value.phases.length < 1 || value.phases.length > 12) {
     throw new Error("Planner output must contain between 1 and 12 phases.");
@@ -114,6 +186,19 @@ export function validateWorkflowPlan(value: unknown): WorkflowPlan {
   const ids = new Set(phases.map((phase) => phase.id));
   if (ids.size !== phases.length) throw new Error("Planner phase IDs must be unique.");
 
+  const ownerQuestions = validateOwnerQuestions(value.ownerQuestions, ids);
+  for (const phase of phases) {
+    if (
+      options.requireOwnerQuestions === true &&
+      phase.requiresOwnerApproval &&
+      !ownerQuestions.some((question) => question.blocking && question.phaseId === phase.id)
+    ) {
+      throw new Error(
+        `Planner owner-gated phase ${phase.id} must include at least one phase-scoped blocking owner question.`
+      );
+    }
+  }
+
   return {
     summary: stringValue(value, "summary"),
     assumptions: stringArray(value, "assumptions"),
@@ -122,6 +207,7 @@ export function validateWorkflowPlan(value: unknown): WorkflowPlan {
     expectedAreas: stringArray(value, "expectedAreas").map((path) =>
       validateRepositoryPath(path, "Planner expectedAreas", { allowTrailingSlash: true })
     ),
+    ownerQuestions,
     phases
   };
 }
@@ -130,7 +216,7 @@ export async function createPlan(
   runner: AgentRunner,
   model: string,
   originalRequest: string
-): Promise<{ plan: WorkflowPlan; cost: number | null }> {
+): Promise<{ plan: WorkflowPlan; cost: number | null; run: AgentRunResult }> {
   const prompt = `You are planning a Newl Apps feature in read-only mode.
 
 Original feature request:
@@ -140,7 +226,7 @@ ${originalRequest}
 
 Inspect the real repository. Read AGENTS.md, docs/README.md, docs/architecture/overview.md, docs/modules/README.md, and the nearest relevant module documentation. Trace the requested behavior across every applicable UI, API, action, service, database, permission, test, and documentation layer. Preserve authenticated tenantId filtering and explicit human approval boundaries. Mark inferred business behavior as an open question.
 
-Create the smallest complete sequence of independently reviewable phases. The controller always runs git diff --check, npm run typecheck, npm run lint, npm run build, and the full npm test suite. Do not propose shell commands. testFiles is advisory review evidence describing the concrete regression test files the phase should add or update; it never controls which commands run and may contain only repository-relative tests/**/*.test.ts or tests/**/*.test.tsx paths. Set requiresOwnerApproval to true for a phase that depends on unresolved owner decisions or would cross a protected human-approval boundary. Such a phase will stop before its builder runs; never place unresolved business decisions inside an automatically executable phase.
+Create the smallest complete sequence of independently reviewable phases. Preserve stable phase IDs from a validated handoff when they exist. The controller always runs git diff --check, npm run typecheck, npm run lint, npm run build, and the full npm test suite. Do not propose shell commands. testFiles is advisory review evidence describing the concrete regression test files the phase should add or update; it never controls which commands run and may contain only repository-relative tests/**/*.test.ts or tests/**/*.test.tsx paths. Set risk to owner_gated and requiresOwnerApproval to true for a phase that depends on unresolved owner decisions or would cross a protected human-approval boundary. Every owner-gated phase must have at least one phase-scoped blocking ownerQuestions entry. Never place unresolved business decisions inside an automatically executable phase.
 
 Return exactly one JSON object inside these tags, with no text after the closing tag:
 <AI_WORKFLOW_RESULT>
@@ -150,6 +236,18 @@ Return exactly one JSON object inside these tags, with no text after the closing
   "openQuestions": [],
   "globalRisks": [],
   "expectedAreas": ["src/..."],
+  "ownerQuestions": [
+    {
+      "id": "FEATURE-PHASE-QUESTION-1",
+      "phaseId": "phase-2",
+      "text": "What exact business rule should be used?",
+      "type": "multiple_choice",
+      "choices": [{ "value": "OPTION_A", "label": "Option A" }, { "value": "OPTION_B", "label": "Option B" }],
+      "evidence": ["Repository evidence that makes this decision necessary."],
+      "whyItMatters": "The builder cannot safely infer this rule.",
+      "blocking": true
+    }
+  ],
   "phases": [
     {
       "id": "phase-1",
@@ -168,7 +266,10 @@ Return exactly one JSON object inside these tags, with no text after the closing
 
   const result = await runner.run({ role: "planner", model, prompt });
   return {
-    plan: validateWorkflowPlan(extractStructuredResult(result.text)),
-    cost: result.cost
+    plan: validateWorkflowPlan(extractStructuredResult(result.text), {
+      requireOwnerQuestions: true
+    }),
+    cost: result.cost,
+    run: result
   };
 }

@@ -4,7 +4,11 @@ import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { ModelConfiguration } from "./config";
-import { ensureWorkflowBranch, inspectGitWorktree } from "./git";
+import {
+  ensureWorkflowBranch,
+  inspectGitWorktree,
+  inspectRecoveryGitIdentity
+} from "./git";
 import { OpenCodeCatalog, OpenCodeInspector } from "./opencode";
 import { CommandRunner, runVerification, VerificationResult } from "./verification";
 
@@ -50,7 +54,12 @@ export function validateOpenCodeCatalog(
     throw new PreflightError(`OpenCode is missing required agent profiles: ${missingAgents.join(", ")}.`);
   }
 
-  const selected = [configuration.plannerModel, configuration.builderModel, configuration.reviewerModel];
+  const selected = [
+    configuration.plannerModel,
+    configuration.builderModel,
+    configuration.reviewerModel,
+    ...(configuration.escalationModel ? [configuration.escalationModel] : [])
+  ];
   const missingModels = [...new Set(selected.filter((model) => !catalog.modelIds.includes(model)))];
   if (missingModels.length > 0) {
     throw new PreflightError(
@@ -130,6 +139,12 @@ export async function runPreflight(input: {
   commandRunner: CommandRunner;
   openCodeInspector: OpenCodeInspector;
   onEvent?: (message: string) => void;
+  expectedExistingDiff?: {
+    branch: string;
+    baseCommit: string;
+    headCommit: string;
+    diffHash: string;
+  };
 }): Promise<PreflightResult> {
   const repositoryRoot = await realpath(resolve(input.repositoryRoot));
   const event = input.onEvent ?? (() => undefined);
@@ -148,13 +163,40 @@ export async function runPreflight(input: {
   requireExecutable("git");
   requireExecutable("node");
   requireExecutable("npm");
-  const gitState = await ensureWorkflowBranch(repositoryRoot, input.requestedBranch);
+  let gitState: { branch: string; baseCommit: string };
+  if (input.expectedExistingDiff) {
+    if (input.requestedBranch) {
+      throw new PreflightError("A continuing workflow cannot create or switch branches during preflight.");
+    }
+    const expected = input.expectedExistingDiff;
+    const actual = await inspectRecoveryGitIdentity(
+      repositoryRoot,
+      expected.baseCommit,
+      expected.baseCommit
+    );
+    if (actual.branch !== expected.branch) {
+      throw new PreflightError(`Expected branch ${expected.branch}, found ${actual.branch}.`);
+    }
+    if (actual.headCommit !== expected.headCommit) {
+      throw new PreflightError("The continuing workflow HEAD changed unexpectedly.");
+    }
+    if (actual.mergeBaseCommit !== expected.baseCommit || actual.diffHash !== expected.diffHash) {
+      throw new PreflightError("The continuing workflow base or registered diff changed unexpectedly.");
+    }
+    gitState = { branch: actual.branch, baseCommit: expected.baseCommit };
+  } else {
+    gitState = await ensureWorkflowBranch(repositoryRoot, input.requestedBranch);
+  }
 
   event("Preflight: validating OpenCode, agent profiles, selected models, and stored provider authentication.");
   const catalog = await input.openCodeInspector.inspect();
   validateOpenCodeCatalog(catalog, input.models);
 
-  event("Preflight: running the strict clean-baseline verification before any model call.");
+  event(
+    input.expectedExistingDiff
+      ? "Preflight: running strict verification of the registered continuing-workflow diff before any model call."
+      : "Preflight: running the strict clean-baseline verification before any model call."
+  );
   const baselineVerification = await runVerification(
     input.commandRunner,
     repositoryRoot,

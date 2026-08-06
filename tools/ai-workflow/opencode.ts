@@ -24,6 +24,12 @@ export interface AgentRunner {
   run(request: AgentRunRequest): Promise<AgentRunResult>;
 }
 
+export type OpenCodeProgressEvent = {
+  role: AgentRole;
+  type: "started" | "active" | "heartbeat" | "completed" | "failed";
+  elapsedMs: number;
+};
+
 export type OpenCodeCatalog = {
   version: string;
   modelIds: string[];
@@ -247,7 +253,11 @@ export function extractStructuredResult(text: string): unknown {
 export class OpenCodeCliRunner implements AgentRunner {
   private readonly binary: string;
 
-  constructor(private readonly repositoryRoot: string, binary?: string) {
+  constructor(
+    private readonly repositoryRoot: string,
+    binary?: string,
+    private readonly onProgress?: (event: OpenCodeProgressEvent) => void
+  ) {
     this.binary = resolveOpenCodeBinary(repositoryRoot, binary);
   }
 
@@ -275,6 +285,8 @@ export class OpenCodeCliRunner implements AgentRunner {
       request.prompt
     ];
 
+    const startedAt = Date.now();
+    this.onProgress?.({ role: request.role, type: "started", elapsedMs: 0 });
     const stdout = await new Promise<string>((resolveOutput, reject) => {
       const child = spawn(this.binary, args, {
         cwd: this.repositoryRoot,
@@ -284,11 +296,28 @@ export class OpenCodeCliRunner implements AgentRunner {
       });
       let output = "";
       let errorOutput = "";
+      let reportedActive = false;
+      const heartbeat = setInterval(() => {
+        this.onProgress?.({
+          role: request.role,
+          type: "heartbeat",
+          elapsedMs: Date.now() - startedAt
+        });
+      }, 15_000);
+      heartbeat.unref();
 
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
         output += chunk;
+        if (!reportedActive) {
+          reportedActive = true;
+          this.onProgress?.({
+            role: request.role,
+            type: "active",
+            elapsedMs: Date.now() - startedAt
+          });
+        }
         if (Buffer.byteLength(output) > MAX_OUTPUT_BYTES) {
           child.kill("SIGTERM");
           reject(new Error("OpenCode output exceeded the 8 MB safety limit."));
@@ -297,12 +326,31 @@ export class OpenCodeCliRunner implements AgentRunner {
       child.stderr.on("data", (chunk: string) => {
         if (Buffer.byteLength(errorOutput) < MAX_OUTPUT_BYTES) errorOutput += chunk;
       });
-      child.on("error", reject);
+      child.on("error", (error) => {
+        clearInterval(heartbeat);
+        this.onProgress?.({
+          role: request.role,
+          type: "failed",
+          elapsedMs: Date.now() - startedAt
+        });
+        reject(error);
+      });
       child.on("close", (code) => {
+        clearInterval(heartbeat);
         if (code === 0) {
+          this.onProgress?.({
+            role: request.role,
+            type: "completed",
+            elapsedMs: Date.now() - startedAt
+          });
           resolveOutput(output);
           return;
         }
+        this.onProgress?.({
+          role: request.role,
+          type: "failed",
+          elapsedMs: Date.now() - startedAt
+        });
         reject(
           new Error(
             `OpenCode ${request.role} failed with exit code ${code ?? "unknown"}: ${

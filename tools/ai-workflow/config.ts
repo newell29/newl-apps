@@ -1,13 +1,20 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, relative, resolve, sep } from "node:path";
 
 export type ModelConfiguration = {
   plannerModel: string;
   builderModel: string;
   reviewerModel: string;
+  escalationModel?: string;
 };
 
 export const DEFAULT_MODEL_CONFIG_FILE = "tmp/ai-workflow/models.json";
+export const DEFAULT_USER_MODEL_CONFIG_FILE = resolve(
+  process.env.XDG_CONFIG_HOME ?? resolve(homedir(), ".config"),
+  "newl-ai-workflow",
+  "models.json"
+);
 
 export function validateModelId(value: unknown, label: string): string {
   if (typeof value !== "string") {
@@ -38,16 +45,29 @@ function parseModelConfiguration(value: unknown): ModelConfiguration {
     throw new Error("Model configuration must be a JSON object.");
   }
   const record = value as Record<string, unknown>;
-  const allowed = new Set(["plannerModel", "builderModel", "reviewerModel"]);
+  const allowed = new Set(["plannerModel", "builderModel", "reviewerModel", "escalationModel"]);
   const unexpected = Object.keys(record).filter((key) => !allowed.has(key));
   if (unexpected.length > 0) {
     throw new Error(`Model configuration contains unsupported fields: ${unexpected.join(", ")}.`);
   }
-  return {
+  const configuration: ModelConfiguration = {
     plannerModel: validateModelId(record.plannerModel, "Planner"),
     builderModel: validateModelId(record.builderModel, "Builder"),
     reviewerModel: validateModelId(record.reviewerModel, "Reviewer")
   };
+  if (record.escalationModel !== undefined && record.escalationModel !== null) {
+    configuration.escalationModel = validateModelId(record.escalationModel, "Escalation");
+  }
+  return configuration;
+}
+
+async function readConfigurationIfPresent(path: string): Promise<ModelConfiguration | null> {
+  try {
+    return parseModelConfiguration(JSON.parse(await readFile(path, "utf8")) as unknown);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 export async function loadModelConfiguration(input: {
@@ -56,6 +76,7 @@ export async function loadModelConfiguration(input: {
   plannerModel?: string;
   builderModel?: string;
   reviewerModel?: string;
+  userConfigFile?: string;
 }): Promise<ModelConfiguration> {
   const explicit = input.plannerModel || input.builderModel || input.reviewerModel;
   if (explicit) {
@@ -85,19 +106,15 @@ export async function loadModelConfiguration(input: {
   }
 
   const path = modelConfigPath(input.repositoryRoot, input.configFile);
-  let contents: string;
-  try {
-    contents = await readFile(path, "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      throw new Error(
-        `Model configuration was not found at ${path}. Run npm run ai-workflow:models, then npm run ai-workflow:configure -- with the selected IDs.`
-      );
-    }
-    throw error;
-  }
-  return parseModelConfiguration(JSON.parse(contents) as unknown);
+  const worktreeConfiguration = await readConfigurationIfPresent(path);
+  if (worktreeConfiguration) return worktreeConfiguration;
+
+  const userPath = resolve(input.userConfigFile ?? DEFAULT_USER_MODEL_CONFIG_FILE);
+  const userConfiguration = await readConfigurationIfPresent(userPath);
+  if (userConfiguration) return userConfiguration;
+  throw new Error(
+    `No model defaults were found at ${path} or ${userPath}. Run npm run ai:feature -- models configure.`
+  );
 }
 
 export async function saveModelConfiguration(
@@ -109,6 +126,22 @@ export async function saveModelConfiguration(
   const validated = parseModelConfiguration(configuration);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(validated, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
+  return path;
+}
+
+export async function saveUserModelConfiguration(
+  configuration: ModelConfiguration,
+  configuredPath = DEFAULT_USER_MODEL_CONFIG_FILE
+): Promise<string> {
+  const path = resolve(configuredPath);
+  const validated = parseModelConfiguration(configuration);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await chmod(dirname(path), 0o700);
+  await writeFile(path, `${JSON.stringify(validated, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600
+  });
   await chmod(path, 0o600);
   return path;
 }

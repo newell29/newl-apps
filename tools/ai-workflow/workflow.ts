@@ -5,12 +5,20 @@ import { implementPhase } from "./builder";
 import {
   getSurroundingCode,
   getWorkflowDiff,
+  getWorkflowDiffHash,
   listChangedFiles
 } from "./git";
-import { AgentRunner } from "./opencode";
+import { AgentRole, AgentRunner, AgentRunResult } from "./opencode";
 import { createPlan, WorkflowPlan } from "./planner";
 import { PreflightResult } from "./preflight";
 import { ReviewDecision, reviewPhase } from "./reviewer";
+import {
+  evaluatorBlocksApproval,
+  EvaluationResult,
+  validateEvaluationResult,
+  WorkflowEvaluator
+} from "./evaluator";
+import { WorkflowStage } from "./state";
 import { CommandRunner, runVerification, VerificationResult } from "./verification";
 
 export type WorkflowMetrics = {
@@ -37,13 +45,29 @@ export type WorkflowOptions = {
   metricsFile?: string;
   maxReviewCycles?: number;
   maxRetriesPerPhase?: number;
+  approvedPlan?: WorkflowPlan;
+  phaseId?: string;
+  featureSlug?: string;
+  confirmedDecisions?: Record<string, string>;
+  ownerGateSatisfied?: boolean;
+  evaluators?: WorkflowEvaluator[];
 };
 
 export type WorkflowDependencies = {
   agentRunner: AgentRunner;
   commandRunner: CommandRunner;
   preflight: () => Promise<PreflightResult>;
-  approvePlan: (plan: WorkflowPlan) => Promise<boolean>;
+  approvePlan?: (plan: WorkflowPlan) => Promise<boolean>;
+  approvePhase?: (plan: WorkflowPlan, phaseId: string) => Promise<boolean>;
+  ownerGateSatisfied?: (plan: WorkflowPlan, phaseId: string) => Promise<boolean>;
+  onPlanCreated?: (plan: WorkflowPlan) => Promise<void>;
+  onStage?: (stage: WorkflowStage, phaseId: string | null) => Promise<void>;
+  onModelRun?: (
+    role: AgentRole,
+    phaseId: string | null,
+    result: AgentRunResult
+  ) => Promise<void>;
+  onVerification?: (phaseId: string, result: VerificationResult) => Promise<void>;
   onEvent?: (message: string) => void;
   now?: () => Date;
 };
@@ -52,6 +76,8 @@ export type WorkflowResult = {
   branch: string;
   baseCommit: string;
   plan: WorkflowPlan;
+  phaseId: string;
+  stoppedBeforeNextPhase: true;
   metrics: WorkflowMetrics;
 };
 
@@ -124,6 +150,7 @@ export async function runWorkflow(
   const maxReviewCycles = validateLimit(options.maxReviewCycles, 3, "maxReviewCycles");
   const maxRetriesPerPhase = validateLimit(options.maxRetriesPerPhase, 3, "maxRetriesPerPhase");
   const event = dependencies.onEvent ?? (() => undefined);
+  await dependencies.onStage?.("preflight", null);
   const preflight = await dependencies.preflight();
   const gitState = {
     branch: preflight.branch,
@@ -140,45 +167,75 @@ export async function runWorkflow(
     else apiCost += cost;
   };
 
-  event(`Planning on ${gitState.branch} with ${options.plannerModel}.`);
-  const planned = await createPlan(
-    dependencies.agentRunner,
-    options.plannerModel,
-    options.originalRequest
-  );
-  addCost(planned.cost);
-
-  event(`Plan ready with ${planned.plan.phases.length} phase(s); awaiting one human approval.`);
-  if (!(await dependencies.approvePlan(planned.plan))) {
-    throw new WorkflowCancelledError("The human reviewer did not approve the overall plan.");
+  let plan: WorkflowPlan;
+  if (options.approvedPlan) {
+    plan = options.approvedPlan;
+    event(`Using the stored approved roadmap; no planner call is required.`);
+  } else {
+    await dependencies.onStage?.("planning", null);
+    event(`Planning on ${gitState.branch} with ${options.plannerModel}.`);
+    const planned = await createPlan(
+      dependencies.agentRunner,
+      options.plannerModel,
+      options.originalRequest
+    );
+    addCost(planned.cost);
+    await dependencies.onModelRun?.("planner", null, planned.run);
+    plan = planned.plan;
+    await dependencies.onPlanCreated?.(plan);
   }
 
-  for (const [phaseIndex, phase] of planned.plan.phases.entries()) {
-    if (phase.requiresOwnerApproval) {
-      throw new WorkflowEscalationError(
-        `${phase.id} requires explicit owner approval and cannot start automatically.`
-      );
-    }
+  const phase = options.phaseId
+    ? plan.phases.find((candidate) => candidate.id === options.phaseId)
+    : plan.phases[0];
+  if (!phase) throw new Error(`Selected phase ${options.phaseId ?? "(first)"} is absent from the plan.`);
+  const ownerGateSatisfied =
+    options.ownerGateSatisfied ||
+    (dependencies.ownerGateSatisfied
+      ? await dependencies.ownerGateSatisfied(plan, phase.id)
+      : false);
+  if ((phase.requiresOwnerApproval || phase.risk === "owner_gated") && !ownerGateSatisfied) {
+    throw new WorkflowEscalationError(
+      `${phase.id} is owner-gated and cannot start until its blocking decisions are confirmed.`
+    );
+  }
+
+  event(`Roadmap ready with ${plan.phases.length} phase(s); awaiting approval for ${phase.id} only.`);
+  await dependencies.onStage?.("awaiting_phase_approval", phase.id);
+  const approved = dependencies.approvePhase
+    ? await dependencies.approvePhase(plan, phase.id)
+    : dependencies.approvePlan
+      ? await dependencies.approvePlan(plan)
+      : false;
+  if (!approved) {
+    throw new WorkflowCancelledError(`The operator did not approve ${phase.id}.`);
+  }
+
     let corrections: string[] = [];
     let phaseRetries = 0;
     let phaseReviewCycles = 0;
-    event(`Starting phase ${phaseIndex + 1}/${planned.plan.phases.length}: ${phase.title}`);
+    event(`Starting approved phase ${phase.id}: ${phase.title}`);
 
     while (true) {
+      await dependencies.onStage?.(corrections.length > 0 ? "correcting" : "implementing", phase.id);
       const built = await implementPhase(
         dependencies.agentRunner,
         options.builderModel,
         phase,
-        corrections
+        corrections,
+        { confirmedDecisions: options.confirmedDecisions }
       );
       addCost(built.cost);
+      await dependencies.onModelRun?.("builder", phase.id, built.run);
 
       event(`Running mandatory verification for ${phase.id}.`);
+      await dependencies.onStage?.("verifying", phase.id);
       const verification = await runVerification(
         dependencies.commandRunner,
         options.repositoryRoot,
         gitState.baseCommit
       );
+      await dependencies.onVerification?.(phase.id, verification);
       const testCommand = verification.commands.find((command) => command.name === "tests");
       if (testCommand) testsExecuted.push(`${testCommand.command} ${testCommand.args.join(" ")}`);
 
@@ -202,30 +259,55 @@ export async function runWorkflow(
       }
 
       event(`Starting fresh independent review ${phaseReviewCycles + 1} for ${phase.id}.`);
+      await dependencies.onStage?.("reviewing", phase.id);
       const { writeReviewRecoveryMetadata } = await import("./recovery");
       await writeReviewRecoveryMetadata({
         repositoryRoot: options.repositoryRoot,
         branch: gitState.branch,
         baseCommit: gitState.baseCommit,
         originalRequest: options.originalRequest,
-        approvedPlan: planned.plan,
+        approvedPlan: plan,
         phaseId: phase.id
       });
+      const diffHash = await getWorkflowDiffHash(options.repositoryRoot, gitState.baseCommit);
+      const evaluations: EvaluationResult[] = [];
+      for (const evaluator of options.evaluators ?? []) {
+        const result = validateEvaluationResult(
+          await evaluator.evaluate({
+            repositoryRoot: options.repositoryRoot,
+            featureSlug: options.featureSlug ?? "unregistered-feature",
+            phaseId: phase.id,
+            baseCommit: gitState.baseCommit,
+            diffHash,
+            verification,
+            confirmedDecisions: options.confirmedDecisions ?? {}
+          }),
+          { evaluatorId: evaluator.id, diffHash }
+        );
+        if (evaluatorBlocksApproval(result)) {
+          throw new WorkflowEscalationError(`Workflow evaluator ${evaluator.id} blocked review.`);
+        }
+        evaluations.push(result);
+      }
       const reviewed = await reviewPhase(dependencies.agentRunner, options.reviewerModel, {
         repositoryRoot: options.repositoryRoot,
         originalRequest: options.originalRequest,
-        approvedPlan: planned.plan,
+        approvedPlan: plan,
         phase,
         gitDiff: await getWorkflowDiff(options.repositoryRoot, gitState.baseCommit),
         surroundingCode: await getSurroundingCode(options.repositoryRoot),
-        verification
+        verification,
+        confirmedDecisions: options.confirmedDecisions,
+        evaluations
       });
       addCost(reviewed.cost);
+      await dependencies.onModelRun?.("reviewer", phase.id, reviewed.run);
       phaseReviewCycles += 1;
       reviewCycles += 1;
 
       if (reviewed.decision.status === "approved") {
         event(`Independent reviewer approved ${phase.id}.`);
+        await dependencies.onStage?.("phase_approved", phase.id);
         break;
       }
       if (reviewed.decision.status === "escalate") {
@@ -244,7 +326,6 @@ export async function runWorkflow(
       corrections = reviewerCorrections(reviewed.decision);
       event(`Reviewer requested ${corrections.length} correction(s) for ${phase.id}.`);
     }
-  }
 
   const completedAt = now();
   const metrics: WorkflowMetrics = {
@@ -261,12 +342,14 @@ export async function runWorkflow(
     testsExecuted
   };
   await writeMetrics(options.repositoryRoot, options.metricsFile, metrics);
-  event("All approved phases are complete. Review and finish the branch manually.");
+  event(`${phase.id} is approved. The workflow stopped before every later phase.`);
 
   return {
     branch: gitState.branch,
     baseCommit: gitState.baseCommit,
-    plan: planned.plan,
+    plan,
+    phaseId: phase.id,
+    stoppedBeforeNextPhase: true,
     metrics
   };
 }

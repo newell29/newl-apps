@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 const MAX_CAPTURE_BYTES = 1024 * 1024;
 const MAX_REPORTED_CHARACTERS = 24_000;
@@ -19,6 +20,20 @@ export type CommandResult = CommandSpec & {
 export type VerificationResult = {
   passed: boolean;
   commands: CommandResult[];
+};
+
+export type ReviewerVerificationEvidence = {
+  passed: boolean;
+  commands: Array<{
+    name: CommandSpec["name"];
+    command: string;
+    args: string[];
+    passed: boolean;
+    exitCode: number | null;
+    durationMs: number;
+    outputHash: string;
+    summary: string;
+  }>;
 };
 
 export interface CommandRunner {
@@ -70,6 +85,33 @@ export function sanitizeCommandOutput(output: string): string {
   if (sanitized.length <= MAX_REPORTED_CHARACTERS) return sanitized;
   const half = Math.floor(MAX_REPORTED_CHARACTERS / 2);
   return `${sanitized.slice(0, half)}\n...[verification output truncated]...\n${sanitized.slice(-half)}`;
+}
+
+function successfulOutputSummary(output: string): string {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const selected = lines.slice(-8).join("\n");
+  return selected.length <= 2_000 ? selected : selected.slice(-2_000);
+}
+
+export function reviewerVerificationEvidence(
+  result: VerificationResult
+): ReviewerVerificationEvidence {
+  return {
+    passed: result.passed,
+    commands: result.commands.map((command) => ({
+      name: command.name,
+      command: command.command,
+      args: [...command.args],
+      passed: command.passed,
+      exitCode: command.exitCode,
+      durationMs: command.durationMs,
+      outputHash: createHash("sha256").update(command.output, "utf8").digest("hex"),
+      summary: command.passed ? successfulOutputSummary(command.output) : command.output
+    }))
+  };
 }
 
 export class LocalCommandRunner implements CommandRunner {

@@ -6,7 +6,7 @@
 
 This is the retained blueprint for the Newl Apps AI Development Engine. It describes the Version 3–4 architecture that future iterations should evolve toward. It must not be treated as a commitment to build the whole platform at once.
 
-The present experiment is [Version 1A.1](../../tools/ai-workflow/README.md): one local, non-persistent Qwen planner → DeepSeek builder → fresh Qwen reviewer loop with deterministic verification, fail-closed preflight, and one human plan approval. Infrastructure in this roadmap should be added only after real Newl Apps features demonstrate that the model sequence improves quality, time, or cost.
+The present implementation is [Version 1B.1](../../tools/ai-workflow/README.md): the proven local Qwen planner → DeepSeek builder → fresh Qwen reviewer loop plus a small operator launcher, exact single-phase approval, structured owner decisions, minimal ignored state, progress events, and review-boundary recovery. Infrastructure in this roadmap should still be added only when real Newl Apps features demonstrate a concrete need.
 
 ## Executive recommendation
 
@@ -475,16 +475,18 @@ Automated tests must never call live models, production systems, Teamship, email
 
 No persistence, checkpoints, resume, final cross-phase review, report engine, dashboard, Codex integration, automatic publishing, or production action.
 
-### Version 1B — evidence-based hardening
+### Version 1B.1 — operator usability and evidence-based hardening (implemented)
 
-Only after several real workflows:
-
-- tune prompts/schemas from observed failures;
-- add explicit risk-derived check selection;
-- improve phase-local diffs without checkpoint commits;
-- compare model combinations and human acceptance;
-- add dry-run/model-mock CLI fixtures; and
-- decide whether API cost and quality measurements justify continued investment.
+- one guided `npm run ai:feature` launcher;
+- user-level credential-free model defaults with worktree overrides;
+- local feature registry, bounded handoff imports, and generated requests;
+- atomic feature snapshots, append-only safe events, and an exclusive active-run guard;
+- exact single-phase approval and mandatory stop after review;
+- LOW, MEDIUM, HIGH, and OWNER_GATED phase handling with structured decisions;
+- status, watch, readiness, adoption, next, resume, and review-recovery commands;
+- compact successful verification evidence for lower reviewer cost;
+- schema-validated workflow evaluator extension point; and
+- no checkpoint commits, mobile service, OpenCode SDK transport, or automatic external action.
 
 ### Version 2 — durability and Git checkpoints
 
