@@ -21,6 +21,7 @@ import {
 } from "../tools/ai-workflow/config";
 import {
   answerOwnerQuestion,
+  confirmedDecisionMap,
   effectivePhaseRisk,
   hashJson,
   questionsFromPlan,
@@ -295,6 +296,38 @@ describe("Version 1B.1 model defaults and artifact import", () => {
     expect(phaseRequest.contents).toContain("Excluded later phases: FEATURE-PHASE-02");
     expect(phaseRequest.hash).toMatch(/^[0-9a-f]{64}$/);
   });
+
+  it("preserves the selected answer and exact owner explanation in the phase request", async () => {
+    const worktree = temporaryDirectory("newl-v1b1-owner-evidence-");
+    const question = questionsFromPlan(plan)[0];
+    const answered = answerOwnerQuestion(
+      question,
+      "POLICY_A",
+      "Use the same policy for both existing operating companies; do not infer a third.",
+      { planHash: question.planHash, questionHash: question.questionHash }
+    );
+    const phaseRequest = await generatePhaseRequest({
+      worktree,
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Add the synthetic feature.",
+      plan,
+      phase: ownerPhase,
+      artifacts: [],
+      questions: [answered]
+    });
+
+    expect(confirmedDecisionMap([answered])).toEqual({
+      "FEATURE-POLICY-1": {
+        answer: "POLICY_A",
+        explanation: "Use the same policy for both existing operating companies; do not infer a third."
+      }
+    });
+    expect(phaseRequest.contents).toContain("Selected answer: POLICY_A");
+    expect(phaseRequest.contents).toContain(
+      "Confirmed owner explanation: Use the same policy for both existing operating companies; do not infer a third."
+    );
+  });
 });
 
 describe("Version 1B.1 phase and owner-decision controls", () => {
@@ -462,6 +495,13 @@ These questions gate the same owner-gated phase.
 
   it("uses a stored roadmap without a planner call and stops after one phase", async () => {
     const requests: AgentRunRequest[] = [];
+    const evaluatorDecisions: unknown[] = [];
+    const confirmedDecisions = {
+      "FEATURE-POLICY-1": {
+        answer: "POLICY_A",
+        explanation: "Preserve this exact owner rationale in every model packet."
+      }
+    };
     const runner: AgentRunner = {
       run: async (request) => {
         requests.push(request);
@@ -499,7 +539,26 @@ These questions gate the same owner-gated phase.
         builderModel: "provider/deepseek",
         reviewerModel: "provider/qwen",
         approvedPlan: plan,
-        phaseId: phaseOne.id
+        phaseId: phaseOne.id,
+        confirmedDecisions,
+        evaluators: [
+          {
+            id: "owner-evidence",
+            evaluate: async (context) => {
+              evaluatorDecisions.push(context.confirmedDecisions);
+              return {
+                schemaVersion: 1,
+                evaluatorId: "owner-evidence",
+                status: "passed",
+                findings: [],
+                measurements: {},
+                artifactHashes: [],
+                durationMs: 1,
+                diffHash: context.diffHash
+              };
+            }
+          }
+        ]
       },
       {
         agentRunner: runner,
@@ -528,6 +587,11 @@ These questions gate the same owner-gated phase.
       }
     );
     expect(requests.map((request) => request.role)).toEqual(["builder", "reviewer"]);
+    expect(requests[0].prompt).toContain('"answer": "POLICY_A"');
+    expect(requests[0].prompt).toContain("Preserve this exact owner rationale in every model packet.");
+    expect(requests[1].prompt).toContain('"answer": "POLICY_A"');
+    expect(requests[1].prompt).toContain("Preserve this exact owner rationale in every model packet.");
+    expect(evaluatorDecisions).toEqual([confirmedDecisions]);
     expect(result).toMatchObject({ phaseId: phaseOne.id, stoppedBeforeNextPhase: true });
   });
 });

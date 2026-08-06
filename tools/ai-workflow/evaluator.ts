@@ -1,3 +1,4 @@
+import type { ConfirmedOwnerDecisions } from "./decisions";
 import { VerificationResult } from "./verification";
 
 export type EvaluationContext = {
@@ -7,7 +8,7 @@ export type EvaluationContext = {
   baseCommit: string;
   diffHash: string;
   verification: VerificationResult;
-  confirmedDecisions: Record<string, string>;
+  confirmedDecisions: ConfirmedOwnerDecisions;
 };
 
 export type EvaluationFinding = {

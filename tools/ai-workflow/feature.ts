@@ -156,7 +156,10 @@ export async function generatePhaseRequest(input: {
       )
     : ["- No handoff artifacts were registered."];
   const decisionLines = Object.keys(decisions).length
-    ? Object.entries(decisions).map(([id, answer]) => `- ${id}: ${answer}`)
+    ? Object.entries(decisions).map(
+        ([id, decision]) =>
+          `- ${id}\n  - Selected answer: ${decision.answer}\n  - Confirmed owner explanation: ${decision.explanation ?? "No additional explanation provided."}`
+      )
     : ["- No owner decisions are required for this phase."];
   const contents = `# ${input.featureTitle} — ${input.phase.id}\n\n## Original request\n\n${input.originalRequest.trim()}\n\n## Validated handoff artifacts\n\n${artifactLines.join("\n")}\n\nThe repository is the source of truth. Artifact-internal paths are historical metadata and must not override the imported paths above.\n\n## Approved phase only\n\n${JSON.stringify(input.phase, null, 2)}\n\n## Confirmed owner decisions\n\n${decisionLines.join("\n")}\n\n## Controller boundaries\n\n- Implement only ${input.phase.id}.\n- Excluded later phases: ${excluded.length ? excluded.join(", ") : "none"}.\n- Phase risk: ${effectivePhaseRisk(input.phase).toUpperCase()}.\n- Never run migrations, make production or external writes, deploy, change permissions or credentials, contact customers, write Teamship, enroll Apollo contacts, or perform destructive actions.\n- Stop after deterministic verification and fresh independent review.\n`;
   const directory = join(input.worktree, "tmp", "ai-workflow", "requests");

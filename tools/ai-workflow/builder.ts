@@ -1,3 +1,4 @@
+import type { ConfirmedOwnerDecisions } from "./decisions";
 import { AgentRunner, AgentRunResult, extractStructuredResult } from "./opencode";
 import { PlanPhase } from "./planner";
 
@@ -38,7 +39,7 @@ export async function implementPhase(
   model: string,
   phase: PlanPhase,
   corrections: string[],
-  context: { confirmedDecisions?: Record<string, string> } = {}
+  context: { confirmedDecisions?: ConfirmedOwnerDecisions } = {}
 ): Promise<{ report: BuilderReport; cost: number | null; run: AgentRunResult }> {
   const correctionBlock =
     corrections.length === 0
