@@ -106,6 +106,10 @@ Port and consignee-filter regression coverage must also verify:
 11. invalid local configuration creates and fails a tracked run before the worker stops, preventing untracked retry loops.
 12. Found Companies queries at most the top 100 human-review candidates, defaults to 25 rendered rows, supports only 25/50/75/100, clamps invalid pages, and limits CSV export to the same bounded review queue.
 13. the Hunter installer pins the live service to a clean detached `origin/main` worktree and the runner cannot be redirected to a development checkout through its environment file.
+14. transient ingestion HTTP/transport failures receive bounded request backoff, while permanent 4xx failures do not retry;
+15. after one batch succeeds and a later batch exhausts its retry budget, a second adapter process resumes the same tenant job and canonical CSV at the first unfinished batch without replaying the successful batch;
+16. ingestion checkpoints are mode `0600`, fail closed when their job/profile/CSV digest or batch layout differs, and record cumulative processed/created/updated/skipped counts; and
+17. a later worker failure update preserves the job's last successful batch, cumulative counters, and ingestion checkpoint metadata instead of replacing them with nulls or generic output.
 
 Scoring regression coverage must also verify:
 
