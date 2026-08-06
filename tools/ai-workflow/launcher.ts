@@ -35,7 +35,7 @@ import {
 } from "./git";
 import { importLegacyOwnerQuestions } from "./legacy-questions";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
-import { PlanPhase, WorkflowPlan } from "./planner";
+import { PlanPhase, recoverPlanFromSession, WorkflowPlan } from "./planner";
 import {
   authenticatedModelIds,
   runPreflight,
@@ -563,11 +563,21 @@ async function runFeature(
               phaseId,
               sessionId: modelRun.sessionId ?? null,
               messageId: modelRun.assistantMessageId ?? null,
+              textPartIds: (modelRun.textPartIds ?? []).slice(0, 64),
+              finishReason: modelRun.finishReason ?? null,
+              cost: modelRun.cost,
+              tokens: modelRun.tokens ?? null,
               recordedAt: new Date().toISOString()
             }
           ]
         };
         await saveFeatureState(coordinationRoot, state);
+      },
+      onDiagnostic: async (path) => {
+        if (!state.diagnosticArtifacts.includes(path)) {
+          state = { ...state, diagnosticArtifacts: [...state.diagnosticArtifacts, path] };
+          await saveFeatureState(coordinationRoot, state);
+        }
       },
       onVerification: async (phaseId, verification) => {
         const identity = await gitIdentity(state);
@@ -678,6 +688,144 @@ async function runFeature(
       }
       throw error;
     }
+  } finally {
+    await release();
+  }
+}
+
+async function recoverPlan(
+  coordinationRoot: string,
+  initialState: FeatureState,
+  readline: Interface,
+  explicitSessionId?: string
+): Promise<void> {
+  if (initialState.stage !== "interrupted" || initialState.plan !== null) {
+    throw new Error("Plan recovery is available only for an interrupted feature with no validated plan.");
+  }
+  const savedSessionId = [...initialState.modelSessions]
+    .reverse()
+    .find((run) => run.role === "planner" && run.sessionId)?.sessionId;
+  const sessionId = explicitSessionId ?? savedSessionId;
+  if (!sessionId) {
+    throw new Error(
+      "No saved planner session ID is available. For a pre-patch failure, rerun with --session <OpenCode-session-id>."
+    );
+  }
+
+  const release = await acquireFeatureRun(coordinationRoot, initialState.featureSlug);
+  let state = initialState;
+  const progress = createProgressReporter(coordinationRoot, state);
+  try {
+    await ensureDependencies(state.worktree, readline);
+    const identity = await gitIdentity(state);
+    if (
+      identity.branch !== state.branch ||
+      identity.headCommit !== state.headCommit ||
+      identity.mergeBaseCommit !== state.baseCommit ||
+      identity.diffHash !== state.currentDiffHash
+    ) {
+      throw new Error("Registered branch, base, HEAD, or diff changed. Planner recovery refused.");
+    }
+
+    const models = await loadModelConfiguration({ repositoryRoot: state.worktree });
+    state = { ...state, selectedModels: models, updatedAt: new Date().toISOString() };
+    await saveFeatureState(coordinationRoot, state);
+    state = await persistStage(coordinationRoot, state, "preflight", null);
+    const commandRunner = new LocalCommandRunner();
+    const inspector = new OpenCodeCliInspector(state.worktree);
+    await runPreflight({
+      repositoryRoot: state.worktree,
+      models,
+      commandRunner,
+      openCodeInspector: inspector,
+      expectedExistingDiff: {
+        branch: state.branch,
+        baseCommit: state.baseCommit,
+        headCommit: state.headCommit,
+        diffHash: state.currentDiffHash
+      },
+      onEvent: (message) => progress.emit({ stage: state.stage, type: "preflight.progress", message })
+    });
+
+    state = await persistStage(coordinationRoot, state, "planning", null);
+    console.log(`\nRecovering the compact roadmap with ${models.plannerModel}.`);
+    console.log("No builder, reviewer, phase approval, or feature-code action will run.");
+    const runner = new OpenCodeCliRunner(state.worktree, undefined, (event) => {
+      progress.emit({
+        stage: state.stage,
+        type: `model.${event.type}`,
+        message:
+          event.type === "heartbeat"
+            ? "planner model is still active; no operator input is needed."
+            : `planner model ${event.type}.`,
+        phaseId: null,
+        data: { modelRole: "planner", elapsedMs: event.elapsedMs }
+      });
+    });
+    const recovered = await recoverPlanFromSession(runner, models.plannerModel, sessionId, {
+      repositoryRoot: state.worktree,
+      onRun: async (modelRun) => {
+        state = {
+          ...state,
+          modelSessions: [
+            ...state.modelSessions,
+            {
+              role: "planner",
+              phaseId: null,
+              sessionId: modelRun.sessionId ?? sessionId,
+              messageId: modelRun.assistantMessageId ?? null,
+              textPartIds: (modelRun.textPartIds ?? []).slice(0, 64),
+              finishReason: modelRun.finishReason ?? null,
+              cost: modelRun.cost,
+              tokens: modelRun.tokens ?? null,
+              recordedAt: new Date().toISOString()
+            }
+          ]
+        };
+        await saveFeatureState(coordinationRoot, state);
+      },
+      onDiagnostic: async (path) => {
+        if (!state.diagnosticArtifacts.includes(path)) {
+          state = { ...state, diagnosticArtifacts: [...state.diagnosticArtifacts, path] };
+          await saveFeatureState(coordinationRoot, state);
+        }
+      }
+    });
+
+    const planHash = hashJson(recovered.plan);
+    const questions = questionsFromPlan(recovered.plan, planHash);
+    const phases = reconcilePhaseQuestionGates(phaseRecordsFromPlan(recovered.plan), questions);
+    state = {
+      ...state,
+      plan: recovered.plan,
+      planHash,
+      phases,
+      questions,
+      currentPhaseId: null,
+      finalOutcome: "Planner roadmap recovered; no phase has been approved.",
+      eventSequence: progress.sequence()
+    };
+    state = transitionFeatureState(state, "awaiting_phase_approval");
+    await saveFeatureState(coordinationRoot, state);
+
+    const phase = nextPendingPhase(state);
+    if (!phase) throw new Error("The recovered roadmap has no eligible phase.");
+    printRoadmap(recovered.plan, phase.id);
+    printPhase(phase);
+    console.log("\n✓ The roadmap was recovered and validated.");
+    console.log("⏸ No phase was approved and no builder was called.");
+    console.log(`Continue only when ready: npm run ai:feature -- continue ${state.featureSlug}`);
+  } catch (error) {
+    try {
+      if (state.stage === "preflight" || state.stage === "planning") {
+        state = transitionFeatureState(state, "interrupted");
+      }
+      state = { ...state, eventSequence: progress.sequence() };
+      await saveFeatureState(coordinationRoot, state);
+    } catch {
+      // Preserve the original fail-closed recovery error.
+    }
+    throw error;
   } finally {
     await release();
   }
@@ -933,7 +1081,7 @@ async function watchFeature(coordinationRoot: string, state: FeatureState): Prom
 }
 
 async function interactiveCommand(readline: Interface): Promise<string> {
-  console.log(`\nNewl AI Development Engine\n\nWhat would you like to do?\n\n1. Start a new feature\n2. Continue an existing feature\n3. Run the next approved phase\n4. View workflow status\n5. Resume an interrupted workflow\n6. Recover a failed review\n7. Answer blocking questions\n8. Check system readiness\n`);
+  console.log(`\nNewl AI Development Engine\n\nWhat would you like to do?\n\n1. Start a new feature\n2. Continue an existing feature\n3. Run the next approved phase\n4. View workflow status\n5. Resume an interrupted workflow\n6. Recover a failed review\n7. Answer blocking questions\n8. Check system readiness\n9. Recover a failed plan\n`);
   const selection = await ask(readline, "Selection: ");
   return (
     {
@@ -944,7 +1092,8 @@ async function interactiveCommand(readline: Interface): Promise<string> {
       "5": "resume",
       "6": "recover-review",
       "7": "questions",
-      "8": "readiness"
+      "8": "readiness",
+      "9": "recover-plan"
     } as Record<string, string>
   )[selection] ?? "";
 }
@@ -1018,6 +1167,14 @@ async function main(): Promise<void> {
     }
     if (action === "answer") return answerQuestion(coordinationRoot, state, args[2], readline);
     if (action === "recover-review") return recoverReview(coordinationRoot, state);
+    if (action === "recover-plan") {
+      const sessionFlag = args.indexOf("--session");
+      const explicitSessionId = sessionFlag >= 0 ? args[sessionFlag + 1] : undefined;
+      if (sessionFlag >= 0 && !explicitSessionId) {
+        throw new Error("--session requires an OpenCode session ID.");
+      }
+      return recoverPlan(coordinationRoot, state, readline, explicitSessionId);
+    }
     if (action === "readiness") {
       const models = await loadModelConfiguration({ repositoryRoot: state.worktree });
       const result = await runPreflight({
@@ -1046,6 +1203,10 @@ async function main(): Promise<void> {
         console.log(`Review recovery is available: npm run ai:feature -- recover-review ${state.featureSlug}`);
         return;
       }
+      if (state.stage === "interrupted" && state.plan === null) {
+        console.log(`Plan recovery is available: npm run ai:feature -- recover-plan ${state.featureSlug}`);
+        return;
+      }
       if (state.stage === "waiting_questions") {
         await showQuestions(state);
         return;
@@ -1061,6 +1222,10 @@ async function main(): Promise<void> {
     if (action === "resume") {
       if (state.stage !== "interrupted" && state.stage !== "paused") {
         throw new Error(`Feature is ${state.stage}; resume is only available after interruption or pause.`);
+      }
+      if (state.stage === "interrupted" && state.plan === null) {
+        console.log(`Plan recovery is available: npm run ai:feature -- recover-plan ${state.featureSlug}`);
+        return;
       }
       return runFeature(coordinationRoot, state, readline);
     }

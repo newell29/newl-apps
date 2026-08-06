@@ -10,6 +10,7 @@ export type AgentRunRequest = {
   role: AgentRole;
   model: string;
   prompt: string;
+  sessionId?: string;
 };
 
 export type AgentRunResult = {
@@ -18,6 +19,13 @@ export type AgentRunResult = {
   sessionId?: string;
   assistantMessageId?: string;
   textPartIds?: string[];
+  finishReason?: string;
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning: number;
+    cacheRead: number;
+  };
 };
 
 export interface AgentRunner {
@@ -198,9 +206,39 @@ function eventCost(value: unknown): number | null {
   return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : null;
 }
 
+function eventCompletionMetadata(value: unknown): Pick<AgentRunResult, "finishReason" | "tokens"> {
+  if (!value || typeof value !== "object") return {};
+  const event = value as Record<string, unknown>;
+  if (event.type !== "step_finish" || !event.part || typeof event.part !== "object") return {};
+  const part = event.part as Record<string, unknown>;
+  const tokens = part.tokens;
+  let parsedTokens: AgentRunResult["tokens"];
+  if (tokens && typeof tokens === "object" && !Array.isArray(tokens)) {
+    const record = tokens as Record<string, unknown>;
+    const cache = record.cache;
+    const cacheRead =
+      cache && typeof cache === "object" && !Array.isArray(cache)
+        ? (cache as Record<string, unknown>).read
+        : undefined;
+    const numeric = (candidate: unknown) =>
+      typeof candidate === "number" && Number.isFinite(candidate) && candidate >= 0 ? candidate : 0;
+    parsedTokens = {
+      input: numeric(record.input),
+      output: numeric(record.output),
+      reasoning: numeric(record.reasoning),
+      cacheRead: numeric(cacheRead)
+    };
+  }
+  return {
+    finishReason: stringField(part, "reason") ?? stringField(part, "finish"),
+    tokens: parsedTokens
+  };
+}
+
 export function parseOpenCodeOutput(stdout: string): AgentRunResult {
   const texts: TextCandidate[] = [];
   const costs: number[] = [];
+  let completionMetadata: Pick<AgentRunResult, "finishReason" | "tokens"> = {};
 
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -209,6 +247,8 @@ export function parseOpenCodeOutput(stdout: string): AgentRunResult {
       collectText(event, texts);
       const cost = eventCost(event);
       if (cost !== null) costs.push(cost);
+      const metadata = eventCompletionMetadata(event);
+      if (metadata.finishReason || metadata.tokens) completionMetadata = metadata;
     } catch {
       texts.push({ text: line });
     }
@@ -229,15 +269,19 @@ export function parseOpenCodeOutput(stdout: string): AgentRunResult {
     assistantMessageId: selected?.messageId,
     textPartIds: [
       ...new Set(texts.map((candidate) => candidate.partId).filter((id): id is string => Boolean(id)))
-    ]
+    ],
+    ...completionMetadata
   };
 }
 
 export function extractStructuredResult(text: string): unknown {
   const start = text.indexOf(RESULT_OPEN);
+  if (start < 0) {
+    throw new Error("The model response did not contain the opening structured result envelope.");
+  }
   const end = text.indexOf(RESULT_CLOSE, start + RESULT_OPEN.length);
-  if (start < 0 || end < 0) {
-    throw new Error("The model response did not contain the required structured result envelope.");
+  if (end < 0) {
+    throw new Error("The model response started a structured result but was truncated before the closing envelope.");
   }
 
   const json = text.slice(start + RESULT_OPEN.length, end).trim();
@@ -278,12 +322,17 @@ export class OpenCodeCliRunner implements AgentRunner {
       "--format",
       "json",
       "--dir",
-      this.repositoryRoot,
-      "--title",
-      `Newl AI workflow ${request.role}`,
-      "--",
-      request.prompt
+      this.repositoryRoot
     ];
+    if (request.sessionId) {
+      if (!/^ses_[A-Za-z0-9_-]{6,128}$/.test(request.sessionId)) {
+        throw new Error("OpenCode session ID is malformed.");
+      }
+      args.push("--session", request.sessionId);
+    } else {
+      args.push("--title", `Newl AI workflow ${request.role}`);
+    }
+    args.push("--", request.prompt);
 
     const startedAt = Date.now();
     this.onProgress?.({ role: request.role, type: "started", elapsedMs: 0 });

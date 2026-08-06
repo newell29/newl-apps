@@ -103,6 +103,15 @@ export type FeatureState = {
     phaseId: string | null;
     sessionId: string | null;
     messageId: string | null;
+    textPartIds?: string[];
+    finishReason?: string | null;
+    cost?: number | null;
+    tokens?: {
+      input: number;
+      output: number;
+      reasoning: number;
+      cacheRead: number;
+    } | null;
     recordedAt: string;
   }>;
   verificationHistory: Array<{

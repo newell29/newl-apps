@@ -188,7 +188,7 @@ describe("reviewer status contract", () => {
     expect(() => validateReviewDecision("not an object")).toThrow(/must be an object/);
     expect(() => validateReviewDecision({ status: "approved" })).toThrow(/summary/);
     expect(() => extractStructuredResult("<AI_WORKFLOW_RESULT>{\"status\":\"approved\""))
-      .toThrow(/required structured result envelope/);
+      .toThrow(/truncated before the closing envelope/);
     expect(() =>
       validateReviewDecision({ ...decision("approved"), result: decision("changes_requested", [finding()]) })
     ).toThrow(/unexpected fields/);

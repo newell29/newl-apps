@@ -67,6 +67,7 @@ export type WorkflowDependencies = {
     phaseId: string | null,
     result: AgentRunResult
   ) => Promise<void>;
+  onDiagnostic?: (path: string) => Promise<void>;
   onVerification?: (phaseId: string, result: VerificationResult) => Promise<void>;
   onEvent?: (message: string) => void;
   now?: () => Date;
@@ -177,10 +178,14 @@ export async function runWorkflow(
     const planned = await createPlan(
       dependencies.agentRunner,
       options.plannerModel,
-      options.originalRequest
+      options.originalRequest,
+      {
+        repositoryRoot: options.repositoryRoot,
+        onRun: (run) => dependencies.onModelRun?.("planner", null, run) ?? Promise.resolve(),
+        onDiagnostic: dependencies.onDiagnostic
+      }
     );
     addCost(planned.cost);
-    await dependencies.onModelRun?.("planner", null, planned.run);
     plan = planned.plan;
     await dependencies.onPlanCreated?.(plan);
   }
