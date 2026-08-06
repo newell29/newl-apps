@@ -4,7 +4,6 @@ import { spawn } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync, watch } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import type { Interface } from "node:readline/promises";
 
 import {
   DEFAULT_USER_MODEL_CONFIG_FILE,
@@ -35,7 +34,7 @@ import {
 } from "./git";
 import { importLegacyOwnerQuestions } from "./legacy-questions";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
-import { createOperatorInput } from "./operator-input";
+import { createOperatorInput, OperatorReadline } from "./operator-input";
 import { PlanPhase, recoverPlanFromSession, WorkflowPlan } from "./planner";
 import {
   authenticatedModelIds,
@@ -73,13 +72,13 @@ function command(cwd: string, executable: string, args: string[]): Promise<void>
   });
 }
 
-async function ask(readline: Interface, prompt: string, required = true): Promise<string> {
+async function ask(readline: OperatorReadline, prompt: string, required = true): Promise<string> {
   const answer = (await readline.question(prompt)).trim();
   if (required && !answer) throw new Error("A response is required.");
   return answer;
 }
 
-async function confirm(readline: Interface, prompt: string, defaultYes = false): Promise<boolean> {
+async function confirm(readline: OperatorReadline, prompt: string, defaultYes = false): Promise<boolean> {
   const answer = (await readline.question(`${prompt} ${defaultYes ? "[Y/n]" : "[y/N]"} `))
     .trim()
     .toLowerCase();
@@ -109,7 +108,7 @@ async function listFeatureStates(coordinationRoot: string): Promise<FeatureState
 
 async function selectFeature(
   coordinationRoot: string,
-  readline: Interface,
+  readline: OperatorReadline,
   requested?: string
 ): Promise<FeatureState> {
   if (requested) return loadFeatureState(coordinationRoot, validateFeatureSlug(requested));
@@ -176,7 +175,10 @@ async function persistStage(
   return next;
 }
 
-async function createNewFeature(coordinationRoot: string, readline: Interface): Promise<FeatureState> {
+async function createNewFeature(
+  coordinationRoot: string,
+  readline: OperatorReadline
+): Promise<FeatureState> {
   const slug = validateFeatureSlug(await ask(readline, "Feature slug: "));
   const title = await ask(readline, "Feature name: ");
   const originalRequest = await ask(readline, "Describe the feature request: ");
@@ -232,7 +234,7 @@ async function createNewFeature(coordinationRoot: string, readline: Interface): 
   return state;
 }
 
-async function ensureDependencies(worktree: string, readline: Interface): Promise<void> {
+async function ensureDependencies(worktree: string, readline: OperatorReadline): Promise<void> {
   const openCodeBinary = join(worktree, "node_modules", ".bin", "opencode");
   if (existsSync(openCodeBinary)) return;
   console.log("\nRequired worktree dependencies are not installed.");
@@ -245,7 +247,7 @@ async function ensureDependencies(worktree: string, readline: Interface): Promis
 
 async function adoptExistingFeature(
   coordinationRoot: string,
-  readline: Interface,
+  readline: OperatorReadline,
   requestedSlug?: string
 ): Promise<FeatureState> {
   const slug = validateFeatureSlug(requestedSlug ?? (await ask(readline, "Feature slug: ")));
@@ -389,7 +391,7 @@ async function readGitHead(worktree: string): Promise<string> {
 async function runFeature(
   coordinationRoot: string,
   initialState: FeatureState,
-  readline: Interface
+  readline: OperatorReadline
 ): Promise<void> {
   const release = await acquireFeatureRun(coordinationRoot, initialState.featureSlug);
   let state = initialState;
@@ -696,7 +698,7 @@ async function runFeature(
 async function recoverPlan(
   coordinationRoot: string,
   initialState: FeatureState,
-  readline: Interface,
+  readline: OperatorReadline,
   explicitSessionId?: string
 ): Promise<void> {
   if (initialState.stage !== "interrupted" || initialState.plan !== null) {
@@ -892,7 +894,7 @@ async function answerQuestion(
   coordinationRoot: string,
   state: FeatureState,
   questionId: string | undefined,
-  readline: Interface
+  readline: OperatorReadline
 ): Promise<void> {
   const question = questionId
     ? state.questions.find((candidate) => candidate.id === questionId)
@@ -1023,7 +1025,10 @@ async function recoverReview(
   }
 }
 
-async function configureModels(repositoryRoot: string, readline: Interface): Promise<void> {
+async function configureModels(
+  repositoryRoot: string,
+  readline: OperatorReadline
+): Promise<void> {
   const inspector = new OpenCodeCliInspector(repositoryRoot);
   const catalog = await inspector.inspect();
   console.log(`\nOpenCode ${catalog.version}`);
@@ -1080,7 +1085,7 @@ async function watchFeature(coordinationRoot: string, state: FeatureState): Prom
   });
 }
 
-async function interactiveCommand(readline: Interface): Promise<string> {
+async function interactiveCommand(readline: OperatorReadline): Promise<string> {
   console.log(`\nNewl AI Development Engine\n\nWhat would you like to do?\n\n1. Start a new feature\n2. Continue an existing feature\n3. Run the next approved phase\n4. View workflow status\n5. Resume an interrupted workflow\n6. Recover a failed review\n7. Answer blocking questions\n8. Check system readiness\n9. Recover a failed plan\n`);
   const selection = await ask(readline, "Selection: ");
   return (

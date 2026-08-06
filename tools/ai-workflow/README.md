@@ -44,7 +44,7 @@ npm run ai:feature -- models configure
 
 Running `npm run ai:feature` without arguments opens the guided menu. The launcher labels approval prompts, shows the selected worktree and models, creates internal request files, and reports when a model is active even if no safe content is available to display.
 
-The launcher explicitly keeps terminal input active until the current command finishes. This prevents supported Node.js versions from exiting silently while an approval, model-selection, or owner-question prompt is waiting for an answer.
+The launcher entry point stays alive until the current command finishes, while terminal input is opened only for the question currently on screen. Each approval, model-selection, or owner-question prompt gets a fresh input interface, so a long preflight or model operation cannot leave the later prompt attached to a stale closed interface.
 
 For a new feature, the operator may describe the request directly in ordinary text. Handoff Markdown, JSON, and review evidence are optional inputs for continuing or transferring existing work; they are not required to start a feature. The planner turns the operator's text plus repository evidence into the validated roadmap.
 
