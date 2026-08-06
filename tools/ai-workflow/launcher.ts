@@ -129,6 +129,7 @@ function printModels(models: NonNullable<FeatureState["selectedModels"]>): void 
   console.log(`Planner:  ${models.plannerModel}`);
   console.log(`Builder:  ${models.builderModel}`);
   console.log(`Reviewer: ${models.reviewerModel}`);
+  console.log(`Fallback: ${models.escalationModel ?? "not configured"}`);
 }
 
 function printRoadmap(plan: WorkflowPlan, selectedPhaseId: string): void {
@@ -431,6 +432,7 @@ async function runFeature(
       plannerModel: models.plannerModel,
       builderModel: models.builderModel,
       reviewerModel: models.reviewerModel,
+      escalationModel: models.escalationModel,
       approvedPlan: state.plan ?? undefined,
       phaseId: phase?.id,
       featureSlug: state.featureSlug,
@@ -1041,7 +1043,11 @@ async function configureModels(
     builderModel: await ask(readline, "Builder model ID: "),
     reviewerModel: await ask(readline, "Reviewer model ID: ")
   };
-  const escalationModel = await ask(readline, "Optional future escalation model ID: ", false);
+  const escalationModel = await ask(
+    readline,
+    "Optional one-attempt fallback remediation model ID: ",
+    false
+  );
   const selectedModels = escalationModel ? { ...models, escalationModel } : models;
   validateOpenCodeCatalog(catalog, selectedModels);
   const path = await saveUserModelConfiguration(selectedModels);

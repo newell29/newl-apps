@@ -97,6 +97,7 @@ export type FeatureState = {
     plannerModel: string;
     builderModel: string;
     reviewerModel: string;
+    escalationModel?: string;
   } | null;
   modelSessions: Array<{
     role: "planner" | "builder" | "reviewer";

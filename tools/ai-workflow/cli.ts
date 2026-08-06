@@ -73,6 +73,7 @@ async function main(): Promise<void> {
       "planner-model": { type: "string" },
       "builder-model": { type: "string" },
       "reviewer-model": { type: "string" },
+      "escalation-model": { type: "string" },
       "model-config": { type: "string" },
       "metrics-file": { type: "string" },
       "max-review-cycles": { type: "string" },
@@ -107,6 +108,7 @@ AI_WORKFLOW_*_MODEL environment variables may override that local ignored file:
   --planner-model provider/model     Qwen planner model
   --builder-model provider/model     DeepSeek builder model
   --reviewer-model provider/model    Qwen reviewer model
+  --escalation-model provider/model  One bounded fallback remediator after correction exhaustion
 
 Other options:
   --branch codex/name                Create a new simple feature branch
@@ -114,7 +116,7 @@ Other options:
   --metrics-file tmp/name.jsonl      Ignored local metrics output
   --recovery-file tmp/name.json      Owner-only pinned review recovery metadata
   --max-review-cycles 3              Fresh Qwen reviews allowed per phase
-  --max-retries 3                    Builder corrections allowed per phase`);
+  --max-retries 3                    Ordinary failed attempts before fallback or stop`);
     return;
   }
 
@@ -148,7 +150,8 @@ Other options:
     configFile: values["model-config"],
     plannerModel: values["planner-model"],
     builderModel: values["builder-model"],
-    reviewerModel: values["reviewer-model"]
+    reviewerModel: values["reviewer-model"],
+    escalationModel: values["escalation-model"]
   });
   const commandRunner = new LocalCommandRunner();
   const agentRunner = new OpenCodeCliRunner(repositoryRoot);
@@ -236,6 +239,7 @@ Other options:
         plannerModel: models.plannerModel,
         builderModel: models.builderModel,
         reviewerModel: models.reviewerModel,
+        escalationModel: models.escalationModel,
         branch: values.branch,
         metricsFile: values["metrics-file"],
         maxReviewCycles: numberOption(values["max-review-cycles"], "--max-review-cycles"),
