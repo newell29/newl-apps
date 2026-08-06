@@ -261,6 +261,22 @@ describe("Version 1B.1 local state", () => {
     await releaseAgain();
   });
 
+  it("allows an approved-roadmap feature to re-enter mandatory preflight before phase approval", () => {
+    const state = createFeatureState({
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Synthetic request.",
+      branch: "codex/synthetic-feature",
+      worktree: "/synthetic/worktree",
+      baseCommit: "a".repeat(40),
+      headCommit: "a".repeat(40),
+      diffHash: "b".repeat(64)
+    });
+    const awaitingApproval = transitionFeatureState(state, "awaiting_phase_approval");
+
+    expect(transitionFeatureState(awaitingApproval, "preflight").stage).toBe("preflight");
+  });
+
   it("rejects unknown state schema versions", async () => {
     const coordinationRoot = temporaryDirectory("newl-v1b1-schema-");
     const directory = join(coordinationRoot, "tmp", "ai-workflow", "features", "synthetic-feature");
