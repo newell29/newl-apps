@@ -34,7 +34,7 @@ import {
 } from "./git";
 import { importLegacyOwnerQuestions } from "./legacy-questions";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
-import { createOperatorInput, OperatorReadline } from "./operator-input";
+import { OperatorReadline, withOperatorInput } from "./operator-input";
 import { PlanPhase, recoverPlanFromSession, WorkflowPlan } from "./planner";
 import {
   authenticatedModelIds,
@@ -1106,9 +1106,7 @@ async function interactiveCommand(readline: OperatorReadline): Promise<string> {
 export async function runLauncher(): Promise<void> {
   const repositoryRoot = await findRepositoryRoot(process.cwd());
   const coordinationRoot = await findCoordinationRoot(repositoryRoot);
-  const operatorInput = createOperatorInput();
-  const readline = operatorInput.readline;
-  try {
+  await withOperatorInput(async (readline) => {
     const args = process.argv.slice(2);
     let action = args[0] ?? "";
     if (!action) action = await interactiveCommand(readline);
@@ -1236,7 +1234,5 @@ export async function runLauncher(): Promise<void> {
       return runFeature(coordinationRoot, state, readline);
     }
     throw new Error(`Unknown ai:feature action ${action}.`);
-  } finally {
-    operatorInput.close();
-  }
+  });
 }
