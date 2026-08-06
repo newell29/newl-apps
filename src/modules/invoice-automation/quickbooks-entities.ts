@@ -16,6 +16,7 @@ import type { TenantContext } from "@/server/tenant-context";
 const QUICKBOOKS_ENTITY_SYNC_STALE_MS = 10 * 60 * 1000;
 const QUICKBOOKS_QUERY_PAGE_SIZE = 1000;
 const QUICKBOOKS_ENTITY_UPSERT_BATCH_SIZE = 100;
+const INVOICE_AUTOMATION_QUICKBOOKS_LEGAL_ENTITY = "NEWL_WORLDWIDE";
 
 type QuickBooksCredentialRecord = {
   id: string;
@@ -43,7 +44,8 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
   const entities = await prisma.invoiceAutomationQuickBooksEntity.findMany({
     where: {
       tenantId: tenant.tenantId,
-      active: true
+      active: true,
+      legalEntity: INVOICE_AUTOMATION_QUICKBOOKS_LEGAL_ENTITY
     },
     orderBy: [{ entityType: "asc" }, { displayName: "asc" }],
     select: {
@@ -52,7 +54,8 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
       quickBooksId: true,
       displayName: true,
       normalizedName: true,
-      currency: true
+      currency: true,
+      legalEntity: true
     }
   });
   const aliases = await prisma.invoiceAutomationEntityAlias.findMany({
@@ -68,6 +71,7 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
       currency: true
     }
   });
+  const allowedRealmIds = new Set(entities.map((entity) => entity.realmId));
 
   return [
     ...entities.map((entity) => ({
@@ -77,13 +81,15 @@ export async function getInvoiceAutomationQuickBooksEntityOptions(
       currency: entity.currency,
       entityType: entity.entityType
     })),
-    ...aliases.map((alias) => ({
-      id: alias.quickBooksEntityId,
-      displayName: alias.quickBooksEntityDisplayName,
-      normalizedName: alias.normalizedAlias,
-      currency: alias.currency,
-      entityType: alias.invoiceType
-    }))
+    ...aliases
+      .filter((alias) => isQuickBooksEntityOptionInAllowedRealms(alias.quickBooksEntityId, allowedRealmIds))
+      .map((alias) => ({
+        id: alias.quickBooksEntityId,
+        displayName: alias.quickBooksEntityDisplayName,
+        normalizedName: alias.normalizedAlias,
+        currency: alias.currency,
+        entityType: alias.invoiceType
+      }))
   ];
 }
 
@@ -416,6 +422,11 @@ function buildQuickBooksEntityOptionId(entity: {
   quickBooksId: string;
 }) {
   return `quickbooks:${entity.realmId}:${entity.entityType}:${entity.quickBooksId}`;
+}
+
+function isQuickBooksEntityOptionInAllowedRealms(value: string, allowedRealmIds: Set<string>) {
+  const parts = value.split(":");
+  return parts.length === 4 && parts[0] === "quickbooks" && allowedRealmIds.has(parts[1]);
 }
 
 function formatQuickBooksSyncWarning(credential: QuickBooksCredentialRecord, error: unknown) {

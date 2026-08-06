@@ -46,6 +46,10 @@ const mocks = vi.hoisted(() => {
         findUnique: vi.fn(),
         update: vi.fn()
       },
+      integrationCredential: {
+        findMany: vi.fn(),
+        update: vi.fn()
+      },
       auditLog: {
         create: vi.fn()
       }
@@ -134,6 +138,8 @@ describe("invoice automation workflow routes", () => {
     mocks.prisma.invoiceAutomationInvoice.findMany.mockResolvedValue([]);
     mocks.prisma.invoiceAutomationInvoice.findFirst.mockResolvedValue(null);
     mocks.prisma.invoiceAutomationInvoice.findUnique.mockResolvedValue(null);
+    mocks.prisma.integrationCredential.findMany.mockResolvedValue([]);
+    mocks.prisma.integrationCredential.update.mockResolvedValue({});
     mocks.prisma.invoiceAutomationInvoice.update.mockResolvedValue({
       ...completeCustomerInvoice,
       batch: { batchNumber: "IA-1" },
@@ -364,6 +370,81 @@ describe("invoice automation workflow routes", () => {
       error: "QuickBooks posting is disabled. Set QUICKBOOKS_POSTING_ENABLED=true only when ready to run controlled tests."
     });
     expect(mocks.prisma.invoiceAutomationInvoice.findMany).not.toHaveBeenCalled();
+  });
+
+  it("blocks QuickBooks posting when an invoice is matched to a Newl USA realm", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    mocks.prisma.invoiceAutomationInvoice.findMany.mockResolvedValueOnce([
+      {
+        ...completeCustomerInvoice,
+        status: InvoiceAutomationStatus.APPROVED_FOR_POSTING,
+        batch: { batchNumber: "IA-1" },
+        document: {
+          fileName: "customer.pdf",
+          contentType: "application/pdf",
+          extractedText: "Invoice text",
+          pdfBytes: new Uint8Array([37, 80, 68, 70])
+        },
+        shipmentType: "OE",
+        businessLine: "OCEAN",
+        quickBooksEntityId: "quickbooks:realm-usa:CUSTOMER:qb-customer-usa",
+        quickBooksEntityDisplayName: "Acme Logistics USA",
+        quickBooksMatchConfidence: 100,
+        dueDate: new Date("2026-07-31T00:00:00.000Z"),
+        subtotalAmount: 1000,
+        taxAmount: 0,
+        totalAmount: 1000,
+        quickBooksExchangeRate: null,
+        quickBooksHomeCurrency: null,
+        quickBooksSubtotalHomeAmount: null,
+        quickBooksTaxHomeAmount: null,
+        quickBooksTotalHomeAmount: null,
+        quickBooksFxSource: null,
+        quickBooksFxCapturedAt: null,
+        issueCodes: [],
+        createdAt: new Date("2026-07-01T00:00:00.000Z"),
+        sentToAccountingAt: new Date("2026-07-01T00:00:00.000Z"),
+        sentToAccountingById: context.userId
+      }
+    ]);
+    mocks.prisma.integrationCredential.findMany.mockResolvedValueOnce([
+      {
+        id: "credential-usa",
+        tenantId: context.tenantId,
+        name: "QuickBooks - Newl USA",
+        publicConfig: {
+          legalEntity: "NEWL_USA",
+          realmId: "realm-usa",
+          accessTokenExpiresAt: "2099-01-01T00:00:00.000Z"
+        },
+        secretRef: "encrypted-secret"
+      }
+    ]);
+
+    const response = await postToQuickBooks(
+      new Request("https://newl.test/api/finance/invoice-automation/post", {
+        method: "POST",
+        body: JSON.stringify({
+          invoiceIds: ["invoice-1"],
+          mode: "preview"
+        })
+      })
+    );
+
+    expect(response.status).toBe(207);
+    await expect(response.json()).resolves.toMatchObject({
+      mode: "preview",
+      errorCount: 1,
+      results: [
+        {
+          invoiceId: "invoice-1",
+          error: "Invoice automation currently posts only to Newl Worldwide. Re-select a Newl Worldwide QuickBooks customer/vendor before posting."
+        }
+      ]
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mocks.prisma.integrationCredential.update).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
 
