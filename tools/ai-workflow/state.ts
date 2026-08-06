@@ -170,7 +170,7 @@ const allowedTransitions: Record<WorkflowStage, WorkflowStage[]> = {
   ],
   preflight: ["planning", "awaiting_phase_approval", "recovering_review", "interrupted"],
   planning: ["awaiting_phase_approval", "waiting_questions", "interrupted", "escalated"],
-  awaiting_phase_approval: ["implementing", "waiting_questions", "paused", "interrupted"],
+  awaiting_phase_approval: ["preflight", "implementing", "waiting_questions", "paused", "interrupted"],
   waiting_questions: ["awaiting_phase_approval", "paused", "interrupted"],
   implementing: ["verifying", "interrupted", "escalated"],
   verifying: ["correcting", "reviewing", "interrupted", "escalated"],
