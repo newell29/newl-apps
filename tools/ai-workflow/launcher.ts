@@ -1043,7 +1043,11 @@ async function configureModels(
     builderModel: await ask(readline, "Builder model ID: "),
     reviewerModel: await ask(readline, "Reviewer model ID: ")
   };
-  const escalationModel = await ask(readline, "Optional future escalation model ID: ", false);
+  const escalationModel = await ask(
+    readline,
+    "Optional one-attempt fallback remediation model ID: ",
+    false
+  );
   const selectedModels = escalationModel ? { ...models, escalationModel } : models;
   validateOpenCodeCatalog(catalog, selectedModels);
   const path = await saveUserModelConfiguration(selectedModels);
