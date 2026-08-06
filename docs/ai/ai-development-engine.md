@@ -192,6 +192,8 @@ Every model result is parsed into JSON and validated twice:
 
 Invalid output may be retried with a short schema-error prompt. Repeated invalid output produces escalation; it never becomes implied approval.
 
+The current planner applies this policy with a bounded two-turn OpenCode session: repository inspection first, then a compact roadmap capped at eight phases and eight initial owner questions. A malformed or truncated roadmap receives one same-session compact repair, preserving the already-paid repository context. Provider identifiers and bounded redacted diagnostics are captured before validation, and `recover-plan` can resume the pinned session while rechecking Git identity and deterministic preflight. Recovery only restores a validated roadmap; it never approves or implements a phase.
+
 ## Agent design
 
 ### Planner — Qwen

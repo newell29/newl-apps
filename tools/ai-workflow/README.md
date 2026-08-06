@@ -33,6 +33,7 @@ npm run ai:feature -- next customer-profile
 npm run ai:feature -- status customer-profile
 npm run ai:feature -- watch customer-profile
 npm run ai:feature -- resume customer-profile
+npm run ai:feature -- recover-plan customer-profile
 npm run ai:feature -- recover-review customer-profile
 npm run ai:feature -- questions customer-profile
 npm run ai:feature -- answer customer-profile QUESTION-ID
@@ -154,6 +155,28 @@ Optional settings:
 - `AI_WORKFLOW_PLANNER_MODEL`, `AI_WORKFLOW_BUILDER_MODEL`, and `AI_WORKFLOW_REVIEWER_MODEL` may supply model IDs.
 
 The CLI displays the complete plan and accepts only an interactive `yes` or `y` before any builder runs. There is no non-interactive approval flag.
+
+## Planner output resilience and plan recovery
+
+Live planning uses one read-only OpenCode session in two bounded turns. The first turn inspects and reconciles the repository without emitting a roadmap. The second turn asks the same session for a compact structured roadmap. New model output is limited to 8 phases, 8 initial owner questions, bounded per-phase arrays, bounded paths, and bounded text. Existing validated local roadmaps remain readable even if they predate these tighter generation limits.
+
+If the structured turn is truncated or malformed, the controller makes one same-session compact repair attempt. It does not pay for another repository inspection. Approval still fails closed: an incomplete, ambiguous, oversized, or twice-invalid result never becomes a plan. Planner session, message, text-part, finish-reason, token, and cost metadata are recorded as soon as each model turn completes, before validation.
+
+Planner parsing failures create a bounded redacted owner-only diagnostic under ignored `tmp/ai-workflow/failures/`. The artifact records envelope positions and provider identifiers, but excludes private reasoning, credentials, environment variables, and unbounded logs. A recovered first failure is retained for later provider analysis.
+
+After an interrupted planning boundary, run:
+
+```bash
+npm run ai:feature -- recover-plan <feature-slug>
+```
+
+The launcher verifies the exact registered branch, base commit, HEAD, and diff hash, then reruns strict preflight before making a paid call. It continues the saved planner session, validates the compact roadmap, displays it, and stops. It does not call the builder or reviewer and does not approve a phase. Failures created before planner session capture was added require the one-time compatibility form:
+
+```bash
+npm run ai:feature -- recover-plan <feature-slug> --session <OpenCode-session-id>
+```
+
+Ordinary `continue` and `resume` no longer silently start a new planner when an unvalidated interrupted plan can be recovered.
 
 ## Reviewer contract and review-boundary recovery
 

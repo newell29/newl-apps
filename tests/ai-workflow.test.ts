@@ -132,12 +132,12 @@ describe("AI workflow structured contracts", () => {
     expect(() =>
       validateWorkflowPlan({ ...plan, expectedAreas: ["tools/ai-workflow//nested"] })
     ).toThrow(/unsafe repository path/);
-    expect(() =>
+    expect(
       validateWorkflowPlan({
         ...plan,
         phases: [{ ...plan.phases[0], expectedFiles: ["tools/ai-workflow/"] }]
-      })
-    ).toThrow(/unsafe repository path/);
+      }).phases[0].expectedFiles
+    ).toEqual(["tools/ai-workflow"]);
   });
 
   it("rejects contradictory reviewer approval", () => {
@@ -156,11 +156,20 @@ describe("AI workflow structured contracts", () => {
   it("extracts JSON and cost from OpenCode JSON events", () => {
     const stdout = [
       JSON.stringify({ type: "text", part: { text: envelope({ ok: true }) } }),
-      JSON.stringify({ type: "step_finish", part: { cost: 0.125 } })
+      JSON.stringify({
+        type: "step_finish",
+        part: {
+          cost: 0.125,
+          reason: "length",
+          tokens: { input: 100, output: 200, reasoning: 50, cache: { read: 25 } }
+        }
+      })
     ].join("\n");
     const parsed = parseOpenCodeOutput(stdout);
     expect(extractStructuredResult(parsed.text)).toEqual({ ok: true });
     expect(parsed.cost).toBe(0.125);
+    expect(parsed.finishReason).toBe("length");
+    expect(parsed.tokens).toEqual({ input: 100, output: 200, reasoning: 50, cacheRead: 25 });
   });
 });
 
