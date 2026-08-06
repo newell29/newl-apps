@@ -20,7 +20,7 @@ It implements only this sequence:
 6. Exact verification failures or review findings return to DeepSeek.
 7. Every approved phase stops before every later phase. Progression is always a new explicit operator action.
 
-Version 1B.1 adds bounded local feature state, append-only progress events, structured owner decisions, safe review recovery, and conservative resume checks. There is still no database, checkpoint commit, web dashboard, mobile service, Codex escalation, automatic push, merge, deployment, migration execution, or production/external action.
+Version 1B.1 adds bounded local feature state, append-only progress events, structured owner decisions, safe review recovery, conservative resume checks, and one optional premium-model remediation attempt after the ordinary builder exhausts its correction limit. There is still no database, checkpoint commit, web dashboard, mobile service, Codex escalation, automatic push, merge, deployment, migration execution, or production/external action.
 
 ## Operator commands
 
@@ -95,7 +95,8 @@ Copy exact IDs from that output and validate/save the credential-free local sele
 npm run ai-workflow:configure -- \
   --planner-model '<exact-qwen-planner-id>' \
   --builder-model '<exact-deepseek-builder-id>' \
-  --reviewer-model '<exact-qwen-reviewer-id>'
+  --reviewer-model '<exact-reviewer-id>' \
+  --escalation-model '<exact-fallback-remediator-id>'
 ```
 
 The compatibility command writes a worktree override with user-only permissions to ignored `tmp/ai-workflow/models.json`. It accepts only credential-free model IDs. Use `--model-config tmp/ai-workflow/another.json` to select another ignored file, or supply all three IDs through CLI flags/environment variables for a one-off run. Never put API keys in either model file or the repository.
@@ -151,10 +152,11 @@ Optional settings:
 
 - `--branch codex/name` creates a new feature branch from the clean current commit.
 - `--max-review-cycles 3` sets the fresh-review limit per phase.
-- `--max-retries 3` sets the combined verification/review correction limit per phase.
+- `--max-retries 3` sets the combined ordinary failed-attempt limit per phase before the one configured fallback remediation or a fail-closed stop.
 - `--metrics-file tmp/name.jsonl` changes the ignored local metrics destination.
 - `OPENCODE_BIN=/absolute/path` selects another OpenCode executable.
 - `AI_WORKFLOW_PLANNER_MODEL`, `AI_WORKFLOW_BUILDER_MODEL`, and `AI_WORKFLOW_REVIEWER_MODEL` may supply model IDs.
+- `AI_WORKFLOW_ESCALATION_MODEL` optionally supplies the single bounded fallback remediator.
 
 The CLI displays the complete plan and accepts only an interactive `yes` or `y` before any builder runs. There is no non-interactive approval flag.
 
@@ -215,6 +217,14 @@ npm run test
 ```
 
 Models cannot remove, replace, narrow, or bypass these commands. Planner `testFiles` entries describe expected regression files for Qwen's coverage review only; they never control execution. A reviewer is not called unless all five checks pass.
+
+### Bounded premium-model remediation
+
+When an optional `escalationModel` is configured and the ordinary builder reaches the configured correction limit (three failed attempts by default), the controller may make exactly one fresh remediation call with that model. It receives only the current approved phase, confirmed owner decisions, and the exact sanitized verification failures or reviewer findings. It uses the builder's worktree-scoped editing profile and cannot approve its own work.
+
+After that single remediation, every mandatory verification command runs again. A failed check stops the workflow immediately. A green remediation proceeds to a separate fresh read-only reviewer session; even when the reviewer uses the same model family, it has no remediation conversation history. Any further requested change or malformed or ambiguous approval stops fail-closed. No later phase starts automatically.
+
+If no escalation model is configured, correction exhaustion retains the existing manual-escalation behavior.
 
 ### Verification cadence assessment
 

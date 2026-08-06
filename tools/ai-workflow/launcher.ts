@@ -129,6 +129,7 @@ function printModels(models: NonNullable<FeatureState["selectedModels"]>): void 
   console.log(`Planner:  ${models.plannerModel}`);
   console.log(`Builder:  ${models.builderModel}`);
   console.log(`Reviewer: ${models.reviewerModel}`);
+  console.log(`Fallback: ${models.escalationModel ?? "not configured"}`);
 }
 
 function printRoadmap(plan: WorkflowPlan, selectedPhaseId: string): void {
@@ -431,6 +432,7 @@ async function runFeature(
       plannerModel: models.plannerModel,
       builderModel: models.builderModel,
       reviewerModel: models.reviewerModel,
+      escalationModel: models.escalationModel,
       approvedPlan: state.plan ?? undefined,
       phaseId: phase?.id,
       featureSlug: state.featureSlug,

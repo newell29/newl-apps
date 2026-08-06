@@ -406,7 +406,7 @@ Deterministic rules must stop automatic work or require manual/Codex review for:
 - suspicious live customer data or credentials in added content; and
 - unexplained overlap with another open change.
 
-The escalation artifact should include the request, approved plan, current phase, branch/commit/diff identity, exact unresolved findings, sanitized verification evidence, attempts, files changed, risk rules triggered, decisions needed, and a recommended next safe action. Early versions should hand this to the owner or Codex manually; automatic premium-model invocation is a later, separately approved capability.
+The escalation artifact should include the request, approved plan, current phase, branch/commit/diff identity, exact unresolved findings, sanitized verification evidence, attempts, files changed, risk rules triggered, decisions needed, and a recommended next safe action. Version 1B.1 permits one separately approved, configured premium-model remediation attempt after the ordinary builder exhausts its correction limit. That model runs under builder permissions, cannot approve its own work, must pass the complete deterministic verification gate, and is followed by a fresh independent reviewer. Repeated failure still stops for the owner; broader Codex escalation remains future scope.
 
 ## Reporting and observability
 

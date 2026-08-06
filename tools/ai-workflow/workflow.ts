@@ -26,6 +26,8 @@ export type WorkflowMetrics = {
   plannerModel: string;
   builderModel: string;
   reviewerModel: string;
+  escalationModel: string | null;
+  escalationAttempts: number;
   startedAt: string;
   completedAt: string;
   totalTimeMs: number;
@@ -42,6 +44,7 @@ export type WorkflowOptions = {
   plannerModel: string;
   builderModel: string;
   reviewerModel: string;
+  escalationModel?: string;
   branch?: string;
   metricsFile?: string;
   maxReviewCycles?: number;
@@ -161,6 +164,7 @@ export async function runWorkflow(
 
   let retryCount = 0;
   let reviewCycles = 0;
+  let escalationAttempts = 0;
   let apiCost = 0;
   let completeCost = true;
   const testsExecuted: string[] = [];
@@ -220,13 +224,26 @@ export async function runWorkflow(
     let corrections: string[] = [];
     let phaseRetries = 0;
     let phaseReviewCycles = 0;
+    let escalationUsed = false;
+    let useEscalationRemediation = false;
     event(`Starting approved phase ${phase.id}: ${phase.title}`);
 
     while (true) {
       await dependencies.onStage?.(corrections.length > 0 ? "correcting" : "implementing", phase.id);
+      const isEscalationRemediation = useEscalationRemediation;
+      const implementationModel = isEscalationRemediation
+        ? options.escalationModel as string
+        : options.builderModel;
+      if (isEscalationRemediation) {
+        event(
+          `Builder correction limit reached for ${phase.id}; starting one fresh bounded remediation with ${implementationModel}.`
+        );
+        useEscalationRemediation = false;
+        escalationAttempts += 1;
+      }
       const built = await implementPhase(
         dependencies.agentRunner,
-        options.builderModel,
+        implementationModel,
         phase,
         corrections,
         { confirmedDecisions: options.confirmedDecisions }
@@ -248,12 +265,25 @@ export async function runWorkflow(
       if (!verification.passed) {
         phaseRetries += 1;
         retryCount += 1;
-        if (phaseRetries > maxRetriesPerPhase) {
+        corrections = failedVerificationCorrections(verification);
+        if (isEscalationRemediation) {
           throw new WorkflowEscalationError(
-            `${phase.id} exceeded ${maxRetriesPerPhase} correction retries after mandatory verification failures.`
+            `${phase.id} still failed mandatory verification after its single escalation remediation attempt.`
           );
         }
-        corrections = failedVerificationCorrections(verification);
+        if (phaseRetries >= maxRetriesPerPhase) {
+          if (options.escalationModel && !escalationUsed) {
+            escalationUsed = true;
+            useEscalationRemediation = true;
+            event(
+              `${phase.id} exhausted ${maxRetriesPerPhase} ordinary builder failures; preserving exact verification failures for escalation remediation.`
+            );
+            continue;
+          }
+          throw new WorkflowEscalationError(
+            `${phase.id} reached ${maxRetriesPerPhase} failed ordinary builder attempts after mandatory verification failures.`
+          );
+        }
         event(`Verification failed for ${phase.id}; returning exact failures to the builder.`);
         continue;
       }
@@ -325,12 +355,25 @@ export async function runWorkflow(
 
       phaseRetries += 1;
       retryCount += 1;
-      if (phaseRetries > maxRetriesPerPhase || phaseReviewCycles >= maxReviewCycles) {
+      corrections = reviewerCorrections(reviewed.decision);
+      if (phaseReviewCycles >= maxReviewCycles) {
         throw new WorkflowEscalationError(
           `${phase.id} could not be approved within the configured correction and review limits.`
         );
       }
-      corrections = reviewerCorrections(reviewed.decision);
+      if (phaseRetries >= maxRetriesPerPhase) {
+        if (options.escalationModel && !escalationUsed) {
+          escalationUsed = true;
+          useEscalationRemediation = true;
+          event(
+            `${phase.id} exhausted ${maxRetriesPerPhase} ordinary correction attempts; preserving exact reviewer findings for escalation remediation.`
+          );
+          continue;
+        }
+        throw new WorkflowEscalationError(
+          `${phase.id} could not be approved within the configured correction limit.`
+        );
+      }
       event(`Reviewer requested ${corrections.length} correction(s) for ${phase.id}.`);
     }
 
@@ -339,6 +382,8 @@ export async function runWorkflow(
     plannerModel: options.plannerModel,
     builderModel: options.builderModel,
     reviewerModel: options.reviewerModel,
+    escalationModel: options.escalationModel ?? null,
+    escalationAttempts,
     startedAt: startedAt.toISOString(),
     completedAt: completedAt.toISOString(),
     totalTimeMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
