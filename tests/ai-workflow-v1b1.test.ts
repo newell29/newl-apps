@@ -156,18 +156,53 @@ afterEach(() => {
 });
 
 describe("Version 1B.1 local state", () => {
-  it("keeps operator input active until the launcher explicitly closes it", async () => {
+  it("opens operator input only while a prompt is active", async () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const operatorInput = createOperatorInput(input, output);
 
-    expect(input.readableFlowing).toBe(true);
+    expect(input.readableFlowing).not.toBe(true);
     const answer = operatorInput.readline.question("Selection: ");
+    expect(input.readableFlowing).toBe(true);
     input.write("2\n");
     await expect(answer).resolves.toBe("2");
+    expect(input.readableFlowing).toBe(false);
 
     operatorInput.close();
     expect(input.readableFlowing).toBe(false);
+  });
+
+  it("creates a fresh prompt after delayed work and after an earlier prompt", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operatorInput = createOperatorInput(input, output);
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+    expect(input.readableFlowing).not.toBe(true);
+
+    const firstAnswer = operatorInput.readline.question("First: ");
+    input.write("one\n");
+    await expect(firstAnswer).resolves.toBe("one");
+    expect(input.readableFlowing).toBe(false);
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+    const secondAnswer = operatorInput.readline.question("Second: ");
+    input.write("two\n");
+    await expect(secondAnswer).resolves.toBe("two");
+
+    operatorInput.close();
+  });
+
+  it("rejects prompts after operator input is explicitly closed", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operatorInput = createOperatorInput(input, output);
+
+    operatorInput.close();
+
+    await expect(operatorInput.readline.question("Selection: ")).rejects.toThrow(
+      "Operator input is closed."
+    );
   });
 
   it("keeps a real tsx launcher process alive while an operator prompt is unanswered", async () => {
