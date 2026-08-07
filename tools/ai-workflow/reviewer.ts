@@ -245,7 +245,7 @@ ${JSON.stringify(input.evaluations ?? [], null, 2)}
 
 Compare the implementation with the original request, complete approved plan, and current phase. Inspect actual code. Reject incomplete requirements, regressions, tenant/organization isolation gaps, authorization or human-approval boundary problems, missing or weak tests, documentation omissions, unnecessary complexity, and scope drift. Verification commands are fixed by the controller and all must pass before approval. Never approve merely because the builder reported completion.
 
-The status field must be exactly one of: "approved", "changes_requested", or "escalate". Use "changes_requested" (never "changes_required") when corrections are required. Approval is valid only when findings, missingTests, and scopeConcerns are empty and escalationReason is null. Do not use synonyms such as pass, passed, accepted, looks_good, or no_issues.
+The status field must be exactly one of: "approved", "changes_requested", or "escalate". Use "changes_requested" (never "changes_required") when corrections are required. A changes_requested result must contain at least one actionable object in findings. If missing test coverage is the only problem, represent it as a finding with the exact target test file, evidence, and required correction; missingTests may additionally summarize it. Approval is valid only when findings, missingTests, and scopeConcerns are empty and escalationReason is null. Do not use synonyms such as pass, passed, accepted, looks_good, or no_issues.
 
 Return exactly one JSON object inside these tags, with no text after the closing tag:
 <AI_WORKFLOW_RESULT>

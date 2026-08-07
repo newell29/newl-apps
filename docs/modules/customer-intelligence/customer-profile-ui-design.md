@@ -40,6 +40,10 @@ to the builder.
 
 - A QuickBooks customer name alone never approves a match or creates a
   canonical `Company`.
+- For an unmatched customer, ADMIN/FINANCE may explicitly create and approve a
+  canonical Company only through the dedicated confirmation control, using a
+  separately entered canonical name and tenant-valid operating company. This is
+  a human decision, never an automatic name fallback.
 - The UI must show source evidence and why a candidate was suggested.
 - Potential contacts may be shown from authorized email metadata/signature
   evidence, but remain suggestions until the company identity is approved.

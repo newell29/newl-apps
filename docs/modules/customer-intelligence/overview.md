@@ -40,12 +40,16 @@ planning or migration approval.
 
 ## Workflow / rules summary
 
-- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; UI pages, API routes, mailbox sync, QuickBooks sync, and research are later phases.
+- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`. Mailbox sync, QuickBooks report sync, research, and the remaining Customer Profile screens are later phases.
 - Every query and action requires an authenticated leadership context (`permissions.ts`) and injects `tenantId` through `tenantWhere`.
 - The canonical `Company` stays the identity shared by sales, TradeMining, Hunter, contacts, and finance. Customer Intelligence adds records around it; it never rewrites or deletes existing `Company`, `CashflowCustomer`, or `CashflowLegalEntity` data.
 - Lifecycle is computed per operating-company relationship and rolled up to the canonical company (ACTIVE beats DORMANT beats FORMER beats PROSPECT).
-- Identity matches auto-link only at score >= 90 without a conflicting canonical company; reviewed decisions are preserved across re-runs; one source can be approved to at most one canonical company.
-- Every approval, rejection, merge, and unmerge writes an `AuditLog`.
+- Identity matches auto-link only at score >= 90 without a conflicting canonical company; reviewed decisions are preserved across re-runs; one source can be approved to at most one canonical company. CP-PHASE-02B-3 adds the deterministic reconciliation service that re-scores PROPOSED QuickBooks matches and routes ambiguity to the leadership review queue.
+- Every approval, rejection, and deferral writes an `AuditLog`. For an unmatched
+  QuickBooks customer, ADMIN/FINANCE may explicitly create a canonical Company
+  from separately entered reviewer data; Company, operating-company
+  relationship, approved decision, and audit evidence commit atomically. The
+  source name is never an automatic creation fallback.
 
 ## Permissions
 
@@ -82,6 +86,8 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Services/actions | `src/modules/customer-intelligence/actions.ts` |
 | Queries | `src/modules/customer-intelligence/queries.ts` |
 | Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
+| Deterministic identity reconciliation (CP-PHASE-02B-3) | `src/modules/customer-intelligence/reconciliation.ts` |
+| Identity review page and server actions (CP-PHASE-02B-3) | `src/app/(authenticated)/customer-intelligence/review/page.tsx`, `src/modules/customer-intelligence/review-actions.ts`, `src/modules/customer-intelligence/components/identity-review-actions.tsx` |
 | Customer Profile UX baseline | `docs/modules/customer-intelligence/customer-profile-ui-design.md`, `customer-profile-wireframes.html` |
 | Pure logic | `src/modules/customer-intelligence/identity.ts`, `service-lines.ts`, `lifecycle.ts`, `constants.ts` |
 | Cashflow compatibility | `src/modules/customer-intelligence/cashflow-compatibility.ts` |

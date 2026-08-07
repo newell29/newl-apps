@@ -461,9 +461,13 @@ async function persistUnmatchedProposal(
       }
     });
     if (existing) {
+      const refreshedEvidence = mergeSourceEvidenceWithReviewNote(
+        existing.evidence,
+        input.evidence
+      );
       if (
         existing.sourceLabel === input.sourceLabel &&
-        jsonValuesEqual(existing.evidence, input.evidence)
+        jsonValuesEqual(existing.evidence, refreshedEvidence)
       ) {
         return {
           match: existing,
@@ -475,11 +479,12 @@ async function persistUnmatchedProposal(
         where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
         // Only unreviewed source-owned fields are refreshed. In particular,
         // companyId, candidateCompanyId, score, reviewerUserId, and reviewedAt
-        // remain exactly as the human review workflow left them. Replacing the
-        // complete evidence object also removes evidence absent from this sync.
+        // remain exactly as the human review workflow left them. Source-owned
+        // evidence is replaced so removed QuickBooks fields disappear, while
+        // the human-owned reviewNote is merged back explicitly.
         data: {
           sourceLabel: input.sourceLabel,
-          evidence: input.evidence
+          evidence: refreshedEvidence
         }
       });
       return {
@@ -566,8 +571,12 @@ async function inspectUnmatchedProposal(
   if (!existing) {
     return "CREATED";
   }
+  const refreshedEvidence = mergeSourceEvidenceWithReviewNote(
+    existing.evidence,
+    input.evidence
+  );
   return existing.sourceLabel === input.sourceLabel &&
-    jsonValuesEqual(existing.evidence, input.evidence)
+    jsonValuesEqual(existing.evidence, refreshedEvidence)
     ? "UNCHANGED"
     : "REFRESHED";
 }
@@ -614,6 +623,37 @@ function jsonValuesEqual(left: unknown, right: unknown): boolean {
         key === rightKeys[index] && jsonValuesEqual(leftRecord[key], rightRecord[key])
     )
   );
+}
+
+/**
+ * QuickBooks owns the refreshed source fields, while reviewNote is written by
+ * the guarded human-review workflow. Preserve only that explicitly
+ * human-owned field so stale QuickBooks evidence is still removed on reruns.
+ */
+function mergeSourceEvidenceWithReviewNote(
+  existingEvidence: Prisma.JsonValue | null,
+  sourceEvidence: Prisma.InputJsonValue
+): Prisma.InputJsonValue {
+  if (
+    !existingEvidence ||
+    typeof existingEvidence !== "object" ||
+    Array.isArray(existingEvidence) ||
+    !sourceEvidence ||
+    typeof sourceEvidence !== "object" ||
+    Array.isArray(sourceEvidence)
+  ) {
+    return sourceEvidence;
+  }
+
+  const reviewNote = (existingEvidence as Prisma.JsonObject).reviewNote;
+  if (typeof reviewNote !== "string" || !reviewNote.trim()) {
+    return sourceEvidence;
+  }
+
+  return {
+    ...(sourceEvidence as Prisma.InputJsonObject),
+    reviewNote
+  };
 }
 
 /**

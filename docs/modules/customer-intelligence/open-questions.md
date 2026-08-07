@@ -11,6 +11,8 @@
 - The initial history window is 24 months; lifecycle uses a trailing 12-month revenue/open-AR test.
 - CAD consolidation is directional management reporting, not statutory accounting.
 - Newell's Express defaults unmapped income to `LOCAL_TRUCKING`.
+- **CP-02B-3-Q1 — unmatched QuickBooks customers are `MANUAL_ONLY`**: never automatically create or approve a canonical Company from a QuickBooks customer name alone. An unmatched customer remains PROPOSED until a person selects an existing Company or uses the guarded Create-and-Approve control with a separately entered canonical name and explicit confirmation. The latter atomically creates a tenant Company, operating-company relationship, approved match, and audit records; approval without a tenant-valid `companyId` remains impossible.
+- **CP-02B-3-Q2 — reconciliation candidates are operating-company-scoped**: automatic reconciliation may consider only canonical companies already associated with the QuickBooks record's operating company. A company without that relationship remains PROPOSED for human review and may still be selected through the guarded manual workflow; it is never auto-linked across operating-company boundaries.
 
 ## Requires confirmation
 
@@ -22,6 +24,7 @@
 - **Which remaining external integration credentials should move from env fallback to tenant-scoped storage next**: CP-PHASE-02B-1 added the ADMIN-only, audited `OperatingCompany.quickBooksCredentialId` association, and CP-PHASE-02B-2 now consumes it for QuickBooks customer ingestion. Other integration paths that still rely on environment-level fallback remain separate future scope; their migration order requires confirmation.
 - **Open AR lifecycle interpretation**: "open AR within the trailing 12 months" is implemented as any `CustomerMonthlyFinancial` row with `nativeOpenAr > 0` whose `monthKey` falls in the trailing 12 months. Open AR is a point-in-time balance, so this is a materialized-month interpretation; confirm whether current open AR (regardless of age) should count instead.
 - **Operating-company scoping of identity matches**: `QUICKBOOKS_ACCOUNT` matches now require `operatingCompanyId`. Confirm that a QuickBooks customer record that serves multiple operating companies should be represented as one match per operating company rather than a single company-level match.
+- **Address-equivalence heuristics**: confirm whether a future phase may treat street-suffix variants such as `Rd` and `Road` as equivalent. CP-PHASE-02B-3 does not do so; address comparison currently applies case, punctuation, and whitespace normalization only to QuickBooks `Line1`-`Line5`. City, province, postal code, country, and arbitrary address JSON values are explicitly excluded as standalone evidence.
 
 ## Retired historical legacy-backfill questions (CP-02A-BF-1..7)
 

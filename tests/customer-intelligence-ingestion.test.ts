@@ -1313,7 +1313,7 @@ describe("unmatched customers: proposed matches with evidence (CP-02B-2-Q1 MATCH
     expect(selectedProposal.candidateCompanyId).toBe("company-reviewer-candidate");
   });
 
-  it("refreshes changed and removed evidence without altering human-selected proposal fields", async () => {
+  it("preserves a deferred review note across changed, partial, and missing source evidence", async () => {
     let proposal = {
       id: "match-refresh",
       tenantId: "tenant-a",
@@ -1333,7 +1333,8 @@ describe("unmatched customers: proposed matches with evidence (CP-02B-2-Q1 MATCH
         email: "old@example.com",
         phone: "416-555-0100",
         parentQuickBooksCustomerId: "old-parent",
-        notes: "Old notes"
+        notes: "Old notes",
+        reviewNote: "Owner needs to confirm this customer"
       },
       reviewerUserId: "reviewer-1",
       reviewedAt: null,
@@ -1372,23 +1373,35 @@ describe("unmatched customers: proposed matches with evidence (CP-02B-2-Q1 MATCH
       familyName: "Buyer",
       email: "current@example.com",
       parentQuickBooksCustomerId: "900",
-      notes: "Warehouse account"
+      notes: "Warehouse account",
+      reviewNote: "Owner needs to confirm this customer"
     });
 
     stubQuickBooksFetch([{ Id: "1001", DisplayName: "Current Source Label" }]);
-    const removed = await runQuickBooksCustomerIngestion(ADMIN, {});
+    const partial = await runQuickBooksCustomerIngestion(ADMIN, {});
 
-    expect(removed.totals.unmatchedRefreshed).toBe(1);
+    expect(partial.totals.unmatchedRefreshed).toBe(1);
     expect(proposal.evidence).toEqual({
       source: "QUICKBOOKS",
-      displayName: "Current Source Label"
+      displayName: "Current Source Label",
+      reviewNote: "Owner needs to confirm this customer"
+    });
+
+    stubQuickBooksFetch([{ Id: "1001" }]);
+    const missing = await runQuickBooksCustomerIngestion(ADMIN, {});
+
+    expect(missing.totals.unmatchedRefreshed).toBe(1);
+    expect(proposal.sourceLabel).toBeNull();
+    expect(proposal.evidence).toEqual({
+      source: "QUICKBOOKS",
+      reviewNote: "Owner needs to confirm this customer"
     });
     expect(proposal.companyId).toBe("company-reviewer-selected");
     expect(proposal.candidateCompanyId).toBe("company-reviewer-candidate");
     expect(proposal.score).toBe(74);
     expect(proposal.reviewerUserId).toBe("reviewer-1");
     expect(prismaTest.model("customerIdentityMatch").create).not.toHaveBeenCalled();
-    expect(prismaTest.model("customerIdentityMatch").update).toHaveBeenCalledTimes(2);
+    expect(prismaTest.model("customerIdentityMatch").update).toHaveBeenCalledTimes(3);
     for (const [arg] of prismaTest.model("customerIdentityMatch").update.mock.calls) {
       expect(arg.where).toEqual({ tenantId_id: { tenantId: "tenant-a", id: "match-refresh" } });
       expect(Object.keys(arg.data).sort()).toEqual(["evidence", "sourceLabel"]);

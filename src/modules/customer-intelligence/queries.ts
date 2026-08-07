@@ -135,6 +135,79 @@ export async function getIdentityMatch(ctx: AuthenticatedContext, matchId: strin
   });
 }
 
+/**
+ * Leadership review queue (CP-PHASE-02B-3): PROPOSED QUICKBOOKS_ACCOUNT
+ * matches with their suggested canonical company and operating company. Every
+ * read is tenant-scoped and leadership-only (requireReadAccess).
+ */
+export async function getIdentityReviewQueue(
+  ctx: AuthenticatedContext,
+  input?: { operatingCompanyId?: string }
+) {
+  await requireReadAccess(ctx);
+  return prisma.customerIdentityMatch.findMany({
+    where: tenantWhere(ctx, {
+      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+      status: CustomerIdentityMatchStatus.PROPOSED,
+      ...(input?.operatingCompanyId ? { operatingCompanyId: input.operatingCompanyId } : {})
+    }),
+    include: {
+      candidateCompany: true,
+      operatingCompany: true
+    },
+    orderBy: [{ createdAt: "asc" }]
+  });
+}
+
+export type IdentityReviewMetrics = {
+  proposed: number;
+  approved: number;
+  rejected: number;
+};
+
+/** Counts of identity-match review states for the leadership queue page. */
+export async function getIdentityReviewMetrics(
+  ctx: AuthenticatedContext,
+  input?: { operatingCompanyId?: string }
+): Promise<IdentityReviewMetrics> {
+  await requireReadAccess(ctx);
+  const where = tenantWhere(ctx, {
+    kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+    ...(input?.operatingCompanyId ? { operatingCompanyId: input.operatingCompanyId } : {})
+  });
+  const [proposed, approved, rejected] = await Promise.all([
+    prisma.customerIdentityMatch.count({
+      where: { ...where, status: CustomerIdentityMatchStatus.PROPOSED }
+    }),
+    prisma.customerIdentityMatch.count({
+      where: { ...where, status: CustomerIdentityMatchStatus.APPROVED }
+    }),
+    prisma.customerIdentityMatch.count({
+      where: { ...where, status: CustomerIdentityMatchStatus.REJECTED }
+    })
+  ]);
+  return { proposed, approved, rejected };
+}
+
+/**
+ * Tenant-scoped canonical companies for the identity-review approve control.
+ * Every selectable target must belong to the authenticated tenant; the
+ * server-side approval invariant validates the chosen id again before any
+ * status update.
+ */
+export async function listTenantCompanies(ctx: AuthenticatedContext) {
+  await requireReadAccess(ctx);
+  return prisma.company.findMany({
+    where: tenantWhere(ctx),
+    select: {
+      id: true,
+      name: true,
+      domain: true
+    },
+    orderBy: [{ name: "asc" }]
+  });
+}
+
 export async function listServiceMappingRules(
   ctx: AuthenticatedContext,
   operatingCompanyId?: string
