@@ -10,6 +10,10 @@ const upsertMailboxSyncState = vi.fn();
 const findMailboxSyncStates = vi.fn();
 const updateMailboxSyncState = vi.fn();
 
+function validAccessTokenExpiry() {
+  return Math.floor(Date.now() / 1000) + 3_600;
+}
+
 vi.mock("@/server/db", () => ({
   prisma: {
     integrationCredential: {
@@ -105,7 +109,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       id: "account-1",
       access_token: "access-token",
       refresh_token: "refresh-token",
-      expires_at: 1_786_090_000,
+      expires_at: validAccessTokenExpiry(),
       scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
       token_type: "Bearer"
     });
@@ -254,7 +258,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
       id: "account-1",
       access_token: "access-token",
       refresh_token: "refresh-token",
-      expires_at: 1_786_090_000,
+      expires_at: validAccessTokenExpiry(),
       scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
       token_type: "Bearer"
     });
@@ -457,7 +461,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
         id: "account-1",
         access_token: "access-token-1",
         refresh_token: "refresh-token-1",
-        expires_at: 1_786_090_000,
+        expires_at: validAccessTokenExpiry(),
         scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
         token_type: "Bearer"
       })
@@ -465,7 +469,7 @@ describe("syncMicrosoftGraphAssistantKnowledge", () => {
         id: "account-2",
         access_token: "access-token-2",
         refresh_token: "refresh-token-2",
-        expires_at: 1_786_090_000,
+        expires_at: validAccessTokenExpiry(),
         scope: "openid profile email offline_access User.Read Mail.Read Files.Read.All Sites.Read.All",
         token_type: "Bearer"
       });
