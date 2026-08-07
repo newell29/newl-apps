@@ -67,6 +67,7 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 |---|---|
 | Services/actions | `src/modules/customer-intelligence/actions.ts` |
 | Queries | `src/modules/customer-intelligence/queries.ts` |
+| Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
 | Pure logic | `src/modules/customer-intelligence/identity.ts`, `service-lines.ts`, `lifecycle.ts`, `constants.ts` |
 | Cashflow compatibility | `src/modules/customer-intelligence/cashflow-compatibility.ts` |
 | Audit | `src/modules/customer-intelligence/audit.ts` |

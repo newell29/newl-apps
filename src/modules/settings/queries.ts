@@ -48,6 +48,7 @@ import {
   parseMicrosoftGraphDelegatedConnection
 } from "@/server/integrations/microsoft-graph-account";
 import { getOpenAiDraftRuntimeNotes, isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
+import { quickBooksLegalEntityToSlug } from "@/server/integrations/quickbooks";
 import { parseTeamshipSettings, TEAMSHIP_CREDENTIAL_NAME } from "@/server/integrations/teamship-settings";
 
 type SettingsUpsAccount = UpsAccountConfig & {
@@ -373,6 +374,10 @@ function mapQuickBooksConnection(credential: IntegrationCredentialRecord) {
     name: credential.name,
     status: credential.status,
     legalEntity: typeof config.legalEntity === "string" ? config.legalEntity : null,
+    operatingCompanySlug:
+      typeof config.legalEntity === "string"
+        ? quickBooksLegalEntityToSlug(config.legalEntity)
+        : null,
     realmId: typeof config.realmId === "string" ? config.realmId : null,
     environment: typeof config.environment === "string" ? config.environment : null,
     companyName: typeof config.companyName === "string" ? config.companyName : null,

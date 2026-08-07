@@ -5,12 +5,59 @@ const QUICKBOOKS_STATE_VERSION = "v1";
 const QUICKBOOKS_SECRET_PREFIX = "enc:v1";
 const QUICKBOOKS_ACCOUNTING_SCOPE = "com.intuit.quickbooks.accounting";
 
-export type QuickBooksLegalEntity = "NEWL_WORLDWIDE" | "NEWL_USA";
+/**
+ * Approved production redirect URL for the single QuickBooks OAuth app shared
+ * by all three operating companies (owner decision CP-02B-1-Q2, SAME_APP).
+ */
+export const QUICKBOOKS_APPROVED_REDIRECT_URI =
+  "https://newl-apps.vercel.app/api/integrations/quickbooks/callback";
+
+/**
+ * Legacy legal-entity keys retained in the stored credential publicConfig so
+ * the existing Newl Worldwide and Newl USA connections keep working. The
+ * connect API and OAuth state are keyed by operating-company slug instead
+ * (owner decision CP-02B-1-Q1, OPERATING_COMPANY_KEYED); these enum keys only
+ * bridge to the legacy storage representation.
+ */
+export type QuickBooksLegalEntity = "NEWL_WORLDWIDE" | "NEWL_USA" | "NEWELLS_EXPRESS";
+
+export const QUICKBOOKS_OPERATING_COMPANY_SLUGS = [
+  "newl-worldwide",
+  "newl-usa",
+  "newells-express"
+] as const;
+
+export type QuickBooksOperatingCompanySlug = (typeof QUICKBOOKS_OPERATING_COMPANY_SLUGS)[number];
+
+export const QUICKBOOKS_LEGAL_ENTITY_TO_SLUG: Record<
+  QuickBooksLegalEntity,
+  QuickBooksOperatingCompanySlug
+> = {
+  NEWL_WORLDWIDE: "newl-worldwide",
+  NEWL_USA: "newl-usa",
+  NEWELLS_EXPRESS: "newells-express"
+};
+
+export const QUICKBOOKS_SLUG_TO_LEGAL_ENTITY: Record<
+  QuickBooksOperatingCompanySlug,
+  QuickBooksLegalEntity
+> = {
+  "newl-worldwide": "NEWL_WORLDWIDE",
+  "newl-usa": "NEWL_USA",
+  "newells-express": "NEWELLS_EXPRESS"
+};
+
+export const QUICKBOOKS_LEGAL_ENTITY_DISPLAY_NAMES: Record<QuickBooksLegalEntity, string> = {
+  NEWL_WORLDWIDE: "Newl Worldwide",
+  NEWL_USA: "Newl USA",
+  NEWELLS_EXPRESS: "Newell's Express and Warehousing Ltd."
+};
+
 export type QuickBooksEnvironment = "sandbox" | "production";
 
 type QuickBooksStatePayload = {
   tenantId: string;
-  legalEntity: QuickBooksLegalEntity;
+  operatingCompanySlug: QuickBooksOperatingCompanySlug;
   returnTo: string;
   nonce: string;
 };
@@ -54,12 +101,11 @@ export function getQuickBooksApiBaseUrl() {
 }
 
 export function getQuickBooksRedirectUri() {
+  // One shared OAuth app for every operating company (CP-02B-1-Q2). The env
+  // override supports preview/sandbox runs; the approved production URL is the
+  // default so an unset value can never break the OAuth decision.
   const value = process.env.QUICKBOOKS_REDIRECT_URI?.trim();
-  if (!value) {
-    throw new Error("QUICKBOOKS_REDIRECT_URI is not configured.");
-  }
-
-  return value;
+  return value || QUICKBOOKS_APPROVED_REDIRECT_URI;
 }
 
 function getQuickBooksClientId() {
@@ -94,21 +140,41 @@ function getQuickBooksStateSecret() {
 }
 
 export function getQuickBooksConnectionName(legalEntity: QuickBooksLegalEntity) {
-  return legalEntity === "NEWL_USA" ? "QuickBooks - Newl USA" : "QuickBooks - Newl Worldwide";
+  // Keeps the exact legacy names ("QuickBooks - Newl USA", "QuickBooks - Newl
+  // Worldwide") while adding the third operating company.
+  return `QuickBooks - ${QUICKBOOKS_LEGAL_ENTITY_DISPLAY_NAMES[legalEntity]}`;
+}
+
+export function isQuickBooksOperatingCompanySlug(value: string): value is QuickBooksOperatingCompanySlug {
+  return value in QUICKBOOKS_SLUG_TO_LEGAL_ENTITY;
+}
+
+/** Stable operating-company slug for a legacy stored legal-entity key. */
+export function quickBooksLegalEntityToSlug(
+  legalEntity: string
+): QuickBooksOperatingCompanySlug | null {
+  return QUICKBOOKS_LEGAL_ENTITY_TO_SLUG[legalEntity as QuickBooksLegalEntity] ?? null;
+}
+
+/** Legacy stored legal-entity key for a stable operating-company slug. */
+export function quickBooksSlugToLegalEntity(
+  slug: string
+): QuickBooksLegalEntity | null {
+  return isQuickBooksOperatingCompanySlug(slug) ? QUICKBOOKS_SLUG_TO_LEGAL_ENTITY[slug] : null;
 }
 
 export function buildQuickBooksAuthorizationUrl({
   tenantId,
-  legalEntity,
+  operatingCompanySlug,
   returnTo
 }: {
   tenantId: string;
-  legalEntity: QuickBooksLegalEntity;
+  operatingCompanySlug: QuickBooksOperatingCompanySlug;
   returnTo: string;
 }) {
   const state = signQuickBooksState({
     tenantId,
-    legalEntity,
+    operatingCompanySlug,
     returnTo,
     nonce: randomBytes(12).toString("hex")
   });

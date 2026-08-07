@@ -7,7 +7,9 @@ import {
   encryptQuickBooksSecret,
   exchangeQuickBooksAuthorizationCode,
   fetchQuickBooksCompanyInfo,
-  parseQuickBooksState
+  getQuickBooksEnvironment,
+  parseQuickBooksState,
+  quickBooksSlugToLegalEntity
 } from "@/server/integrations/quickbooks";
 
 function buildSettingsQuickBooksRedirect(
@@ -43,7 +45,8 @@ export async function GET(request: Request) {
         buildSettingsQuickBooksRedirect(callbackBase, {
           quickbooks: "error",
           reason: oauthError
-        })
+        }),
+        { status: 302 }
       );
     }
 
@@ -52,7 +55,8 @@ export async function GET(request: Request) {
         buildSettingsQuickBooksRedirect(callbackBase, {
           quickbooks: "error",
           reason: "missing-callback-params"
-        })
+        }),
+        { status: 302 }
       );
     }
 
@@ -62,7 +66,22 @@ export async function GET(request: Request) {
         buildSettingsQuickBooksRedirect(callbackBase, {
           quickbooks: "error",
           reason: "tenant-mismatch"
-        })
+        }),
+        { status: 302 }
+      );
+    }
+
+    // The state carries the stable operating-company slug (CP-02B-1-Q1); the
+    // legacy legalEntity key is derived only to keep stored credentials and the
+    // invoice-automation reader compatible with the two existing connections.
+    const legalEntity = quickBooksSlugToLegalEntity(parsedState.operatingCompanySlug);
+    if (!legalEntity) {
+      return NextResponse.redirect(
+        buildSettingsQuickBooksRedirect(callbackBase, {
+          quickbooks: "error",
+          reason: "invalid-operating-company"
+        }),
+        { status: 302 }
       );
     }
 
@@ -72,9 +91,9 @@ export async function GET(request: Request) {
       accessToken: tokenSet.accessToken
     });
     const credential = buildQuickBooksCredentialRecord({
-      legalEntity: parsedState.legalEntity,
+      legalEntity,
       realmId,
-      environment: process.env.QUICKBOOKS_ENVIRONMENT === "sandbox" ? "sandbox" : "production",
+      environment: getQuickBooksEnvironment(),
       companyName: companyInfo.companyName,
       accessTokenExpiresAt: tokenSet.accessTokenExpiresAt,
       refreshTokenExpiresAt: tokenSet.refreshTokenExpiresAt,
@@ -127,17 +146,19 @@ export async function GET(request: Request) {
         callbackBase,
         {
           quickbooks: "connected",
-          entity: parsedState.legalEntity
+          entity: parsedState.operatingCompanySlug
         },
         parsedState.returnTo
-      )
+      ),
+      { status: 302 }
     );
   } catch (error) {
     return NextResponse.redirect(
       buildSettingsQuickBooksRedirect(callbackBase, {
         quickbooks: "error",
         reason: error instanceof Error ? error.message : "callback-failed"
-      })
+      }),
+      { status: 302 }
     );
   }
 }

@@ -22,9 +22,22 @@
   - **never touching legacy finance** — none of the migrations references `CashflowCustomer`, `CashflowLegalEntity`, or any other `Cashflow*` structure; and
   - **tenant-scoped bootstrap** — the `Module`/`TenantModuleAccess`/`OperatingCompany` bootstrap is scoped to the `newl-group` tenant only.
   The statement splitter removes full-line `--` comment lines before splitting on semicolons, so comment prose containing semicolons can never be parsed as a phantom statement (CP-PHASE-02A confirmed regression, pinned by a dedicated test). It also guards the inventory: exactly the three known migrations may reference Customer Intelligence tables, so renaming, removing, or silently adding a Customer Intelligence migration fails the suite. Phase-2 backfill migrations must pass the same statement allowlist and idempotency guards.
+- `tests/customer-intelligence-ingestion.test.ts` — CP-PHASE-02B-2 read-only QuickBooks customer ingestion suite. Prisma is mocked; the authorization module is REAL; `fetch` is mocked. Covers:
+  - **GET-only transport**: the customer query URL is built against `GET /v3/company/{realmId}/query` (the access token is never embedded in the query URL — it is carried by the request `Authorization` header), every QuickBooks request is asserted to be GET with a Bearer token, and pagination stops on a short page.
+  - **Bounded pagination regression**: the full-page mock reads the URL-encoded `query` value through `URL.searchParams` and asserts requests advance from `startposition 1` to `startposition 1001`. This prevents the mock from mistaking form-encoded `+` separators for literal spaces, returning the first 1,000-row page forever, and growing the fetched-customer array without bound.
+  - **Partial and completely missing evidence**: `normalizeQuickBooksCustomer` stores missing fields as `null` (never invented); unmatched evidence JSON omits missing fields. Live and dry-run regressions prove an unmatched record carrying only a valid QuickBooks ID remains a reviewable proposal with a null source label and no invented evidence. Available name, contact, address, parent-account, notes, status, currency, and timestamp evidence is retained; reruns clear removed source evidence without changing reviewer-owned fields. Matched records missing schema-required display name, `currency`, or `active` evidence are skipped and reported without changing prior data because no owner-approved fallback exists.
+  - **Operating-company credential resolution**: unassociated companies (and companies whose credential is missing / not QuickBooks / not ACTIVE) are `SKIPPED_UNASSOCIATED` with an audited warning and zero customer writes; a cross-tenant operating-company id is rejected.
+  - **Idempotency and reviewed-decision preservation**: re-runs keyed by `(tenantId, realmId, quickBooksCustomerId)` refresh `lastSyncedAt`; an `APPROVED` match is authoritative for matching and is never rewritten; a re-run over a `REJECTED` decision leaves the reviewed row unchanged with no writes and reports it separately from proposed changes. Regressions cover both a rejected decision and a still-`PROPOSED` row with non-null reviewer-selected `companyId`: both lookups are independent of canonical target, the proposal is not duplicated, and its human-selected company/candidate/score/reviewer fields survive changed and removed source-evidence refreshes. Concurrent unmatched reruns exercise the transaction-scoped PostgreSQL advisory-lock backstop and prove exactly one proposal is created while the losing rerun reports the authoritative row as unchanged. Cross-operating-company approved matches, rejected proposals, and source accounts cannot be resolved, moved, or updated.
+  - **Atomic source ownership**: concurrent source-account upserts for the same tenant/realm/customer key but different operating companies are serialized; exactly one owner is persisted and the losing call is rejected before any update. Connection tests separately prove that a QuickBooks credential or realm cannot be associated with two operating companies in the tenant.
+  - **CP-02B-2-Q1 `MATCH_EVIDENCE`**: unmatched customers are persisted as `PROPOSED` `CustomerIdentityMatch` rows (`companyId = null`, `operatingCompanyId` set) with the available evidence; nothing is auto-created or auto-approved (CP-02B-3-Q1 `MANUAL_ONLY`).
+  - **Dry-run zero-write contract**: `{ dryRun: true }` computes the full would-be report and asserts no create/update/upsert/delete on any model (no audits either); proposal-resolution regressions distinguish create, evidence-refresh, unchanged, and reviewed-preserved outcomes, including an existing unchanged proposal that is not counted as a new write. An expired token in dry-run is reported as a limitation instead of refreshing.
+  - **Token refresh**: expired tokens refresh through `refreshQuickBooksAccessToken` (refresh endpoint asserted) and the rotated tokens use an `(id, tenantId)`-constrained persistence write that must affect exactly one row; foreign-tenant credentials and zero-row updates fail closed. Fresh tokens never trigger a refresh write.
+  - **Run/error audit contract**: successful non-dry runs record the authenticated tenant and actor with a terminal summary containing only timestamps, operating-company status counts, and aggregate totals. Detailed warnings remain in the returned ADMIN report but are never copied to the audit. Token-acquisition and QuickBooks-fetch failures use deterministic classifications only. Synthetic upstream token/customer-like content and failed-record identifiers are proven absent from audit writes, alongside bearer tokens, refresh tokens, credential references, and authorization headers. A persistence failure after an earlier successful record increments sanitized `recordErrors`/`skipped` counts, allows deterministic processing to finish, and still writes the terminal summary.
+  - **Permissions**: MANAGER, SALES, OPERATIONS, READ_ONLY, and FINANCE are denied for both live and dry-run entry points before any database write or QuickBooks fetch; FINANCE is denied even with `canMutate=true` (ingestion is ADMIN-only).
+  - **Association bypass regression**: `registerOperatingCompany` ignores removed QuickBooks association properties from an untyped runtime caller, proving realm/credential references can only be written through the validated, audited `associateQuickBooksCredential` action.
 - `tests/authorization.test.ts` — 27 tests including the leadership-only `CUSTOMER_INTELLIGENCE` matrix assertions (ADMIN/MANAGER/FINANCE allowed; SALES/OPERATIONS denied).
 
-The Customer Intelligence + authorization baseline is **104 targeted tests** = 77 Customer Intelligence tests (`foundation` 39 + `identity` 17 + `service-lines` 9 + `lifecycle` 12) + 27 authorization tests.
+The Customer Intelligence + authorization baseline is **104 targeted tests** = 77 Customer Intelligence tests (`foundation` 39 + `identity` 17 + `service-lines` 9 + `lifecycle` 12) + 27 authorization tests. CP-PHASE-02B-2 adds the read-only ingestion suite in `tests/customer-intelligence-ingestion.test.ts` on top of that baseline.
 
 ## Phase 2A adoption baseline
 
@@ -65,6 +78,31 @@ npm run lint
 npm run typecheck
 npm run build
 ```
+
+## Verification correction (CP-PHASE-02B-2)
+
+The ingestion suite previously exhausted the worker's approximately 4 GB V8
+heap before reporting any of its 28 tests. The failure was deterministic and
+local to the pagination test mock, not repository-wide worker concurrency:
+
+- `URLSearchParams` serializes spaces in the QuickBooks `query` parameter as
+  `+` characters.
+- The mock used `decodeURIComponent(href)` and searched for the space-delimited
+  text `startposition 1001`. `decodeURIComponent` does not translate `+` to a
+  space, so that condition was never true.
+- The mock consequently returned the full first page of 1,000 synthetic
+  customers for every request. The production pagination loop correctly kept
+  requesting the next page because every mocked page was full, while the test
+  accumulated and repeatedly serialized unbounded pages until V8 failed in
+  response JSON parsing.
+
+The correction parses `new URL(href).searchParams.get("query")`, which applies
+the form-url-encoded `+` decoding and lets the mock return its two-row final
+page at `startposition 1001`. The regression assertion pins both requested
+positions. The unrelated `vitest.config.ts` heap and worker-concurrency
+workaround is fully reverted; no heap increase, concurrency reduction, test
+skip, exclusion, or assertion weakening is used. The controller owns the full
+suite verification.
 
 ## Baseline debt (recorded at CP-PHASE-02A verification time)
 
@@ -107,7 +145,6 @@ Each approved migration validation must record:
 
 CP-PHASE-02A confirms the following are excluded and introduces none of them:
 
-- No QuickBooks ingestion or sync.
 - No settings/connection UI.
 - No Customer Profile UI, API routes, or navigation.
 - No Microsoft 365 mailbox integration.
@@ -117,4 +154,23 @@ CP-PHASE-02A confirms the following are excluded and introduces none of them:
 - No scheduling.
 - No production write of any kind.
 
-No new entry points are introduced. Every existing shared data path continues to carry authenticated `tenantId` filtering, and the existing permission and human-approval boundaries are preserved.
+At CP-PHASE-02A time, "no QuickBooks ingestion or sync" also held; CP-PHASE-02B-2
+implements the read-only QuickBooks **customer** ingestion (see above and
+`docs/modules/customer-intelligence/integrations.md`). QuickBooks report sync
+(revenue, AR aging detail), webhooks, CDC recovery, reconciliation, and the job
+ledger remain excluded and unstarted.
+
+## Phase scope (CP-PHASE-02B-2)
+
+CP-PHASE-02B-2 introduces exactly one new entry point
+(`runQuickBooksCustomerIngestion`), one new module file
+(`quickbooks-ingestion.ts`), one new guard (`requireIngestionAdmin`), one new
+test suite (`tests/customer-intelligence-ingestion.test.ts`), and documentation
+updates. It adds **no schema change and no migration** (owner decision
+CP-02B-2-Q1 `MATCH_EVIDENCE` chose the existing `CustomerIdentityMatch` staging
+model over a new staging table). It performs **no QuickBooks write of any kind**
+(GET-only transport, asserted by tests), **no Company creation or approval**
+(CP-02B-3-Q1 `MANUAL_ONLY`), **no Teamship access**, **no customer
+communication**, and **no production write**. Every shared data path carries
+authenticated `tenantId` filtering, and the existing permission and
+human-approval boundaries are preserved.

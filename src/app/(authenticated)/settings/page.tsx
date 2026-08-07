@@ -133,7 +133,10 @@ export default async function SettingsPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">QuickBooks Connections</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Connect each legal entity separately so finance imports can distinguish Newl Worldwide from Newl USA while reusing shared canonical customer identity.
+              Connect each operating company separately so finance imports can distinguish Newl
+              Worldwide, Newl USA, and Newell&apos;s Express and Warehousing Ltd. while reusing shared
+              canonical customer identity. All three use the same QuickBooks OAuth app, each with its
+              own realm/company connection.
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
@@ -143,13 +146,16 @@ export default async function SettingsPage() {
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           {[
-            { entity: "NEWL_WORLDWIDE", title: "Newl Worldwide", description: "Canada transport and third-party warehouse activity." },
-            { entity: "NEWL_USA", title: "Newl USA", description: "US customers plus Charlotte warehousing operations." }
+            { slug: "newl-worldwide", title: "Newl Worldwide", description: "Canada transport and third-party warehouse activity." },
+            { slug: "newl-usa", title: "Newl USA", description: "US customers plus Charlotte warehousing operations." },
+            { slug: "newells-express", title: "Newell's Express and Warehousing Ltd.", description: "Local trucking and warehousing operations for Newell's Express and Warehousing Ltd." }
           ].map((target) => {
-            const connection = settings.quickbooksConnections.find((item) => item.legalEntity === target.entity);
+            const connection = settings.quickbooksConnections.find(
+              (item) => item.operatingCompanySlug === target.slug
+            );
 
             return (
-              <div key={target.entity} className="rounded-md border border-border bg-muted/40 p-4">
+              <div key={target.slug} className="rounded-md border border-border bg-muted/40 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">{target.title}</h3>
@@ -175,7 +181,7 @@ export default async function SettingsPage() {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <a
-                    href={`/api/integrations/quickbooks/connect?entity=${target.entity}`}
+                    href={`/api/integrations/quickbooks/connect?entity=${target.slug}`}
                     className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
                   >
                     {connection ? "Reconnect QuickBooks" : "Connect QuickBooks"}

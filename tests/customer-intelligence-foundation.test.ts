@@ -15,6 +15,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prismaTest = vi.hoisted(() => {
   const modelCalls: Array<{ model: string; method: string; args: unknown[] }> = [];
   const modelTargets = new Map<string, Record<string, ReturnType<typeof vi.fn>>>();
+  const queryRaw = vi.fn(async () => []);
+  const transaction = vi.fn(async (callback: (client: Record<string, unknown>) => unknown) =>
+    callback(proxy)
+  );
   const getModel = (model: string) => {
     if (!modelTargets.has(model)) {
       modelTargets.set(model, {});
@@ -38,12 +42,18 @@ const prismaTest = vi.hoisted(() => {
       }
     });
   };
-  const proxy = new Proxy(
+  const proxy: Record<string, unknown> = new Proxy(
     {},
     {
       get(_target, prop) {
         if (typeof prop !== "string") {
           return undefined;
+        }
+        if (prop === "$transaction") {
+          return transaction;
+        }
+        if (prop === "$queryRaw") {
+          return queryRaw;
         }
         return makeModelProxy(prop);
       }
@@ -53,6 +63,8 @@ const prismaTest = vi.hoisted(() => {
     proxy,
     modelTargets,
     modelCalls,
+    queryRaw,
+    transaction,
     model(modelName: string) {
       return makeModelProxy(modelName);
     },
@@ -63,6 +75,12 @@ const prismaTest = vi.hoisted(() => {
         }
       }
       modelCalls.length = 0;
+      queryRaw.mockReset();
+      queryRaw.mockResolvedValue([]);
+      transaction.mockReset();
+      transaction.mockImplementation(
+        async (callback: (client: Record<string, unknown>) => unknown) => callback(proxy)
+      );
     }
   };
 });
@@ -517,6 +535,7 @@ describe("identity target integrity", () => {
       tenantId: "tenant-a",
       kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
       companyId: "company-1",
+      operatingCompanyId: "oc-ww",
       sourceRecordKey: "realm-1:1001",
       status: CustomerIdentityMatchStatus.APPROVED
     });
@@ -673,6 +692,7 @@ describe("identity target integrity", () => {
       tenantId: "tenant-a",
       kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
       companyId: "company-1",
+      operatingCompanyId: "oc-ww",
       sourceRecordKey: "realm-1:1001",
       status: CustomerIdentityMatchStatus.REJECTED,
       score: 100
