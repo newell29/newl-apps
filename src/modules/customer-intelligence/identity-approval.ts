@@ -1,4 +1,8 @@
-import { CustomerIdentityMatchKind, CustomerIdentityMatchStatus } from "@prisma/client";
+import {
+  CustomerIdentityMatchKind,
+  CustomerIdentityMatchStatus,
+  Prisma
+} from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -21,6 +25,11 @@ export type IdentityTargetInput = {
   candidateCompanyId?: string | null;
 };
 
+type IdentityApprovalClient = Pick<
+  Prisma.TransactionClient,
+  "company" | "operatingCompany" | "customerIdentityMatch"
+>;
+
 /**
  * Validates that every referenced canonical company (target, candidate, and
  * operating company) exists within the authenticated tenant. Cross-tenant
@@ -29,10 +38,11 @@ export type IdentityTargetInput = {
  */
 export async function validateReferencedCompanies(
   ctx: AuthenticatedContext,
-  input: IdentityTargetInput
+  input: IdentityTargetInput,
+  client: IdentityApprovalClient = prisma
 ): Promise<void> {
   if (input.companyId) {
-    const company = await prisma.company.findFirst({
+    const company = await client.company.findFirst({
       where: tenantWhere(ctx, { id: input.companyId })
     });
     if (!company) {
@@ -40,7 +50,7 @@ export async function validateReferencedCompanies(
     }
   }
   if (input.candidateCompanyId) {
-    const candidate = await prisma.company.findFirst({
+    const candidate = await client.company.findFirst({
       where: tenantWhere(ctx, { id: input.candidateCompanyId })
     });
     if (!candidate) {
@@ -48,7 +58,7 @@ export async function validateReferencedCompanies(
     }
   }
   if (input.operatingCompanyId) {
-    const operatingCompany = await prisma.operatingCompany.findFirst({
+    const operatingCompany = await client.operatingCompany.findFirst({
       where: tenantWhere(ctx, { id: input.operatingCompanyId })
     });
     if (!operatingCompany) {
@@ -64,7 +74,8 @@ export async function validateReferencedCompanies(
  */
 export async function assertCanApproveIdentityMatch(
   ctx: AuthenticatedContext,
-  input: IdentityTargetInput & { kind: CustomerIdentityMatchKind }
+  input: IdentityTargetInput & { kind: CustomerIdentityMatchKind },
+  client: IdentityApprovalClient = prisma
 ): Promise<void> {
   if (!input.companyId) {
     throw new Error("Cannot approve an identity match without a canonical company.");
@@ -75,7 +86,7 @@ export async function assertCanApproveIdentityMatch(
   ) {
     throw new Error("operatingCompanyId is required for QUICKBOOKS_ACCOUNT identity matches.");
   }
-  await validateReferencedCompanies(ctx, input);
+  await validateReferencedCompanies(ctx, input, client);
 }
 
 /**
@@ -90,12 +101,13 @@ export async function findApprovedConflict(
     sourceRecordKey: string | null;
     companyId: string;
     selfId?: string;
-  }
+  },
+  client: IdentityApprovalClient = prisma
 ) {
   if (!input.sourceRecordKey) {
     return null;
   }
-  return prisma.customerIdentityMatch.findFirst({
+  return client.customerIdentityMatch.findFirst({
     where: tenantWhere(ctx, {
       kind: input.kind,
       sourceRecordKey: input.sourceRecordKey,

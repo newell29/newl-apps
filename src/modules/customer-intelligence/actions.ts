@@ -41,6 +41,10 @@ import {
   ingestQuickBooksCustomers,
   type QuickBooksCustomerIngestionReport
 } from "@/modules/customer-intelligence/quickbooks-ingestion";
+import {
+  reconcileQuickBooksIdentityMatches,
+  type IdentityReconciliationReport
+} from "@/modules/customer-intelligence/reconciliation";
 
 function toInputJson(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined
@@ -56,6 +60,16 @@ function isUniqueConstraintError(error: unknown): boolean {
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === "P2002"
   );
+}
+
+/** Existing canonical Company key format used by seed and ingestion paths. */
+function normalizeCanonicalCompanyName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export async function registerOperatingCompany(
@@ -276,6 +290,21 @@ export async function runQuickBooksCustomerIngestion(
 ): Promise<QuickBooksCustomerIngestionReport> {
   await requireIngestionAdmin(ctx);
   return ingestQuickBooksCustomers(ctx, input);
+}
+
+/**
+ * Leadership-triggered deterministic identity reconciliation (CP-PHASE-02B-3).
+ * ADMIN and FINANCE (requireMatchApproval) re-score the tenant's PROPOSED
+ * QUICKBOOKS_ACCOUNT matches against canonical companies using only the
+ * approved identity.ts scoring rules and route ambiguity to the leadership
+ * review queue. The core enforces the same permission guards defensively.
+ */
+export async function runIdentityReconciliation(
+  ctx: AuthenticatedContext,
+  input: { operatingCompanyId?: string } = {}
+): Promise<IdentityReconciliationReport> {
+  await requireMatchApproval(ctx);
+  return reconcileQuickBooksIdentityMatches(ctx, input);
 }
 
 export async function upsertCompanyOperatingRelationship(
@@ -736,84 +765,393 @@ export async function proposeIdentityMatch(
   return record;
 }
 
+export type IdentityMatchReviewDecision = "APPROVE" | "REJECT" | "DEFER";
+
+export type IdentityMatchReviewInput = {
+  /**
+   * Canonical target to persist with the review. For APPROVE this is required
+   * (falls back to the match's stored companyId) and must exist in the
+   * authenticated tenant. For REJECT a provided target is recorded as the
+   * considered-but-rejected company after the same tenant validation.
+   */
+  companyId?: string;
+  /**
+   * Operating company for a QUICKBOOKS_ACCOUNT approval. Falls back to the
+   * match's stored operatingCompanyId; a provided value must belong to the
+   * tenant.
+   */
+  operatingCompanyId?: string;
+  /** Human review note recorded in the match evidence. */
+  note?: string;
+};
+
+/**
+ * Manual leadership review of an identity match. Enforces the same shared
+ * approval invariants as automatic approval (`identity-approval.ts`):
+ *
+ * - APPROVE requires a non-null, tenant-valid canonical companyId; a
+ *   QUICKBOOKS_ACCOUNT approval requires a tenant-valid operatingCompanyId;
+ *   one source can never be approved to two canonical companies. A target
+ *   supplied here is persisted with the approval.
+ * - REJECT records the reviewed decision (an optional tenant-valid target may
+ *   be persisted as the considered-but-rejected company).
+ * - DEFER returns the match to PROPOSED (reviewer identity/timestamp cleared)
+ *   so it stays in the leadership review queue for a later decision.
+ *
+ * Every approval, rejection, and deferral writes an AuditLog entry.
+ */
 export async function reviewIdentityMatch(
   ctx: AuthenticatedContext,
   matchId: string,
-  decision: "APPROVE" | "REJECT",
-  note?: string
+  decision: IdentityMatchReviewDecision,
+  input: IdentityMatchReviewInput = {}
 ) {
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
-  const existing = await prisma.customerIdentityMatch.findFirst({
+  // Read only the source coordinates needed to acquire the same lock as
+  // ingestion/reconciliation. The authoritative row is re-read after locking.
+  const lockCoordinates = await prisma.customerIdentityMatch.findFirst({
     where: tenantWhere(ctx, { id: matchId })
   });
-  if (!existing) {
+  if (!lockCoordinates) {
     throw new Error("Identity match does not exist in this tenant.");
   }
-
-  // Manual approval enforces the same approval-invariant validator as
-  // automatic approval: a canonical company is required, a QUICKBOOKS_ACCOUNT
-  // approval requires an operating company, and one source cannot be approved
-  // to two canonical companies.
-  if (decision === "APPROVE") {
-    await assertCanApproveIdentityMatch(ctx, {
-      kind: existing.kind,
-      companyId: existing.companyId,
-      operatingCompanyId: existing.operatingCompanyId,
-      candidateCompanyId: existing.candidateCompanyId
-    });
-    const companyId = existing.companyId;
-    if (!companyId) {
-      throw new Error("Cannot approve an identity match without a canonical company.");
-    }
-    const conflicting = await findApprovedConflict(ctx, {
-      kind: existing.kind,
-      sourceRecordKey: existing.sourceRecordKey,
-      companyId,
-      selfId: existing.id
-    });
-    if (conflicting) {
-      throw new Error("Source record is already approved to another canonical company.");
-    }
+  if (
+    input.operatingCompanyId &&
+    lockCoordinates.operatingCompanyId &&
+    input.operatingCompanyId !== lockCoordinates.operatingCompanyId
+  ) {
+    throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
   }
 
-  const status =
-    decision === "APPROVE"
-      ? CustomerIdentityMatchStatus.APPROVED
-      : CustomerIdentityMatchStatus.REJECTED;
-
-  const evidenceBase =
-    existing.evidence && typeof existing.evidence === "object" && !Array.isArray(existing.evidence)
-      ? { ...(existing.evidence as Prisma.JsonObject) }
-      : {};
-  const evidence = note
-    ? ({ ...evidenceBase, reviewNote: note } as Prisma.InputJsonValue)
-    : toInputJson(existing.evidence);
-
-  const updated = await prisma.customerIdentityMatch.update({
-    where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
-    data: {
-      status,
-      reviewerUserId: ctx.userId,
-      reviewedAt: new Date(),
-      evidence
+  return prisma.$transaction(async (transaction) => {
+    if (
+      lockCoordinates.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT &&
+      lockCoordinates.operatingCompanyId &&
+      lockCoordinates.sourceRecordKey
+    ) {
+      const lockKey = [
+        "customer-intelligence.quickbooks-proposal",
+        ctx.tenantId,
+        lockCoordinates.operatingCompanyId,
+        lockCoordinates.sourceRecordKey
+      ].join(":");
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+      );
+    } else {
+      const lockKey = [
+        "customer-intelligence.identity-match",
+        ctx.tenantId,
+        matchId
+      ].join(":");
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+      );
     }
-  });
 
-  await auditEntry({
-    actor: ctx,
-    action:
-      decision === "APPROVE"
-        ? "customer-intelligence.identity-match.approved"
-        : "customer-intelligence.identity-match.rejected",
-    entityType: "CustomerIdentityMatch",
-    entityId: matchId,
-    before: existing,
-    after: updated
-  });
+    const existing = await transaction.customerIdentityMatch.findFirst({
+      where: tenantWhere(ctx, { id: matchId })
+    });
+    if (!existing) {
+      throw new Error("Identity match does not exist in this tenant.");
+    }
+    if (
+      input.operatingCompanyId &&
+      existing.operatingCompanyId &&
+      input.operatingCompanyId !== existing.operatingCompanyId
+    ) {
+      throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
+    }
 
-  return updated;
+    const evidenceBase =
+      existing.evidence &&
+      typeof existing.evidence === "object" &&
+      !Array.isArray(existing.evidence)
+        ? { ...(existing.evidence as Prisma.JsonObject) }
+        : {};
+    const evidence = input.note
+      ? ({ ...evidenceBase, reviewNote: input.note } as Prisma.InputJsonValue)
+      : toInputJson(existing.evidence);
+
+    let updated;
+    let action: string;
+    if (decision === "APPROVE") {
+      const companyId = input.companyId ?? existing.companyId;
+      if (!companyId) {
+        throw new Error("Cannot approve an identity match without a canonical company.");
+      }
+      const operatingCompanyId = input.operatingCompanyId ?? existing.operatingCompanyId;
+      await assertCanApproveIdentityMatch(
+        ctx,
+        {
+          kind: existing.kind,
+          companyId,
+          operatingCompanyId,
+          candidateCompanyId: existing.candidateCompanyId
+        },
+        transaction
+      );
+      const conflicting = await findApprovedConflict(
+        ctx,
+        {
+          kind: existing.kind,
+          sourceRecordKey: existing.sourceRecordKey,
+          companyId,
+          selfId: existing.id
+        },
+        transaction
+      );
+      if (conflicting) {
+        throw new Error("Source record is already approved to another canonical company.");
+      }
+      updated = await transaction.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+        data: {
+          status: CustomerIdentityMatchStatus.APPROVED,
+          companyId,
+          operatingCompanyId,
+          reviewerUserId: ctx.userId,
+          reviewedAt: new Date(),
+          evidence
+        }
+      });
+      action = "customer-intelligence.identity-match.approved";
+    } else if (decision === "REJECT") {
+      const data: Prisma.CustomerIdentityMatchUncheckedUpdateInput = {
+        status: CustomerIdentityMatchStatus.REJECTED,
+        reviewerUserId: ctx.userId,
+        reviewedAt: new Date(),
+        evidence
+      };
+      if (input.companyId !== undefined) {
+        await validateReferencedCompanies(
+          ctx,
+          {
+            companyId: input.companyId,
+            operatingCompanyId: input.operatingCompanyId ?? undefined,
+            candidateCompanyId: existing.candidateCompanyId
+          },
+          transaction
+        );
+        data.companyId = input.companyId;
+      }
+      updated = await transaction.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+        data
+      });
+      action = "customer-intelligence.identity-match.rejected";
+    } else {
+      updated = await transaction.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+        data: {
+          status: CustomerIdentityMatchStatus.PROPOSED,
+          reviewerUserId: null,
+          reviewedAt: null,
+          evidence
+        }
+      });
+      action = "customer-intelligence.identity-match.deferred";
+    }
+
+    await auditEntry({
+      actor: ctx,
+      action,
+      entityType: "CustomerIdentityMatch",
+      entityId: matchId,
+      before: existing,
+      after: updated,
+      client: transaction
+    });
+    return updated;
+  });
+}
+
+export type ApproveIdentityMatchWithNewCompanyInput = {
+  /** Explicit reviewer-entered canonical name; source evidence is never used as a fallback. */
+  companyName: string;
+  domain?: string;
+  operatingCompanyId?: string;
+  note?: string;
+  /** Deliberate human confirmation required by CP-02B-3-Q1. */
+  confirmation: "CREATE_AND_APPROVE";
+};
+
+/**
+ * Narrow MANUAL_ONLY path for an ADMIN/FINANCE reviewer to create a canonical
+ * Company and approve an unmatched QuickBooks identity in one transaction.
+ * Nothing is derived from the QuickBooks name: the canonical name is explicit
+ * reviewer input, and the confirmation token prevents this path from being
+ * called as an automatic fallback.
+ */
+export async function approveIdentityMatchWithNewCompany(
+  ctx: AuthenticatedContext,
+  matchId: string,
+  input: ApproveIdentityMatchWithNewCompanyInput
+) {
+  await requireMatchApproval(ctx);
+  await requireWrite(ctx);
+
+  if (input.confirmation !== "CREATE_AND_APPROVE") {
+    throw new Error("Explicit confirmation is required to create and approve a canonical company.");
+  }
+  const companyName = input.companyName.trim();
+  if (!companyName || companyName.length > 200) {
+    throw new Error("Canonical company name is required and must be 200 characters or fewer.");
+  }
+  const normalizedName = normalizeCanonicalCompanyName(companyName);
+  if (!normalizedName) {
+    throw new Error("Canonical company name must contain letters or numbers.");
+  }
+  const domain = input.domain?.trim().toLowerCase() || null;
+  if (domain && !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+    throw new Error("Canonical company domain must be a valid hostname.");
+  }
+
+  const lockCoordinates = await prisma.customerIdentityMatch.findFirst({
+    where: tenantWhere(ctx, { id: matchId })
+  });
+  if (!lockCoordinates) {
+    throw new Error("Identity match does not exist in this tenant.");
+  }
+  if (
+    input.operatingCompanyId &&
+    lockCoordinates.operatingCompanyId &&
+    input.operatingCompanyId !== lockCoordinates.operatingCompanyId
+  ) {
+    throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
+  }
+
+  return prisma.$transaction(async (transaction) => {
+    const operatingCompanyId = input.operatingCompanyId ?? lockCoordinates.operatingCompanyId;
+    const lockKey =
+      lockCoordinates.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT &&
+      lockCoordinates.operatingCompanyId &&
+      lockCoordinates.sourceRecordKey
+        ? [
+            "customer-intelligence.quickbooks-proposal",
+            ctx.tenantId,
+            lockCoordinates.operatingCompanyId,
+            lockCoordinates.sourceRecordKey
+          ].join(":")
+        : ["customer-intelligence.identity-match", ctx.tenantId, matchId].join(":");
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+    );
+
+    const existing = await transaction.customerIdentityMatch.findFirst({
+      where: tenantWhere(ctx, { id: matchId })
+    });
+    if (!existing) {
+      throw new Error("Identity match does not exist in this tenant.");
+    }
+    if (existing.status !== CustomerIdentityMatchStatus.PROPOSED) {
+      throw new Error("Only a PROPOSED identity match can create a new canonical company.");
+    }
+    if (existing.kind !== CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT) {
+      throw new Error("This company-creation approval is limited to QuickBooks identity review.");
+    }
+    if (
+      existing.operatingCompanyId &&
+      existing.operatingCompanyId !== operatingCompanyId
+    ) {
+      throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
+    }
+    if (!operatingCompanyId) {
+      throw new Error("operatingCompanyId is required for QUICKBOOKS_ACCOUNT identity matches.");
+    }
+    const operatingCompany = await transaction.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: operatingCompanyId })
+    });
+    if (!operatingCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+    const duplicate = await transaction.company.findFirst({
+      where: tenantWhere(ctx, { normalizedName })
+    });
+    if (duplicate) {
+      throw new Error("A canonical company with this normalized name already exists; select it instead.");
+    }
+    const conflict = existing.sourceRecordKey
+      ? await transaction.customerIdentityMatch.findFirst({
+          where: tenantWhere(ctx, {
+            kind: existing.kind,
+            sourceRecordKey: existing.sourceRecordKey,
+            status: CustomerIdentityMatchStatus.APPROVED,
+            id: { not: existing.id }
+          })
+        })
+      : null;
+    if (conflict) {
+      throw new Error("Source record is already approved to another canonical company.");
+    }
+
+    const company = await transaction.company.create({
+      data: {
+        tenantId: ctx.tenantId,
+        name: companyName,
+        normalizedName,
+        domain,
+        source: "CUSTOMER_INTELLIGENCE_IDENTITY_REVIEW"
+      }
+    });
+    const relationship = await transaction.companyOperatingRelationship.create({
+      data: {
+        tenantId: ctx.tenantId,
+        companyId: company.id,
+        operatingCompanyId,
+        lifecycle: CustomerLifecycle.PROSPECT,
+        status: "ACTIVE"
+      }
+    });
+    const evidenceBase =
+      existing.evidence && typeof existing.evidence === "object" && !Array.isArray(existing.evidence)
+        ? { ...(existing.evidence as Prisma.JsonObject) }
+        : {};
+    const evidence = input.note?.trim()
+      ? ({ ...evidenceBase, reviewNote: input.note.trim().slice(0, 500) } as Prisma.InputJsonValue)
+      : toInputJson(existing.evidence);
+    const updated = await transaction.customerIdentityMatch.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+      data: {
+        companyId: company.id,
+        candidateCompanyId: company.id,
+        operatingCompanyId,
+        status: CustomerIdentityMatchStatus.APPROVED,
+        reviewerUserId: ctx.userId,
+        reviewedAt: new Date(),
+        evidence
+      }
+    });
+
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.company.created-from-identity-review",
+      entityType: "Company",
+      entityId: company.id,
+      after: { id: company.id, name: company.name, domain: company.domain },
+      client: transaction
+    });
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.relationship.created",
+      entityType: "CompanyOperatingRelationship",
+      entityId: relationship.id,
+      after: relationship,
+      client: transaction
+    });
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.identity-match.approved",
+      entityType: "CustomerIdentityMatch",
+      entityId: matchId,
+      before: existing,
+      after: updated,
+      client: transaction
+    });
+    return { company, relationship, match: updated };
+  });
 }
 
 export async function upsertServiceMappingRule(

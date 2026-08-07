@@ -7,6 +7,8 @@ export type AuditActor = {
   userId: string | null;
 };
 
+type AuditClient = Pick<Prisma.TransactionClient, "auditLog">;
+
 export function auditEntry(input: {
   actor: AuditActor;
   action: string;
@@ -14,9 +16,10 @@ export function auditEntry(input: {
   entityId?: string | null;
   before?: unknown;
   after?: unknown;
+  client?: AuditClient;
 }) {
-  const { actor, action, entityType, entityId, before, after } = input;
-  return prisma.auditLog.create({
+  const { actor, action, entityType, entityId, before, after, client = prisma } = input;
+  return client.auditLog.create({
     data: {
       tenantId: actor.tenantId,
       actorUserId: actor.userId,
