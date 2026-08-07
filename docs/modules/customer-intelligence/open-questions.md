@@ -16,16 +16,20 @@
 
 - **Lifecycle rollup ordering** (ACTIVE > DORMANT > FORMER > PROSPECT). Inferred; owner to confirm.
 - **"Compatible normalized name"** definition (current implementation: normalized equality or token-contained subset of length >= 2). Employee to confirm.
-- **Third operating company display name**: "Newell's Express and Warehousing Ltd." per the plan. Note `tests/invoice-automation-extraction.test.ts` references a different legal-name string; confirm which name is authoritative.
+- **Third operating company display name**: confirmed as "Newell's Express and Warehousing Ltd." by owner decision CP-02B-1-Q1 (slug `newells-express`, legal company Newell's Express and Warehousing Ltd.). An unrelated invoice-automation fixture in `tests/invoice-automation-extraction.test.ts` still uses different legal-name strings; the authoritative display/legal name is the owner-confirmed one.
 - Whether `READ_ONLY` should ever see Customer Intelligence (v1 excludes it via the leadership guard even though the matrix grants READ_ONLY broad read access).
 - Whether two-person approval is required for any identity-match approvals or service-rule changes.
-- Which external integration credentials should move from env fallback to tenant-scoped `OperatingCompany.quickBooksCredentialId` first.
+- **Which remaining external integration credentials should move from env fallback to tenant-scoped storage next**: CP-PHASE-02B-1 added the ADMIN-only, audited `OperatingCompany.quickBooksCredentialId` association, and CP-PHASE-02B-2 now consumes it for QuickBooks customer ingestion. Other integration paths that still rely on environment-level fallback remain separate future scope; their migration order requires confirmation.
 - **Open AR lifecycle interpretation**: "open AR within the trailing 12 months" is implemented as any `CustomerMonthlyFinancial` row with `nativeOpenAr > 0` whose `monthKey` falls in the trailing 12 months. Open AR is a point-in-time balance, so this is a materialized-month interpretation; confirm whether current open AR (regardless of age) should count instead.
 - **Operating-company scoping of identity matches**: `QUICKBOOKS_ACCOUNT` matches now require `operatingCompanyId`. Confirm that a QuickBooks customer record that serves multiple operating companies should be represented as one match per operating company rather than a single company-level match.
 
-## Blocking legacy-backfill policy questions (CP-02A-BF-1..7)
+## Retired historical legacy-backfill questions (CP-02A-BF-1..7)
 
-These questions gate the legacy-cashflow backfill that phase 2 depends on. The backfill phase is **owner-gated**: no backfill migration may be written, reviewed, or scheduled until the owner confirms CP-02A-BF-1..7. All seven are inferred policy questions, not approved business rules, and must never be presented as approved.
+These questions are retained only as retired historical material. The legacy
+Cashflow backfill is not part of the Customer Intelligence plan, and no phase 2
+work depends on it. No Customer Intelligence phase reads or writes
+`CashflowCustomer`, `CashflowLegalEntity`, or other Cashflow records. These
+questions are not active gates or approved business rules.
 
 - **CP-02A-BF-1 — Lifecycle and revenue dates for backfilled rows**: which `CustomerLifecycle` is assigned to each backfilled relationship, and how are `firstRevenueDate`/`lastRevenueDate` derived from the legacy `CashflowCustomer` history when the backfill creates `CompanyOperatingRelationship` rows?
 - **CP-02A-BF-2 — `businessLine`-row collapse policy**: `CashflowCustomer` is unique on `(tenantId, companyId, legalEntity, businessLine)`, so one company can span multiple legacy rows. Which policy collapses those rows into the single `CompanyOperatingRelationship` per `(tenantId, companyId, operatingCompanyId)`, and which fields win or aggregate during the collapse?
@@ -35,18 +39,22 @@ These questions gate the legacy-cashflow backfill that phase 2 depends on. The b
 - **CP-02A-BF-6 — Backfill mechanism**: is the backfill a pure SQL migration executed through the preview migrate-deploy runbook, or a guarded idempotent service action behind a distinct human approval enforced by deterministic code?
 - **CP-02A-BF-7 — `newells-express` zero-row confirmation**: confirm that zero legacy rows map to the `newells-express` operating company, and that this expected result is validated and reported — never inferred — as part of the backfill reconciliation.
 
-## Additional builder backfill questions (new IDs, not part of the approved plan's seven)
+## Retired additional builder backfill questions (CP-02A-BFX-1..6)
 
-These questions were raised while preparing the backfill design. They are distinct from CP-02A-BF-1..7 and carry their own IDs; they must never be mistaken for (or renumbered into) the approved plan's IDs. They gate the same owner-gated backfill phase.
+These questions were raised while preparing the now-retired backfill design.
+They are preserved solely for historical traceability and do not gate any
+Customer Intelligence phase.
 
 - **CP-02A-BFX-1 — Backfill scope**: which legacy `CashflowCustomer` rows are in scope for the relationship backfill (all tenants, only `newl-group`, active rows only, both legal entities, archived rows)? Inferred starting position for discussion: tenant-scoped per authenticated/ingestion context, every tenant that has `CashflowCustomer` rows.
 - **CP-02A-BFX-2 — Canonical company resolution**: the backfill reads `CashflowCustomer.companyId`; what happens to rows whose `companyId` is missing or whose referenced `Company` is absent or soft-deleted?
 - **CP-02A-BFX-3 — Conflict and re-run semantics**: `CompanyOperatingRelationship` is unique on `(tenantId, companyId, operatingCompanyId)`. On re-run, should backfill keep the first relationship (`DO NOTHING`), refresh lifecycle fields (`DO UPDATE`), or never touch a manually created relationship?
 - **CP-02A-BFX-4 — Source-account backfill**: should `CustomerSourceAccount` rows be backfilled from `CashflowCustomer`/`CashflowCustomerAlias`, and which fields (realm id, QuickBooks customer id, display name, currency) are authoritative?
 - **CP-02A-BFX-5 — Approval and evidence gate**: what evidence must the owner approve before the backfill runs (dry-run counts, tenant scope, preview upgrade-path result), and is a distinct human approval enforced by deterministic code required per the repository human-approval boundaries?
-- **CP-02A-BFX-6 — Phase-2 dependency**: confirm that phase 2 (QuickBooks ingestion and the Customer Profile UI) must not start until the approved backfill policy and the backfill migration are delivered and validated in preview.
+- **CP-02A-BFX-6 — Former phase-2 dependency premise**: retired. Phase 2 does not depend on a Cashflow backfill, and no Customer Intelligence phase reads or writes Cashflow records.
 
-Until CP-02A-BF-1..7 are confirmed, no legacy-backfill work may be presented as approved or scheduled; the additional CP-02A-BFX-1..6 questions gate the same backfill phase.
+CP-02A-BF-1..7 and CP-02A-BFX-1..6 are retired and require no answers for
+Customer Intelligence delivery. Any future proposal to interact with legacy
+Cashflow records would be new, separately owner-gated scope.
 
 ## Explicitly out of Phase 1 and CP-PHASE-02A
 

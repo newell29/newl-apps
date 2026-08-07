@@ -9,6 +9,8 @@
 | Read profiles, directory, contacts, financials, matching | ADMIN, MANAGER, FINANCE |
 | Approve/reject identity matches, manage service rules, source accounts, FX, financial facts | ADMIN, FINANCE |
 | Operating-company, integration, mailbox, retention, and schedule settings | ADMIN |
+| Associate an operating company with an ACTIVE QuickBooks credential (`associateQuickBooksCredential`) | ADMIN (plus the tenant mutation gate via `requireWrite`) |
+| Trigger read-only QuickBooks customer ingestion (`runQuickBooksCustomerIngestion`, CP-PHASE-02B-2) | ADMIN (via `requireIngestionAdmin`, which stacks `requireAdminSettings` + `requireWrite`) |
 | No access | SALES, OPERATIONS, READ_ONLY |
 
 ## Implementation
@@ -22,5 +24,5 @@
   - `requireAdminSettings`: read access then `requireRole([ADMIN])`.
   - `requireWrite`: read access then `requireMutationAccess` (blocks READ_ONLY and tenant roles with `canMutate=false`).
 
-- Every exported query in `queries.ts` and the guarded resolver in `cashflow-compatibility.ts` call `requireReadAccess`; every mutation action calls the appropriate guard plus `requireWrite`. `refreshRelationshipLifecycle` also calls `requireMutationAccess` because it writes.
+- Every exported query in `queries.ts` and the guarded resolver in `cashflow-compatibility.ts` call `requireReadAccess`; every mutation action calls the appropriate guard plus `requireWrite`. `refreshRelationshipLifecycle` also calls `requireMutationAccess` because it writes. The CP-PHASE-02B-1 association action (`associateQuickBooksCredential`) calls `requireAdminSettings` then `requireWrite` and is ADMIN-only, so FINANCE and MANAGER cannot associate QuickBooks credentials even though they can read and maintain other Customer Intelligence facts. The CP-PHASE-02B-2 ingestion entry point (`runQuickBooksCustomerIngestion`) calls `requireIngestionAdmin` (`requireAdminSettings` + `requireWrite`) and is ADMIN-only, so SALES, OPERATIONS, READ_ONLY, FINANCE, and MANAGER cannot trigger ingestion — even a zero-write dry run.
 - Tenant module access for the seeded tenant is created in `prisma/seed.ts` and by the corrections migration (both idempotent).

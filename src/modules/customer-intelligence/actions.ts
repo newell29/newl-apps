@@ -4,6 +4,8 @@ import {
   CustomerIntelligenceServiceLine,
   CustomerLifecycle,
   CustomerSourceAccountStatus,
+  IntegrationProvider,
+  IntegrationStatus,
   Prisma,
   QuickBooksServiceMappingDimension
 } from "@prisma/client";
@@ -31,9 +33,14 @@ import {
 } from "@/modules/customer-intelligence/identity-approval";
 import {
   requireAdminSettings,
+  requireIngestionAdmin,
   requireMatchApproval,
   requireWrite
 } from "@/modules/customer-intelligence/permissions";
+import {
+  ingestQuickBooksCustomers,
+  type QuickBooksCustomerIngestionReport
+} from "@/modules/customer-intelligence/quickbooks-ingestion";
 
 function toInputJson(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined
@@ -59,8 +66,6 @@ export async function registerOperatingCompany(
     legalName?: string;
     homeCurrency?: string;
     active?: boolean;
-    quickBooksRealmId?: string;
-    quickBooksCredentialId?: string;
   }
 ) {
   await requireAdminSettings(ctx);
@@ -87,9 +92,7 @@ export async function registerOperatingCompany(
       displayName,
       legalName: input.legalName?.trim() || null,
       homeCurrency: input.homeCurrency ?? "CAD",
-      active: input.active ?? true,
-      quickBooksRealmId: input.quickBooksRealmId?.trim() || null,
-      quickBooksCredentialId: input.quickBooksCredentialId?.trim() || null
+      active: input.active ?? true
     },
     create: {
       tenantId: ctx.tenantId,
@@ -97,9 +100,7 @@ export async function registerOperatingCompany(
       displayName,
       legalName: input.legalName?.trim() || null,
       homeCurrency: input.homeCurrency ?? "CAD",
-      active: input.active ?? true,
-      quickBooksRealmId: input.quickBooksRealmId?.trim() || null,
-      quickBooksCredentialId: input.quickBooksCredentialId?.trim() || null
+      active: input.active ?? true
     }
   });
 
@@ -112,6 +113,169 @@ export async function registerOperatingCompany(
   });
 
   return record;
+}
+
+/**
+ * Associate a tenant-scoped, ACTIVE QuickBooks credential with an operating
+ * company and persist the loose quickBooksCredentialId/quickBooksRealmId
+ * references together. Validation is deterministic and tenant-scoped:
+ *
+ * - the operating company must belong to the caller's tenant;
+ * - the credential must belong to the caller's tenant, use the QUICKBOOKS
+ *   provider, and be ACTIVE;
+ * - the provided quickBooksRealmId must equal the realm stored in the
+ *   credential's publicConfig.
+ *
+ * Cross-tenant or mismatched references are rejected before any write. This is
+ * an ADMIN-only settings mutation and every successful association writes an
+ * AuditLog. Connecting a QuickBooks company never auto-enables live sync
+ * (owner decision CP-02B-8-Q1); this phase only records the association.
+ */
+export async function associateQuickBooksCredential(
+  ctx: AuthenticatedContext,
+  input: {
+    operatingCompanyId: string;
+    quickBooksCredentialId: string;
+    quickBooksRealmId: string;
+  }
+) {
+  await requireAdminSettings(ctx);
+  await requireWrite(ctx);
+
+  const realmId = input.quickBooksRealmId.trim();
+  if (!realmId) {
+    throw new Error("quickBooksRealmId is required.");
+  }
+
+  const operatingCompany = await prisma.operatingCompany.findFirst({
+    where: tenantWhere(ctx, { id: input.operatingCompanyId })
+  });
+  if (!operatingCompany) {
+    throw new Error("Operating company does not exist in this tenant.");
+  }
+
+  const credential = await prisma.integrationCredential.findFirst({
+    where: tenantWhere(ctx, { id: input.quickBooksCredentialId })
+  });
+  if (!credential) {
+    throw new Error("QuickBooks credential does not exist in this tenant.");
+  }
+  if (credential.provider !== IntegrationProvider.QUICKBOOKS) {
+    throw new Error("The selected credential is not a QuickBooks credential.");
+  }
+  if (credential.status !== IntegrationStatus.ACTIVE) {
+    throw new Error("The QuickBooks credential must be ACTIVE before it can be associated.");
+  }
+
+  const credentialRealmId = readCredentialRealmId(credential.publicConfig);
+  if (!credentialRealmId) {
+    throw new Error("The QuickBooks credential does not store a realm ID.");
+  }
+  if (credentialRealmId !== realmId) {
+    throw new Error("quickBooksRealmId does not match the realm stored on the QuickBooks credential.");
+  }
+
+  const before = {
+    quickBooksRealmId: operatingCompany.quickBooksRealmId,
+    quickBooksCredentialId: operatingCompany.quickBooksCredentialId
+  };
+
+  const associationLockKeys = [
+    `customer-intelligence.quickbooks-credential:${ctx.tenantId}:${credential.id}`,
+    `customer-intelligence.quickbooks-realm:${ctx.tenantId}:${credentialRealmId}`
+  ].sort();
+
+  const updated = await prisma.$transaction(async (transaction) => {
+    // A credential and its realm identify one QuickBooks company. Serialize
+    // association attempts for both keys so two operating companies cannot
+    // concurrently claim the same connection without a schema migration.
+    for (const lockKey of associationLockKeys) {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+      );
+    }
+
+    const conflictingAssociations =
+      (await transaction.operatingCompany.findMany({
+        where: tenantWhere(ctx, {
+          id: { not: operatingCompany.id },
+          OR: [
+            { quickBooksCredentialId: credential.id },
+            { quickBooksRealmId: credentialRealmId }
+          ]
+        }),
+        select: {
+          id: true,
+          displayName: true,
+          quickBooksCredentialId: true,
+          quickBooksRealmId: true
+        }
+      })) ?? [];
+
+    if (conflictingAssociations.length > 0) {
+      throw new Error(
+        "This QuickBooks credential or realm is already associated with another operating company in this tenant."
+      );
+    }
+
+    return transaction.operatingCompany.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: operatingCompany.id } },
+      data: {
+        quickBooksRealmId: credentialRealmId,
+        quickBooksCredentialId: credential.id
+      }
+    });
+  });
+
+  await auditEntry({
+    actor: ctx,
+    action: "customer-intelligence.operating-company.quickbooks-associated",
+    entityType: "OperatingCompany",
+    entityId: operatingCompany.id,
+    before,
+    after: {
+      quickBooksRealmId: updated.quickBooksRealmId,
+      quickBooksCredentialId: updated.quickBooksCredentialId
+    }
+  });
+
+  return updated;
+}
+
+function readCredentialRealmId(value: Prisma.JsonValue | null | undefined): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const config = value as Record<string, unknown>;
+  return typeof config.realmId === "string" ? config.realmId : null;
+}
+
+/**
+ * ADMIN-triggered, tenant-scoped, read-only QuickBooks customer ingestion
+ * (CP-PHASE-02B-2). GET-only toward QuickBooks: customer records are fetched
+ * per associated operating company and persisted idempotently under the
+ * owner-approved staging model:
+ *
+ * - matched customers upsert the tenant-scoped `CustomerSourceAccount` keyed by
+ *   `(tenantId, realmId, quickBooksCustomerId)` and refresh `lastSyncedAt`;
+ * - unmatched customers stay `PROPOSED` `CustomerIdentityMatch` rows with the
+ *   available evidence (owner decision CP-02B-2-Q1, `MATCH_EVIDENCE`); no
+ *   `Company` is created or approved (owner decision CP-02B-3-Q1,
+ *   `MANUAL_ONLY`);
+ * - reviewed identity decisions are never overwritten;
+ * - `dryRun` performs zero database writes and returns the would-be report.
+ *
+ * Operating companies without an associated tenant-scoped, ACTIVE QuickBooks
+ * credential are skipped with an audited warning. Every run writes an
+ * `AuditLog` entry unless `dryRun` is true.
+ */
+export async function runQuickBooksCustomerIngestion(
+  ctx: AuthenticatedContext,
+  input: { operatingCompanyId?: string; dryRun?: boolean } = {}
+): Promise<QuickBooksCustomerIngestionReport> {
+  await requireIngestionAdmin(ctx);
+  return ingestQuickBooksCustomers(ctx, input);
 }
 
 export async function upsertCompanyOperatingRelationship(
@@ -297,11 +461,11 @@ export async function upsertSourceAccount(
     displayName: string;
     active?: boolean;
     status?: CustomerSourceAccountStatus;
-    email?: string;
-    phone?: string;
-    billingAddress?: Prisma.InputJsonValue;
-    shippingAddress?: Prisma.InputJsonValue;
-    parentQuickBooksCustomerId?: string;
+    email?: string | null;
+    phone?: string | null;
+    billingAddress?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+    shippingAddress?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+    parentQuickBooksCustomerId?: string | null;
     contactDetails?: Prisma.InputJsonValue;
     lastSyncedAt?: Date;
   }
@@ -323,57 +487,82 @@ export async function upsertSourceAccount(
     );
   }
 
-  const existing = await prisma.customerSourceAccount.findFirst({
-    where: tenantWhere(ctx, {
-      realmId: input.realmId,
-      quickBooksCustomerId: input.quickBooksCustomerId
-    })
-  });
+  const lockKey = [
+    "customer-intelligence.quickbooks-source-account",
+    ctx.tenantId,
+    input.realmId,
+    input.quickBooksCustomerId
+  ].join(":");
 
-  const record = await prisma.customerSourceAccount.upsert({
-    where: {
-      tenantId_realmId_quickBooksCustomerId: {
-        tenantId: ctx.tenantId,
+  const { existing, record } = await prisma.$transaction(async (transaction) => {
+    // The ownership check and upsert must share one serialized transaction.
+    // Otherwise two operating companies can both observe no row and the
+    // losing upsert can overwrite the winner's ownership fields.
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+    );
+
+    const existing = await transaction.customerSourceAccount.findFirst({
+      where: tenantWhere(ctx, {
         realmId: input.realmId,
         quickBooksCustomerId: input.quickBooksCustomerId
-      }
-    },
-    update: {
-      companyId: input.companyId,
-      operatingCompanyId: input.operatingCompanyId,
-      companyOperatingRelationshipId: input.companyOperatingRelationshipId,
-      currency: input.currency ?? existing?.currency ?? "CAD",
-      displayName: input.displayName,
-      active: input.active ?? existing?.active ?? true,
-      status: input.status ?? existing?.status ?? CustomerSourceAccountStatus.ACTIVE,
-      email: input.email ?? existing?.email ?? null,
-      phone: input.phone ?? existing?.phone ?? null,
-      billingAddress: input.billingAddress ?? existing?.billingAddress ?? Prisma.JsonNull,
-      shippingAddress: input.shippingAddress ?? existing?.shippingAddress ?? Prisma.JsonNull,
-      parentQuickBooksCustomerId:
-        input.parentQuickBooksCustomerId ?? existing?.parentQuickBooksCustomerId ?? null,
-      contactDetails: input.contactDetails ?? existing?.contactDetails ?? Prisma.JsonNull,
-      lastSyncedAt: input.lastSyncedAt ?? existing?.lastSyncedAt ?? null
-    },
-    create: {
-      tenantId: ctx.tenantId,
-      realmId: input.realmId,
-      quickBooksCustomerId: input.quickBooksCustomerId,
-      companyId: input.companyId,
-      operatingCompanyId: input.operatingCompanyId,
-      companyOperatingRelationshipId: input.companyOperatingRelationshipId,
-      currency: input.currency ?? "CAD",
-      displayName: input.displayName,
-      active: input.active ?? true,
-      status: input.status ?? CustomerSourceAccountStatus.ACTIVE,
-      email: input.email ?? null,
-      phone: input.phone ?? null,
-      billingAddress: input.billingAddress ?? Prisma.JsonNull,
-      shippingAddress: input.shippingAddress ?? Prisma.JsonNull,
-      parentQuickBooksCustomerId: input.parentQuickBooksCustomerId ?? null,
-      contactDetails: input.contactDetails ?? Prisma.JsonNull,
-      lastSyncedAt: input.lastSyncedAt ?? null
+      })
+    });
+    if (existing && existing.operatingCompanyId !== input.operatingCompanyId) {
+      throw new Error(
+        "A source account owned by another operating company cannot be moved or updated."
+      );
     }
+
+    const record = await transaction.customerSourceAccount.upsert({
+      where: {
+        tenantId_realmId_quickBooksCustomerId: {
+          tenantId: ctx.tenantId,
+          realmId: input.realmId,
+          quickBooksCustomerId: input.quickBooksCustomerId
+        }
+      },
+      update: {
+        companyId: input.companyId,
+        operatingCompanyId: input.operatingCompanyId,
+        companyOperatingRelationshipId: input.companyOperatingRelationshipId,
+        currency: input.currency ?? existing?.currency ?? "CAD",
+        displayName: input.displayName,
+        active: input.active ?? existing?.active ?? true,
+        status: input.status ?? existing?.status ?? CustomerSourceAccountStatus.ACTIVE,
+        email: input.email === undefined ? existing?.email ?? null : input.email,
+        phone: input.phone === undefined ? existing?.phone ?? null : input.phone,
+        billingAddress: input.billingAddress ?? existing?.billingAddress ?? Prisma.JsonNull,
+        shippingAddress: input.shippingAddress ?? existing?.shippingAddress ?? Prisma.JsonNull,
+        parentQuickBooksCustomerId:
+          input.parentQuickBooksCustomerId === undefined
+            ? existing?.parentQuickBooksCustomerId ?? null
+            : input.parentQuickBooksCustomerId,
+        contactDetails: input.contactDetails ?? existing?.contactDetails ?? Prisma.JsonNull,
+        lastSyncedAt: input.lastSyncedAt ?? existing?.lastSyncedAt ?? null
+      },
+      create: {
+        tenantId: ctx.tenantId,
+        realmId: input.realmId,
+        quickBooksCustomerId: input.quickBooksCustomerId,
+        companyId: input.companyId,
+        operatingCompanyId: input.operatingCompanyId,
+        companyOperatingRelationshipId: input.companyOperatingRelationshipId,
+        currency: input.currency ?? "CAD",
+        displayName: input.displayName,
+        active: input.active ?? true,
+        status: input.status ?? CustomerSourceAccountStatus.ACTIVE,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+        billingAddress: input.billingAddress ?? Prisma.JsonNull,
+        shippingAddress: input.shippingAddress ?? Prisma.JsonNull,
+        parentQuickBooksCustomerId: input.parentQuickBooksCustomerId ?? null,
+        contactDetails: input.contactDetails ?? Prisma.JsonNull,
+        lastSyncedAt: input.lastSyncedAt ?? null
+      }
+    });
+
+    return { existing, record };
   });
 
   await auditEntry({
@@ -443,9 +632,21 @@ export async function proposeIdentityMatch(
     where: tenantWhere(ctx, {
       kind: input.kind,
       companyId: input.companyId,
+      ...(input.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT
+        ? { operatingCompanyId: input.operatingCompanyId }
+        : {}),
       sourceRecordKey
     })
   });
+  if (
+    input.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT &&
+    existing &&
+    existing.operatingCompanyId !== input.operatingCompanyId
+  ) {
+    throw new Error(
+      "QuickBooks match evidence owned by another operating company cannot be reused or moved."
+    );
+  }
 
   if (existing && existing.status !== CustomerIdentityMatchStatus.PROPOSED) {
     return existing;
