@@ -10,6 +10,20 @@ No live Microsoft 365, QuickBooks, Brave, Apollo, or customer-communication work
 
 Main evidence: `prisma/schema.prisma` (Customer Intelligence models), `prisma/migrations/20260805120000_add_customer_intelligence_foundation`, `prisma/migrations/20260805150000_customer_intelligence_corrections`, `prisma/migrations/20260805160000_customer_intelligence_identity_integrity`, `src/modules/customer-intelligence/*`, `tests/customer-intelligence-*.test.ts`.
 
+## Customer Profile UI design reference
+
+The owner-reviewed target experience is documented in
+`docs/modules/customer-intelligence/customer-profile-ui-design.md`, with the
+interactive high-fidelity reference in
+`docs/modules/customer-intelligence/customer-profile-wireframes.html`.
+
+Builders and reviewers working on CP-PHASE-02B-3 or later Customer Profile
+phases must inspect both files. The reference spans multiple phases for product
+continuity; it is not blanket approval to implement every screen or integration
+in one phase. The design document identifies the approved UX baseline, phase
+boundaries, safety rules, and future concepts that still require separate
+planning or migration approval.
+
 ## Corrections (second review round)
 
 - **Deployable bootstrap**: the corrections migration creates the module catalog record, enables the module for the approved `newl-group` tenant, and seeds the three Newl operating companies, so entitlement works through `prisma migrate deploy` without the development seed.
@@ -68,6 +82,7 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Services/actions | `src/modules/customer-intelligence/actions.ts` |
 | Queries | `src/modules/customer-intelligence/queries.ts` |
 | Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
+| Customer Profile UX baseline | `docs/modules/customer-intelligence/customer-profile-ui-design.md`, `customer-profile-wireframes.html` |
 | Pure logic | `src/modules/customer-intelligence/identity.ts`, `service-lines.ts`, `lifecycle.ts`, `constants.ts` |
 | Cashflow compatibility | `src/modules/customer-intelligence/cashflow-compatibility.ts` |
 | Audit | `src/modules/customer-intelligence/audit.ts` |
