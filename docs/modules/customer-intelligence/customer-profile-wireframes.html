@@ -1,0 +1,975 @@
+<!--
+  Customer Profile high-fidelity design reference.
+  Read customer-profile-ui-design.md before implementation or review.
+  All names, addresses, contact details, financial values, news, and import
+  activity in this file are synthetic examples.
+-->
+<div id="newl-customer-profile-concept" class="newl-cp">
+  <style>
+    #newl-customer-profile-concept {
+      --newl-ink: light-dark(#17233b, #eef3fb);
+      --newl-muted: light-dark(#667085, #a7b1c2);
+      --newl-canvas: light-dark(#f4f6f9, #101621);
+      --newl-panel: light-dark(#ffffff, #182130);
+      --newl-panel-2: light-dark(#f8fafc, #202b3b);
+      --newl-border: light-dark(#dce2ea, #344155);
+      --newl-navy: light-dark(#152944, #101b2e);
+      --newl-blue: light-dark(#2367d1, #72a7ff);
+      --newl-blue-soft: light-dark(#eaf2ff, #1c3558);
+      --newl-teal: light-dark(#087f74, #5ed6ca);
+      --newl-teal-soft: light-dark(#e7f7f4, #163f3c);
+      --newl-amber: light-dark(#9b6500, #f0bd5c);
+      --newl-amber-soft: light-dark(#fff5dd, #44351c);
+      --newl-red: light-dark(#b42318, #ff8b82);
+      --newl-red-soft: light-dark(#ffefed, #48231f);
+      --newl-green: light-dark(#177245, #68d69a);
+      --newl-green-soft: light-dark(#e9f7ef, #173c2b);
+      color: var(--newl-ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: var(--font-size-base);
+      width: 100%;
+    }
+
+    #newl-customer-profile-concept * { box-sizing: border-box; }
+    #newl-customer-profile-concept button,
+    #newl-customer-profile-concept input,
+    #newl-customer-profile-concept select,
+    #newl-customer-profile-concept textarea { font: inherit; }
+    #newl-customer-profile-concept button { cursor: pointer; }
+    #newl-customer-profile-concept svg { display: block; }
+
+    #newl-customer-profile-concept .newl-window {
+      overflow: hidden;
+      border: 1px solid var(--newl-border);
+      border-radius: 14px;
+      background: var(--newl-canvas);
+      box-shadow: 0 18px 55px light-dark(rgba(23, 35, 59, 0.12), rgba(0, 0, 0, 0.32));
+    }
+
+    #newl-customer-profile-concept .newl-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--newl-border);
+      background: var(--newl-panel);
+    }
+
+    #newl-customer-profile-concept .newl-brand,
+    #newl-customer-profile-concept .newl-top-actions,
+    #newl-customer-profile-concept .newl-brand-mark,
+    #newl-customer-profile-concept .newl-user,
+    #newl-customer-profile-concept .newl-inline,
+    #newl-customer-profile-concept .newl-title-row,
+    #newl-customer-profile-concept .newl-tabs,
+    #newl-customer-profile-concept .newl-actions,
+    #newl-customer-profile-concept .newl-score,
+    #newl-customer-profile-concept .newl-meta-row,
+    #newl-customer-profile-concept .newl-filter-row,
+    #newl-customer-profile-concept .newl-tag-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    #newl-customer-profile-concept .newl-brand-mark {
+      justify-content: center;
+      width: 31px;
+      height: 31px;
+      border-radius: 8px;
+      background: var(--newl-navy);
+      color: #ffffff;
+      font-weight: 500;
+    }
+
+    #newl-customer-profile-concept .newl-brand-copy { display: grid; gap: 1px; }
+    #newl-customer-profile-concept .newl-brand-copy strong { font-weight: 500; }
+    #newl-customer-profile-concept .newl-subtle,
+    #newl-customer-profile-concept .newl-eyebrow,
+    #newl-customer-profile-concept .newl-helper,
+    #newl-customer-profile-concept .newl-table-note { color: var(--newl-muted); }
+    #newl-customer-profile-concept .newl-eyebrow { text-transform: uppercase; letter-spacing: .08em; }
+
+    #newl-customer-profile-concept .newl-top-search,
+    #newl-customer-profile-concept .newl-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--newl-border);
+      border-radius: 8px;
+      background: var(--newl-panel-2);
+      color: var(--newl-muted);
+      padding: 8px 10px;
+    }
+
+    #newl-customer-profile-concept .newl-top-search { min-width: min(280px, 32vw); }
+    #newl-customer-profile-concept .newl-search { flex: 1 1 260px; background: var(--newl-panel); }
+    #newl-customer-profile-concept .newl-top-search input,
+    #newl-customer-profile-concept .newl-search input {
+      min-width: 0;
+      width: 100%;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--newl-ink);
+    }
+
+    #newl-customer-profile-concept .newl-avatar {
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--newl-blue-soft);
+      color: var(--newl-blue);
+      font-weight: 500;
+    }
+
+    #newl-customer-profile-concept .newl-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); }
+    #newl-customer-profile-concept .newl-sidebar {
+      min-height: 820px;
+      padding: 16px 12px;
+      background: var(--newl-navy);
+      color: #dce7f6;
+    }
+
+    #newl-customer-profile-concept .newl-nav-group { display: grid; gap: 5px; margin-bottom: 18px; }
+    #newl-customer-profile-concept .newl-nav-label { padding: 0 10px 5px; color: #8fa3bd; text-transform: uppercase; letter-spacing: .08em; }
+    #newl-customer-profile-concept .newl-nav-button {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      gap: 9px;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+    }
+    #newl-customer-profile-concept .newl-nav-button:hover,
+    #newl-customer-profile-concept .newl-nav-button[aria-current="page"] { background: rgba(255,255,255,.11); color: #ffffff; }
+    #newl-customer-profile-concept .newl-nav-count { margin-left: auto; color: #b6c6d9; }
+
+    #newl-customer-profile-concept .newl-main { min-width: 0; padding: 18px; }
+    #newl-customer-profile-concept .newl-concept-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+      padding: 9px 11px;
+      border: 1px dashed var(--newl-border);
+      border-radius: 9px;
+      background: var(--newl-panel-2);
+      color: var(--newl-muted);
+    }
+
+    #newl-customer-profile-concept .newl-phase-key { display: flex; gap: 7px; flex-wrap: wrap; }
+    #newl-customer-profile-concept .newl-phase-chip {
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: var(--newl-blue-soft);
+      color: var(--newl-blue);
+    }
+
+    #newl-customer-profile-concept .newl-screen { display: none; }
+    #newl-customer-profile-concept .newl-screen.is-active { display: block; }
+    #newl-customer-profile-concept h1,
+    #newl-customer-profile-concept h2,
+    #newl-customer-profile-concept h3,
+    #newl-customer-profile-concept p { margin: 0; }
+    #newl-customer-profile-concept h1,
+    #newl-customer-profile-concept h2,
+    #newl-customer-profile-concept h3,
+    #newl-customer-profile-concept strong { font-weight: 500; }
+    #newl-customer-profile-concept .newl-page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+    #newl-customer-profile-concept .newl-page-copy { display: grid; gap: 5px; }
+    #newl-customer-profile-concept .newl-page-copy p { color: var(--newl-muted); }
+
+    #newl-customer-profile-concept .newl-button {
+      min-height: 36px;
+      border: 1px solid var(--newl-border);
+      border-radius: 8px;
+      padding: 7px 11px;
+      background: var(--newl-panel);
+      color: var(--newl-ink);
+      font-weight: 500;
+    }
+    #newl-customer-profile-concept .newl-button:hover { border-color: var(--newl-blue); }
+    #newl-customer-profile-concept .newl-button-primary { border-color: var(--newl-blue); background: var(--newl-blue); color: #ffffff; }
+    #newl-customer-profile-concept .newl-button-danger { border-color: var(--newl-red); color: var(--newl-red); }
+
+    #newl-customer-profile-concept .newl-tabs {
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid var(--newl-border);
+    }
+    #newl-customer-profile-concept .newl-tab {
+      border: 0;
+      border-bottom: 2px solid transparent;
+      padding: 9px 10px;
+      background: transparent;
+      color: var(--newl-muted);
+    }
+    #newl-customer-profile-concept .newl-tab.is-active { border-bottom-color: var(--newl-blue); color: var(--newl-blue); font-weight: 500; }
+
+    #newl-customer-profile-concept .newl-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    #newl-customer-profile-concept select {
+      border: 1px solid var(--newl-border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: var(--newl-panel);
+      color: var(--newl-ink);
+    }
+
+    #newl-customer-profile-concept .newl-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    #newl-customer-profile-concept .newl-metric,
+    #newl-customer-profile-concept .newl-panel {
+      border: 1px solid var(--newl-border);
+      border-radius: 10px;
+      background: var(--newl-panel);
+    }
+    #newl-customer-profile-concept .newl-metric { display: grid; gap: 7px; padding: 12px; }
+    #newl-customer-profile-concept .newl-metric-value { font-weight: 500; }
+    #newl-customer-profile-concept .newl-panel { padding: 14px; }
+
+    #newl-customer-profile-concept .newl-table-wrap { overflow-x: auto; border: 1px solid var(--newl-border); border-radius: 10px; background: var(--newl-panel); }
+    #newl-customer-profile-concept table { width: 100%; border-collapse: collapse; min-width: 850px; }
+    #newl-customer-profile-concept th,
+    #newl-customer-profile-concept td { padding: 11px 12px; border-bottom: 1px solid var(--newl-border); text-align: left; vertical-align: middle; }
+    #newl-customer-profile-concept th { background: var(--newl-panel-2); color: var(--newl-muted); font-weight: 500; }
+    #newl-customer-profile-concept tbody tr:last-child td { border-bottom: 0; }
+    #newl-customer-profile-concept tbody tr:hover { background: var(--newl-panel-2); }
+    #newl-customer-profile-concept .newl-company-button { border: 0; padding: 0; background: none; color: var(--newl-blue); text-align: left; font-weight: 500; }
+    #newl-customer-profile-concept .newl-company-cell { display: grid; gap: 3px; }
+
+    #newl-customer-profile-concept .newl-badge {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+    #newl-customer-profile-concept .newl-badge-green { background: var(--newl-green-soft); color: var(--newl-green); }
+    #newl-customer-profile-concept .newl-badge-blue { background: var(--newl-blue-soft); color: var(--newl-blue); }
+    #newl-customer-profile-concept .newl-badge-amber { background: var(--newl-amber-soft); color: var(--newl-amber); }
+    #newl-customer-profile-concept .newl-badge-red { background: var(--newl-red-soft); color: var(--newl-red); }
+    #newl-customer-profile-concept .newl-badge-neutral { background: var(--newl-panel-2); color: var(--newl-muted); border-color: var(--newl-border); }
+
+    #newl-customer-profile-concept .newl-review-layout { display: grid; grid-template-columns: minmax(240px, .8fr) minmax(0, 1.5fr); gap: 12px; }
+    #newl-customer-profile-concept .newl-queue { display: grid; gap: 8px; align-content: start; }
+    #newl-customer-profile-concept .newl-queue-item {
+      width: 100%;
+      display: grid;
+      gap: 7px;
+      border: 1px solid var(--newl-border);
+      border-radius: 9px;
+      padding: 11px;
+      background: var(--newl-panel);
+      color: var(--newl-ink);
+      text-align: left;
+    }
+    #newl-customer-profile-concept .newl-queue-item.is-active { border-color: var(--newl-blue); box-shadow: 0 0 0 2px var(--newl-blue-soft); }
+    #newl-customer-profile-concept .newl-review-card { display: grid; gap: 13px; }
+    #newl-customer-profile-concept .newl-comparison { display: grid; grid-template-columns: 1fr 32px 1fr; gap: 10px; align-items: stretch; }
+    #newl-customer-profile-concept .newl-compare-side { border: 1px solid var(--newl-border); border-radius: 9px; padding: 12px; background: var(--newl-panel-2); }
+    #newl-customer-profile-concept .newl-compare-arrow { display: grid; place-items: center; color: var(--newl-blue); }
+    #newl-customer-profile-concept .newl-field-list { display: grid; gap: 8px; margin-top: 10px; }
+    #newl-customer-profile-concept .newl-field { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; }
+    #newl-customer-profile-concept .newl-field span:first-child { color: var(--newl-muted); }
+    #newl-customer-profile-concept .newl-rule-box { border-left: 3px solid var(--newl-amber); padding: 9px 11px; background: var(--newl-amber-soft); color: var(--newl-amber); }
+    #newl-customer-profile-concept .newl-score { justify-content: space-between; }
+    #newl-customer-profile-concept .newl-score-bar { flex: 1; height: 7px; border-radius: 999px; background: var(--newl-border); overflow: hidden; }
+    #newl-customer-profile-concept .newl-score-fill { height: 100%; width: 82%; background: var(--newl-blue); }
+
+    #newl-customer-profile-concept .newl-profile-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid var(--newl-border);
+      border-radius: 11px;
+      background: var(--newl-panel);
+    }
+    #newl-customer-profile-concept .newl-profile-title { display: flex; align-items: flex-start; gap: 12px; }
+    #newl-customer-profile-concept .newl-company-logo {
+      display: grid;
+      place-items: center;
+      width: 46px;
+      height: 46px;
+      border-radius: 10px;
+      background: var(--newl-teal-soft);
+      color: var(--newl-teal);
+      font-weight: 500;
+    }
+    #newl-customer-profile-concept .newl-profile-name { display: grid; gap: 6px; }
+    #newl-customer-profile-concept .newl-detail-tab-panel { display: none; }
+    #newl-customer-profile-concept .newl-detail-tab-panel.is-active { display: block; }
+    #newl-customer-profile-concept .newl-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    #newl-customer-profile-concept .newl-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    #newl-customer-profile-concept .newl-stack { display: grid; gap: 12px; }
+    #newl-customer-profile-concept .newl-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 11px; }
+    #newl-customer-profile-concept .newl-account-row,
+    #newl-customer-profile-concept .newl-activity-row,
+    #newl-customer-profile-concept .newl-signal-row,
+    #newl-customer-profile-concept .newl-opportunity-card {
+      display: grid;
+      gap: 6px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--newl-border);
+    }
+    #newl-customer-profile-concept .newl-account-row:last-child,
+    #newl-customer-profile-concept .newl-activity-row:last-child,
+    #newl-customer-profile-concept .newl-signal-row:last-child,
+    #newl-customer-profile-concept .newl-opportunity-card:last-child { border-bottom: 0; }
+    #newl-customer-profile-concept .newl-opportunity-card { grid-template-columns: minmax(0, 1fr) auto; }
+    #newl-customer-profile-concept .newl-signal-row { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
+    #newl-customer-profile-concept .newl-signal-icon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--newl-blue-soft);
+      color: var(--newl-blue);
+      font-weight: 500;
+    }
+    #newl-customer-profile-concept .newl-signal-copy { display: grid; gap: 5px; }
+    #newl-customer-profile-concept .newl-contact-primary { display: flex; align-items: center; gap: 9px; }
+    #newl-customer-profile-concept .newl-contact-avatar { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--newl-panel-2); color: var(--newl-blue); }
+    #newl-customer-profile-concept .newl-contact-copy { display: grid; gap: 2px; }
+    #newl-customer-profile-concept .newl-empty {
+      display: grid;
+      place-items: center;
+      gap: 8px;
+      min-height: 180px;
+      padding: 24px;
+      border: 1px dashed var(--newl-border);
+      border-radius: 10px;
+      text-align: center;
+      color: var(--newl-muted);
+    }
+    #newl-customer-profile-concept .newl-toast {
+      display: none;
+      margin-top: 12px;
+      padding: 9px 11px;
+      border-radius: 8px;
+      background: var(--newl-blue-soft);
+      color: var(--newl-blue);
+    }
+    #newl-customer-profile-concept .newl-toast.is-visible { display: block; }
+    #newl-customer-profile-concept .newl-dialog {
+      width: min(620px, calc(100% - 24px));
+      border: 1px solid var(--newl-border);
+      border-radius: 12px;
+      padding: 0;
+      background: var(--newl-panel);
+      color: var(--newl-ink);
+      box-shadow: 0 22px 70px light-dark(rgba(23, 35, 59, .24), rgba(0, 0, 0, .55));
+    }
+    #newl-customer-profile-concept .newl-dialog::backdrop { background: light-dark(rgba(21, 41, 68, .42), rgba(0, 0, 0, .68)); }
+    #newl-customer-profile-concept .newl-dialog-body { display: grid; gap: 14px; padding: 18px; }
+    #newl-customer-profile-concept .newl-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    #newl-customer-profile-concept .newl-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    #newl-customer-profile-concept .newl-form-field { display: grid; gap: 6px; }
+    #newl-customer-profile-concept .newl-form-field.is-wide { grid-column: 1 / -1; }
+    #newl-customer-profile-concept .newl-text-input,
+    #newl-customer-profile-concept .newl-textarea {
+      width: 100%;
+      border: 1px solid var(--newl-border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: var(--newl-panel-2);
+      color: var(--newl-ink);
+    }
+    #newl-customer-profile-concept .newl-textarea { min-height: 70px; resize: vertical; }
+    #newl-customer-profile-concept .newl-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+    #newl-customer-profile-concept .newl-alias-list { display: flex; flex-wrap: wrap; gap: 7px; }
+
+    @media (max-width: 760px) {
+      #newl-customer-profile-concept .newl-top-search { display: none; }
+      #newl-customer-profile-concept .newl-shell { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-sidebar { min-height: auto; display: flex; gap: 5px; overflow-x: auto; padding: 8px; }
+      #newl-customer-profile-concept .newl-nav-group { display: flex; margin: 0; }
+      #newl-customer-profile-concept .newl-nav-group:not(:first-child),
+      #newl-customer-profile-concept .newl-nav-label { display: none; }
+      #newl-customer-profile-concept .newl-nav-button { white-space: nowrap; }
+      #newl-customer-profile-concept .newl-main { padding: 12px; }
+      #newl-customer-profile-concept .newl-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #newl-customer-profile-concept .newl-review-layout,
+      #newl-customer-profile-concept .newl-grid-2 { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-comparison { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-compare-arrow { transform: rotate(90deg); }
+      #newl-customer-profile-concept .newl-profile-head,
+      #newl-customer-profile-concept .newl-page-head { flex-direction: column; }
+      #newl-customer-profile-concept .newl-grid-3 { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-concept-bar { align-items: flex-start; flex-direction: column; }
+    }
+
+    @media (max-width: 420px) {
+      #newl-customer-profile-concept .newl-user span { display: none; }
+      #newl-customer-profile-concept .newl-metrics { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-main { padding: 10px; }
+      #newl-customer-profile-concept .newl-field { grid-template-columns: 1fr; gap: 2px; }
+      #newl-customer-profile-concept .newl-title-row { align-items: flex-start; flex-wrap: wrap; }
+      #newl-customer-profile-concept .newl-opportunity-card,
+      #newl-customer-profile-concept .newl-signal-row { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-actions { align-items: stretch; flex-direction: column; }
+      #newl-customer-profile-concept .newl-form-grid { grid-template-columns: 1fr; }
+      #newl-customer-profile-concept .newl-form-field.is-wide { grid-column: auto; }
+      #newl-customer-profile-concept .newl-dialog-actions { align-items: stretch; flex-direction: column-reverse; }
+    }
+  </style>
+
+  <div class="newl-window">
+    <header class="newl-topbar">
+      <div class="newl-brand">
+        <div class="newl-brand-mark">N</div>
+        <div class="newl-brand-copy">
+          <strong>Newl Apps</strong>
+          <span class="newl-subtle">Customer Intelligence</span>
+        </div>
+      </div>
+      <label class="newl-top-search" aria-label="Global search preview">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input value="" placeholder="Search Newl Apps" />
+      </label>
+      <div class="newl-top-actions">
+        <div class="newl-user"><span>Alex Newell</span><div class="newl-avatar">AN</div></div>
+      </div>
+    </header>
+
+    <div class="newl-shell">
+      <aside class="newl-sidebar" aria-label="Application navigation">
+        <div class="newl-nav-group">
+          <span class="newl-nav-label">Customer intelligence</span>
+          <button class="newl-nav-button js-route" data-route="matched" aria-current="page">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h6M9 14h6"></path></svg>
+            Profiles <span class="newl-nav-count">214</span>
+          </button>
+          <button class="newl-nav-button js-route" data-route="unmatched">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M12 8v4M12 16h.01"></path></svg>
+            Identity review <span class="newl-nav-count">18</span>
+          </button>
+        </div>
+        <div class="newl-nav-group">
+          <span class="newl-nav-label">Operations</span>
+          <button class="newl-nav-button"><span>Dashboard</span></button>
+          <button class="newl-nav-button"><span>Lead generation</span></button>
+          <button class="newl-nav-button"><span>Finance</span></button>
+        </div>
+        <div class="newl-nav-group">
+          <span class="newl-nav-label">Administration</span>
+          <button class="newl-nav-button"><span>Integrations</span></button>
+          <button class="newl-nav-button"><span>Settings</span></button>
+        </div>
+      </aside>
+
+      <main class="newl-main">
+        <div class="newl-concept-bar">
+          <span><strong>Interactive concept</strong> · synthetic company and financial data</span>
+          <div class="newl-phase-key"><span class="newl-phase-chip">P3 review</span><span class="newl-phase-chip">P4 profiles</span><span class="newl-phase-chip">P5 financials</span></div>
+        </div>
+
+        <section class="newl-screen is-active" data-screen="matched">
+          <div class="newl-page-head">
+            <div class="newl-page-copy">
+              <span class="newl-eyebrow">Customer intelligence</span>
+              <h1>Company profiles</h1>
+              <p>One canonical view across operating companies, QuickBooks accounts, contacts, and opportunities.</p>
+            </div>
+            <button class="newl-button">Export current view</button>
+          </div>
+
+          <div class="newl-tabs" aria-label="Company profile states">
+            <button class="newl-tab is-active js-route" data-route="matched">Matched companies · 214</button>
+            <button class="newl-tab js-route" data-route="unmatched">Needs review · 18</button>
+          </div>
+
+          <div class="newl-metrics">
+            <div class="newl-metric"><span class="newl-subtle">Canonical companies</span><span class="newl-metric-value">214</span><span class="newl-helper">Across 3 operating companies</span></div>
+            <div class="newl-metric"><span class="newl-subtle">Active customers</span><span class="newl-metric-value">168</span><span class="newl-helper">Revenue or open AR in 12 months</span></div>
+            <div class="newl-metric"><span class="newl-subtle">Pending review</span><span class="newl-metric-value">18</span><span class="newl-helper">No automatic identity creation</span></div>
+            <div class="newl-metric"><span class="newl-subtle">QuickBooks accounts</span><span class="newl-metric-value">286</span><span class="newl-helper">Last sync 12 minutes ago</span></div>
+          </div>
+
+          <div class="newl-toolbar">
+            <label class="newl-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+              <input id="matched-search" placeholder="Search company, QuickBooks account, or contact" />
+            </label>
+            <select aria-label="Operating company"><option>All operating companies</option><option>Newl Worldwide</option><option>Newl USA</option><option>Newell's Express</option></select>
+            <select aria-label="Lifecycle"><option>All lifecycle stages</option><option>Active customer</option><option>Dormant customer</option><option>Prospect</option></select>
+          </div>
+
+          <div class="newl-table-wrap">
+            <table aria-label="Matched companies">
+              <thead><tr><th>Company</th><th>Lifecycle</th><th>Operating companies</th><th>QB accounts</th><th>New signals</th><th>12-mo revenue</th><th>Open AR</th><th>Last activity</th></tr></thead>
+              <tbody id="matched-rows">
+                <tr data-search="northstar outdoor supply toronto purchasing worldwide usa"><td><div class="newl-company-cell"><button class="newl-company-button js-open-company">Northstar Outdoor Supply</button><span class="newl-table-note">Toronto, ON · Outdoor retail</span></div></td><td><span class="newl-badge newl-badge-green">Active customer</span></td><td><div class="newl-tag-row"><span class="newl-badge newl-badge-neutral">Worldwide</span><span class="newl-badge newl-badge-neutral">USA</span></div></td><td>3</td><td><span class="newl-badge newl-badge-blue">5 new</span></td><td>CA$1.28M</td><td>CA$86.4K</td><td>2 days ago</td></tr>
+                <tr data-search="harborline foods vancouver produce worldwide"><td><div class="newl-company-cell"><button class="newl-company-button js-open-company">Harborline Foods</button><span class="newl-table-note">Vancouver, BC · Food distribution</span></div></td><td><span class="newl-badge newl-badge-green">Active customer</span></td><td><span class="newl-badge newl-badge-neutral">Worldwide</span></td><td>2</td><td><span class="newl-badge newl-badge-amber">2 new</span></td><td>CA$864K</td><td>CA$31.7K</td><td>Yesterday</td></tr>
+                <tr data-search="copperfield medical devices boston healthcare usa"><td><div class="newl-company-cell"><button class="newl-company-button js-open-company">Copperfield Medical Devices</button><span class="newl-table-note">Boston, MA · Medical devices</span></div></td><td><span class="newl-badge newl-badge-amber">Dormant customer</span></td><td><span class="newl-badge newl-badge-neutral">USA</span></td><td>1</td><td>—</td><td>US$92K</td><td>US$0</td><td>9 months ago</td></tr>
+                <tr data-search="bluepeak packaging mississauga manufacturing warehousing"><td><div class="newl-company-cell"><button class="newl-company-button js-open-company">BluePeak Packaging</button><span class="newl-table-note">Mississauga, ON · Packaging</span></div></td><td><span class="newl-badge newl-badge-blue">Prospect</span></td><td><span class="newl-badge newl-badge-neutral">Newell's Express</span></td><td>1</td><td><span class="newl-badge newl-badge-blue">3 new</span></td><td>—</td><td>CA$4.2K</td><td>6 days ago</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="newl-screen" data-screen="unmatched">
+          <div class="newl-page-head">
+            <div class="newl-page-copy">
+              <span class="newl-eyebrow">Identity review · Phase 3</span>
+              <h1>Unmatched QuickBooks customers</h1>
+              <p>Review deterministic suggestions. Names alone never create or approve a canonical company.</p>
+            </div>
+            <span class="newl-badge newl-badge-amber">18 awaiting review</span>
+          </div>
+
+          <div class="newl-toolbar">
+            <label class="newl-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input placeholder="Search source customers" /></label>
+            <select aria-label="Review operating company"><option>All operating companies</option><option>Newl Worldwide</option><option>Newl USA</option><option>Newell's Express</option></select>
+            <select aria-label="Review confidence"><option>All confidence levels</option><option>High confidence</option><option>Ambiguous</option><option>No candidate</option></select>
+          </div>
+
+          <div class="newl-review-layout">
+            <div class="newl-queue" aria-label="Unmatched customer queue">
+              <button class="newl-queue-item is-active">
+                <div class="newl-inline"><strong>Blue Peak Packaging Inc.</strong><span class="newl-badge newl-badge-amber">82</span></div>
+                <span class="newl-subtle">Newell's Express · CAD</span>
+                <span>Suggested: BluePeak Packaging</span>
+                <span class="newl-helper">Email domain + phone + address</span>
+              </button>
+              <button class="newl-queue-item">
+                <div class="newl-inline"><strong>North Star Outdoor - USD</strong><span class="newl-badge newl-badge-green">96</span></div>
+                <span class="newl-subtle">Newl USA · USD</span>
+                <span>Suggested: Northstar Outdoor Supply</span>
+                <span class="newl-helper">Previously approved stable account</span>
+              </button>
+              <button class="newl-queue-item">
+                <div class="newl-inline"><strong>Summit Parts Depot</strong><span class="newl-badge newl-badge-red">No candidate</span></div>
+                <span class="newl-subtle">Newl Worldwide · CAD</span>
+                <span>No canonical company selected</span>
+                <span class="newl-helper">Remains proposed until human review</span>
+              </button>
+              <button class="newl-queue-item">
+                <div class="newl-inline"><strong>Harbor Line Foods AP</strong><span class="newl-badge newl-badge-amber">76</span></div>
+                <span class="newl-subtle">Newl Worldwide · CAD</span>
+                <span>Suggested: Harborline Foods</span>
+                <span class="newl-helper">Address match; conflicting phone</span>
+              </button>
+            </div>
+
+            <div class="newl-panel newl-review-card">
+              <div class="newl-panel-head">
+                <div><span class="newl-eyebrow">Review record</span><h2>Blue Peak Packaging Inc.</h2></div>
+                <span class="newl-badge newl-badge-amber">Ambiguous · 82</span>
+              </div>
+              <div class="newl-rule-box">Human decision required. Exact name alone cannot approve a match, and no new canonical company will be created automatically.</div>
+              <div class="newl-comparison">
+                <div class="newl-compare-side">
+                  <span class="newl-eyebrow">QuickBooks source</span>
+                  <div class="newl-field-list">
+                    <div class="newl-field"><span>Name</span><strong>Blue Peak Packaging Inc.</strong></div>
+                    <div class="newl-field"><span>Company</span><span>Newell's Express</span></div>
+                    <div class="newl-field"><span>Email</span><span>purchasing@example.com</span></div>
+                    <div class="newl-field"><span>Phone</span><span>(416) 555-0184</span></div>
+                    <div class="newl-field"><span>Address</span><span>1200 Example Road, Mississauga</span></div>
+                    <div class="newl-field"><span>Currency</span><span>CAD</span></div>
+                  </div>
+                </div>
+                <div class="newl-compare-arrow"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"></path></svg></div>
+                <div class="newl-compare-side">
+                  <span class="newl-eyebrow">Suggested canonical company</span>
+                  <div class="newl-field-list">
+                    <div class="newl-field"><span>Name</span><strong>BluePeak Packaging</strong></div>
+                    <div class="newl-field"><span>Domain</span><span>example.com</span></div>
+                    <div class="newl-field"><span>Phone</span><span>(416) 555-0184</span></div>
+                    <div class="newl-field"><span>Address</span><span>1200 Example Rd., Mississauga</span></div>
+                    <div class="newl-field"><span>Relationship</span><span>Prospect</span></div>
+                    <div class="newl-field"><span>Existing sources</span><span>TradeMining, Apollo</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="newl-stack">
+                <div class="newl-score"><span>Email domain</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:90%"></div></div><strong>+35</strong></div>
+                <div class="newl-score"><span>Phone</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:78%"></div></div><strong>+25</strong></div>
+                <div class="newl-score"><span>Address</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:66%"></div></div><strong>+22</strong></div>
+                <div class="newl-score"><span>Name only</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:35%"></div></div><strong>non-decisive</strong></div>
+              </div>
+              <div class="newl-compare-side">
+                <div class="newl-panel-head">
+                  <div><span class="newl-eyebrow">Authorized email review</span><h3>Potential contacts at this company</h3></div>
+                  <span class="newl-badge newl-badge-blue">2 suggested</span>
+                </div>
+                <div class="newl-contact-primary newl-account-row">
+                  <div class="newl-contact-avatar">PD</div>
+                  <div class="newl-contact-copy"><strong>Priya Desai</strong><span class="newl-subtle">Purchasing Manager · priya.desai@example.com</span><span class="newl-helper">5 customer email threads · last seen 4 days ago · role supported by signature evidence</span></div>
+                </div>
+                <div class="newl-contact-primary newl-account-row">
+                  <div class="newl-contact-avatar">OB</div>
+                  <div class="newl-contact-copy"><strong>Owen Brooks</strong><span class="newl-subtle">Operations Director · owen.brooks@example.com</span><span class="newl-helper">2 customer email threads · last seen 3 weeks ago · company domain matches</span></div>
+                </div>
+                <div class="newl-rule-box">Contacts remain suggestions until the company identity is approved. Email content is not shown here; only authorized, traceable contact evidence is summarized.</div>
+              </div>
+              <div class="newl-actions">
+                <button class="newl-button newl-button-primary js-concept-action">Approve suggested match</button>
+                <button class="newl-button newl-button-danger js-concept-action">Reject suggestion</button>
+                <button class="newl-button js-concept-action">Keep proposed</button>
+              </div>
+              <div class="newl-toast" role="status">Concept only — no approval or data change was performed.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="newl-screen" data-screen="detail">
+          <button class="newl-company-button js-route" data-route="matched">← Back to company profiles</button>
+          <div class="newl-profile-head">
+            <div class="newl-profile-title">
+              <div class="newl-company-logo">NO</div>
+              <div class="newl-profile-name">
+                <div class="newl-title-row"><h1>Northstar Outdoor Supply</h1><span class="newl-badge newl-badge-green">Active customer</span></div>
+                <span class="newl-subtle">Toronto, Ontario · Outdoor retail · Canonical company</span>
+                <div class="newl-tag-row"><span class="newl-badge newl-badge-neutral">Newl Worldwide</span><span class="newl-badge newl-badge-neutral">Newl USA</span><span class="newl-badge newl-badge-blue">3 QB accounts</span></div>
+              </div>
+            </div>
+            <div class="newl-actions"><button class="newl-button">Add note</button><button class="newl-button newl-button-primary js-detail-tab" data-tab="opportunities">New opportunity</button></div>
+          </div>
+
+          <div class="newl-tabs" aria-label="Company profile sections">
+            <button class="newl-tab is-active js-detail-tab" data-tab="overview">Overview</button>
+            <button class="newl-tab js-detail-tab" data-tab="contacts">Contacts · 4</button>
+            <button class="newl-tab js-detail-tab" data-tab="opportunities">Opportunities · 3</button>
+            <button class="newl-tab js-detail-tab" data-tab="signals">Signals · 5</button>
+            <button class="newl-tab js-detail-tab" data-tab="financials">Financials</button>
+            <button class="newl-tab js-detail-tab" data-tab="activity">Activity</button>
+          </div>
+
+          <div class="newl-detail-tab-panel is-active" data-tab-panel="overview">
+            <div class="newl-metrics">
+              <div class="newl-metric"><span class="newl-subtle">12-month revenue</span><span class="newl-metric-value">CA$1.28M</span><span class="newl-helper">Worldwide + USA</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Open AR</span><span class="newl-metric-value">CA$86.4K</span><span class="newl-helper">6 open invoices</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Open opportunities</span><span class="newl-metric-value">CA$245K</span><span class="newl-helper">3 active opportunities</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Opportunity signals</span><span class="newl-metric-value">5</span><span class="newl-helper">2 news · 3 TradeMining</span></div>
+            </div>
+            <div class="newl-grid-2">
+              <div class="newl-stack">
+                <div class="newl-panel">
+                  <div class="newl-panel-head"><h2>Operating-company relationships</h2><button class="newl-company-button">View all</button></div>
+                  <div class="newl-account-row"><div class="newl-inline"><strong>Newl Worldwide</strong><span class="newl-badge newl-badge-green">Active</span></div><span class="newl-subtle">2 QuickBooks accounts · CAD and USD · CA$1.08M revenue</span></div>
+                  <div class="newl-account-row"><div class="newl-inline"><strong>Newl USA</strong><span class="newl-badge newl-badge-green">Active</span></div><span class="newl-subtle">1 QuickBooks account · USD · US$148K revenue</span></div>
+                  <div class="newl-account-row"><div class="newl-inline"><strong>Newell's Express</strong><span class="newl-badge newl-badge-neutral">No relationship</span></div><span class="newl-subtle">No approved account or activity</span></div>
+                </div>
+                <div class="newl-panel">
+                  <div class="newl-panel-head"><h2>QuickBooks source accounts</h2><span class="newl-badge newl-badge-green">3 approved</span></div>
+                  <div class="newl-account-row"><strong>Northstar Outdoor Supply — CAD</strong><span class="newl-subtle">Newl Worldwide · Synced 12 minutes ago</span></div>
+                  <div class="newl-account-row"><strong>Northstar Outdoor Supply — USD</strong><span class="newl-subtle">Newl Worldwide · Synced 12 minutes ago</span></div>
+                  <div class="newl-account-row"><strong>North Star Outdoor USA</strong><span class="newl-subtle">Newl USA · Synced 14 minutes ago</span></div>
+                </div>
+              </div>
+              <div class="newl-stack">
+                <div class="newl-panel">
+                  <div class="newl-panel-head"><h2>Company details</h2><button class="newl-company-button">Edit</button></div>
+                  <div class="newl-field-list">
+                    <div class="newl-field"><span>Website</span><span>northstar.example</span></div>
+                    <div class="newl-field"><span>Industry</span><span>Outdoor retail and distribution</span></div>
+                    <div class="newl-field"><span>Owner</span><span>Alex Newell</span></div>
+                    <div class="newl-field"><span>Primary contact</span><span>Morgan Lee · Purchasing Director</span></div>
+                    <div class="newl-field"><span>Service lines</span><span>Ocean freight, customs, final mile</span></div>
+                    <div class="newl-field"><span>Data confidence</span><span class="newl-badge newl-badge-green">Verified</span></div>
+                  </div>
+                </div>
+                <div class="newl-panel">
+                  <div class="newl-panel-head"><h2>Opportunity intelligence</h2><button class="newl-company-button js-detail-tab" data-tab="signals">View all signals</button></div>
+                  <div class="newl-signal-row"><span class="newl-signal-icon">N</span><div class="newl-signal-copy"><strong>New distribution centre announced</strong><span class="newl-subtle">News · Expansion may create warehousing and final-mile demand</span></div><span class="newl-badge newl-badge-blue">New</span></div>
+                  <div class="newl-signal-row"><span class="newl-signal-icon">T</span><div class="newl-signal-copy"><strong>Imports increased 31% over 90 days</strong><span class="newl-subtle">TradeMining · 14 shipments from Vietnam and China</span></div><span class="newl-badge newl-badge-amber">Review</span></div>
+                </div>
+                <div class="newl-panel">
+                  <div class="newl-panel-head"><h2>Recent activity</h2><button class="newl-company-button js-detail-tab" data-tab="activity">View timeline</button></div>
+                  <div class="newl-activity-row"><strong>Customer email received</strong><span class="newl-subtle">Morgan Lee · 2 days ago · Microsoft 365 evidence</span></div>
+                  <div class="newl-activity-row"><strong>Invoice payment recorded</strong><span class="newl-subtle">Newl Worldwide · 5 days ago · QuickBooks</span></div>
+                  <div class="newl-activity-row"><strong>Opportunity stage updated</strong><span class="newl-subtle">Transpacific contract · 8 days ago</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="newl-detail-tab-panel" data-tab-panel="contacts">
+            <div class="newl-page-head"><div class="newl-page-copy"><h2>Contacts</h2><p>People connected to this canonical company, with evidence and operating-company context.</p></div><button class="newl-button newl-button-primary js-contact-editor" data-contact-mode="add">Add contact</button></div>
+            <div class="newl-toolbar"><label class="newl-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg><input placeholder="Search contacts" /></label><select><option>All contact statuses</option><option>Primary</option><option>Verified</option><option>Needs review</option></select></div>
+            <div class="newl-table-wrap">
+              <table aria-label="Company contacts"><thead><tr><th>Contact</th><th>Role</th><th>Email and phone</th><th>Relationship</th><th>Evidence</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>
+                <tr><td><div class="newl-contact-primary"><div class="newl-contact-avatar">ML</div><div class="newl-contact-copy"><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Morgan Lee" data-role="Purchasing Director" data-email="morgan.lee@example.com" data-phone="(416) 555-0129" data-relationship="Worldwide + USA">Morgan Lee</button><span class="newl-badge newl-badge-blue">Primary</span></div></div></td><td>Purchasing Director</td><td>morgan.lee@example.com<br><span class="newl-subtle">(416) 555-0129</span></td><td>Worldwide + USA</td><td><span class="newl-badge newl-badge-green">M365 verified</span></td><td>2 days ago</td><td><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Morgan Lee" data-role="Purchasing Director" data-email="morgan.lee@example.com" data-phone="(416) 555-0129" data-relationship="Worldwide + USA">Edit</button></td></tr>
+                <tr><td><div class="newl-contact-primary"><div class="newl-contact-avatar">AR</div><div class="newl-contact-copy"><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Avery Reed" data-role="Controller" data-email="avery.reed@example.com" data-phone="(416) 555-0162" data-relationship="Worldwide">Avery Reed</button><span class="newl-subtle">Finance</span></div></div></td><td>Controller</td><td>avery.reed@example.com<br><span class="newl-subtle">(416) 555-0162</span></td><td>Worldwide</td><td><span class="newl-badge newl-badge-green">Invoice evidence</span></td><td>3 weeks ago</td><td><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Avery Reed" data-role="Controller" data-email="avery.reed@example.com" data-phone="(416) 555-0162" data-relationship="Worldwide">Edit</button></td></tr>
+                <tr><td><div class="newl-contact-primary"><div class="newl-contact-avatar">SJ</div><div class="newl-contact-copy"><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Sam Jordan" data-role="Logistics Manager" data-email="sam.jordan@example.com" data-phone="(617) 555-0130" data-relationship="USA">Sam Jordan</button><span class="newl-subtle">Operations</span></div></div></td><td>Logistics Manager</td><td>sam.jordan@example.com<br><span class="newl-subtle">(617) 555-0130</span></td><td>USA</td><td><span class="newl-badge newl-badge-amber">Needs review</span></td><td>4 months ago</td><td><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Sam Jordan" data-role="Logistics Manager" data-email="sam.jordan@example.com" data-phone="(617) 555-0130" data-relationship="USA">Edit</button></td></tr>
+                <tr><td><div class="newl-contact-primary"><div class="newl-contact-avatar">TC</div><div class="newl-contact-copy"><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Taylor Chen" data-role="VP Supply Chain" data-email="taylor.chen@example.com" data-phone="" data-relationship="Company-wide">Taylor Chen</button><span class="newl-subtle">Executive</span></div></div></td><td>VP Supply Chain</td><td>taylor.chen@example.com<br><span class="newl-subtle">—</span></td><td>Company-wide</td><td><span class="newl-badge newl-badge-neutral">Apollo</span></td><td>7 months ago</td><td><button class="newl-company-button js-contact-editor" data-contact-mode="edit" data-name="Taylor Chen" data-role="VP Supply Chain" data-email="taylor.chen@example.com" data-phone="" data-relationship="Company-wide">Edit</button></td></tr>
+              </tbody></table>
+            </div>
+          </div>
+
+          <div class="newl-detail-tab-panel" data-tab-panel="opportunities">
+            <div class="newl-page-head"><div class="newl-page-copy"><h2>Opportunities</h2><p>Cross-sell and retention opportunities connected to this customer profile.</p></div><button class="newl-button newl-button-primary js-concept-action">Create opportunity</button></div>
+            <div class="newl-grid-3">
+              <div class="newl-metric"><span class="newl-subtle">Open pipeline</span><span class="newl-metric-value">CA$245K</span><span class="newl-helper">3 opportunities</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Weighted pipeline</span><span class="newl-metric-value">CA$128K</span><span class="newl-helper">Based on current stages</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Next action due</span><span class="newl-metric-value">Tomorrow</span><span class="newl-helper">Transpacific pricing follow-up</span></div>
+            </div>
+            <div class="newl-panel" style="margin-top:12px">
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>Transpacific annual freight contract</strong><span class="newl-badge newl-badge-blue">Proposal</span></div><p class="newl-subtle">Ocean freight · Newl Worldwide · Owner: Alex Newell</p><p>Next: review revised pricing with Morgan Lee tomorrow</p></div><strong>CA$180K</strong></div>
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>US final-mile expansion</strong><span class="newl-badge newl-badge-amber">Discovery</span></div><p class="newl-subtle">Final mile · Newl USA · Owner: Jamie Patel</p><p>Next: confirm expected monthly shipment volume</p></div><strong>US$42K</strong></div>
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>Peak-season warehousing overflow</strong><span class="newl-badge newl-badge-neutral">Qualified</span></div><p class="newl-subtle">Warehousing · Newell's Express · Owner: Alex Newell</p><p>Next: prepare space and handling estimate</p></div><strong>CA$8K</strong></div>
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>Customs brokerage consolidation</strong><span class="newl-badge newl-badge-green">Won</span></div><p class="newl-subtle">Customs · Newl Worldwide · Closed last quarter</p><p>Converted from a Customer Intelligence cross-sell signal</p></div><strong>CA$32K</strong></div>
+            </div>
+            <div class="newl-toast" role="status">Concept only — no opportunity was created.</div>
+          </div>
+
+          <div class="newl-detail-tab-panel" data-tab-panel="signals">
+            <div class="newl-page-head">
+              <div class="newl-page-copy"><h2>Opportunity intelligence</h2><p>Recent news and TradeMining evidence translated into reviewable sales signals. Signals never create opportunities automatically.</p></div>
+              <div class="newl-actions"><button class="newl-button js-concept-action">Run TradeMining analysis</button><button class="newl-button newl-button-primary js-concept-action">Create from selected signal</button></div>
+            </div>
+            <div class="newl-metrics">
+              <div class="newl-metric"><span class="newl-subtle">New signals</span><span class="newl-metric-value">5</span><span class="newl-helper">Since last review</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Tracked imports</span><span class="newl-metric-value">46</span><span class="newl-helper">Shipments in 12 months</span></div>
+              <div class="newl-metric"><span class="newl-subtle">90-day trend</span><span class="newl-metric-value">+31%</span><span class="newl-helper">Shipment count versus prior period</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Last intelligence run</span><span class="newl-metric-value">Today</span><span class="newl-helper">TradeMining + public news</span></div>
+            </div>
+
+            <div class="newl-grid-2">
+              <div class="newl-panel">
+                <div class="newl-panel-head"><div><span class="newl-eyebrow">Public sources</span><h2>Recent company news</h2></div><span class="newl-badge newl-badge-blue">2 relevant</span></div>
+                <div class="newl-signal-row">
+                  <span class="newl-signal-icon">N</span>
+                  <div class="newl-signal-copy"><div class="newl-inline"><strong>Northstar announces a new Western Canada distribution centre</strong><span class="newl-badge newl-badge-green">High relevance</span></div><span class="newl-subtle">Company newsroom · 3 days ago</span><span>Possible need: inbound ocean freight, overflow warehousing, and final-mile distribution.</span><span class="newl-helper">Suggested contact: Taylor Chen, VP Supply Chain</span></div>
+                  <button class="newl-company-button js-concept-action">Review</button>
+                </div>
+                <div class="newl-signal-row">
+                  <span class="newl-signal-icon">N</span>
+                  <div class="newl-signal-copy"><div class="newl-inline"><strong>Retail expansion adds twelve US locations</strong><span class="newl-badge newl-badge-amber">Medium relevance</span></div><span class="newl-subtle">Industry publication · 11 days ago</span><span>Possible need: cross-border replenishment and US final-mile capacity.</span><span class="newl-helper">Suggested contact: Morgan Lee, Purchasing Director</span></div>
+                  <button class="newl-company-button js-concept-action">Review</button>
+                </div>
+                <div class="newl-rule-box">News is a sales-research signal, not a verified customer requirement. The source, date, and evidence should remain attached to any resulting opportunity.</div>
+              </div>
+
+              <div class="newl-panel">
+                <div class="newl-panel-head"><div><span class="newl-eyebrow">TradeMining</span><h2>Import activity</h2></div><div class="newl-actions"><span class="newl-badge newl-badge-green">Human-confirmed match</span><button class="newl-company-button js-trademining-editor">Edit match</button></div></div>
+                <div class="newl-field-list">
+                  <div class="newl-field"><span>Search name</span><strong>North Star Outdoor Imports Ltd.</strong></div>
+                  <div class="newl-field"><span>Aliases</span><span>Northstar Outdoor Supply · Northstar Outdoor Canada</span></div>
+                  <div class="newl-field"><span>Match basis</span><span>Confirmed alias, address, consignee history</span></div>
+                  <div class="newl-field"><span>Latest import</span><span>8 days ago · Vancouver, BC</span></div>
+                  <div class="newl-field"><span>Top origins</span><span>Vietnam 43% · China 35% · Taiwan 14%</span></div>
+                  <div class="newl-field"><span>Commodities</span><span>Outdoor equipment, textiles, retail fixtures</span></div>
+                  <div class="newl-field"><span>Tracking</span><span class="newl-badge newl-badge-blue">Weekly monitoring</span></div>
+                </div>
+                <div class="newl-account-row"><div class="newl-score"><span>Last 90 days</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:86%"></div></div><strong>14 shipments</strong></div><span class="newl-subtle">31% increase from the prior 90-day period</span></div>
+                <div class="newl-account-row"><div class="newl-score"><span>Prior 90 days</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:58%"></div></div><strong>11 shipments</strong></div><span class="newl-subtle">Stable origin mix; Vancouver remains the primary port</span></div>
+                <div class="newl-actions"><button class="newl-button js-trademining-editor">Manage search names</button><button class="newl-button js-concept-action">View shipment history</button></div>
+              </div>
+            </div>
+
+            <div class="newl-panel" style="margin-top:12px">
+              <div class="newl-panel-head"><div><span class="newl-eyebrow">Human review required</span><h2>Suggested sales opportunities</h2></div><span class="newl-badge newl-badge-amber">3 to review</span></div>
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>Western Canada distribution launch</strong><span class="newl-badge newl-badge-blue">News + imports</span></div><p class="newl-subtle">Potential services: Vancouver drayage, warehousing, final mile</p><p>Evidence: new distribution centre announcement and rising Vancouver imports.</p></div><button class="newl-button js-concept-action">Create draft</button></div>
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>Vietnam consolidation program</strong><span class="newl-badge newl-badge-green">TradeMining</span></div><p class="newl-subtle">Potential services: origin consolidation and annual ocean program</p><p>Evidence: Vietnam became the largest origin with repeated shipments over six months.</p></div><button class="newl-button js-concept-action">Create draft</button></div>
+              <div class="newl-opportunity-card"><div><div class="newl-inline"><strong>US store replenishment expansion</strong><span class="newl-badge newl-badge-amber">News</span></div><p class="newl-subtle">Potential services: cross-border freight and US final mile</p><p>Evidence: twelve announced US locations; confirm timeline with Morgan Lee.</p></div><button class="newl-button js-concept-action">Create draft</button></div>
+            </div>
+            <div class="newl-toast" role="status">Concept only — no intelligence run or opportunity creation was performed.</div>
+          </div>
+
+          <div class="newl-detail-tab-panel" data-tab-panel="financials">
+            <div class="newl-page-head"><div class="newl-page-copy"><h2>Financials</h2><p>Relationship-scoped revenue and receivables. Phase 5 target state.</p></div><select><option>Last 12 months</option><option>Last 24 months</option><option>Year to date</option></select></div>
+            <div class="newl-metrics">
+              <div class="newl-metric"><span class="newl-subtle">Revenue</span><span class="newl-metric-value">CA$1.28M</span><span class="newl-helper">+14% versus prior period</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Open AR</span><span class="newl-metric-value">CA$86.4K</span><span class="newl-helper">CA$12.7K over 30 days</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Gross profit</span><span class="newl-metric-value">CA$241K</span><span class="newl-helper">Worldwide only</span></div>
+              <div class="newl-metric"><span class="newl-subtle">Invoices</span><span class="newl-metric-value">48</span><span class="newl-helper">6 currently open</span></div>
+            </div>
+            <div class="newl-grid-2">
+              <div class="newl-panel"><div class="newl-panel-head"><h2>By operating company</h2><span class="newl-subtle">Native currencies</span></div><div class="newl-account-row"><div class="newl-inline"><strong>Newl Worldwide</strong><span class="newl-badge newl-badge-green">Active</span></div><span>CA$1.08M revenue · CA$78.2K open AR · CA$241K gross profit</span></div><div class="newl-account-row"><div class="newl-inline"><strong>Newl USA</strong><span class="newl-badge newl-badge-green">Active</span></div><span>US$148K revenue · US$6.1K open AR · Gross profit not tracked</span></div><div class="newl-account-row"><div class="newl-inline"><strong>Newell's Express</strong><span class="newl-badge newl-badge-neutral">No activity</span></div><span>No approved source account · Gross profit not tracked</span></div></div>
+              <div class="newl-panel"><div class="newl-panel-head"><h2>Receivables aging</h2><span class="newl-subtle">6 open invoices</span></div><div class="newl-account-row"><div class="newl-score"><span>Current</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:72%"></div></div><strong>CA$62.1K</strong></div></div><div class="newl-account-row"><div class="newl-score"><span>1–30 days</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:28%"></div></div><strong>CA$11.6K</strong></div></div><div class="newl-account-row"><div class="newl-score"><span>31–60 days</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:20%"></div></div><strong>CA$8.4K</strong></div></div><div class="newl-account-row"><div class="newl-score"><span>60+ days</span><div class="newl-score-bar"><div class="newl-score-fill" style="width:12%"></div></div><strong>CA$4.3K</strong></div></div></div>
+            </div>
+          </div>
+
+          <div class="newl-detail-tab-panel" data-tab-panel="activity">
+            <div class="newl-page-head"><div class="newl-page-copy"><h2>Activity and evidence</h2><p>A traceable timeline of customer facts, human decisions, and source updates.</p></div><select><option>All activity</option><option>QuickBooks</option><option>Microsoft 365</option><option>TradeMining</option><option>News</option><option>Human decisions</option><option>Opportunities</option></select></div>
+            <div class="newl-panel">
+              <div class="newl-activity-row"><div class="newl-inline"><span class="newl-badge newl-badge-blue">TradeMining</span><strong>Import signal refreshed</strong></div><span>Fourteen shipments were observed in the latest 90-day period, up from eleven.</span><span class="newl-subtle">Today</span></div>
+              <div class="newl-activity-row"><div class="newl-inline"><span class="newl-badge newl-badge-blue">Microsoft 365</span><strong>Customer email received</strong></div><span>Morgan Lee asked for a revised sailing schedule. Evidence is visible only to authorized users.</span><span class="newl-subtle">2 days ago</span></div>
+              <div class="newl-activity-row"><div class="newl-inline"><span class="newl-badge newl-badge-green">QuickBooks</span><strong>Payment recorded</strong></div><span>Invoice status changed from open to paid under Newl Worldwide.</span><span class="newl-subtle">5 days ago</span></div>
+              <div class="newl-activity-row"><div class="newl-inline"><span class="newl-badge newl-badge-neutral">Opportunity</span><strong>Proposal sent</strong></div><span>Transpacific annual freight contract moved to Proposal.</span><span class="newl-subtle">8 days ago</span></div>
+              <div class="newl-activity-row"><div class="newl-inline"><span class="newl-badge newl-badge-amber">Human review</span><strong>QuickBooks identity approved</strong></div><span>An ADMIN approved the Newl USA source account for this canonical company.</span><span class="newl-subtle">3 months ago</span></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog class="newl-dialog" id="trademining-editor" aria-labelledby="trademining-editor-title">
+    <div class="newl-dialog-body">
+      <div class="newl-dialog-head">
+        <div class="newl-page-copy"><span class="newl-eyebrow">Northstar Outdoor Supply</span><h2 id="trademining-editor-title">Edit TradeMining identity</h2><p>Control the names and locations used to find this company in import records.</p></div>
+        <button class="newl-button js-dialog-close" type="button" aria-label="Close TradeMining editor">Close</button>
+      </div>
+      <div class="newl-rule-box">The Newl Apps company name remains unchanged. These values only control TradeMining searches and matching. Updated matches require human confirmation.</div>
+      <div class="newl-form-grid">
+        <label class="newl-form-field is-wide"><span>Primary TradeMining search name</span><input class="newl-text-input" value="North Star Outdoor Imports Ltd." /></label>
+        <label class="newl-form-field is-wide"><span>Alternate names and aliases</span><textarea class="newl-textarea">Northstar Outdoor Supply
+Northstar Outdoor Canada
+North Star Outdoor</textarea><span class="newl-helper">One alias per line. Include legal names, former names, and common consignee spellings.</span></label>
+        <label class="newl-form-field"><span>Country</span><select><option>Canada</option><option>United States</option><option>Both Canada and United States</option></select></label>
+        <label class="newl-form-field"><span>Primary city or region</span><input class="newl-text-input" value="Toronto, Ontario" /></label>
+        <label class="newl-form-field is-wide"><span>Known importer addresses</span><textarea class="newl-textarea">44 Synthetic Avenue, Toronto, ON
+780 Example Way, Vancouver, BC</textarea></label>
+        <label class="newl-form-field"><span>Monitoring frequency</span><select><option>Weekly</option><option>Monthly</option><option>Manual only</option></select></label>
+        <label class="newl-form-field"><span>Current match status</span><select><option>Human-confirmed</option><option>Needs review</option><option>Paused</option></select></label>
+      </div>
+      <div class="newl-dialog-actions"><button class="newl-button js-dialog-close" type="button">Cancel</button><button class="newl-button newl-button-primary js-dialog-save" type="button">Save and rerun match</button></div>
+      <div class="newl-toast" role="status">Concept only — the TradeMining identity was not changed.</div>
+    </div>
+  </dialog>
+
+  <dialog class="newl-dialog" id="contact-editor" aria-labelledby="contact-editor-title">
+    <div class="newl-dialog-body">
+      <div class="newl-dialog-head">
+        <div class="newl-page-copy"><span class="newl-eyebrow">Northstar Outdoor Supply</span><h2 id="contact-editor-title">Edit contact</h2><p>Add or update a person while preserving the source evidence.</p></div>
+        <button class="newl-button js-dialog-close" type="button" aria-label="Close contact editor">Close</button>
+      </div>
+      <div class="newl-form-grid">
+        <label class="newl-form-field"><span>Full name</span><input class="newl-text-input" id="contact-name" value="Morgan Lee" /></label>
+        <label class="newl-form-field"><span>Job title</span><input class="newl-text-input" id="contact-role" value="Purchasing Director" /></label>
+        <label class="newl-form-field"><span>Email address</span><input class="newl-text-input" id="contact-email" type="email" value="morgan.lee@example.com" /></label>
+        <label class="newl-form-field"><span>Phone</span><input class="newl-text-input" id="contact-phone" value="(416) 555-0129" /></label>
+        <label class="newl-form-field"><span>Operating-company relationship</span><select id="contact-relationship"><option>Worldwide + USA</option><option>Newl Worldwide</option><option>Newl USA</option><option>Newell's Express</option><option>Company-wide</option></select></label>
+        <label class="newl-form-field"><span>Contact status</span><select><option>Active</option><option>Needs review</option><option>Former contact</option><option>Do not contact</option></select></label>
+        <label class="newl-form-field is-wide"><span>Evidence or correction note</span><textarea class="newl-textarea" placeholder="Why is this contact being added or changed?">Email address confirmed from a recent customer thread.</textarea><span class="newl-helper">Changes retain their source and audit history. Updating an email does not delete the previous evidence.</span></label>
+      </div>
+      <div class="newl-dialog-actions"><button class="newl-button js-dialog-close" type="button">Cancel</button><button class="newl-button newl-button-primary js-dialog-save" id="contact-save" type="button">Save contact</button></div>
+      <div class="newl-toast" role="status">Concept only — the contact was not changed.</div>
+    </div>
+  </dialog>
+
+  <script>
+    (() => {
+      const root = document.getElementById('newl-customer-profile-concept');
+      if (!root) return;
+
+      const screens = [...root.querySelectorAll('[data-screen]')];
+      const routeButtons = [...root.querySelectorAll('.js-route')];
+      const detailTabs = [...root.querySelectorAll('.js-detail-tab')];
+      const detailPanels = [...root.querySelectorAll('[data-tab-panel]')];
+
+      function showRoute(route) {
+        screens.forEach((screen) => screen.classList.toggle('is-active', screen.dataset.screen === route));
+        root.querySelectorAll('.newl-nav-button[data-route]').forEach((button) => {
+          if (button.dataset.route === route || (route === 'detail' && button.dataset.route === 'matched')) {
+            button.setAttribute('aria-current', 'page');
+          } else {
+            button.removeAttribute('aria-current');
+          }
+        });
+      }
+
+      function showDetailTab(tab) {
+        showRoute('detail');
+        detailTabs.forEach((button) => button.classList.toggle('is-active', button.dataset.tab === tab));
+        detailPanels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.tabPanel === tab));
+      }
+
+      routeButtons.forEach((button) => button.addEventListener('click', () => showRoute(button.dataset.route)));
+      root.querySelectorAll('.js-open-company').forEach((button) => button.addEventListener('click', () => showDetailTab('overview')));
+      detailTabs.forEach((button) => button.addEventListener('click', () => showDetailTab(button.dataset.tab)));
+
+      const tradeMiningDialog = root.querySelector('#trademining-editor');
+      root.querySelectorAll('.js-trademining-editor').forEach((button) => {
+        button.addEventListener('click', () => tradeMiningDialog?.showModal());
+      });
+
+      const contactDialog = root.querySelector('#contact-editor');
+      const contactTitle = root.querySelector('#contact-editor-title');
+      const contactSave = root.querySelector('#contact-save');
+      const contactName = root.querySelector('#contact-name');
+      const contactRole = root.querySelector('#contact-role');
+      const contactEmail = root.querySelector('#contact-email');
+      const contactPhone = root.querySelector('#contact-phone');
+      const contactRelationship = root.querySelector('#contact-relationship');
+
+      root.querySelectorAll('.js-contact-editor').forEach((button) => {
+        button.addEventListener('click', () => {
+          const isAdding = button.dataset.contactMode === 'add';
+          if (contactTitle) contactTitle.textContent = isAdding ? 'Add contact' : 'Edit contact';
+          if (contactSave) contactSave.textContent = isAdding ? 'Add contact' : 'Save contact';
+          if (contactName) contactName.value = isAdding ? '' : button.dataset.name || '';
+          if (contactRole) contactRole.value = isAdding ? '' : button.dataset.role || '';
+          if (contactEmail) contactEmail.value = isAdding ? '' : button.dataset.email || '';
+          if (contactPhone) contactPhone.value = isAdding ? '' : button.dataset.phone || '';
+          if (contactRelationship) contactRelationship.value = isAdding ? 'Company-wide' : button.dataset.relationship || 'Company-wide';
+          contactDialog?.showModal();
+        });
+      });
+
+      root.querySelectorAll('.js-dialog-close').forEach((button) => {
+        button.addEventListener('click', () => button.closest('dialog')?.close());
+      });
+
+      root.querySelectorAll('.js-dialog-save').forEach((button) => {
+        button.addEventListener('click', () => {
+          const dialog = button.closest('dialog');
+          const toast = dialog?.querySelector('.newl-toast');
+          toast?.classList.add('is-visible');
+          window.setTimeout(() => {
+            toast?.classList.remove('is-visible');
+            dialog?.close();
+          }, 900);
+        });
+      });
+
+      const matchedSearch = root.querySelector('#matched-search');
+      const matchedRows = [...root.querySelectorAll('#matched-rows tr')];
+      if (matchedSearch) {
+        matchedSearch.addEventListener('input', () => {
+          const query = matchedSearch.value.trim().toLowerCase();
+          matchedRows.forEach((row) => {
+            row.style.display = !query || (row.dataset.search || '').includes(query) ? '' : 'none';
+          });
+        });
+      }
+
+      root.querySelectorAll('.js-concept-action').forEach((button) => {
+        button.addEventListener('click', () => {
+          const screen = button.closest('.newl-screen');
+          const panel = button.closest('.newl-detail-tab-panel') || button.closest('.newl-review-card');
+          const toast = (panel || screen)?.querySelector('.newl-toast');
+          if (!toast) return;
+          toast.classList.add('is-visible');
+          window.setTimeout(() => toast.classList.remove('is-visible'), 3200);
+        });
+      });
+    })();
+  </script>
+</div>
