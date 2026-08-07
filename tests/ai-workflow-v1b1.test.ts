@@ -9,9 +9,10 @@ import {
   symlinkSync,
   writeFileSync
 } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -21,6 +22,7 @@ import {
 } from "../tools/ai-workflow/config";
 import {
   answerOwnerQuestion,
+  confirmedDecisionMap,
   effectivePhaseRisk,
   hashJson,
   questionsFromPlan,
@@ -40,6 +42,10 @@ import {
 } from "../tools/ai-workflow/feature";
 import { importLegacyOwnerQuestions } from "../tools/ai-workflow/legacy-questions";
 import { AgentRunRequest, AgentRunner } from "../tools/ai-workflow/opencode";
+import {
+  createOperatorInput,
+  withOperatorInput
+} from "../tools/ai-workflow/operator-input";
 import { PlanPhase, validateWorkflowPlan, WorkflowPlan } from "../tools/ai-workflow/planner";
 import { reviewPhase } from "../tools/ai-workflow/reviewer";
 import {
@@ -153,6 +159,118 @@ afterEach(() => {
 });
 
 describe("Version 1B.1 local state", () => {
+  it("opens operator input only while a prompt is active", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operatorInput = createOperatorInput(input, output);
+
+    expect(input.readableFlowing).not.toBe(true);
+    const answer = operatorInput.readline.question("Selection: ");
+    expect(input.readableFlowing).toBe(true);
+    input.write("2\n");
+    await expect(answer).resolves.toBe("2");
+    expect(input.readableFlowing).toBe(false);
+
+    operatorInput.close();
+    expect(input.readableFlowing).toBe(false);
+  });
+
+  it("creates a fresh prompt after delayed work and after an earlier prompt", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operatorInput = createOperatorInput(input, output);
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+    expect(input.readableFlowing).not.toBe(true);
+
+    const firstAnswer = operatorInput.readline.question("First: ");
+    input.write("one\n");
+    await expect(firstAnswer).resolves.toBe("one");
+    expect(input.readableFlowing).toBe(false);
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+    const secondAnswer = operatorInput.readline.question("Second: ");
+    input.write("two\n");
+    await expect(secondAnswer).resolves.toBe("two");
+
+    operatorInput.close();
+  });
+
+  it("rejects prompts after operator input is explicitly closed", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operatorInput = createOperatorInput(input, output);
+
+    operatorInput.close();
+
+    await expect(operatorInput.readline.question("Selection: ")).rejects.toThrow(
+      "Operator input is closed."
+    );
+  });
+
+  it("keeps operator input open until a returned asynchronous launcher operation settles", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const operation = withOperatorInput(
+      async (readline) => {
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+        return readline.question("Approve: ");
+      },
+      input,
+      output
+    );
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    expect(input.readableFlowing).toBe(true);
+    input.write("CP-PHASE-02B-1\n");
+
+    await expect(operation).resolves.toBe("CP-PHASE-02B-1");
+    expect(input.readableFlowing).toBe(false);
+  });
+
+  it("keeps a real tsx launcher process alive while an operator prompt is unanswered", async () => {
+    const script = `
+      import { createOperatorInput } from "./tools/ai-workflow/operator-input.ts";
+      const operatorInput = createOperatorInput();
+      const answer = await operatorInput.readline.question("Selection: ");
+      process.stdout.write("ANSWER=" + answer);
+      operatorInput.close();
+    `;
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      { cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"] }
+    );
+    let stdout = "";
+    let stderr = "";
+    let answered = false;
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+      if (!answered && stdout.includes("Selection: ")) {
+        answered = true;
+        setTimeout(() => child.stdin.end("2\n"), 50);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const exitCode = await new Promise<number | null>((resolveExit, rejectExit) => {
+      const timeout = setTimeout(() => {
+        child.kill();
+        rejectExit(new Error("Operator prompt child process did not finish."));
+      }, 3_000);
+      child.on("error", rejectExit);
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        resolveExit(code);
+      });
+    });
+
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain("Selection: ANSWER=2");
+  });
+
   it("writes and reloads owner-only atomic feature state and append-only events", async () => {
     const coordinationRoot = temporaryDirectory("newl-v1b1-state-");
     const state = createFeatureState({
@@ -199,6 +317,22 @@ describe("Version 1B.1 local state", () => {
     await release();
     const releaseAgain = await acquireFeatureRun(coordinationRoot, state.featureSlug);
     await releaseAgain();
+  });
+
+  it("allows an approved-roadmap feature to re-enter mandatory preflight before phase approval", () => {
+    const state = createFeatureState({
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Synthetic request.",
+      branch: "codex/synthetic-feature",
+      worktree: "/synthetic/worktree",
+      baseCommit: "a".repeat(40),
+      headCommit: "a".repeat(40),
+      diffHash: "b".repeat(64)
+    });
+    const awaitingApproval = transitionFeatureState(state, "awaiting_phase_approval");
+
+    expect(transitionFeatureState(awaitingApproval, "preflight").stage).toBe("preflight");
   });
 
   it("rejects unknown state schema versions", async () => {
@@ -294,6 +428,38 @@ describe("Version 1B.1 model defaults and artifact import", () => {
     expect(phaseRequest.contents).toContain("Implement only FEATURE-PHASE-01");
     expect(phaseRequest.contents).toContain("Excluded later phases: FEATURE-PHASE-02");
     expect(phaseRequest.hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("preserves the selected answer and exact owner explanation in the phase request", async () => {
+    const worktree = temporaryDirectory("newl-v1b1-owner-evidence-");
+    const question = questionsFromPlan(plan)[0];
+    const answered = answerOwnerQuestion(
+      question,
+      "POLICY_A",
+      "Use the same policy for both existing operating companies; do not infer a third.",
+      { planHash: question.planHash, questionHash: question.questionHash }
+    );
+    const phaseRequest = await generatePhaseRequest({
+      worktree,
+      featureSlug: "synthetic-feature",
+      featureTitle: "Synthetic Feature",
+      originalRequest: "Add the synthetic feature.",
+      plan,
+      phase: ownerPhase,
+      artifacts: [],
+      questions: [answered]
+    });
+
+    expect(confirmedDecisionMap([answered])).toEqual({
+      "FEATURE-POLICY-1": {
+        answer: "POLICY_A",
+        explanation: "Use the same policy for both existing operating companies; do not infer a third."
+      }
+    });
+    expect(phaseRequest.contents).toContain("Selected answer: POLICY_A");
+    expect(phaseRequest.contents).toContain(
+      "Confirmed owner explanation: Use the same policy for both existing operating companies; do not infer a third."
+    );
   });
 });
 
@@ -462,6 +628,13 @@ These questions gate the same owner-gated phase.
 
   it("uses a stored roadmap without a planner call and stops after one phase", async () => {
     const requests: AgentRunRequest[] = [];
+    const evaluatorDecisions: unknown[] = [];
+    const confirmedDecisions = {
+      "FEATURE-POLICY-1": {
+        answer: "POLICY_A",
+        explanation: "Preserve this exact owner rationale in every model packet."
+      }
+    };
     const runner: AgentRunner = {
       run: async (request) => {
         requests.push(request);
@@ -499,7 +672,26 @@ These questions gate the same owner-gated phase.
         builderModel: "provider/deepseek",
         reviewerModel: "provider/qwen",
         approvedPlan: plan,
-        phaseId: phaseOne.id
+        phaseId: phaseOne.id,
+        confirmedDecisions,
+        evaluators: [
+          {
+            id: "owner-evidence",
+            evaluate: async (context) => {
+              evaluatorDecisions.push(context.confirmedDecisions);
+              return {
+                schemaVersion: 1,
+                evaluatorId: "owner-evidence",
+                status: "passed",
+                findings: [],
+                measurements: {},
+                artifactHashes: [],
+                durationMs: 1,
+                diffHash: context.diffHash
+              };
+            }
+          }
+        ]
       },
       {
         agentRunner: runner,
@@ -528,6 +720,11 @@ These questions gate the same owner-gated phase.
       }
     );
     expect(requests.map((request) => request.role)).toEqual(["builder", "reviewer"]);
+    expect(requests[0].prompt).toContain('"answer": "POLICY_A"');
+    expect(requests[0].prompt).toContain("Preserve this exact owner rationale in every model packet.");
+    expect(requests[1].prompt).toContain('"answer": "POLICY_A"');
+    expect(requests[1].prompt).toContain("Preserve this exact owner rationale in every model packet.");
+    expect(evaluatorDecisions).toEqual([confirmedDecisions]);
     expect(result).toMatchObject({ phaseId: phaseOne.id, stoppedBeforeNextPhase: true });
   });
 });

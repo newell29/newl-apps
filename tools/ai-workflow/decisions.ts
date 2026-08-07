@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 
-import { OwnerQuestionProposal, PlanPhase, WorkflowPlan } from "./planner";
-import { OwnerQuestionRecord } from "./state";
+import type { OwnerQuestionProposal, PlanPhase, WorkflowPlan } from "./planner";
+import type { OwnerQuestionRecord } from "./state";
+
+export type ConfirmedOwnerDecision = {
+  answer: string;
+  explanation: string | null;
+};
+
+export type ConfirmedOwnerDecisions = Record<string, ConfirmedOwnerDecision>;
 
 export function hashJson(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
@@ -108,10 +115,49 @@ export function effectivePhaseRisk(phase: PlanPhase): PlanPhase["risk"] {
   return phase.risk;
 }
 
-export function confirmedDecisionMap(questions: OwnerQuestionRecord[]): Record<string, string> {
+export function confirmedDecisionMap(questions: OwnerQuestionRecord[]): ConfirmedOwnerDecisions {
   return Object.fromEntries(
     questions
       .filter((question) => question.confirmedAt && question.answer)
-      .map((question) => [question.id, question.answer as string])
+      .map((question) => [
+        question.id,
+        {
+          answer: question.answer as string,
+          explanation: question.explanation
+        }
+      ])
+  );
+}
+
+export function validateConfirmedOwnerDecisions(value: unknown): ConfirmedOwnerDecisions {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Confirmed owner decisions must be an object.");
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([id, decision]) => {
+      if (!id.trim() || !decision || typeof decision !== "object" || Array.isArray(decision)) {
+        throw new Error("Each confirmed owner decision must have an ID and structured value.");
+      }
+      const record = decision as Record<string, unknown>;
+      const unexpected = Object.keys(record).filter(
+        (key) => key !== "answer" && key !== "explanation"
+      );
+      if (unexpected.length > 0) {
+        throw new Error(`Confirmed owner decision ${id} contains unexpected fields.`);
+      }
+      if (typeof record.answer !== "string" || !record.answer.trim()) {
+        throw new Error(`Confirmed owner decision ${id} must contain an answer.`);
+      }
+      if (record.explanation !== null && typeof record.explanation !== "string") {
+        throw new Error(`Confirmed owner decision ${id} has an invalid explanation.`);
+      }
+      return [
+        id,
+        {
+          answer: record.answer,
+          explanation: record.explanation
+        }
+      ];
+    })
   );
 }

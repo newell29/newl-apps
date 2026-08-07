@@ -132,12 +132,12 @@ describe("AI workflow structured contracts", () => {
     expect(() =>
       validateWorkflowPlan({ ...plan, expectedAreas: ["tools/ai-workflow//nested"] })
     ).toThrow(/unsafe repository path/);
-    expect(() =>
+    expect(
       validateWorkflowPlan({
         ...plan,
         phases: [{ ...plan.phases[0], expectedFiles: ["tools/ai-workflow/"] }]
-      })
-    ).toThrow(/unsafe repository path/);
+      }).phases[0].expectedFiles
+    ).toEqual(["tools/ai-workflow"]);
   });
 
   it("rejects contradictory reviewer approval", () => {
@@ -156,11 +156,20 @@ describe("AI workflow structured contracts", () => {
   it("extracts JSON and cost from OpenCode JSON events", () => {
     const stdout = [
       JSON.stringify({ type: "text", part: { text: envelope({ ok: true }) } }),
-      JSON.stringify({ type: "step_finish", part: { cost: 0.125 } })
+      JSON.stringify({
+        type: "step_finish",
+        part: {
+          cost: 0.125,
+          reason: "length",
+          tokens: { input: 100, output: 200, reasoning: 50, cache: { read: 25 } }
+        }
+      })
     ].join("\n");
     const parsed = parseOpenCodeOutput(stdout);
     expect(extractStructuredResult(parsed.text)).toEqual({ ok: true });
     expect(parsed.cost).toBe(0.125);
+    expect(parsed.finishReason).toBe("length");
+    expect(parsed.tokens).toEqual({ input: 100, output: 200, reasoning: 50, cacheRead: 25 });
   });
 });
 
@@ -248,7 +257,8 @@ describe("AI workflow deterministic controls", () => {
     const models = {
       plannerModel: "qwen/qwen-planner",
       builderModel: "deepseek/deepseek-builder",
-      reviewerModel: "qwen/qwen-reviewer"
+      reviewerModel: "qwen/qwen-reviewer",
+      escalationModel: "openai/gpt-5.6-sol"
     };
     const path = await saveModelConfiguration(repository, models);
 
@@ -340,6 +350,149 @@ describe("AI workflow deterministic controls", () => {
 });
 
 describe("AI workflow review loop", () => {
+  it("uses one fresh escalation remediation after three ordinary builder failures", async () => {
+    const repository = createRepository();
+    const requests: AgentRunRequest[] = [];
+    let verificationAttempt = 0;
+    const agentRunner: AgentRunner = {
+      run: async (request) => {
+        requests.push(request);
+        if (request.role === "planner") return { text: envelope(plan), cost: 0 };
+        if (request.role === "builder") {
+          mkdirSync(join(repository, "src"), { recursive: true });
+          writeFileSync(join(repository, "src", "feature.ts"), "export const feature = 1;\n");
+          return {
+            text: envelope({
+              summary: "Applied the requested correction.",
+              changedFiles: ["src/feature.ts"],
+              testsChanged: [],
+              limitations: []
+            }),
+            cost: 0
+          };
+        }
+        return {
+          text: envelope({
+            status: "approved",
+            summary: "The separately verified phase is complete.",
+            findings: [],
+            missingTests: [],
+            scopeConcerns: [],
+            escalationReason: null
+          }),
+          cost: 0
+        };
+      }
+    };
+    const commandRunner: CommandRunner = {
+      run: async (spec) => {
+        if (spec.name === "diff-check") verificationAttempt += 1;
+        const passed = !(verificationAttempt < 4 && spec.name === "typecheck");
+        return {
+          ...spec,
+          passed,
+          exitCode: passed ? 0 : 2,
+          durationMs: 1,
+          output: passed ? "passed" : `ordinary failure ${verificationAttempt}`
+        };
+      }
+    };
+
+    const result = await runWorkflow(
+      {
+        repositoryRoot: repository,
+        originalRequest: "Fix the synthetic phase.",
+        plannerModel: "provider/qwen",
+        builderModel: "provider/deepseek",
+        reviewerModel: "provider/sol",
+        escalationModel: "provider/sol",
+        maxRetriesPerPhase: 3
+      },
+      {
+        agentRunner,
+        commandRunner,
+        preflight: () => passingPreflight(repository),
+        approvePlan: async () => true
+      }
+    );
+
+    const builderRequests = requests.filter((request) => request.role === "builder");
+    expect(builderRequests.map((request) => request.model)).toEqual([
+      "provider/deepseek",
+      "provider/deepseek",
+      "provider/deepseek",
+      "provider/sol"
+    ]);
+    expect(builderRequests[3].prompt).toContain("ordinary failure 3");
+    expect(builderRequests[3].sessionId).toBeUndefined();
+    expect(requests.filter((request) => request.role === "reviewer")).toHaveLength(1);
+    expect(requests.at(-1)).toMatchObject({ role: "reviewer", model: "provider/sol" });
+    expect(requests.at(-1)?.sessionId).toBeUndefined();
+    expect(result.metrics).toMatchObject({
+      escalationModel: "provider/sol",
+      escalationAttempts: 1,
+      retryCount: 3,
+      reviewCycles: 1
+    });
+  });
+
+  it("fails closed when the single escalation remediation still fails verification", async () => {
+    const repository = createRepository();
+    const requests: AgentRunRequest[] = [];
+    const agentRunner: AgentRunner = {
+      run: async (request) => {
+        requests.push(request);
+        if (request.role === "planner") return { text: envelope(plan), cost: null };
+        return {
+          text: envelope({
+            summary: "Attempted correction.",
+            changedFiles: [],
+            testsChanged: [],
+            limitations: []
+          }),
+          cost: null
+        };
+      }
+    };
+    const commandRunner: CommandRunner = {
+      run: async (spec) => ({
+        ...spec,
+        passed: spec.name !== "typecheck",
+        exitCode: spec.name === "typecheck" ? 2 : 0,
+        durationMs: 1,
+        output: spec.name === "typecheck" ? "still failing" : "passed"
+      })
+    };
+
+    await expect(
+      runWorkflow(
+        {
+          repositoryRoot: repository,
+          originalRequest: "Fix the synthetic phase.",
+          plannerModel: "provider/qwen",
+          builderModel: "provider/deepseek",
+          reviewerModel: "provider/sol",
+          escalationModel: "provider/sol",
+          maxRetriesPerPhase: 3
+        },
+        {
+          agentRunner,
+          commandRunner,
+          preflight: () => passingPreflight(repository),
+          approvePlan: async () => true
+        }
+      )
+    ).rejects.toThrow(/single escalation remediation attempt/);
+
+    expect(requests.filter((request) => request.role === "builder").map((request) => request.model)).toEqual([
+      "provider/deepseek",
+      "provider/deepseek",
+      "provider/deepseek",
+      "provider/sol"
+    ]);
+    expect(requests.some((request) => request.role === "reviewer")).toBe(false);
+  });
+
   it("returns mandatory verification failures to the builder before any review", async () => {
     const repository = createRepository();
     const requests: AgentRunRequest[] = [];

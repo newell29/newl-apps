@@ -76,11 +76,13 @@ export async function loadModelConfiguration(input: {
   plannerModel?: string;
   builderModel?: string;
   reviewerModel?: string;
+  escalationModel?: string;
   userConfigFile?: string;
 }): Promise<ModelConfiguration> {
-  const explicit = input.plannerModel || input.builderModel || input.reviewerModel;
+  const explicit =
+    input.plannerModel || input.builderModel || input.reviewerModel || input.escalationModel;
   if (explicit) {
-    return {
+    const configuration: ModelConfiguration = {
       plannerModel: validateModelId(
         input.plannerModel ?? process.env.AI_WORKFLOW_PLANNER_MODEL,
         "Planner"
@@ -94,14 +96,25 @@ export async function loadModelConfiguration(input: {
         "Reviewer"
       )
     };
+    const escalationModel = input.escalationModel ?? process.env.AI_WORKFLOW_ESCALATION_MODEL;
+    if (escalationModel) {
+      configuration.escalationModel = validateModelId(escalationModel, "Escalation");
+    }
+    return configuration;
   }
 
   const environmentModels = {
     plannerModel: process.env.AI_WORKFLOW_PLANNER_MODEL,
     builderModel: process.env.AI_WORKFLOW_BUILDER_MODEL,
-    reviewerModel: process.env.AI_WORKFLOW_REVIEWER_MODEL
+    reviewerModel: process.env.AI_WORKFLOW_REVIEWER_MODEL,
+    escalationModel: process.env.AI_WORKFLOW_ESCALATION_MODEL
   };
-  if (environmentModels.plannerModel || environmentModels.builderModel || environmentModels.reviewerModel) {
+  if (
+    environmentModels.plannerModel ||
+    environmentModels.builderModel ||
+    environmentModels.reviewerModel ||
+    environmentModels.escalationModel
+  ) {
     return parseModelConfiguration(environmentModels);
   }
 

@@ -2,6 +2,8 @@ import { chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promise
 import { dirname, relative, resolve, sep } from "node:path";
 
 import { implementPhase } from "./builder";
+import type { ConfirmedOwnerDecisions } from "./decisions";
+import { validateConfirmedOwnerDecisions } from "./decisions";
 import {
   getSurroundingCode,
   getWorkflowDiff,
@@ -28,6 +30,7 @@ export type ReviewRecoveryRecord = {
   originalRequest: string;
   approvedPlan: WorkflowPlan;
   phaseId: string;
+  confirmedDecisions?: ConfirmedOwnerDecisions;
 };
 
 export type LoadedReviewRecovery = {
@@ -83,7 +86,8 @@ export function validateReviewRecoveryRecord(value: unknown): ReviewRecoveryReco
     "diffHash",
     "originalRequest",
     "approvedPlan",
-    "phaseId"
+    "phaseId",
+    "confirmedDecisions"
   ]);
   const unexpectedKeys = Object.keys(value).filter((key) => !expectedKeys.has(key));
   if (unexpectedKeys.length > 0) {
@@ -116,7 +120,11 @@ export function validateReviewRecoveryRecord(value: unknown): ReviewRecoveryReco
     diffHash: validateHash(requiredString(value, "diffHash")),
     originalRequest: requiredString(value, "originalRequest"),
     approvedPlan: validateWorkflowPlan(value.approvedPlan),
-    phaseId: requiredString(value, "phaseId")
+    phaseId: requiredString(value, "phaseId"),
+    confirmedDecisions:
+      value.confirmedDecisions === undefined
+        ? undefined
+        : validateConfirmedOwnerDecisions(value.confirmedDecisions)
   };
 }
 
@@ -128,6 +136,7 @@ export async function writeReviewRecoveryMetadata(input: {
   originalRequest: string;
   approvedPlan: WorkflowPlan;
   phaseId: string;
+  confirmedDecisions?: ConfirmedOwnerDecisions;
   recoveryFile?: string;
 }): Promise<string> {
   const baseRef = input.baseRef ?? input.baseCommit;
@@ -152,7 +161,8 @@ export async function writeReviewRecoveryMetadata(input: {
     diffHash: identity.diffHash,
     originalRequest: input.originalRequest,
     approvedPlan: input.approvedPlan,
-    phaseId: input.phaseId
+    phaseId: input.phaseId,
+    confirmedDecisions: input.confirmedDecisions
   });
   const path = recoveryPath(
     input.repositoryRoot,
@@ -297,7 +307,8 @@ export async function runReviewCurrentDiff(input: {
       phase,
       gitDiff: await getWorkflowDiff(input.repositoryRoot, record.baseCommit),
       surroundingCode: await getSurroundingCode(input.repositoryRoot),
-      verification
+      verification,
+      confirmedDecisions: record.confirmedDecisions
     });
     const afterReview = await inspectRecoveryGitIdentity(
       input.repositoryRoot,
@@ -333,7 +344,9 @@ export async function runReviewCurrentDiff(input: {
     correctionAttempts += 1;
     event(`Recovery: forwarding ${corrections.length} exact correction(s) to the builder.`);
     while (true) {
-      await implementPhase(input.agentRunner, input.builderModel, phase, corrections);
+      await implementPhase(input.agentRunner, input.builderModel, phase, corrections, {
+        confirmedDecisions: record.confirmedDecisions
+      });
       const postBuilder = await inspectRecoveryGitIdentity(
         input.repositoryRoot,
         record.baseRef,

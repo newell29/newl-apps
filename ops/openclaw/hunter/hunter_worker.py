@@ -204,6 +204,62 @@ def fail_job_run(base_url: str, token: str, job_run_id: str, error: Exception) -
         pass
 
 
+def ingestion_failure_message(stderr: str) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    message = lines[-1] if lines else "Hunter ingestion failed without a diagnostic message"
+    return message[:500]
+
+
+def is_transient_ingestion_failure(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "http 408",
+            "http 425",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "timed out",
+            "timeout",
+            "connection pool",
+            "can't reach database server",
+            "connection refused",
+            "connection reset",
+            "temporary failure",
+        )
+    )
+
+
+def run_ingestion_with_recovery(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Resume the same checkpointed ingestion after a bounded transient failure."""
+    configured_attempts = int(os.environ.get("HUNTER_INGESTION_PROCESS_ATTEMPTS", "2"))
+    max_attempts = max(1, min(3, configured_attempts))
+    configured_delay = int(os.environ.get("HUNTER_INGESTION_RECOVERY_DELAY_SECONDS", "15"))
+    recovery_delay = max(0, min(60, configured_delay))
+
+    for attempt in range(1, max_attempts + 1):
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result
+
+        message = ingestion_failure_message(result.stderr)
+        if attempt >= max_attempts or not is_transient_ingestion_failure(message):
+            raise RuntimeError(message)
+
+        print(
+            f"Hunter ingestion attempt {attempt}/{max_attempts} hit a transient Newl Apps failure; "
+            "resuming from the saved batch checkpoint.",
+            file=sys.stderr,
+        )
+        if recovery_delay:
+            time.sleep(recovery_delay)
+
+    raise RuntimeError("Hunter ingestion recovery loop ended unexpectedly")
+
+
 def profile_lookback_days(profile: dict[str, Any]) -> int:
     return max(1, int(profile.get("lookbackDays") or 1))
 
@@ -669,12 +725,7 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         ]
         if destination_markets:
             ingest_command.extend(["--destination-market", destination_markets[0]])
-        ingest_result = subprocess.run(
-            ingest_command,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        ingest_result = run_ingestion_with_recovery(ingest_command)
         try:
             ingestion_summary = json.loads(ingest_result.stdout)
         except json.JSONDecodeError as error:

@@ -159,6 +159,74 @@ describe("Hunter daily profile worker", () => {
     expect(result.stdout).toContain("not enabled");
   });
 
+  it("restarts transient ingestion against the same checkpointed command", () => {
+    const python = [
+      "import importlib.util, json, os, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls=[]",
+      "sleeps=[]",
+      "class Result:",
+      " def __init__(self, returncode, stdout='', stderr=''): self.returncode=returncode; self.stdout=stdout; self.stderr=stderr",
+      "def run(command, **_kwargs):",
+      " calls.append(command)",
+      " if len(calls)==1: return Result(1, stderr='Newl Apps request failed with HTTP 500: connection pool exhausted')",
+      " return Result(0, stdout='{\"jobRunId\":\"job-1\"}')",
+      "module.subprocess.run=run",
+      "module.time.sleep=lambda seconds: sleeps.append(seconds)",
+      "os.environ['HUNTER_INGESTION_PROCESS_ATTEMPTS']='2'",
+      "os.environ['HUNTER_INGESTION_RECOVERY_DELAY_SECONDS']='7'",
+      "command=['python3','hunter_ingest.py','--job-run-id','job-1','--canonical-csv','canonical.csv']",
+      "result=module.run_ingestion_with_recovery(command)",
+      "print(json.dumps({'calls':calls,'sleeps':sleeps,'returncode':result.returncode}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      calls: [
+        ["python3", "hunter_ingest.py", "--job-run-id", "job-1", "--canonical-csv", "canonical.csv"],
+        ["python3", "hunter_ingest.py", "--job-run-id", "job-1", "--canonical-csv", "canonical.csv"]
+      ],
+      sleeps: [7],
+      returncode: 0
+    });
+  });
+
+  it("does not retry non-transient ingestion failures", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls=[]",
+      "class Result:",
+      " returncode=1; stdout=''; stderr='Newl Apps request failed with HTTP 400: invalid profile'",
+      "module.subprocess.run=lambda command, **_kwargs: calls.append(command) or Result()",
+      "try:",
+      " module.run_ingestion_with_recovery(['python3','hunter_ingest.py'])",
+      "except RuntimeError as error:",
+      " message=str(error)",
+      "else:",
+      " raise RuntimeError('non-transient failure unexpectedly succeeded')",
+      "print(json.dumps({'callCount':len(calls),'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      callCount: 1,
+      message: "Newl Apps request failed with HTTP 400: invalid profile"
+    });
+  });
+
   it("resolves common U.S. port aliases to canonical TradeMining ports", () => {
     const python = [
       "import importlib.util, json, pathlib, sys",

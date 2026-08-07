@@ -4,7 +4,6 @@ import { spawn } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync, watch } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { createInterface, Interface } from "node:readline/promises";
 
 import {
   DEFAULT_USER_MODEL_CONFIG_FILE,
@@ -35,7 +34,8 @@ import {
 } from "./git";
 import { importLegacyOwnerQuestions } from "./legacy-questions";
 import { OpenCodeCliInspector, OpenCodeCliRunner } from "./opencode";
-import { PlanPhase, WorkflowPlan } from "./planner";
+import { OperatorReadline, withOperatorInput } from "./operator-input";
+import { PlanPhase, recoverPlanFromSession, WorkflowPlan } from "./planner";
 import {
   authenticatedModelIds,
   runPreflight,
@@ -62,6 +62,16 @@ import {
   WorkflowOptions
 } from "./workflow";
 
+export type RunFeatureOptions = {
+  phaseApproval?: {
+    phaseId: string;
+    planHash: string;
+    diffHash: string;
+    confirmation: string;
+  };
+  allowOwnerCorrectionRetry?: boolean;
+};
+
 function command(cwd: string, executable: string, args: string[]): Promise<void> {
   return new Promise((resolveCommand, reject) => {
     const child = spawn(executable, args, { cwd, shell: false, stdio: "inherit" });
@@ -73,13 +83,13 @@ function command(cwd: string, executable: string, args: string[]): Promise<void>
   });
 }
 
-async function ask(readline: Interface, prompt: string, required = true): Promise<string> {
+async function ask(readline: OperatorReadline, prompt: string, required = true): Promise<string> {
   const answer = (await readline.question(prompt)).trim();
   if (required && !answer) throw new Error("A response is required.");
   return answer;
 }
 
-async function confirm(readline: Interface, prompt: string, defaultYes = false): Promise<boolean> {
+async function confirm(readline: OperatorReadline, prompt: string, defaultYes = false): Promise<boolean> {
   const answer = (await readline.question(`${prompt} ${defaultYes ? "[Y/n]" : "[y/N]"} `))
     .trim()
     .toLowerCase();
@@ -109,7 +119,7 @@ async function listFeatureStates(coordinationRoot: string): Promise<FeatureState
 
 async function selectFeature(
   coordinationRoot: string,
-  readline: Interface,
+  readline: OperatorReadline,
   requested?: string
 ): Promise<FeatureState> {
   if (requested) return loadFeatureState(coordinationRoot, validateFeatureSlug(requested));
@@ -130,6 +140,7 @@ function printModels(models: NonNullable<FeatureState["selectedModels"]>): void 
   console.log(`Planner:  ${models.plannerModel}`);
   console.log(`Builder:  ${models.builderModel}`);
   console.log(`Reviewer: ${models.reviewerModel}`);
+  console.log(`Fallback: ${models.escalationModel ?? "not configured"}`);
 }
 
 function printRoadmap(plan: WorkflowPlan, selectedPhaseId: string): void {
@@ -176,7 +187,10 @@ async function persistStage(
   return next;
 }
 
-async function createNewFeature(coordinationRoot: string, readline: Interface): Promise<FeatureState> {
+async function createNewFeature(
+  coordinationRoot: string,
+  readline: OperatorReadline
+): Promise<FeatureState> {
   const slug = validateFeatureSlug(await ask(readline, "Feature slug: "));
   const title = await ask(readline, "Feature name: ");
   const originalRequest = await ask(readline, "Describe the feature request: ");
@@ -232,7 +246,7 @@ async function createNewFeature(coordinationRoot: string, readline: Interface): 
   return state;
 }
 
-async function ensureDependencies(worktree: string, readline: Interface): Promise<void> {
+async function ensureDependencies(worktree: string, readline: OperatorReadline): Promise<void> {
   const openCodeBinary = join(worktree, "node_modules", ".bin", "opencode");
   if (existsSync(openCodeBinary)) return;
   console.log("\nRequired worktree dependencies are not installed.");
@@ -245,7 +259,7 @@ async function ensureDependencies(worktree: string, readline: Interface): Promis
 
 async function adoptExistingFeature(
   coordinationRoot: string,
-  readline: Interface,
+  readline: OperatorReadline,
   requestedSlug?: string
 ): Promise<FeatureState> {
   const slug = validateFeatureSlug(requestedSlug ?? (await ask(readline, "Feature slug: ")));
@@ -386,10 +400,11 @@ async function readGitHead(worktree: string): Promise<string> {
   });
 }
 
-async function runFeature(
+export async function runFeature(
   coordinationRoot: string,
   initialState: FeatureState,
-  readline: Interface
+  readline: OperatorReadline,
+  runOptions: RunFeatureOptions = {}
 ): Promise<void> {
   const release = await acquireFeatureRun(coordinationRoot, initialState.featureSlug);
   let state = initialState;
@@ -409,7 +424,31 @@ async function runFeature(
     state = { ...state, selectedModels: models, updatedAt: new Date().toISOString() };
     await saveFeatureState(coordinationRoot, state);
 
-    let phase = nextPendingPhase(state);
+    const correctionBoundary = state.correctionBoundary;
+    if (
+      correctionBoundary &&
+      (correctionBoundary.branch !== state.branch ||
+        correctionBoundary.baseCommit !== state.baseCommit ||
+        correctionBoundary.headCommit !== state.headCommit ||
+        correctionBoundary.diffHash !== state.currentDiffHash)
+    ) {
+      throw new WorkflowEscalationError(
+        `${correctionBoundary.phaseId} cannot resume because its saved branch, base, HEAD, or diff identity changed.`
+      );
+    }
+    if (correctionBoundary?.ownerActionRequired && !runOptions.allowOwnerCorrectionRetry) {
+      throw new WorkflowEscalationError(
+        `${correctionBoundary.phaseId} has exhausted its automatic correction allowance. Explicit owner approval is required for another bounded correction attempt.`
+      );
+    }
+    if (correctionBoundary?.nextModel === "escalation" && !models.escalationModel) {
+      throw new WorkflowEscalationError(
+        `${correctionBoundary.phaseId} requires the saved escalation model, but no escalation model is configured.`
+      );
+    }
+    let phase = correctionBoundary
+      ? state.plan?.phases.find((candidate) => candidate.id === correctionBoundary.phaseId) ?? null
+      : nextPendingPhase(state);
     if (state.plan && !phase) {
       throw new Error("The stored roadmap has no pending phase. Review the completed feature manually.");
     }
@@ -429,13 +468,33 @@ async function runFeature(
       plannerModel: models.plannerModel,
       builderModel: models.builderModel,
       reviewerModel: models.reviewerModel,
+      escalationModel: models.escalationModel,
       approvedPlan: state.plan ?? undefined,
       phaseId: phase?.id,
       featureSlug: state.featureSlug,
       confirmedDecisions: confirmedDecisionMap(state.questions),
       ownerGateSatisfied: phase
         ? unresolvedBlockingQuestions(state.questions, phase.id).length === 0
-        : false
+        : false,
+      phaseAlreadyApproved: Boolean(correctionBoundary),
+      resumeCorrection: correctionBoundary
+        ? {
+            corrections: correctionBoundary.corrections,
+            phaseRetries: runOptions.allowOwnerCorrectionRetry
+              ? 0
+              : correctionBoundary.phaseRetries,
+            phaseReviewCycles: runOptions.allowOwnerCorrectionRetry
+              ? 0
+              : correctionBoundary.phaseReviewCycles,
+            escalationUsed: runOptions.allowOwnerCorrectionRetry
+              ? false
+              : correctionBoundary.escalationUsed,
+            useEscalationRemediation:
+              correctionBoundary.nextModel === "escalation" ||
+              Boolean(runOptions.allowOwnerCorrectionRetry && models.escalationModel),
+            singleAttempt: Boolean(runOptions.allowOwnerCorrectionRetry)
+          }
+        : undefined
     };
     const commandRunner = new LocalCommandRunner();
     const inspector = new OpenCodeCliInspector(state.worktree);
@@ -516,10 +575,25 @@ async function runFeature(
         workflowOptions.ownerGateSatisfied = true;
 
         const risk = effectivePhaseRisk(selected);
-        const approved =
-          risk === "high" || risk === "owner_gated"
-            ? (await ask(readline, `\nType ${phaseId} to approve this phase only: `)) === phaseId
-            : await confirm(readline, `\nApprove ${phaseId} only?`, false);
+        let approved: boolean;
+        if (runOptions.phaseApproval) {
+          if (
+            runOptions.phaseApproval.phaseId !== phaseId ||
+            runOptions.phaseApproval.planHash !== hashJson(plan) ||
+            runOptions.phaseApproval.diffHash !== state.currentDiffHash
+          ) {
+            throw new Error("The local UI approval does not match the current phase, plan, or diff.");
+          }
+          approved =
+            risk === "high" || risk === "owner_gated"
+              ? runOptions.phaseApproval.confirmation === phaseId
+              : runOptions.phaseApproval.confirmation === "approve";
+        } else {
+          approved =
+            risk === "high" || risk === "owner_gated"
+              ? (await ask(readline, `\nType ${phaseId} to approve this phase only: `)) === phaseId
+              : await confirm(readline, `\nApprove ${phaseId} only?`, false);
+        }
         if (!approved) return false;
         state = {
           ...state,
@@ -563,11 +637,21 @@ async function runFeature(
               phaseId,
               sessionId: modelRun.sessionId ?? null,
               messageId: modelRun.assistantMessageId ?? null,
+              textPartIds: (modelRun.textPartIds ?? []).slice(0, 64),
+              finishReason: modelRun.finishReason ?? null,
+              cost: modelRun.cost,
+              tokens: modelRun.tokens ?? null,
               recordedAt: new Date().toISOString()
             }
           ]
         };
         await saveFeatureState(coordinationRoot, state);
+      },
+      onDiagnostic: async (path) => {
+        if (!state.diagnosticArtifacts.includes(path)) {
+          state = { ...state, diagnosticArtifacts: [...state.diagnosticArtifacts, path] };
+          await saveFeatureState(coordinationRoot, state);
+        }
       },
       onVerification: async (phaseId, verification) => {
         const identity = await gitIdentity(state);
@@ -593,6 +677,49 @@ async function runFeature(
         };
         await saveFeatureState(coordinationRoot, state);
       },
+      onCorrectionRequired: async (boundary) => {
+        const identity = await gitIdentity(state);
+        state = {
+          ...state,
+          headCommit: identity.headCommit,
+          currentDiffHash: identity.diffHash,
+          currentPhaseId: boundary.phaseId,
+          correctionBoundary: {
+            schemaVersion: 1,
+            phaseId: boundary.phaseId,
+            source: boundary.source,
+            corrections: boundary.corrections,
+            reviewDecision: boundary.reviewDecision ?? null,
+            phaseRetries: boundary.phaseRetries,
+            phaseReviewCycles: boundary.phaseReviewCycles,
+            escalationUsed: boundary.escalationUsed,
+            nextModel: boundary.nextModel,
+            ownerActionRequired: boundary.ownerActionRequired,
+            branch: state.branch,
+            baseCommit: state.baseCommit,
+            headCommit: identity.headCommit,
+            diffHash: identity.diffHash,
+            recordedAt: new Date().toISOString()
+          },
+          finalOutcome: boundary.ownerActionRequired
+            ? `${boundary.phaseId} requires owner approval for another correction attempt.`
+            : `${boundary.phaseId} has a saved correction and can resume without replanning.`
+        };
+        await saveFeatureState(coordinationRoot, state);
+        progress.emit({
+          stage: state.stage,
+          type: "workflow.correction_saved",
+          message: `${boundary.corrections.length} correction(s) saved from ${boundary.source}.`,
+          phaseId: boundary.phaseId,
+          data: { ownerActionRequired: boundary.ownerActionRequired }
+        });
+      },
+      onCorrectionCleared: async (phaseId) => {
+        if (state.correctionBoundary?.phaseId === phaseId) {
+          state = { ...state, correctionBoundary: null, updatedAt: new Date().toISOString() };
+          await saveFeatureState(coordinationRoot, state);
+        }
+      },
       onEvent: (message) =>
         progress.emit({ stage: state.stage, type: "workflow.progress", message, phaseId: state.currentPhaseId })
     });
@@ -609,6 +736,7 @@ async function runFeature(
       retryCount: state.retryCount + result.metrics.retryCount,
       reviewCycles: state.reviewCycles + result.metrics.reviewCycles,
       eventSequence: progress.sequence(),
+      correctionBoundary: null,
       phases: state.phases.map((record) =>
         record.id === result.phaseId
           ? {
@@ -658,7 +786,15 @@ async function runFeature(
           state.stage === "reviewing" &&
           error instanceof Error &&
           (/Reviewer/.test(error.message) || /Diagnostic:/.test(error.message));
-        state = transitionFeatureState(state, reviewFailure ? "review_failed" : "interrupted");
+        const correctionFailure =
+          error instanceof WorkflowEscalationError && Boolean(state.correctionBoundary);
+        const failureStage = correctionFailure
+          ? "correction_required"
+          : reviewFailure
+            ? "review_failed"
+            : "interrupted";
+        state =
+          state.stage === failureStage ? state : transitionFeatureState(state, failureStage);
         state = {
           ...state,
           headCommit: identity.headCommit,
@@ -678,6 +814,144 @@ async function runFeature(
       }
       throw error;
     }
+  } finally {
+    await release();
+  }
+}
+
+async function recoverPlan(
+  coordinationRoot: string,
+  initialState: FeatureState,
+  readline: OperatorReadline,
+  explicitSessionId?: string
+): Promise<void> {
+  if (initialState.stage !== "interrupted" || initialState.plan !== null) {
+    throw new Error("Plan recovery is available only for an interrupted feature with no validated plan.");
+  }
+  const savedSessionId = [...initialState.modelSessions]
+    .reverse()
+    .find((run) => run.role === "planner" && run.sessionId)?.sessionId;
+  const sessionId = explicitSessionId ?? savedSessionId;
+  if (!sessionId) {
+    throw new Error(
+      "No saved planner session ID is available. For a pre-patch failure, rerun with --session <OpenCode-session-id>."
+    );
+  }
+
+  const release = await acquireFeatureRun(coordinationRoot, initialState.featureSlug);
+  let state = initialState;
+  const progress = createProgressReporter(coordinationRoot, state);
+  try {
+    await ensureDependencies(state.worktree, readline);
+    const identity = await gitIdentity(state);
+    if (
+      identity.branch !== state.branch ||
+      identity.headCommit !== state.headCommit ||
+      identity.mergeBaseCommit !== state.baseCommit ||
+      identity.diffHash !== state.currentDiffHash
+    ) {
+      throw new Error("Registered branch, base, HEAD, or diff changed. Planner recovery refused.");
+    }
+
+    const models = await loadModelConfiguration({ repositoryRoot: state.worktree });
+    state = { ...state, selectedModels: models, updatedAt: new Date().toISOString() };
+    await saveFeatureState(coordinationRoot, state);
+    state = await persistStage(coordinationRoot, state, "preflight", null);
+    const commandRunner = new LocalCommandRunner();
+    const inspector = new OpenCodeCliInspector(state.worktree);
+    await runPreflight({
+      repositoryRoot: state.worktree,
+      models,
+      commandRunner,
+      openCodeInspector: inspector,
+      expectedExistingDiff: {
+        branch: state.branch,
+        baseCommit: state.baseCommit,
+        headCommit: state.headCommit,
+        diffHash: state.currentDiffHash
+      },
+      onEvent: (message) => progress.emit({ stage: state.stage, type: "preflight.progress", message })
+    });
+
+    state = await persistStage(coordinationRoot, state, "planning", null);
+    console.log(`\nRecovering the compact roadmap with ${models.plannerModel}.`);
+    console.log("No builder, reviewer, phase approval, or feature-code action will run.");
+    const runner = new OpenCodeCliRunner(state.worktree, undefined, (event) => {
+      progress.emit({
+        stage: state.stage,
+        type: `model.${event.type}`,
+        message:
+          event.type === "heartbeat"
+            ? "planner model is still active; no operator input is needed."
+            : `planner model ${event.type}.`,
+        phaseId: null,
+        data: { modelRole: "planner", elapsedMs: event.elapsedMs }
+      });
+    });
+    const recovered = await recoverPlanFromSession(runner, models.plannerModel, sessionId, {
+      repositoryRoot: state.worktree,
+      onRun: async (modelRun) => {
+        state = {
+          ...state,
+          modelSessions: [
+            ...state.modelSessions,
+            {
+              role: "planner",
+              phaseId: null,
+              sessionId: modelRun.sessionId ?? sessionId,
+              messageId: modelRun.assistantMessageId ?? null,
+              textPartIds: (modelRun.textPartIds ?? []).slice(0, 64),
+              finishReason: modelRun.finishReason ?? null,
+              cost: modelRun.cost,
+              tokens: modelRun.tokens ?? null,
+              recordedAt: new Date().toISOString()
+            }
+          ]
+        };
+        await saveFeatureState(coordinationRoot, state);
+      },
+      onDiagnostic: async (path) => {
+        if (!state.diagnosticArtifacts.includes(path)) {
+          state = { ...state, diagnosticArtifacts: [...state.diagnosticArtifacts, path] };
+          await saveFeatureState(coordinationRoot, state);
+        }
+      }
+    });
+
+    const planHash = hashJson(recovered.plan);
+    const questions = questionsFromPlan(recovered.plan, planHash);
+    const phases = reconcilePhaseQuestionGates(phaseRecordsFromPlan(recovered.plan), questions);
+    state = {
+      ...state,
+      plan: recovered.plan,
+      planHash,
+      phases,
+      questions,
+      currentPhaseId: null,
+      finalOutcome: "Planner roadmap recovered; no phase has been approved.",
+      eventSequence: progress.sequence()
+    };
+    state = transitionFeatureState(state, "awaiting_phase_approval");
+    await saveFeatureState(coordinationRoot, state);
+
+    const phase = nextPendingPhase(state);
+    if (!phase) throw new Error("The recovered roadmap has no eligible phase.");
+    printRoadmap(recovered.plan, phase.id);
+    printPhase(phase);
+    console.log("\n✓ The roadmap was recovered and validated.");
+    console.log("⏸ No phase was approved and no builder was called.");
+    console.log(`Continue only when ready: npm run ai:feature -- continue ${state.featureSlug}`);
+  } catch (error) {
+    try {
+      if (state.stage === "preflight" || state.stage === "planning") {
+        state = transitionFeatureState(state, "interrupted");
+      }
+      state = { ...state, eventSequence: progress.sequence() };
+      await saveFeatureState(coordinationRoot, state);
+    } catch {
+      // Preserve the original fail-closed recovery error.
+    }
+    throw error;
   } finally {
     await release();
   }
@@ -718,6 +992,19 @@ async function showStatus(state: FeatureState): Promise<void> {
       `Latest phase: ${(metrics.totalTimeMs / 60_000).toFixed(1)}m, cost ${metrics.totalApiCost === null ? "unavailable" : `$${metrics.totalApiCost.toFixed(4)}`}, ${metrics.reviewCycles} review cycle(s)`
     );
   }
+  if (state.correctionBoundary) {
+    console.log(`\nSaved corrections: ${state.correctionBoundary.corrections.length}`);
+    console.log(`Source: ${state.correctionBoundary.source}`);
+    console.log(`Next model: ${state.correctionBoundary.nextModel}`);
+    console.log(
+      state.correctionBoundary.ownerActionRequired
+        ? "Owner approval is required before another bounded attempt."
+        : "The workflow can resume directly from this correction boundary."
+    );
+    for (const correction of state.correctionBoundary.corrections) {
+      console.log(`  - ${correction.split("\n", 1)[0]}`);
+    }
+  }
   if (state.finalOutcome) console.log(`Outcome: ${state.finalOutcome}`);
 }
 
@@ -744,7 +1031,7 @@ async function answerQuestion(
   coordinationRoot: string,
   state: FeatureState,
   questionId: string | undefined,
-  readline: Interface
+  readline: OperatorReadline
 ): Promise<void> {
   const question = questionId
     ? state.questions.find((candidate) => candidate.id === questionId)
@@ -875,7 +1162,10 @@ async function recoverReview(
   }
 }
 
-async function configureModels(repositoryRoot: string, readline: Interface): Promise<void> {
+async function configureModels(
+  repositoryRoot: string,
+  readline: OperatorReadline
+): Promise<void> {
   const inspector = new OpenCodeCliInspector(repositoryRoot);
   const catalog = await inspector.inspect();
   console.log(`\nOpenCode ${catalog.version}`);
@@ -888,7 +1178,11 @@ async function configureModels(repositoryRoot: string, readline: Interface): Pro
     builderModel: await ask(readline, "Builder model ID: "),
     reviewerModel: await ask(readline, "Reviewer model ID: ")
   };
-  const escalationModel = await ask(readline, "Optional future escalation model ID: ", false);
+  const escalationModel = await ask(
+    readline,
+    "Optional one-attempt fallback remediation model ID: ",
+    false
+  );
   const selectedModels = escalationModel ? { ...models, escalationModel } : models;
   validateOpenCodeCatalog(catalog, selectedModels);
   const path = await saveUserModelConfiguration(selectedModels);
@@ -932,8 +1226,8 @@ async function watchFeature(coordinationRoot: string, state: FeatureState): Prom
   });
 }
 
-async function interactiveCommand(readline: Interface): Promise<string> {
-  console.log(`\nNewl AI Development Engine\n\nWhat would you like to do?\n\n1. Start a new feature\n2. Continue an existing feature\n3. Run the next approved phase\n4. View workflow status\n5. Resume an interrupted workflow\n6. Recover a failed review\n7. Answer blocking questions\n8. Check system readiness\n`);
+async function interactiveCommand(readline: OperatorReadline): Promise<string> {
+  console.log(`\nNewl AI Development Engine\n\nWhat would you like to do?\n\n1. Start a new feature\n2. Continue an existing feature\n3. Run the next approved phase\n4. View workflow status\n5. Resume an interrupted workflow\n6. Recover a failed review\n7. Answer blocking questions\n8. Check system readiness\n9. Recover a failed plan\n`);
   const selection = await ask(readline, "Selection: ");
   return (
     {
@@ -944,16 +1238,16 @@ async function interactiveCommand(readline: Interface): Promise<string> {
       "5": "resume",
       "6": "recover-review",
       "7": "questions",
-      "8": "readiness"
+      "8": "readiness",
+      "9": "recover-plan"
     } as Record<string, string>
   )[selection] ?? "";
 }
 
-async function main(): Promise<void> {
+export async function runLauncher(): Promise<void> {
   const repositoryRoot = await findRepositoryRoot(process.cwd());
   const coordinationRoot = await findCoordinationRoot(repositoryRoot);
-  const readline = createInterface({ input: process.stdin, output: process.stdout });
-  try {
+  await withOperatorInput(async (readline) => {
     const args = process.argv.slice(2);
     let action = args[0] ?? "";
     if (!action) action = await interactiveCommand(readline);
@@ -1018,6 +1312,14 @@ async function main(): Promise<void> {
     }
     if (action === "answer") return answerQuestion(coordinationRoot, state, args[2], readline);
     if (action === "recover-review") return recoverReview(coordinationRoot, state);
+    if (action === "recover-plan") {
+      const sessionFlag = args.indexOf("--session");
+      const explicitSessionId = sessionFlag >= 0 ? args[sessionFlag + 1] : undefined;
+      if (sessionFlag >= 0 && !explicitSessionId) {
+        throw new Error("--session requires an OpenCode session ID.");
+      }
+      return recoverPlan(coordinationRoot, state, readline, explicitSessionId);
+    }
     if (action === "readiness") {
       const models = await loadModelConfiguration({ repositoryRoot: state.worktree });
       const result = await runPreflight({
@@ -1046,9 +1348,23 @@ async function main(): Promise<void> {
         console.log(`Review recovery is available: npm run ai:feature -- recover-review ${state.featureSlug}`);
         return;
       }
+      if (state.stage === "interrupted" && state.plan === null) {
+        console.log(`Plan recovery is available: npm run ai:feature -- recover-plan ${state.featureSlug}`);
+        return;
+      }
       if (state.stage === "waiting_questions") {
         await showQuestions(state);
         return;
+      }
+      if (state.stage === "correction_required") {
+        if (state.correctionBoundary?.ownerActionRequired) {
+          await showStatus(state);
+          console.log(
+            `\nUse resume when you explicitly want one more bounded correction attempt for ${state.currentPhaseId}.`
+          );
+          return;
+        }
+        return runFeature(coordinationRoot, state, readline);
       }
       return runFeature(coordinationRoot, state, readline);
     }
@@ -1059,28 +1375,34 @@ async function main(): Promise<void> {
       return runFeature(coordinationRoot, state, readline);
     }
     if (action === "resume") {
-      if (state.stage !== "interrupted" && state.stage !== "paused") {
-        throw new Error(`Feature is ${state.stage}; resume is only available after interruption or pause.`);
+      if (
+        state.stage !== "interrupted" &&
+        state.stage !== "paused" &&
+        state.stage !== "correction_required"
+      ) {
+        throw new Error(
+          `Feature is ${state.stage}; resume is available only after interruption, pause, or a saved correction.`
+        );
       }
-      return runFeature(coordinationRoot, state, readline);
+      if (state.stage === "interrupted" && state.plan === null) {
+        console.log(`Plan recovery is available: npm run ai:feature -- recover-plan ${state.featureSlug}`);
+        return;
+      }
+      let allowOwnerCorrectionRetry = false;
+      if (state.correctionBoundary?.ownerActionRequired) {
+        await showStatus(state);
+        const phaseId = state.correctionBoundary.phaseId;
+        allowOwnerCorrectionRetry =
+          (await ask(
+            readline,
+            `\nType ${phaseId} to authorize one additional bounded correction attempt: `
+          )) === phaseId;
+        if (!allowOwnerCorrectionRetry) {
+          throw new WorkflowCancelledError("The additional correction attempt was not approved.");
+        }
+      }
+      return runFeature(coordinationRoot, state, readline, { allowOwnerCorrectionRetry });
     }
     throw new Error(`Unknown ai:feature action ${action}.`);
-  } finally {
-    readline.close();
-  }
+  });
 }
-
-main().catch((error: unknown) => {
-  if (error instanceof WorkflowCancelledError) {
-    console.error(`[ai-workflow] Cancelled: ${error.message}`);
-    process.exitCode = 2;
-    return;
-  }
-  if (error instanceof WorkflowEscalationError) {
-    console.error(`[ai-workflow] Manual escalation required: ${error.message}`);
-    process.exitCode = 3;
-    return;
-  }
-  console.error(`[ai-workflow] Failed: ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});

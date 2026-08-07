@@ -192,6 +192,8 @@ Every model result is parsed into JSON and validated twice:
 
 Invalid output may be retried with a short schema-error prompt. Repeated invalid output produces escalation; it never becomes implied approval.
 
+The current planner applies this policy with a bounded two-turn OpenCode session: repository inspection first, then a compact roadmap capped at eight phases and eight initial owner questions. A malformed or truncated roadmap receives one same-session compact repair, preserving the already-paid repository context. Provider identifiers and bounded redacted diagnostics are captured before validation, and `recover-plan` can resume the pinned session while rechecking Git identity and deterministic preflight. Recovery only restores a validated roadmap; it never approves or implements a phase.
+
 ## Agent design
 
 ### Planner — Qwen
@@ -404,7 +406,7 @@ Deterministic rules must stop automatic work or require manual/Codex review for:
 - suspicious live customer data or credentials in added content; and
 - unexplained overlap with another open change.
 
-The escalation artifact should include the request, approved plan, current phase, branch/commit/diff identity, exact unresolved findings, sanitized verification evidence, attempts, files changed, risk rules triggered, decisions needed, and a recommended next safe action. Early versions should hand this to the owner or Codex manually; automatic premium-model invocation is a later, separately approved capability.
+The escalation artifact should include the request, approved plan, current phase, branch/commit/diff identity, exact unresolved findings, sanitized verification evidence, attempts, files changed, risk rules triggered, decisions needed, and a recommended next safe action. Version 1B.1 permits one separately approved, configured premium-model remediation attempt after the ordinary builder exhausts its correction limit. That model runs under builder permissions, cannot approve its own work, must pass the complete deterministic verification gate, and is followed by a fresh independent reviewer. Repeated failure still stops for the owner; broader Codex escalation remains future scope.
 
 ## Reporting and observability
 
@@ -485,9 +487,11 @@ No persistence, checkpoints, resume, final cross-phase review, report engine, da
 - LOW, MEDIUM, HIGH, and OWNER_GATED phase handling with structured decisions;
 - Version 1B.1.1 compatibility import for stable legacy handoff/document questions without replanning;
 - status, watch, readiness, adoption, next, resume, and review-recovery commands;
+- a loopback-only local operator UI for status, structured questions, exact one-phase approval, and saved-correction resume;
+- durable exact verification/reviewer correction boundaries pinned to branch, base, HEAD, and diff identity;
 - compact successful verification evidence for lower reviewer cost;
 - schema-validated workflow evaluator extension point; and
-- no checkpoint commits, mobile service, OpenCode SDK transport, or automatic external action.
+- no checkpoint commits, hosted dashboard, mobile service, OpenCode SDK transport, or automatic external action.
 
 ### Version 2 — durability and Git checkpoints
 

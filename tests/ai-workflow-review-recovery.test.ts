@@ -188,7 +188,7 @@ describe("reviewer status contract", () => {
     expect(() => validateReviewDecision("not an object")).toThrow(/must be an object/);
     expect(() => validateReviewDecision({ status: "approved" })).toThrow(/summary/);
     expect(() => extractStructuredResult("<AI_WORKFLOW_RESULT>{\"status\":\"approved\""))
-      .toThrow(/required structured result envelope/);
+      .toThrow(/truncated before the closing envelope/);
     expect(() =>
       validateReviewDecision({ ...decision("approved"), result: decision("changes_requested", [finding()]) })
     ).toThrow(/unexpected fields/);
@@ -263,7 +263,13 @@ async function recoveryFixture(repository: string): Promise<LoadedReviewRecovery
     diffHash: await getWorkflowDiffHash(repository, baseCommit),
     originalRequest: "Recover only the current Phase 1 review.",
     approvedPlan: plan,
-    phaseId: "phase-1"
+    phaseId: "phase-1",
+    confirmedDecisions: {
+      "PHASE-1-OWNER-EVIDENCE": {
+        answer: "USE_EXISTING_POLICY",
+        explanation: "Retain the exact confirmed owner explanation during recovery."
+      }
+    }
   };
   return {
     record,
@@ -285,13 +291,25 @@ describe("review-current-diff recovery", () => {
       baseCommit,
       originalRequest: "Recover only the approved Phase 1 plan.",
       approvedPlan: plan,
-      phaseId: "phase-1"
+      phaseId: "phase-1",
+      confirmedDecisions: {
+        "PHASE-1-OWNER-EVIDENCE": {
+          answer: "USE_EXISTING_POLICY",
+          explanation: "Recovery must preserve this exact explanation."
+        }
+      }
     });
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
     const loaded = await loadReviewRecovery(repository);
     expect(loaded.phase.id).toBe("phase-1");
     expect(loaded.plan.phases[1].requiresOwnerApproval).toBe(true);
+    expect(loaded.record.confirmedDecisions).toEqual({
+      "PHASE-1-OWNER-EVIDENCE": {
+        answer: "USE_EXISTING_POLICY",
+        explanation: "Recovery must preserve this exact explanation."
+      }
+    });
     chmodSync(path, 0o644);
     await expect(loadReviewRecovery(repository)).rejects.toThrow(/owner-only/);
   });
@@ -370,6 +388,12 @@ describe("review-current-diff recovery", () => {
 
     expect(requests.map((request) => request.role)).toEqual(["reviewer", "builder", "reviewer"]);
     expect(requests[1].prompt).toContain(exactCorrection);
+    for (const request of requests) {
+      expect(request.prompt).toContain('"answer": "USE_EXISTING_POLICY"');
+      expect(request.prompt).toContain(
+        "Retain the exact confirmed owner explanation during recovery."
+      );
+    }
     expect(result.stoppedBeforeNextPhase).toBe(true);
   });
 
