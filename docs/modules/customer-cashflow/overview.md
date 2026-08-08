@@ -2,9 +2,61 @@
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
+## Legacy supersession (owner decision CP-02B-6-Q1, `RETIRE_NAV`)
+
+Customer Profile financial reporting (CP-PHASE-02B-6,
+`/customer-intelligence/reporting`) is the owner-decided replacement for the
+legacy Customer Cashflow page and navigation. The owner decision records:
+
+- **Once Customer Profile reporting is working, verified, and provides the
+  required replacement information**, it should replace the existing Customer
+  Cashflow page and navigation.
+- **The existing page is not removed or redirected before Customer Profile
+  reporting has been validated as operational.** The legacy
+  `/finance/customer-cashflow` routes and their navigation entries remain in
+  place until that validation completes; the migration-guard suite
+  (`tests/customer-intelligence-migrations.test.ts`) continues to prove that no
+  Customer Intelligence migration or code path modifies any `Cashflow*`
+  table, enum, or row.
+
+Until the operational validation is recorded, the legacy UI remains temporarily
+accessible, but its unsynchronized `Cashflow*` records are non-authoritative and
+must not be treated as a finance source of truth. Customer Intelligence reporting
+reads only the materialized `CustomerMonthlyFinancial` / `CustomerRevenueLine`
+evidence (never the `Cashflow*` tables). The reporting detail serves revenue-line
+evidence in deterministic 500-row pages with the complete tenant-scoped count
+and Previous/Next controls, so the full materialized record is accessible
+during the owner's operational validation of the replacement reporting; native
+amounts are rendered in their actual transaction currencies, CAD revenue totals
+carry aggregate FX labels, and live CAD Open AR carries its snapshot month's FX
+label. None of these additions modify the
+legacy page, navigation, tables, enums, or rows — they stay in place per
+`RETIRE_NAV` until the validation is recorded.
+
+Replacement-report validation must apply the confirmed reporting semantics per
+operating company. Open AR is the live point-in-time unpaid-invoice snapshot for
+the report's current calendar month, never a sum of historical monthly balances.
+A missing or incomplete current snapshot makes that operating company's AR
+unavailable with no fallback to an older month; another company's complete
+current snapshot remains reportable.
+Revenue, cost, and gross-profit headlines exclude one operating company's entire
+month when any row in that company-period is `INCOMPLETE`, without invalidating
+another company's complete period. Reliable current-month activity is displayed
+month-to-date and is not incomplete merely because the month is in progress.
+Closed stored CAD remains conservatively PROVISIONAL when final rematerialization
+cannot be proven from stored evidence. These rules affect only Customer
+Intelligence reads and do not modify legacy cashflow data or UI.
+
+The reporting navigation entry in `src/components/app-shell.tsx` is
+leadership-only (ADMIN/MANAGER/FINANCE), matching `requireReadAccess`, so
+READ_ONLY and other roles that receive the `CUSTOMER_INTELLIGENCE` module
+entitlement are never shown the reporting route. The legacy Customer Cashflow
+navigation entries remain visible per their existing module policy until the
+owner-validated retirement replaces them.
+
 ## Customer Intelligence relationship (additive)
 
-The `CUSTOMER_INTELLIGENCE` foundation introduces tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, and `CustomerSourceAccount` records. Existing `CashflowCustomer` rows and the `CashflowLegalEntity` enum (`NEWL_WORLDWIDE`/`NEWL_USA`) are preserved and remain the finance source of truth. The additive transition maps the legacy enum to operating-company slugs via `src/modules/customer-intelligence/cashflow-compatibility.ts` (`newl-worldwide`, `newl-usa`); the `20260805150000_customer_intelligence_corrections` migration bootstraps the three Newl operating companies, and a later reviewed migration may backfill relationships from `CashflowCustomer.legalEntity`. Nothing in the Customer Intelligence foundation rewrites cashflow rows, and the operating-company resolver is permission-guarded like every other Customer Intelligence read.
+The `CUSTOMER_INTELLIGENCE` foundation introduces tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, and `CustomerSourceAccount` records. Existing `CashflowCustomer` rows and the `CashflowLegalEntity` enum (`NEWL_WORLDWIDE`/`NEWL_USA`) are preserved unchanged for compatibility, but their unsynchronized records are non-authoritative and are never reporting evidence. The additive transition maps the legacy enum to operating-company slugs via `src/modules/customer-intelligence/cashflow-compatibility.ts` (`newl-worldwide`, `newl-usa`); the `20260805150000_customer_intelligence_corrections` migration bootstraps the three Newl operating companies, and a later reviewed migration may backfill relationships from `CashflowCustomer.legalEntity`. Nothing in the Customer Intelligence foundation rewrites cashflow rows, and the operating-company resolver is permission-guarded like every other Customer Intelligence read.
 
 ## Purpose and status
 

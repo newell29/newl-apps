@@ -253,6 +253,80 @@ receivable). Source transaction identifiers are preserved in a deterministic
   resolution, persistence, monthly aggregation, or lifecycle refresh, and its
   period is reported incomplete. Rows exactly on either boundary are eligible.
 
+## Management reporting (CP-PHASE-02B-6)
+
+Leadership-only (ADMIN/MANAGER/FINANCE via `requireReadAccess`) reporting over
+the materialized financials (`reporting-queries.ts`,
+`/customer-intelligence/reporting`):
+
+- Every view carries the directional-management-reporting disclosure: CAD
+  consolidation is not a statutory accounting entry.
+- Current-month reliable activity is displayed month-to-date through the report
+  date; applicable current-month CAD conversion is PROVISIONAL. Because
+  `CustomerMonthlyFinancial` has no stored materialization FX-status field, a
+  closed stored value remains conservatively PROVISIONAL instead of being
+  relabeled FINAL from calendar position alone. This phase adds no migration.
+- Every displayed non-empty stored CAD **total** carries a conservative
+  `PROVISIONAL` aggregate label; an empty total has no label. The current schema
+  cannot authoritatively produce `FINAL` or `MIXED` reporting labels, so those
+  claims are withheld. The label is rendered on every displayed CAD revenue total: the overview
+  headline metric, the operating-company and service-line CAD revenue totals,
+  and the operating-company detail CAD revenue metric. Live CAD Open AR uses the
+  same conservative evidence rule. Affected totals
+  also render the "partial" marker from `cadRevenuePartial`/`cadOpenArPartial`,
+  including the overview headline revenue metric.
+- Native revenue/cost/gross-profit/open-AR are grouped by transaction currency
+  (`nativeByCurrency`) and never summed across unlike currencies; every native
+  amount is rendered with its actual currency code. The operating-company detail
+  formats monthly native values with the row's `currency` and revenue-line
+  native values with the line's `nativeCurrency`, never a CAD fallback. CAD
+  columns are the only cross-currency basis and remain consolidated totals.
+  Cost and gross profit are exposed in stored native currencies; no CAD cost or
+  CAD gross-profit amount is invented because the monthly model has no such fields.
+- Revenue-line evidence in the operating-company detail is served in
+  deterministic 500-row pages (newest-first by transaction date with the unique
+  `id` tiebreak). The query returns the complete tenant-scoped count and page
+  metadata, and the page renders the page window plus Previous/Next controls, so
+  truncation is always disclosed and a partial evidence set is never mistaken
+  for the complete materialized record.
+- Headline revenue, cost, and gross-profit totals are period-atomic per operating
+  company and month: if any row for one company-period is `INCOMPLETE`, that
+  operating company's entire month is excluded while another operating
+  company's complete data for the same month remains included. Its rows stay visible
+  in detail and the incomplete month/row counts remain explicit, so a
+  superficially complete row from a partial period can never silently enter a
+  headline figure. Rows with a missing CAD
+  conversion keep their CAD value null (never invented); `cadRevenuePartial`
+  and `cadOpenArPartial` expose the exact gap on the affected CAD totals (the
+  combined `cadValuesPartial` covers either gap), and the pages render a
+  "partial" marker instead of presenting a complete-looking total.
+- Open AR is the live point-in-time set of invoices still unpaid when the report
+  is produced. It is never historical AR and is never summed across months.
+  Headline Open AR uses only a snapshot for the report's current calendar month,
+  independently for each operating company. That snapshot contributes only if
+  it exists and that operating company's whole current snapshot month is
+  complete; when it is absent or any row is `INCOMPLETE`, that company's Open AR
+  fails closed and is unavailable rather than substituting an older complete
+  month. Complete current company snapshots
+  remain included and unavailable companies are identified. Its CAD label is
+  conservative and never claims final rematerialization from calendar position.
+- All seven service lines are always returned by the service-line view so an
+  unpopulated line renders an honest zero state. Open AR is materialized under
+  `OTHER` and is not attributable to revenue service lines, so service-line AR
+  columns are omitted rather than mislabeling a complete company snapshot as an
+  incomplete service-line snapshot.
+- Reporting is strictly read-only and tenant-scoped; it reads only
+  `CustomerMonthlyFinancial`/`CustomerRevenueLine` and never the legacy
+  `Cashflow*` tables.
+- The "Reporting" navigation entry in `src/components/app-shell.tsx` is
+  restricted to ADMIN/MANAGER/FINANCE in the shell (matching
+  `requireReadAccess`), so READ_ONLY and other roles that receive the module
+  entitlement are never shown a leadership-only route they cannot open.
+- The legacy Customer Cashflow UI is superseded per owner decision CP-02B-6-Q1
+  (`RETIRE_NAV`) once this reporting is validated as operational; before that
+  validation the legacy page and navigation remain in place and are never
+  modified.
+
 ## Data-retention and privacy
 
 - Extraction observations are retained for 24 months; approved contact facts remain until manually removed (retention scheduling is a later phase).

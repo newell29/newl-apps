@@ -90,7 +90,7 @@ excluded; unknown and cross-tenant company identifiers render as not found
 
 ## Workflow / rules summary
 
-- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`, and the CP-PHASE-02B-4 directory/profile pages live under `src/app/(authenticated)/customer-intelligence` (root) and `src/app/(authenticated)/customer-intelligence/companies/[companyId]`. Mailbox sync, reconciliation, research, and the remaining Customer Profile screens are later phases.
+- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`, the CP-PHASE-02B-4 directory/profile pages live under `src/app/(authenticated)/customer-intelligence` (root) and `src/app/(authenticated)/customer-intelligence/companies/[companyId]`, and the CP-PHASE-02B-6 reporting pages live under `src/app/(authenticated)/customer-intelligence/reporting`. Mailbox sync, reconciliation, research, and the remaining Customer Profile screens are later phases.
 - Every query and action requires an authenticated leadership context (`permissions.ts`) and injects `tenantId` through `tenantWhere`.
 - The canonical `Company` stays the identity shared by sales, TradeMining, Hunter, contacts, and finance. Customer Intelligence adds records around it; it never rewrites or deletes existing `Company`, `CashflowCustomer`, or `CashflowLegalEntity` data.
 - Lifecycle is computed per operating-company relationship and rolled up to the canonical company (ACTIVE beats DORMANT beats FORMER beats PROSPECT).
@@ -106,6 +106,88 @@ excluded; unknown and cross-tenant company identifiers render as not found
   `CustomerMonthlyFinancial` under the existing monthly unique key, and
   lifecycle is refreshed through the existing guarded action. Dry-run performs
   zero writes; no QuickBooks posting is performed.
+
+## Financial reporting (CP-PHASE-02B-6)
+
+Leadership-only CAD consolidation management reporting over the materialized
+financials (ADMIN, MANAGER, FINANCE via `requireReadAccess`), served from
+`src/modules/customer-intelligence/reporting-queries.ts` and the pages under
+`src/app/(authenticated)/customer-intelligence/reporting`:
+
+- **Per-operating-company and per-service-line views**: the overview page
+  (`/customer-intelligence/reporting`) shows tenant-wide summary metrics and
+  tabbed consolidation tables; every operating company and all seven service
+  lines render honest zero states when no evidence exists. The operating-company
+  detail page shows one company's monthly financial rows (each with its
+  conservative CAD materialization label) and its immutable revenue-line evidence.
+- **Conservative PROVISIONAL FX labeling**: current-month CAD conversion is
+  `PROVISIONAL` and the page marks month-to-date activity explicitly. The
+  existing `CustomerMonthlyFinancial` schema does not persist the FX status used
+  by its latest materialization. Therefore a closed month is not upgraded to
+  `FINAL` merely because the calendar advanced: stored closed-month CAD remains
+  conservatively `PROVISIONAL` (`MATERIALIZED_FX_STATUS_UNPROVEN`) until an
+  authoritative final-rematerialization marker exists. No schema change or
+  migration was approved for this phase. The
+  label is rendered on every displayed CAD revenue total: the overview headline
+  metric, every operating-company and service-line CAD revenue cell, and the
+  operating-company detail CAD revenue metric. Live CAD Open AR instead carries
+  the conservative label of its complete current-month per-company snapshot; it is
+  never labeled from a range of revenue months. Affected totals additionally render the "partial" marker from
+  `cadRevenuePartial` / `cadOpenArPartial` (the overview headline revenue metric
+  included).
+- **Native amounts stay per currency**: native revenue/cost/gross-profit/AR are
+  grouped by transaction currency (`nativeByCurrency`) and never summed across
+  unlike currencies; the pages render each native amount with its actual
+  currency code. The operating-company detail renders every monthly native
+  amount with its row's `currency` and every revenue-line native amount with its
+  line's `nativeCurrency` — a native amount is never rendered with a CAD
+  fallback. CAD columns are the only cross-currency basis and remain
+  consolidated totals. Because `CustomerMonthlyFinancial` materializes CAD
+  revenue/AR but no CAD cost or CAD gross-profit fields, reporting exposes cost
+  and gross profit in their stored native currencies and does not invent a CAD
+  conversion. Open AR is not attributable to revenue service lines (the
+  materializer stores it under `OTHER`), so AR columns are intentionally omitted
+  from the service-line table; company-level AR remains on the summary,
+  operating-company table, and operating-company detail.
+- **Deterministic revenue-line pagination**: the operating-company detail serves
+  immutable `CustomerRevenueLine` evidence in deterministic 500-row pages
+  (newest-first by transaction date with the unique `id` tiebreak). The page
+  exposes the complete tenant-scoped `totalCount`, the current page window, and
+  Previous/Next controls, so a truncated evidence set is always disclosed and
+  subsequent evidence is reachable — a partial page is never presented as the
+  complete materialized record.
+- **Directional-reporting disclaimer**: every reporting page and every query
+  response carries the `CAD_CONSOLIDATION_DISCLOSURE` ("Directional management
+  reporting: CAD consolidation is not a statutory accounting entry").
+- **INCOMPLETE periods are never silently folded into headline totals**:
+  completeness is evaluated per operating-company/month. If any row for one
+  operating company and month is `INCOMPLETE`, all of that company-period's rows
+  remain visible in detail but are excluded from headline revenue, cost, and
+  gross-profit totals. Complete evidence for another operating company in the
+  same calendar month remains included. Incomplete company-periods and rows are counted
+  explicitly; missing CAD conversions
+  keep their CAD values null (never invented) and expose the gaps through
+  `cadRevenuePartial` / `cadOpenArPartial` (plus the combined
+  `cadValuesPartial`), which the pages render as "partial" on the affected CAD
+  revenue and CAD AR totals. Open AR is not a monthly flow: reporting uses only
+  a complete live point-in-time snapshot for the report's current calendar month
+  and never adds historical snapshots. If that current snapshot is absent or
+  incomplete, headline Open AR is unavailable with no fallback to an older
+  snapshot; complete current AR for
+  other operating companies remains reportable and the unavailable-company
+  count is disclosed. A current calendar month is not incomplete solely because
+  it is in progress: reliable activity through the report date is month-to-date.
+- **Read-only and tenant-scoped**: every exported query calls
+  `requireReadAccess` and carries `tenantId` through `tenantWhere` on every
+  database read; no database writes are performed.
+- **Leadership-only navigation**: the "Reporting" entry in
+  `src/components/app-shell.tsx` is restricted to ADMIN/MANAGER/FINANCE in the
+  shell itself (matching `requireReadAccess`), so a READ_ONLY user who receives
+  the module entitlement is never shown a route they cannot open.
+- **Legacy supersession (CP-02B-6-Q1 `RETIRE_NAV`)**: the legacy Customer
+  Cashflow UI stays in place until Customer Profile reporting is validated as
+  operational; nothing reads or references the `Cashflow*` tables (see
+  `docs/modules/customer-cashflow/overview.md`).
 
 ## Permissions
 
@@ -133,7 +215,7 @@ Expected failures: missing tenant entitlement, read-only mutation attempts, lead
 
 ## Testing
 
-Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), `tests/customer-intelligence-ingestion.test.ts` (CP-PHASE-02B-2 read-only QuickBooks customer ingestion), `tests/customer-intelligence-materialization.test.ts` and `tests/customer-intelligence-fx.test.ts` (CP-PHASE-02B-5 financial materialization), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
+Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), `tests/customer-intelligence-ingestion.test.ts` (CP-PHASE-02B-2 read-only QuickBooks customer ingestion), `tests/customer-intelligence-materialization.test.ts` and `tests/customer-intelligence-fx.test.ts` (CP-PHASE-02B-5 financial materialization), `tests/customer-intelligence-reporting.test.tsx` (CP-PHASE-02B-6 guarded reporting, PROVISIONAL FX labeling, and server-rendered reporting pages), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
 
 ## Source map
 
@@ -144,6 +226,8 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
 | Read-only QuickBooks financial materialization (CP-PHASE-02B-5) | `src/modules/customer-intelligence/financial-materialization.ts` |
 | Deterministic FX helpers (CP-PHASE-02B-5) | `src/modules/customer-intelligence/fx.ts` |
+| Financial reporting queries (CP-PHASE-02B-6) | `src/modules/customer-intelligence/reporting-queries.ts` |
+| Financial reporting pages (CP-PHASE-02B-6) | `src/app/(authenticated)/customer-intelligence/reporting/page.tsx`, `src/app/(authenticated)/customer-intelligence/reporting/operating-companies/[operatingCompanyId]/page.tsx` |
 | Deterministic identity reconciliation (CP-PHASE-02B-3) | `src/modules/customer-intelligence/reconciliation.ts` |
 | Identity review page and server actions (CP-PHASE-02B-3) | `src/app/(authenticated)/customer-intelligence/review/page.tsx`, `src/modules/customer-intelligence/review-actions.ts`, `src/modules/customer-intelligence/components/identity-review-actions.tsx` |
 | Customer Profile directory and company detail pages (CP-PHASE-02B-4) | `src/app/(authenticated)/customer-intelligence/page.tsx`, `src/app/(authenticated)/customer-intelligence/companies/[companyId]/page.tsx` |
