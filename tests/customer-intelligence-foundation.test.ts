@@ -379,6 +379,39 @@ describe("lifecycle isolation and open-AR evidence", () => {
     expect(revenueWhere.where.tenantId).toBe("tenant-a");
     expect(revenueWhere.where.companyId).toBe("company-1");
     expect(revenueWhere.where.operatingCompanyId).toBe("oc-ww");
+    expect(revenueWhere.where.transactionType).toEqual({
+      in: ["Invoice", "Credit Memo"]
+    });
+  });
+
+  it("excludes vendor costs from lifecycle revenue while retaining customer revenue types", async () => {
+    prismaTest.model("companyOperatingRelationship").findFirst.mockResolvedValue({
+      ...RELATIONSHIP,
+      operatingCompanyId: "oc-ww"
+    });
+    prismaTest.model("customerRevenueLine").count.mockImplementation(
+      ({ where }: { where: { transactionType?: { in?: string[] } } }) =>
+        where.transactionType?.in?.includes("Bill") ||
+        where.transactionType?.in?.includes("Vendor Credit")
+          ? 1
+          : 0
+    );
+    prismaTest.model("customerMonthlyFinancial").count.mockResolvedValue(0);
+    prismaTest.model("customerSourceAccount").findMany.mockResolvedValue([]);
+    prismaTest.model("customerIdentityMatch").count.mockResolvedValue(1);
+    prismaTest.model("companyOperatingRelationship").update.mockImplementation(
+      ({ data }: { data: Record<string, unknown> }) => ({ ...RELATIONSHIP, ...data })
+    );
+
+    const updated = await refreshRelationshipLifecycle(ADMIN, "rel-1");
+
+    expect(updated.lifecycle).toBe(CustomerLifecycle.DORMANT_CUSTOMER);
+    const revenueWhere = prismaTest.model("customerRevenueLine").count.mock.calls[0][0] as {
+      where: { transactionType: { in: string[] } };
+    };
+    expect(revenueWhere.where.transactionType.in).toEqual(["Invoice", "Credit Memo"]);
+    expect(revenueWhere.where.transactionType.in).not.toContain("Bill");
+    expect(revenueWhere.where.transactionType.in).not.toContain("Vendor Credit");
   });
 
   it("scopes approved QuickBooks mappings to the relationship's operating company", async () => {

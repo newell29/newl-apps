@@ -82,9 +82,176 @@ Mapping precedence (`service-lines.ts`): QuickBooks item, then class/department,
 
 - CAD consolidation is directional management reporting, not a statutory accounting entry.
 - Closed months use Bank of Canada monthly average rates; the current month uses an available-to-date average marked `PROVISIONAL`.
-- `CustomerRevenueLine` is immutable: re-inserting the same `sourceKey` returns the existing row rather than rewriting it.
+- `CustomerRevenueLine` is the immutable transaction-evidence model for both customer-revenue and eligible Newl Worldwide vendor-cost report lines in this phase: each `sourceKey` is based only on the report/realm and stable QuickBooks transaction and transaction-line identifiers. Mutable account names, classifications, and transaction types are evidence, not identity. Re-inserting identical source evidence returns the existing row; changed source evidence under the stable identity stops materialization rather than creating a duplicate or changing either the immutable line or monthly totals. The Bank of Canada CAD management conversion is derived materialization evidence, so a PROVISIONAL-to-FINAL month rollover may rebuild monthly CAD without treating the changed rate/label as changed QuickBooks source evidence or rewriting the line. Vendor evidence has no customer source account and preserves its native amount plus QuickBooks's authoritative CAD home amount before monthly cost aggregation.
 - `CustomerMonthlyFinancial` carries a `reconciliationStatus` and open-AR balances (`nativeOpenAr`, `cadOpenAr`); unreconciled periods remain visible as `INCOMPLETE`/`UNRECONCILED` and must not silently update headline totals (computation is a later phase).
 - No QuickBooks posting or mutation is performed.
+
+## Financial materialization (CP-PHASE-02B-5)
+
+ADMIN-triggered, GET-only QuickBooks report materialization
+(`runFinancialMaterialization` in `actions.ts`, core in
+`financial-materialization.ts`, FX helpers in `fx.ts`). The owner-approved
+report sources (CP-02B-5-Q1, `PNL_DETAIL_PLUS_AGING`) are the
+ProfitAndLossDetail report (customer revenue transaction detail over the
+confirmed 24-month window) and the AgedReceivablesDetail report (open accounts
+receivable). Source transaction identifiers are preserved in a deterministic
+`sourceKey`; re-inserting the same `sourceKey` returns the existing immutable
+`CustomerRevenueLine` row rather than rewriting it.
+
+- QuickBooks report sections are traversed recursively (`Rows.Row` under account/customer sections); unreadable or unsupported nested detail stops with `LIMITATION` rather than being treated as an empty report.
+- Report pagination is bounded to 100 pages per source and rejects a repeated full page as `LIMITATION`, preventing a provider that ignores paging parameters from looping or accumulating rows indefinitely.
+- If the QuickBooks API cannot provide stable customer IDs, stable transaction-line IDs, or the explicit transaction/account classification needed for a
+  reliable result, the operating-company section stops with `LIMITATION` and
+  reports the limitation instead of silently substituting less accurate data.
+- Service lines use the existing `service-lines.ts` precedence and the
+  tenant-scoped, active `QuickBooksServiceMappingRule` rows (ITEM, CLASS,
+  DEPARTMENT, INCOME_ACCOUNT, FILE_PREFIX). Newell's Express defaults unmapped
+  income to `LOCAL_TRUCKING`; every other operating company defaults to
+  `OTHER`. The report's `Account`/`Item`/`Class` columns feed the mapping; the
+  file number extracted from the transaction-type-specific approved fields
+  feeds the `FILE_PREFIX` dimension.
+- Transaction currency comes only from the report row, never from `CustomerSourceAccount.currency`. A home-currency row preserves the report `Amount` as both native and home evidence. Foreign **customer revenue** must provide `Currency`, `Foreign Amount`, `Amount` (home/report currency), and `Exchange Rate`; the native-to-home arithmetic is validated before both amounts are preserved. Foreign **vendor cost** follows the separate owner-approved booked-cost path: QuickBooks's `Amount` is authoritative CAD home cost, native evidence is preserved only when supplied, and an exchange rate is neither required nor used to derive or replace the CAD amount. Missing required evidence stops the section with `LIMITATION` instead of inventing values.
+- FX follows `fx.ts`: closed months (strictly before the current month) use
+  FINAL Bank of Canada monthly average rates; the current month uses an
+  available-to-date average marked PROVISIONAL. CAD consolidation is labeled
+  directional management reporting, not a statutory accounting entry. A missing
+  stored rate, non-Bank-of-Canada source, invalid rate, or status mismatch never invents a conversion: the row is skipped, the month is
+  marked `INCOMPLETE`, and the limitation is reported.
+- Cost scope follows owner decision CP-02B-5-Q2 and the repository's
+  finance-provided account source,
+  `reference/FINANCE_FS_GROUPINGS_REFERENCE.md`. nativeCost/nativeGrossProfit
+  are limited to Newl Worldwide (legal company Newell's Express Worldwide
+  Logistics Ltd). Only documented direct-cost accounts `5014`, `5015`, `5020`,
+  `5030`, `5115`, `5205`, `5300`, `5400`, `5401`, and `5590` are eligible;
+  arbitrary Expense, Other Expense, and COGS accounts are not admitted.
+  The allowlist is matched only to an explicit report account-number field or a
+  chart-of-accounts code at the start of the verified Account display name.
+  QuickBooks Account ID is an opaque entity identifier and is never interpreted
+  as an account number, even when it happens to equal an allowlisted code.
+  Customer and vendor invoices are grouped by the shared file number using only
+  the owner-approved transaction fields: customer invoices use `Description`
+  and `Memo on Statement`; vendor bills use `Description` and `Memo`.
+  `Memo/Description`, customer `Memo`, and vendor `Memo on Statement` are not
+  association evidence. The approved fields are inspected independently, and a
+  row with conflicting file numbers across them fails closed rather than taking
+  the first value. All customer invoices on a file must resolve to the same tenant/operating-company
+  relationship before any vendor bill is associated. Each vendor cost uses
+  QuickBooks's authoritative CAD home amount and authoritative vendor-bill
+  month, under `sourceAccountKey = ALL` and the file/account-resolved service
+  line. Costs are not proportionally reallocated across customer invoices and
+  foreign costs are never independently converted. Newl USA and Newell's
+  Express and Warehousing Ltd. keep zero nativeCost/nativeGrossProfit.
+- Newl Worldwide gross-profit contributions use one authoritative CAD basis:
+  customer revenue contributes QuickBooks's CAD home amount and eligible vendor
+  costs subtract QuickBooks's CAD home amount in `ALL`/CAD monthly buckets. The
+  native transaction-currency revenue remains in its source-account bucket, so
+  USD or other native amounts are never mixed with CAD costs. Vendor costs still
+  remain in their authoritative bill month and are not proportionally
+  reallocated.
+- Revenue/cost classification never uses amount sign. Invoice and Credit Memo
+  are the currently recognized income transaction types. An income-bearing row
+  with any other transaction type stops with `LIMITATION`; it is never silently
+  excluded. `Expense` and `Other Expense` are not treated as globally eligible
+  operating costs without an owner-approved account scope.
+- Aggregation reuses the existing monthly unique key
+  `(tenantId, companyOperatingRelationshipId, sourceAccountKey, serviceLine,
+  currency, monthKey)` through `upsertMonthlyFinancial`. Unreconciled periods
+  remain `INCOMPLETE` (when any report row for the month was skipped or a
+  conversion was unavailable) or `UNRECONCILED`; they are never marked
+  `RECONCILED` (reconciliation is a later phase).
+- Monthly revenue, cost, and gross profit are rebuilt from all tenant- and
+  operating-company-scoped immutable `CustomerRevenueLine` evidence in the
+  approved window plus pending inserts while the operating-company lock is
+  held. A prior immutable line omitted from a later QuickBooks response remains
+  in its authoritative bucket; a wholly omitted prior bucket is recomputed too.
+  The rolling fetch window is not a financial-retention or historical-retirement
+  rule. Periods outside the requested interval, including an older boundary
+  month, are not queried or destructively zeroed merely because the window
+  advances. Replacing or retiring those historical totals requires authoritative
+  period evidence or a separate explicit owner decision.
+  Monthly cent rounding uses the same sign-safe decimal half-up rule as FX, so
+  negative half-cent credits round symmetrically. Immutable native, home, and
+  CAD amounts are canonicalized to the `CustomerRevenueLine` `Decimal(14,2)`
+  precision before persistence, conflict comparison, and aggregation, so a
+  repeated higher-precision source amount remains idempotent.
+- Finance-reference production follow-ups remain open honestly: confirm whether
+  Worldwide `4000` always maps to warehousing, whether `5030` remains trucking,
+  and whether grouped-code reporting should be surfaced. These do not expand
+  the approved direct-cost account allowlist.
+- Open AR from the aging detail snapshot merges into the monthly bucket under
+  the `OTHER` service line (open AR is not service-line revenue). The aging
+  snapshot's as-of date comes from the report request. A bucket without open AR
+  reports `nativeOpenAr`/`cadOpenAr` of zero; only a bucket with native open AR
+  and no stored FX rate keeps `cadOpenAr` null. Only the explicit supported
+  monetary columns (`Open Balance`, `Total`, `Current`, `1-30`, `31-60`,
+  `61-90`, `91+`, and their supported QuickBooks spacing/title variants) are
+  accepted; dates, transaction numbers, due dates, and unknown descriptive
+  columns are never parsed as money. A layout with no supported monetary column
+  stops with `LIMITATION`. A row with neither an open balance nor any supported
+  bucket amount has no open-AR evidence and is skipped (an empty bucket sum
+  would invent a zero balance).
+- A resolved foreign-currency revenue row with no approved FX rate still creates
+  or preserves its deterministic monthly-key row as `INCOMPLETE` without
+  materializing revenue or a CAD amount. Existing monthly keys for that resolved
+  relationship and affected month are also preserved and marked `INCOMPLETE`, so
+  an omitted aggregate cannot remain `UNRECONCILED`. A current foreign AR balance lacking an
+  approved rate explicitly clears any prior `cadOpenAr` conversion rather than
+  presenting stale CAD beside current native AR.
+- A foreign revenue line first materialized in the current month keeps its
+  immutable QuickBooks source evidence when that month later closes. On a rerun,
+  the monthly CAD aggregate is rebuilt with the applicable FINAL Bank of Canada
+  rate; the existing `sourceKey` is preserved, no duplicate line is created, and
+  the immutable source row is not rewritten merely to replace its prior
+  PROVISIONAL management conversion metadata.
+- A structurally valid empty revenue report means zero revenue and does not block
+  the independent aging snapshot. An aging fetch failure stops the section before
+  financial writes. Missing or unmatched aging-row evidence marks the snapshot's
+  as-of month `INCOMPLETE`.
+- Lifecycle refresh reuses the existing guarded `refreshRelationshipLifecycle`
+  action for every affected relationship of the processed operating company, so
+  activity under one operating company can never activate another company's
+  relationship.
+- Each operating company's immutable lines, monthly rows, lifecycle refreshes,
+  and required commit audit are written in one transaction under an
+  operating-company advisory lock. After acquiring the lock, every pending
+  `sourceKey` is re-read and its authoritative immutable fields are compared
+  before any revenue-line or monthly write. Concurrent conflicting evidence
+  aborts the transaction; identical evidence is preserved, and commit-audit
+  created counts come from actual inserts. A later line, monthly, lifecycle, or
+  audit failure rolls the whole operating-company result back rather than
+  exposing partial totals.
+- Customer resolution is tenant-, realm-, and operating-company-scoped and uses
+  only an exact stable QuickBooks customer ID tied to a reconciled
+  `CustomerSourceAccount`. Display names never resolve identity. A revenue report
+  row with only a name stops with `LIMITATION`; missing or unmatched aging IDs
+  are not guessed and make the as-of month incomplete.
+- A fully parsed and matched aging response is an authoritative replacement
+  snapshot for its tenant, operating company, and as-of month. Previously
+  positive AR buckets absent from that snapshot are written to zero and their
+  relationships are refreshed. If any aging row is partial, unmatched, or fails
+  processing, absent balances are not cleared. Every existing tenant- and
+  operating-company-scoped financial row for the as-of month is retained with
+  its existing revenue and AR values and marked `INCOMPLETE`, including when no
+  valid new aging or revenue bucket was produced.
+  When a prior row collides with freshly aggregated current-run financial
+  evidence, only the prior AR fields are preserved; fresh revenue, cost, gross
+  profit, and CAD revenue are retained. A valid matched current aging row keeps
+  its newly reported native AR; missing FX leaves its CAD AR explicitly null
+  rather than restoring a stale prior conversion.
+- Partial or completely missing report rows never invent values; `dryRun`
+  performs zero database writes (no revenue lines, no monthly rows, no lifecycle
+  refresh, no audits) and returns the would-be report. Every live run writes a
+  terminal `AuditLog` (`customer-intelligence.financial-materialization.run`)
+  containing counts and classifications only — never customer or transaction
+  identifiers, amounts, or provider content. The per-line
+  `customer-intelligence.revenue-line.created` audit is sanitized the same way
+  (service line, native/home currency, and FX source only). No QuickBooks
+  posting or mutation is performed.
+- Returned ProfitAndLossDetail rows are independently checked against the same
+  inclusive approved 24-month request window. A dated row before the start or
+  after the end (including a future provider row) is skipped before identity
+  resolution, persistence, monthly aggregation, or lifecycle refresh, and its
+  period is reported incomplete. Rows exactly on either boundary are eligible.
 
 ## Data-retention and privacy
 

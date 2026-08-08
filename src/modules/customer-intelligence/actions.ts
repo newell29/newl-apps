@@ -43,6 +43,10 @@ import {
   type QuickBooksCustomerIngestionReport
 } from "@/modules/customer-intelligence/quickbooks-ingestion";
 import {
+  materializeCustomerFinancials,
+  type FinancialMaterializationReport
+} from "@/modules/customer-intelligence/financial-materialization";
+import {
   reconcileQuickBooksIdentityMatches,
   type IdentityReconciliationReport
 } from "@/modules/customer-intelligence/reconciliation";
@@ -308,6 +312,23 @@ export async function runIdentityReconciliation(
   return reconcileQuickBooksIdentityMatches(ctx, input);
 }
 
+/**
+ * ADMIN-triggered financial materialization (CP-PHASE-02B-5). Materializes the
+ * owner-approved GET-only QuickBooks report sources (PNL_DETAIL_PLUS_AGING)
+ * into immutable CustomerRevenueLine rows, applies the existing deterministic
+ * service-line mapping and Bank of Canada FX, aggregates CustomerMonthlyFinancial
+ * under the existing monthly unique key, and refreshes lifecycle through the
+ * existing guarded refreshRelationshipLifecycle action. Dry-run performs zero
+ * database writes; no QuickBooks posting is performed.
+ */
+export async function runFinancialMaterialization(
+  ctx: AuthenticatedContext,
+  input: { operatingCompanyId?: string; dryRun?: boolean } = {}
+): Promise<FinancialMaterializationReport> {
+  await requireIngestionAdmin(ctx);
+  return materializeCustomerFinancials(ctx, input);
+}
+
 export async function upsertCompanyOperatingRelationship(
   ctx: AuthenticatedContext,
   input: {
@@ -396,12 +417,15 @@ export async function upsertCompanyOperatingRelationship(
  */
 export async function refreshRelationshipLifecycle(
   ctx: AuthenticatedContext,
-  relationshipId: string
+  relationshipId: string,
+  options: { client?: Prisma.TransactionClient } = {}
 ) {
   await requireMatchApproval(ctx);
   await requireMutationAccess(ctx);
 
-  const relationship = await prisma.companyOperatingRelationship.findFirst({
+  const client = options.client ?? prisma;
+
+  const relationship = await client.companyOperatingRelationship.findFirst({
     where: tenantWhere(ctx, { id: relationshipId })
   });
   if (!relationship) {
@@ -409,24 +433,25 @@ export async function refreshRelationshipLifecycle(
   }
 
   const [recentRevenue, openArEvidence, sourceAccounts, approvedMapping] = await Promise.all([
-    prisma.customerRevenueLine.count({
+    client.customerRevenueLine.count({
       where: tenantWhere(ctx, {
         companyId: relationship.companyId,
         operatingCompanyId: relationship.operatingCompanyId,
+        transactionType: { in: ["Invoice", "Credit Memo"] },
         transactionDate: { gte: trailingMonthsAgo(12) }
       })
     }),
-    prisma.customerMonthlyFinancial.count({
+    client.customerMonthlyFinancial.count({
       where: tenantWhere(ctx, {
         companyOperatingRelationshipId: relationshipId,
         nativeOpenAr: { gt: 0 },
         monthKey: { gte: trailingMonthKey(12) }
       })
     }),
-    prisma.customerSourceAccount.findMany({
+    client.customerSourceAccount.findMany({
       where: tenantWhere(ctx, { companyOperatingRelationshipId: relationshipId })
     }),
-    prisma.customerIdentityMatch.count({
+    client.customerIdentityMatch.count({
       where: tenantWhere(ctx, {
         kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
         status: CustomerIdentityMatchStatus.APPROVED,
@@ -449,7 +474,7 @@ export async function refreshRelationshipLifecycle(
   const lifecycle = computeRelationshipLifecycle(activity);
   const before = relationship;
 
-  const updated = await prisma.companyOperatingRelationship.update({
+  const updated = await client.companyOperatingRelationship.update({
     where: { tenantId_id: { tenantId: ctx.tenantId, id: relationshipId } },
     data: { lifecycle }
   });
@@ -460,7 +485,8 @@ export async function refreshRelationshipLifecycle(
     entityType: "CompanyOperatingRelationship",
     entityId: relationshipId,
     before,
-    after: updated
+    after: updated,
+    client
   });
 
   return updated;
@@ -1318,25 +1344,28 @@ export async function recordRevenueLine(
     cadAmount?: number;
     fxSource?: string;
     syncMetadata?: Prisma.InputJsonValue;
-  }
+  },
+  options: { client?: Prisma.TransactionClient } = {}
 ) {
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
-  const company = await prisma.company.findFirst({
+  const client = options.client ?? prisma;
+
+  const company = await client.company.findFirst({
     where: tenantWhere(ctx, { id: input.companyId })
   });
   if (!company) {
     throw new Error("Company does not exist in this tenant.");
   }
-  const operatingCompany = await prisma.operatingCompany.findFirst({
+  const operatingCompany = await client.operatingCompany.findFirst({
     where: tenantWhere(ctx, { id: input.operatingCompanyId })
   });
   if (!operatingCompany) {
     throw new Error("Operating company does not exist in this tenant.");
   }
   if (input.sourceAccountId) {
-    const account = await prisma.customerSourceAccount.findFirst({
+    const account = await client.customerSourceAccount.findFirst({
       where: tenantWhere(ctx, {
         id: input.sourceAccountId,
         companyId: input.companyId,
@@ -1348,7 +1377,7 @@ export async function recordRevenueLine(
     }
   }
 
-  const existing = await prisma.customerRevenueLine.findFirst({
+  const existing = await client.customerRevenueLine.findFirst({
     where: tenantWhere(ctx, { sourceKey: input.sourceKey })
   });
 
@@ -1356,7 +1385,7 @@ export async function recordRevenueLine(
     return existing;
   }
 
-  const record = await prisma.customerRevenueLine.create({
+  const record = await client.customerRevenueLine.create({
     data: {
       tenantId: ctx.tenantId,
       realmId: input.realmId,
@@ -1387,7 +1416,15 @@ export async function recordRevenueLine(
     action: "customer-intelligence.revenue-line.created",
     entityType: "CustomerRevenueLine",
     entityId: record.id,
-    after: record
+    // Audits carry classifications and counts only: never customer or
+    // transaction identifiers, sourceKeys, amounts, or provider content.
+    after: {
+      serviceLine: record.serviceLine,
+      nativeCurrency: record.nativeCurrency,
+      homeCurrency: record.homeCurrency,
+      fxSource: record.fxSource ?? undefined
+    },
+    client
   });
 
   return record;
@@ -1409,14 +1446,18 @@ export async function upsertMonthlyFinancial(
     nativeGrossProfit?: number;
     cadRevenue?: number;
     nativeOpenAr?: number;
-    cadOpenAr?: number;
+    cadOpenAr?: number | null;
     reconciliationStatus?: "RECONCILED" | "INCOMPLETE" | "UNRECONCILED";
-  }
+    preserveRevenue?: boolean;
+  },
+  options: { client?: Prisma.TransactionClient } = {}
 ) {
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
-  const relationship = await prisma.companyOperatingRelationship.findFirst({
+  const client = options.client ?? prisma;
+
+  const relationship = await client.companyOperatingRelationship.findFirst({
     where: tenantWhere(ctx, {
       id: input.companyOperatingRelationshipId,
       companyId: input.companyId,
@@ -1427,7 +1468,7 @@ export async function upsertMonthlyFinancial(
     throw new Error("Relationship does not exist in this tenant for the given company.");
   }
   if (input.sourceAccountId) {
-    const account = await prisma.customerSourceAccount.findFirst({
+    const account = await client.customerSourceAccount.findFirst({
       where: tenantWhere(ctx, {
         id: input.sourceAccountId,
         companyOperatingRelationshipId: input.companyOperatingRelationshipId
@@ -1440,7 +1481,7 @@ export async function upsertMonthlyFinancial(
 
   const sourceAccountKey = input.sourceAccountKey ?? input.sourceAccountId ?? "ALL";
 
-  const existing = await prisma.customerMonthlyFinancial.findFirst({
+  const existing = await client.customerMonthlyFinancial.findFirst({
     where: tenantWhere(ctx, {
       companyOperatingRelationshipId: input.companyOperatingRelationshipId,
       sourceAccountKey,
@@ -1450,7 +1491,7 @@ export async function upsertMonthlyFinancial(
     })
   });
 
-  const record = await prisma.customerMonthlyFinancial.upsert({
+  const record = await client.customerMonthlyFinancial.upsert({
     where: {
       tenantId_companyOperatingRelationshipId_sourceAccountKey_serviceLine_currency_monthKey: {
         tenantId: ctx.tenantId,
@@ -1463,12 +1504,20 @@ export async function upsertMonthlyFinancial(
     },
     update: {
       sourceAccountId: input.sourceAccountId ?? existing?.sourceAccountId ?? null,
-      nativeRevenue: input.nativeRevenue,
-      nativeCost: input.nativeCost ?? existing?.nativeCost ?? 0,
-      nativeGrossProfit: input.nativeGrossProfit ?? existing?.nativeGrossProfit ?? 0,
-      cadRevenue: input.cadRevenue ?? existing?.cadRevenue ?? null,
+      nativeRevenue: input.preserveRevenue ? existing?.nativeRevenue ?? input.nativeRevenue : input.nativeRevenue,
+      nativeCost: input.preserveRevenue
+        ? existing?.nativeCost ?? input.nativeCost ?? 0
+        : input.nativeCost ?? existing?.nativeCost ?? 0,
+      nativeGrossProfit: input.preserveRevenue
+        ? existing?.nativeGrossProfit ?? input.nativeGrossProfit ?? 0
+        : input.nativeGrossProfit ?? existing?.nativeGrossProfit ?? 0,
+      cadRevenue: input.preserveRevenue
+        ? existing?.cadRevenue ?? input.cadRevenue ?? null
+        : input.cadRevenue ?? existing?.cadRevenue ?? null,
       nativeOpenAr: input.nativeOpenAr ?? existing?.nativeOpenAr ?? 0,
-      cadOpenAr: input.cadOpenAr ?? existing?.cadOpenAr ?? null,
+      cadOpenAr: Object.prototype.hasOwnProperty.call(input, "cadOpenAr")
+        ? input.cadOpenAr
+        : existing?.cadOpenAr ?? null,
       reconciliationStatus:
         input.reconciliationStatus ?? existing?.reconciliationStatus ?? "UNRECONCILED"
     },

@@ -11,6 +11,7 @@
 | Operating-company, integration, mailbox, retention, and schedule settings | ADMIN |
 | Associate an operating company with an ACTIVE QuickBooks credential (`associateQuickBooksCredential`) | ADMIN (plus the tenant mutation gate via `requireWrite`) |
 | Trigger read-only QuickBooks customer ingestion (`runQuickBooksCustomerIngestion`, CP-PHASE-02B-2) | ADMIN (via `requireIngestionAdmin`, which stacks `requireAdminSettings` + `requireWrite`) |
+| Trigger read-only QuickBooks financial materialization (`runFinancialMaterialization`, CP-PHASE-02B-5) | ADMIN (via the same `requireIngestionAdmin` guard) |
 | Trigger deterministic identity reconciliation; review identity matches; explicitly create-and-approve a canonical Company (`runIdentityReconciliation`, `reviewIdentityMatch`, `approveIdentityMatchWithNewCompany`, CP-PHASE-02B-3) | ADMIN, FINANCE (via `requireMatchApproval` + `requireWrite`; Company creation additionally requires explicit confirmation) |
 | No access | SALES, OPERATIONS, READ_ONLY |
 

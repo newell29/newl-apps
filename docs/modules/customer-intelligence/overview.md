@@ -90,7 +90,7 @@ excluded; unknown and cross-tenant company identifiers render as not found
 
 ## Workflow / rules summary
 
-- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`, and the CP-PHASE-02B-4 directory/profile pages live under `src/app/(authenticated)/customer-intelligence` (root) and `src/app/(authenticated)/customer-intelligence/companies/[companyId]`. Mailbox sync, QuickBooks report sync, research, and the remaining Customer Profile screens are later phases.
+- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`, and the CP-PHASE-02B-4 directory/profile pages live under `src/app/(authenticated)/customer-intelligence` (root) and `src/app/(authenticated)/customer-intelligence/companies/[companyId]`. Mailbox sync, reconciliation, research, and the remaining Customer Profile screens are later phases.
 - Every query and action requires an authenticated leadership context (`permissions.ts`) and injects `tenantId` through `tenantWhere`.
 - The canonical `Company` stays the identity shared by sales, TradeMining, Hunter, contacts, and finance. Customer Intelligence adds records around it; it never rewrites or deletes existing `Company`, `CashflowCustomer`, or `CashflowLegalEntity` data.
 - Lifecycle is computed per operating-company relationship and rolled up to the canonical company (ACTIVE beats DORMANT beats FORMER beats PROSPECT).
@@ -100,6 +100,12 @@ excluded; unknown and cross-tenant company identifiers render as not found
   from separately entered reviewer data; Company, operating-company
   relationship, approved decision, and audit evidence commit atomically. The
   source name is never an automatic creation fallback.
+- CP-PHASE-02B-5 adds the ADMIN-triggered, GET-only financial materialization
+  (`runFinancialMaterialization`): revenue detail + AR aging are materialized
+  into immutable `CustomerRevenueLine` rows, aggregated into
+  `CustomerMonthlyFinancial` under the existing monthly unique key, and
+  lifecycle is refreshed through the existing guarded action. Dry-run performs
+  zero writes; no QuickBooks posting is performed.
 
 ## Permissions
 
@@ -127,7 +133,7 @@ Expected failures: missing tenant entitlement, read-only mutation attempts, lead
 
 ## Testing
 
-Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
+Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), `tests/customer-intelligence-ingestion.test.ts` (CP-PHASE-02B-2 read-only QuickBooks customer ingestion), `tests/customer-intelligence-materialization.test.ts` and `tests/customer-intelligence-fx.test.ts` (CP-PHASE-02B-5 financial materialization), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
 
 ## Source map
 
@@ -136,6 +142,8 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Services/actions | `src/modules/customer-intelligence/actions.ts` |
 | Queries | `src/modules/customer-intelligence/queries.ts` |
 | Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
+| Read-only QuickBooks financial materialization (CP-PHASE-02B-5) | `src/modules/customer-intelligence/financial-materialization.ts` |
+| Deterministic FX helpers (CP-PHASE-02B-5) | `src/modules/customer-intelligence/fx.ts` |
 | Deterministic identity reconciliation (CP-PHASE-02B-3) | `src/modules/customer-intelligence/reconciliation.ts` |
 | Identity review page and server actions (CP-PHASE-02B-3) | `src/app/(authenticated)/customer-intelligence/review/page.tsx`, `src/modules/customer-intelligence/review-actions.ts`, `src/modules/customer-intelligence/components/identity-review-actions.tsx` |
 | Customer Profile directory and company detail pages (CP-PHASE-02B-4) | `src/app/(authenticated)/customer-intelligence/page.tsx`, `src/app/(authenticated)/customer-intelligence/companies/[companyId]/page.tsx` |
