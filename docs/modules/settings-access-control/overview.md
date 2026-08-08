@@ -13,6 +13,11 @@ Settings, roles, module entitlements, integrations is documented because code, r
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- The ADMIN QuickBooks settings cards can repair Customer Intelligence references for an
+  already-connected company. The control discovers only an exact tenant-owned legal-entity
+  match, requires one-company confirmation, and updates no credential, token, live-sync gate,
+  invoice-posting behavior, or external system. Ambiguous or conflicting matches require code
+  review rather than an automatic repair.
 
 ## Data model
 

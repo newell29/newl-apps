@@ -51,6 +51,7 @@ import {
   reconcileQuickBooksIdentityMatches,
   type IdentityReconciliationReport
 } from "@/modules/customer-intelligence/reconciliation";
+import { quickBooksLegalEntityToSlug } from "@/server/integrations/quickbooks";
 
 function toInputJson(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined
@@ -194,6 +195,17 @@ export async function associateQuickBooksCredential(
   if (credentialRealmId !== realmId) {
     throw new Error("quickBooksRealmId does not match the realm stored on the QuickBooks credential.");
   }
+  const credentialOperatingCompanySlug = readCredentialOperatingCompanySlug(
+    credential.publicConfig
+  );
+  if (!credentialOperatingCompanySlug) {
+    throw new Error("The QuickBooks credential does not store a supported legal entity.");
+  }
+  if (credentialOperatingCompanySlug !== operatingCompany.slug) {
+    throw new Error(
+      "The QuickBooks credential legal entity does not match the selected operating company."
+    );
+  }
 
   const before = {
     quickBooksRealmId: operatingCompany.quickBooksRealmId,
@@ -269,6 +281,17 @@ function readCredentialRealmId(value: Prisma.JsonValue | null | undefined): stri
 
   const config = value as Record<string, unknown>;
   return typeof config.realmId === "string" ? config.realmId : null;
+}
+
+function readCredentialOperatingCompanySlug(
+  value: Prisma.JsonValue | null | undefined
+): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const legalEntity = (value as Record<string, unknown>).legalEntity;
+  return typeof legalEntity === "string" ? quickBooksLegalEntityToSlug(legalEntity) : null;
 }
 
 /**

@@ -126,7 +126,8 @@ import {
 } from "@/modules/customer-intelligence/enablement";
 import { AuthorizationError } from "@/server/auth/authorization";
 import {
-  encryptQuickBooksSecret
+  encryptQuickBooksSecret,
+  quickBooksSlugToLegalEntity
 } from "@/server/integrations/quickbooks";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
@@ -266,6 +267,7 @@ function quickBooksCredential(
       realmId: operatingCompany.quickBooksRealmId
     }),
     publicConfig: {
+      legalEntity: quickBooksSlugToLegalEntity(operatingCompany.slug),
       realmId: operatingCompany.quickBooksRealmId,
       environment: "production",
       companyName: operatingCompany.displayName,
