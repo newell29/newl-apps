@@ -227,6 +227,24 @@ disabled and requires explicit owner approval recorded for audit.
 - Enablement state is readable by leadership (`getLiveSyncEnablement`,
   `listLiveSyncEnablements` via `requireReadAccess`).
 
+### Admin production preview
+
+The Identity Review page exposes an ADMIN-only, explicitly confirmed production
+preview for one operating company at a time. It calls the existing consolidated
+`runCustomerIntelligenceDryRun` pipeline with the selected tenant-owned
+`operatingCompanyId`, defaults the operator selection to Newl USA, and never
+enables live sync. The three engines remain in dry-run mode. Only the expected
+tenant-scoped `AutomationJobRun` ledger record and sanitized `AuditLog` entry
+are written; Customer Intelligence customer, identity, revenue, monthly
+financial, relationship, credential, and enablement records are not changed.
+
+The browser receives counts and classifications only. Customer names, source
+keys, transaction identifiers, amounts, provider warnings, raw exception text,
+credentials, and tenant identifiers are not returned by the server action. If
+the QuickBooks access token is expired, dry-run does not refresh and write the
+credential: the preview fails safely and instructs the operator to reconnect
+the company before retrying.
+
 ## Permissions
 
 - Read access: ADMIN, MANAGER, FINANCE (leadership only in v1).

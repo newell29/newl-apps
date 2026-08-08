@@ -1,6 +1,7 @@
 import { CustomerIdentityMatchKind, PlatformRole } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
+import { CustomerIntelligenceDryRunPreviewControl } from "@/modules/customer-intelligence/components/dry-run-preview-control";
 import { IdentityReconciliationControl } from "@/modules/customer-intelligence/components/identity-reconciliation-control";
 import { IdentityReviewActions } from "@/modules/customer-intelligence/components/identity-review-actions";
 import { requireMatchApproval, requireReadAccess } from "@/modules/customer-intelligence/permissions";
@@ -13,6 +14,7 @@ import {
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 /**
  * Customer Intelligence identity review queue (CP-PHASE-02B-3). Leadership-only
@@ -54,6 +56,29 @@ export default async function CustomerIntelligenceReviewPage() {
         <Metric label="Approved" value={metrics.approved} />
         <Metric label="Rejected" value={metrics.rejected} />
       </div>
+
+      {context.role === PlatformRole.ADMIN ? (
+        <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-foreground">
+            QuickBooks production preview
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-mutedForeground">
+            Inspect one connected operating company through the complete ingestion,
+            reconciliation, and financial-materialization pipeline without enabling live sync or
+            changing Customer Intelligence customer or financial records. The preview records one
+            job-ledger entry and one sanitized audit entry for traceability.
+          </p>
+          <CustomerIntelligenceDryRunPreviewControl
+            operatingCompanies={operatingCompanies
+              .filter((company) => company.active)
+              .map((company) => ({
+                id: company.id,
+                slug: company.slug,
+                displayName: company.displayName
+              }))}
+          />
+        </section>
+      ) : null}
 
       {canReconcile ? (
         <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
