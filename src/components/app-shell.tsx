@@ -175,6 +175,13 @@ const navEntries: NavNode[] = [
     moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey,
     children: [
       {
+        id: "ci-company-profiles",
+        href: "/customer-intelligence",
+        label: "Company Profiles",
+        exact: true,
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      },
+      {
         id: "ci-identity-review",
         href: "/customer-intelligence/review",
         label: "Identity Review",

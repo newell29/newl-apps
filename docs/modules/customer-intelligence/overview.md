@@ -38,9 +38,59 @@ planning or migration approval.
 - **QuickBooks operating company required on manual approval**: manual approval of a `QUICKBOOKS_ACCOUNT` match requires a tenant-valid `operatingCompanyId`; automatic and manual approval share the invariant validator in `identity-approval.ts`.
 - **Database-backed integrity**: the `20260805160000_customer_intelligence_identity_integrity` migration adds tenant-scoped foreign keys for `companyId`/`candidateCompanyId` (`ON DELETE NO ACTION`) and CHECK constraints requiring `companyId` on every `APPROVED` match and `operatingCompanyId` on every `APPROVED` `QUICKBOOKS_ACCOUNT` match, preserving the one-approved-per-source index.
 
+## Customer Profile UI (CP-PHASE-02B-4)
+
+The Customer Profile pages are server-rendered, leadership-only (ADMIN,
+MANAGER, FINANCE via `requireReadAccess`) and render only existing
+tenant-scoped foundation data. SALES, OPERATIONS, and READ_ONLY remain
+excluded; unknown and cross-tenant company identifiers render as not found
+(`getCompanyProfileDetail` returns null → `notFound()`).
+
+- **Directory** (`/customer-intelligence`): matched-company table (lifecycle
+  rollup, operating companies, QuickBooks source accounts, contacts,
+  opportunities, last activity) plus an unmatched QuickBooks customer view.
+  Unmatched rows show potential contacts derived **only** from the stored
+  identity-match evidence (`profile-evidence.ts`); no Microsoft 365 or external
+  call exists and email bodies are never read or displayed. Every PROPOSED
+  QuickBooks match remains in this view, including a deferred proposal carrying
+  a reviewer-selected canonical company; only an approved decision is matched.
+- **Company profile** (`/customer-intelligence/companies/[companyId]`):
+  overview with operating-company relationships and lifecycle, source accounts,
+  match status, contacts (with contact points and evidence counts), existing
+  sales-pipeline lead and stored opportunity signals, an honest news empty
+  state (public-news collection is a later phase), and an honest TradeMining
+  configuration state. The TradeMining section shows only stored
+  `TradeMiningImportRecord` evidence; a per-company TradeMining search identity
+  is **not** persisted by the current schema, so no search name is editable and
+  no schema change was added (owner-approved "no schema change" boundary).
+- **Guarded editing**: `updateContactDetails` (core action in `actions.ts`,
+  ADMIN/FINANCE via `requireMatchApproval` + `requireWrite`) applies manual
+   contact corrections (first/last name, title, department, email, phone,
+   contact status), derives the required `fullName`, and records email/phone
+   corrections as normalized `ContactPoint` rows — equivalent spellings
+   deduplicate deterministically, and a replaced value becomes the primary point
+   while the prior direct value is retained as deduplicated evidence even when
+   no prior `ContactPoint` existed (demoted, never deleted). Clearing a direct
+   value retains it and demotes every prior primary point of that type. The
+   authoritative contact is row-locked and read within the transaction, and only
+   submitted fields are updated. The contact row, contact-point corrections,
+   and AuditLog entry commit in that Prisma transaction, so concurrent changes
+   to omitted fields are not lost and a manual correction cannot persist
+   unaudited. The
+  visible edit panel (`components/contact-edit-panel.tsx`) never substitutes
+  for the server-side mutation guard; the thin `profile-actions.ts` wrappers
+  re-validate the profile path and reject a nonempty unrecognized contact
+  status with an error state instead of reporting false success.
+- **No fabrication**: news, imports, opportunities, and external results are
+  never invented; the news section is an honest empty state and the
+  TradeMining section explains the missing per-company identity model.
+- **Contact attribution**: profile contact cards show the stored `Contact.source`
+  and each contact point's stored `source` (or “Not stored”) alongside its
+  verification state. The UI does not infer provenance.
+
 ## Workflow / rules summary
 
-- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`. Mailbox sync, QuickBooks report sync, research, and the remaining Customer Profile screens are later phases.
+- Entry points are server-side queries and actions under `src/modules/customer-intelligence`; the CP-PHASE-02B-3 identity review page lives under `src/app/(authenticated)/customer-intelligence/review`, and the CP-PHASE-02B-4 directory/profile pages live under `src/app/(authenticated)/customer-intelligence` (root) and `src/app/(authenticated)/customer-intelligence/companies/[companyId]`. Mailbox sync, QuickBooks report sync, research, and the remaining Customer Profile screens are later phases.
 - Every query and action requires an authenticated leadership context (`permissions.ts`) and injects `tenantId` through `tenantWhere`.
 - The canonical `Company` stays the identity shared by sales, TradeMining, Hunter, contacts, and finance. Customer Intelligence adds records around it; it never rewrites or deletes existing `Company`, `CashflowCustomer`, or `CashflowLegalEntity` data.
 - Lifecycle is computed per operating-company relationship and rolled up to the canonical company (ACTIVE beats DORMANT beats FORMER beats PROSPECT).
@@ -77,7 +127,7 @@ Expected failures: missing tenant entitlement, read-only mutation attempts, lead
 
 ## Testing
 
-Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
+Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
 
 ## Source map
 
@@ -88,6 +138,8 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
 | Deterministic identity reconciliation (CP-PHASE-02B-3) | `src/modules/customer-intelligence/reconciliation.ts` |
 | Identity review page and server actions (CP-PHASE-02B-3) | `src/app/(authenticated)/customer-intelligence/review/page.tsx`, `src/modules/customer-intelligence/review-actions.ts`, `src/modules/customer-intelligence/components/identity-review-actions.tsx` |
+| Customer Profile directory and company detail pages (CP-PHASE-02B-4) | `src/app/(authenticated)/customer-intelligence/page.tsx`, `src/app/(authenticated)/customer-intelligence/companies/[companyId]/page.tsx` |
+| Customer Profile queries, contact action, server actions, evidence helper, edit panel (CP-PHASE-02B-4) | `src/modules/customer-intelligence/queries.ts`, `src/modules/customer-intelligence/actions.ts`, `src/modules/customer-intelligence/profile-actions.ts`, `src/modules/customer-intelligence/profile-evidence.ts`, `src/modules/customer-intelligence/components/contact-edit-panel.tsx` |
 | Customer Profile UX baseline | `docs/modules/customer-intelligence/customer-profile-ui-design.md`, `customer-profile-wireframes.html` |
 | Pure logic | `src/modules/customer-intelligence/identity.ts`, `service-lines.ts`, `lifecycle.ts`, `constants.ts` |
 | Cashflow compatibility | `src/modules/customer-intelligence/cashflow-compatibility.ts` |

@@ -1,4 +1,5 @@
 import {
+  ContactStatus,
   CustomerIdentityMatchKind,
   CustomerIdentityMatchStatus,
   CustomerIntelligenceServiceLine,
@@ -1494,6 +1495,27 @@ export async function upsertMonthlyFinancial(
   return record;
 }
 
+/** Contact-point value types accepted by the normalized ContactPoint writers. */
+type EditableContactPointType = "EMAIL" | "PHONE" | "WEBSITE" | "ADDRESS" | "OTHER";
+
+/**
+ * Deterministic normalization shared by every ContactPoint writer so equivalent
+ * emails and phone numbers deduplicate against one stored value key. Email is
+ * trimmed and lowercased; phone keeps only its digits (a leading country code
+ * "1" is stripped when it produces an 11-digit number); other values are
+ * lowercased. An empty result means the value is not valid for its type.
+ */
+function normalizeContactPointValue(type: EditableContactPointType, rawValue: string): string {
+  switch (type) {
+    case "EMAIL":
+      return normalizeEmail(rawValue);
+    case "PHONE":
+      return normalizePhone(rawValue);
+    default:
+      return rawValue.toLowerCase();
+  }
+}
+
 export async function upsertContactPoint(
   ctx: AuthenticatedContext,
   input: {
@@ -1527,18 +1549,7 @@ export async function upsertContactPoint(
 
   // Store a normalized value (the unique key) so equivalent emails and phone
   // numbers deduplicate deterministically, and keep a human display value.
-  let value: string;
-  switch (input.type) {
-    case "EMAIL":
-      value = normalizeEmail(rawValue);
-      break;
-    case "PHONE":
-      value = normalizePhone(rawValue);
-      break;
-    default:
-      value = rawValue.toLowerCase();
-      break;
-  }
+  const value = normalizeContactPointValue(input.type, rawValue);
   if (!value) {
     throw new Error("Contact point value is not valid for its type.");
   }
@@ -1708,5 +1719,258 @@ export async function upsertContactEvidence(
       reviewStatus: "UNREVIEWED",
       conflictingValue: null
     }
+  });
+}
+
+function deriveContactFullName(firstName: string | null, lastName: string | null): string {
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
+
+/**
+ * CP-PHASE-02B-4: guarded manual correction of a contact's details (name,
+ * title, department, email, phone, and contact status) on the Customer Profile
+ * UI. ADMIN/FINANCE only (requireMatchApproval + requireWrite); the contact and
+ * its company must both exist in the caller's tenant or the update fails closed
+ * before any write. The authoritative contact is locked and loaded inside the
+ * transaction; only submitted fields are written, preventing omitted fields
+ * from overwriting a concurrent correction.
+ *
+ * Email and phone corrections flow through the existing normalized ContactPoint
+ * model: submitted values are normalized for deterministic deduplication, a
+ * primary point records the corrected value, and the replaced point is retained
+ * as prior evidence — never silently overwritten or deleted (design reference
+ * `customer-profile-ui-design.md` lines 64-66). The contact row, the
+ * contact-point corrections, and the AuditLog entry commit in one Prisma
+ * transaction, so a manual correction can never persist unaudited.
+ */
+export async function updateContactDetails(
+  ctx: AuthenticatedContext,
+  input: {
+    contactId: string;
+    companyId: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    title?: string | null;
+    department?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    contactStatus?: ContactStatus;
+  }
+) {
+  await requireMatchApproval(ctx);
+  await requireWrite(ctx);
+
+  const cleanSubmitted = (value: string | null): string | null => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  return prisma.$transaction(async (transaction) => {
+    // Lock the tenant-owned row before loading decision-critical values. This
+    // makes the snapshot used for name derivation, ContactPoint retention, and
+    // audit evidence authoritative for the remainder of this transaction.
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "Contact" WHERE "tenantId" = ${ctx.tenantId} AND "companyId" = ${input.companyId} AND "id" = ${input.contactId} FOR UPDATE`
+    );
+
+    const contact = await transaction.contact.findFirst({
+      where: tenantWhere(ctx, { id: input.contactId, companyId: input.companyId })
+    });
+    if (!contact) {
+      throw new Error("Contact does not exist in this tenant for the given company.");
+    }
+
+    const firstName =
+      input.firstName === undefined ? contact.firstName : cleanSubmitted(input.firstName);
+    const lastName =
+      input.lastName === undefined ? contact.lastName : cleanSubmitted(input.lastName);
+    const email = input.email === undefined ? contact.email : cleanSubmitted(input.email);
+    const phone = input.phone === undefined ? contact.phone : cleanSubmitted(input.phone);
+
+    const nameWasSubmitted = input.firstName !== undefined || input.lastName !== undefined;
+    const fullName = deriveContactFullName(firstName, lastName);
+    if (nameWasSubmitted && !fullName) {
+      throw new Error("Contact full name is required; clearing both first and last name is not allowed.");
+    }
+
+    const before = {
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      fullName: contact.fullName,
+      title: contact.title,
+      department: contact.department,
+      email: contact.email,
+      phone: contact.phone,
+      contactStatus: contact.contactStatus
+    };
+
+    const updated = await transaction.contact.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: contact.id } },
+      data: {
+        ...(input.firstName !== undefined ? { firstName } : {}),
+        ...(input.lastName !== undefined ? { lastName } : {}),
+        ...(nameWasSubmitted ? { fullName } : {}),
+        ...(input.title !== undefined ? { title: cleanSubmitted(input.title) } : {}),
+        ...(input.department !== undefined
+          ? { department: cleanSubmitted(input.department) }
+          : {}),
+        ...(input.email !== undefined ? { email } : {}),
+        ...(input.phone !== undefined ? { phone } : {}),
+        ...(input.contactStatus !== undefined ? { contactStatus: input.contactStatus } : {})
+      }
+    });
+
+    // Submitted email/phone values are recorded as normalized ContactPoints.
+    // The prior direct value is retained as evidence (never deleted) while the
+    // corrected value becomes the primary point, so a replacement is a
+    // reviewable correction rather than a silent rewrite of accepted facts.
+    if (input.email !== undefined) {
+      await applyContactPointCorrection(
+        transaction,
+        ctx,
+        contact.id,
+        contact.companyId,
+        "EMAIL",
+        contact.email,
+        email,
+        contact.source
+      );
+    }
+    if (input.phone !== undefined) {
+      await applyContactPointCorrection(
+        transaction,
+        ctx,
+        contact.id,
+        contact.companyId,
+        "PHONE",
+        contact.phone,
+        phone,
+        contact.source
+      );
+    }
+
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.contact.details-updated",
+      entityType: "Contact",
+      entityId: contact.id,
+      before,
+      after: updated,
+      client: transaction
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Record a corrected email/phone value as a normalized ContactPoint for the
+ * contact. Deterministic deduplication uses the same normalized value key as
+ * `upsertContactPoint`. A prior nonempty direct Contact value is first retained
+ * as a non-primary point when replacement or clearing would otherwise erase
+ * its only representation. A cleared value demotes every prior primary point;
+ * otherwise the corrected point becomes primary and all other primary points
+ * of the same type are demoted. No prior evidence is deleted.
+ */
+async function applyContactPointCorrection(
+  transaction: Prisma.TransactionClient,
+  ctx: AuthenticatedContext,
+  contactId: string,
+  companyId: string,
+  type: "EMAIL" | "PHONE",
+  priorValue: string | null,
+  correctedValue: string | null,
+  priorSource: string
+): Promise<void> {
+  const rawValue = correctedValue?.trim() ?? "";
+  const value = rawValue ? normalizeContactPointValue(type, rawValue) : null;
+  if (rawValue && !value) {
+    throw new Error("Contact point value is not valid for its type.");
+  }
+
+  const rawPriorValue = priorValue?.trim() ?? "";
+  const priorNormalizedValue = rawPriorValue
+    ? normalizeContactPointValue(type, rawPriorValue)
+    : null;
+  if (rawPriorValue && !priorNormalizedValue) {
+    throw new Error("Prior contact point value cannot be normalized and was not replaced.");
+  }
+
+  if (priorNormalizedValue && priorNormalizedValue !== value) {
+    await transaction.contactPoint.upsert({
+      where: {
+        tenantId_contactId_type_value: {
+          tenantId: ctx.tenantId,
+          contactId,
+          type,
+          value: priorNormalizedValue
+        }
+      },
+      update: { primary: false },
+      create: {
+        tenantId: ctx.tenantId,
+        contactId,
+        companyId,
+        type,
+        value: priorNormalizedValue,
+        displayValue: rawPriorValue,
+        primary: false,
+        verificationStatus: "UNVERIFIED",
+        source: priorSource
+      }
+    });
+  }
+
+  if (!value) {
+    await transaction.contactPoint.updateMany({
+      where: tenantWhere(ctx, { contactId, type, primary: true }),
+      data: { primary: false }
+    });
+    return;
+  }
+
+  const existing = await transaction.contactPoint.findFirst({
+    where: tenantWhere(ctx, { contactId, type, value })
+  });
+
+  const point = await transaction.contactPoint.upsert({
+    where: {
+      tenantId_contactId_type_value: {
+        tenantId: ctx.tenantId,
+        contactId,
+        type,
+        value
+      }
+    },
+    update: {
+      displayValue: rawValue,
+      primary: true,
+      lastSeenAt: new Date(),
+      source: existing?.source ?? "MANUAL"
+    },
+    create: {
+      tenantId: ctx.tenantId,
+      contactId,
+      companyId,
+      type,
+      value,
+      displayValue: rawValue,
+      primary: true,
+      verificationStatus: "UNVERIFIED",
+      firstSeenAt: new Date(),
+      lastSeenAt: new Date(),
+      source: "MANUAL"
+    }
+  });
+
+  // Retain the replaced point as evidence: it is never deleted, only demoted.
+  await transaction.contactPoint.updateMany({
+    where: tenantWhere(ctx, {
+      contactId,
+      type,
+      primary: true,
+      id: { not: point.id }
+    }),
+    data: { primary: false }
   });
 }

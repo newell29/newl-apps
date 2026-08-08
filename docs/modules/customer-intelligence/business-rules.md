@@ -62,6 +62,7 @@ The leadership-triggered reconciliation service (`reconciliation.ts`) re-scores 
 ## Contact points
 
 - `upsertContactPoint` stores a normalized value (emails lowercased, phones digits-only, others lowercased) as the unique key and keeps a human `displayValue`, so equivalent emails and phone formatting deduplicate deterministically.
+- `updateContactDetails` (CP-PHASE-02B-4) routes submitted email/phone corrections through the same normalized `ContactPoint` model: a corrected value becomes the primary point while the replaced point is retained as evidence (demoted, never deleted — a replacement is a reviewed correction, not a silent rewrite). The contact row, contact-point corrections, and the `customer-intelligence.contact.details-updated` AuditLog entry commit in one Prisma transaction, so a manual correction can never persist unaudited; a nonempty unrecognized contact-status value submitted through the profile server action is rejected with an error state and no writes.
 
 ## Contact evidence
 
