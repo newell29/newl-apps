@@ -28,6 +28,10 @@ import {
 } from "@/modules/customer-intelligence/fx";
 import { requireIngestionAdmin } from "@/modules/customer-intelligence/permissions";
 import {
+  LIVE_SYNC_NOT_ENABLED_REASON,
+  assertLiveSyncEnabled
+} from "@/modules/customer-intelligence/enablement";
+import {
   getUsableQuickBooksAccessToken
 } from "@/modules/customer-intelligence/quickbooks-ingestion";
 import { resolveServiceLine, type ServiceMappingRuleInput } from "@/modules/customer-intelligence/service-lines";
@@ -660,7 +664,7 @@ export type OperatingCompanyMaterializationSection = {
   operatingCompanyId: string;
   slug: string;
   displayName: string;
-  status: "ASSOCIATED" | "SKIPPED_UNASSOCIATED" | "ERROR" | "LIMITATION";
+  status: "ASSOCIATED" | "SKIPPED_UNASSOCIATED" | "SKIPPED_NOT_ENABLED" | "ERROR" | "LIMITATION";
   reason?: string;
   fetchedRevenueRows: number;
   fetchedAgingRows: number;
@@ -709,6 +713,7 @@ export type FinancialMaterializationTotals = {
   recordErrors: number;
   incompleteMonths: number;
   unassociatedCompanies: number;
+  notEnabledCompanies: number;
   erroredCompanies: number;
   limitationCompanies: number;
 };
@@ -1508,7 +1513,8 @@ async function materializeForOperatingCompany(
     quickBooksCredentialId: string | null;
   },
   dryRun: boolean,
-  virtualSourceAccounts: FinancialMaterializationDryRunSourceAccount[] = []
+  virtualSourceAccounts: FinancialMaterializationDryRunSourceAccount[] = [],
+  scoped = false
 ): Promise<OperatingCompanyMaterializationSection> {
   const section = newSection(operatingCompany);
 
@@ -1548,6 +1554,29 @@ async function materializeForOperatingCompany(
       });
     }
     return section;
+  }
+
+  // Live sync gate (CP-PHASE-02B-8, owner decision CP-02B-8-Q1
+  // FEATURE_ENABLEMENT_RECORD): a live run refuses to materialize an operating
+  // company without an enabled, approval-carrying enablement record. Dry-run
+  // verification performs zero writes and stays available for every operating
+  // company as the owner's preview tool.
+  if (!dryRun) {
+    const enabled = await assertLiveSyncEnabled(ctx, operatingCompany.id, {
+      mode: scoped ? "THROW" : "SKIP"
+    });
+    if (!enabled) {
+      section.status = "SKIPPED_NOT_ENABLED";
+      section.reason = LIVE_SYNC_NOT_ENABLED_REASON;
+      await auditEntry({
+        actor: ctx,
+        action: "customer-intelligence.financial-materialization.skipped-not-enabled",
+        entityType: "OperatingCompany",
+        entityId: operatingCompany.id,
+        after: { reason: section.reason }
+      });
+      return section;
+    }
   }
 
   const realmId = operatingCompany.quickBooksRealmId;
@@ -2712,6 +2741,7 @@ export async function materializeCustomerFinancials(
   await requireIngestionAdmin(ctx);
 
   const dryRun = input.dryRun === true;
+  const scoped = Boolean(input.operatingCompanyId);
   const startedAt = new Date().toISOString();
 
   const operatingCompanies = input.operatingCompanyId
@@ -2739,7 +2769,8 @@ export async function materializeCustomerFinancials(
         ctx,
         operatingCompany,
         dryRun,
-        dryRun ? input.virtualSourceAccounts : undefined
+        dryRun ? input.virtualSourceAccounts : undefined,
+        scoped
       )
     );
   }
@@ -2769,6 +2800,9 @@ export async function materializeCustomerFinancials(
       acc.incompleteMonths += section.incompleteMonths;
       if (section.status === "SKIPPED_UNASSOCIATED") {
         acc.unassociatedCompanies += 1;
+      }
+      if (section.status === "SKIPPED_NOT_ENABLED") {
+        acc.notEnabledCompanies += 1;
       }
       if (section.status === "ERROR") {
         acc.erroredCompanies += 1;
@@ -2801,6 +2835,7 @@ export async function materializeCustomerFinancials(
       recordErrors: 0,
       incompleteMonths: 0,
       unassociatedCompanies: 0,
+      notEnabledCompanies: 0,
       erroredCompanies: 0,
       limitationCompanies: 0
     }
@@ -2837,11 +2872,12 @@ function buildMaterializationAuditSummary(report: FinancialMaterializationReport
     (counts, section) => {
       if (section.status === "ASSOCIATED") counts.associated += 1;
       if (section.status === "SKIPPED_UNASSOCIATED") counts.skippedUnassociated += 1;
+      if (section.status === "SKIPPED_NOT_ENABLED") counts.skippedNotEnabled += 1;
       if (section.status === "ERROR") counts.error += 1;
       if (section.status === "LIMITATION") counts.limitation += 1;
       return counts;
     },
-    { associated: 0, skippedUnassociated: 0, error: 0, limitation: 0 }
+    { associated: 0, skippedUnassociated: 0, skippedNotEnabled: 0, error: 0, limitation: 0 }
   );
 
   return {

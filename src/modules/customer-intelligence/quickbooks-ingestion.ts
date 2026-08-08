@@ -13,6 +13,10 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
 import { auditEntry } from "@/modules/customer-intelligence/audit";
 import { upsertSourceAccount } from "@/modules/customer-intelligence/actions";
+import {
+  LIVE_SYNC_NOT_ENABLED_REASON,
+  assertLiveSyncEnabled
+} from "@/modules/customer-intelligence/enablement";
 import { requireIngestionAdmin } from "@/modules/customer-intelligence/permissions";
 import {
   decryptQuickBooksSecret,
@@ -39,6 +43,14 @@ import {
  * - partial or completely missing QuickBooks fields are stored as missing and
  *   never invented;
  * - `dryRun` performs zero database writes and returns the would-be report.
+ *
+ * Live sync (CP-PHASE-02B-8, owner decision CP-02B-8-Q1
+ * `FEATURE_ENABLEMENT_RECORD`): a live run refuses to sync an operating
+ * company without an enabled, approval-carrying enablement record. Explicitly
+ * scoped live runs throw before any work; unscoped live runs skip unenabled
+ * operating companies with an audited `SKIPPED_NOT_ENABLED` section. Dry-run
+ * verification stays available for every operating company (zero writes) as
+ * the owner's preview tool.
  *
  * Operating companies without an associated tenant-scoped, ACTIVE QuickBooks
  * credential are skipped with an audited warning. Token refresh reuses
@@ -335,7 +347,7 @@ export type OperatingCompanyIngestionSection = {
   operatingCompanyId: string;
   slug: string;
   displayName: string;
-  status: "ASSOCIATED" | "SKIPPED_UNASSOCIATED" | "ERROR";
+  status: "ASSOCIATED" | "SKIPPED_UNASSOCIATED" | "SKIPPED_NOT_ENABLED" | "ERROR";
   reason?: string;
   fetchedCustomers: number;
   matched: number;
@@ -368,6 +380,7 @@ export type QuickBooksCustomerIngestionReport = {
     skipped: number;
     recordErrors: number;
     unassociatedCompanies: number;
+    notEnabledCompanies: number;
     erroredCompanies: number;
   };
 };
@@ -754,7 +767,8 @@ async function ingestQuickBooksCustomersForOperatingCompany(
     quickBooksCredentialId: string | null;
   },
   dryRun: boolean,
-  virtualState?: QuickBooksIngestionDryRunState
+  virtualState?: QuickBooksIngestionDryRunState,
+  scoped = false
 ): Promise<OperatingCompanyIngestionSection> {
   const section: OperatingCompanyIngestionSection = {
     operatingCompanyId: operatingCompany.id,
@@ -810,6 +824,29 @@ async function ingestQuickBooksCustomersForOperatingCompany(
       });
     }
     return section;
+  }
+
+  // Live sync gate (CP-PHASE-02B-8, owner decision CP-02B-8-Q1
+  // FEATURE_ENABLEMENT_RECORD): a live run refuses to sync an operating
+  // company without an enabled, approval-carrying enablement record. Dry-run
+  // verification performs zero writes and stays available for every operating
+  // company as the owner's preview tool.
+  if (!dryRun) {
+    const enabled = await assertLiveSyncEnabled(ctx, operatingCompany.id, {
+      mode: scoped ? "THROW" : "SKIP"
+    });
+    if (!enabled) {
+      section.status = "SKIPPED_NOT_ENABLED";
+      section.reason = LIVE_SYNC_NOT_ENABLED_REASON;
+      await auditEntry({
+        actor: ctx,
+        action: "customer-intelligence.quickbooks-ingestion.skipped-not-enabled",
+        entityType: "OperatingCompany",
+        entityId: operatingCompany.id,
+        after: { reason: section.reason }
+      });
+      return section;
+    }
   }
 
   const realmId = operatingCompany.quickBooksRealmId;
@@ -1063,6 +1100,7 @@ export async function ingestQuickBooksCustomers(
   await requireIngestionAdmin(ctx);
 
   const dryRun = input.dryRun === true;
+  const scoped = Boolean(input.operatingCompanyId);
   const startedAt = new Date().toISOString();
 
   const operatingCompanies = input.operatingCompanyId
@@ -1090,7 +1128,8 @@ export async function ingestQuickBooksCustomers(
         ctx,
         operatingCompany,
         dryRun,
-        dryRun ? input.virtualState : undefined
+        dryRun ? input.virtualState : undefined,
+        scoped
       )
     );
   }
@@ -1108,6 +1147,9 @@ export async function ingestQuickBooksCustomers(
       if (section.status === "SKIPPED_UNASSOCIATED") {
         acc.unassociatedCompanies += 1;
       }
+      if (section.status === "SKIPPED_NOT_ENABLED") {
+        acc.notEnabledCompanies += 1;
+      }
       if (section.status === "ERROR") {
         acc.erroredCompanies += 1;
       }
@@ -1123,6 +1165,7 @@ export async function ingestQuickBooksCustomers(
       skipped: 0,
       recordErrors: 0,
       unassociatedCompanies: 0,
+      notEnabledCompanies: 0,
       erroredCompanies: 0
     }
   );
@@ -1156,10 +1199,11 @@ function buildIngestionAuditSummary(report: QuickBooksCustomerIngestionReport) {
     (counts, section) => {
       if (section.status === "ASSOCIATED") counts.associated += 1;
       if (section.status === "SKIPPED_UNASSOCIATED") counts.skippedUnassociated += 1;
+      if (section.status === "SKIPPED_NOT_ENABLED") counts.skippedNotEnabled += 1;
       if (section.status === "ERROR") counts.error += 1;
       return counts;
     },
-    { associated: 0, skippedUnassociated: 0, error: 0 }
+    { associated: 0, skippedUnassociated: 0, skippedNotEnabled: 0, error: 0 }
   );
 
   return {

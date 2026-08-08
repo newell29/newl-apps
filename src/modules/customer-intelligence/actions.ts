@@ -38,6 +38,7 @@ import {
   requireMatchApproval,
   requireWrite
 } from "@/modules/customer-intelligence/permissions";
+import { assertLiveSyncEnabled } from "@/modules/customer-intelligence/enablement";
 import {
   ingestQuickBooksCustomers,
   type QuickBooksCustomerIngestionReport
@@ -285,6 +286,13 @@ function readCredentialRealmId(value: Prisma.JsonValue | null | undefined): stri
  * - reviewed identity decisions are never overwritten;
  * - `dryRun` performs zero database writes and returns the would-be report.
  *
+ * Live sync (CP-PHASE-02B-8): a live run for an explicitly scoped operating
+ * company refuses to run without an enabled, approval-carrying enablement
+ * record for that operating company (`assertLiveSyncEnabled`, owner decision
+ * CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`). Unscoped live runs skip unenabled
+ * operating companies with an audited `SKIPPED_NOT_ENABLED` section; dry-run
+ * verification stays available as the owner's zero-write preview tool.
+ *
  * Operating companies without an associated tenant-scoped, ACTIVE QuickBooks
  * credential are skipped with an audited warning. Every run writes an
  * `AuditLog` entry unless `dryRun` is true.
@@ -294,6 +302,20 @@ export async function runQuickBooksCustomerIngestion(
   input: { operatingCompanyId?: string; dryRun?: boolean } = {}
 ): Promise<QuickBooksCustomerIngestionReport> {
   await requireIngestionAdmin(ctx);
+  // Fail closed at the entry point for a live run explicitly scoped to one
+  // operating company before any engine work; the engine enforces the same
+  // gate per operating company for unscoped runs. The tenant-scoped existence
+  // check runs first so a foreign or missing company id still fails with the
+  // precise cross-tenant error before any gate evaluation.
+  if (input.dryRun !== true && input.operatingCompanyId) {
+    const scopedCompany = await prisma.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: input.operatingCompanyId })
+    });
+    if (!scopedCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+    await assertLiveSyncEnabled(ctx, input.operatingCompanyId);
+  }
   return ingestQuickBooksCustomers(ctx, input);
 }
 
@@ -320,12 +342,33 @@ export async function runIdentityReconciliation(
  * under the existing monthly unique key, and refreshes lifecycle through the
  * existing guarded refreshRelationshipLifecycle action. Dry-run performs zero
  * database writes; no QuickBooks posting is performed.
+ *
+ * Live sync (CP-PHASE-02B-8): a live run for an explicitly scoped operating
+ * company refuses to run without an enabled, approval-carrying enablement
+ * record for that operating company (`assertLiveSyncEnabled`, owner decision
+ * CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`). Unscoped live runs skip unenabled
+ * operating companies with an audited `SKIPPED_NOT_ENABLED` section; dry-run
+ * verification stays available as the owner's zero-write preview tool.
  */
 export async function runFinancialMaterialization(
   ctx: AuthenticatedContext,
   input: { operatingCompanyId?: string; dryRun?: boolean } = {}
 ): Promise<FinancialMaterializationReport> {
   await requireIngestionAdmin(ctx);
+  // Fail closed at the entry point for a live run explicitly scoped to one
+  // operating company before any engine work; the engine enforces the same
+  // gate per operating company for unscoped runs. The tenant-scoped existence
+  // check runs first so a foreign or missing company id still fails with the
+  // precise cross-tenant error before any gate evaluation.
+  if (input.dryRun !== true && input.operatingCompanyId) {
+    const scopedCompany = await prisma.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: input.operatingCompanyId })
+    });
+    if (!scopedCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+    await assertLiveSyncEnabled(ctx, input.operatingCompanyId);
+  }
   return materializeCustomerFinancials(ctx, input);
 }
 

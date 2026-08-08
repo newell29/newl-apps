@@ -77,6 +77,18 @@ const prismaTest = vi.hoisted(() => {
       transaction.mockImplementation(
         async (callback: (client: Record<string, unknown>) => unknown) => callback(proxy)
       );
+      // CP-PHASE-02B-8: live-run fixtures default to an enabled enablement
+      // record with recorded owner approval so the sync behaviour under test
+      // is reachable. Enablement-gating tests override this per test.
+      const enablement = makeModelProxy("customerIntelligenceEnablement");
+      enablement.findFirst.mockResolvedValue({
+        id: "enablement-1",
+        tenantId: "tenant-a",
+        operatingCompanyId: "oc-ww",
+        enabled: true,
+        approvedByUserId: "user-owner",
+        approvedAt: new Date("2026-08-01T00:00:00.000Z")
+      });
     }
   };
 });

@@ -327,6 +327,34 @@ the materialized financials (`reporting-queries.ts`,
   validation the legacy page and navigation remain in place and are never
   modified.
 
+## Live-sync enablement (CP-PHASE-02B-8)
+
+Owner-controlled activation of live QuickBooks synchronization (owner decision
+CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`):
+
+- **Default-off**: every operating company has no enablement record after the
+  additive migration; live sync never runs until an ADMIN records explicit
+  owner approval.
+- **Recorded approval required**: a live run (`runQuickBooksCustomerIngestion`,
+  `runFinancialMaterialization`) refuses to sync an operating company unless its
+  `CustomerIntelligenceEnablement` row has `enabled = true` AND non-null
+  `approvedByUserId` + `approvedAt` (database-enforced by the
+  `enabled_requires_approval` CHECK). Explicitly scoped live runs throw;
+  unscoped live runs skip unenabled companies with an audited
+  `SKIPPED_NOT_ENABLED` section. An enabled-but-unapproved row is never treated
+  as enabled.
+- **ADMIN-only, audited, explicit approval evidence**: `setLiveSyncEnablement`
+  requires the `APPROVE_LIVE_SYNC` confirmation token to enable, records
+  approver/timestamp/note, clears them on disable, and writes
+  `customer-intelligence.enablement.enabled` / `.disabled` audit entries.
+- **No auto-enable**: `associateQuickBooksCredential` never writes an
+  enablement record, and scheduling remains deferred until the owner separately
+  approves a cadence.
+- **Dry-run is the preview tool**: `dryRun: true` and the consolidated
+  `runCustomerIntelligenceDryRun` perform zero writes and remain available for
+  unenabled operating companies, so the owner can review the would-change
+  report before approving enablement and a live run.
+
 ## Data-retention and privacy
 
 - Extraction observations are retained for 24 months; approved contact facts remain until manually removed (retention scheduling is a later phase).

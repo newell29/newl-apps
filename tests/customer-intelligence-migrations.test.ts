@@ -1,8 +1,8 @@
 /**
  * CP-PHASE-02A structural migration guards.
  *
- * These tests read the SQL source of the three existing Customer Intelligence
- * migrations and prove at the source level that every one of them is:
+ * These tests read the SQL source of the Customer Intelligence migrations and
+ * prove at the source level that every one of them is:
  *
  *   - additive: a statement-level allowlist admits only CREATE TYPE / ALTER
  *     TYPE ... ADD VALUE / CREATE TABLE / ALTER TABLE restricted to ADD COLUMN
@@ -21,7 +21,7 @@
  *     company rows are created only for the approved `newl-group` tenant.
  *
  * The guard is deliberately data-driven. Renaming or removing a known
- * migration, adding a migration outside the three known folders that starts
+ * migration, adding a migration outside the known folders that starts
  * referencing Customer Intelligence tables, or editing any migration to use a
  * destructive verb, an UPDATE, or any statement verb outside the additive
  * allowlist fails the suite. Phase-2 backfill migrations must pass the same
@@ -35,9 +35,10 @@ const MIGRATION_ROOT = "prisma/migrations";
 const FOUNDATION = "20260805120000_add_customer_intelligence_foundation";
 const CORRECTIONS = "20260805150000_customer_intelligence_corrections";
 const IDENTITY_INTEGRITY = "20260805160000_customer_intelligence_identity_integrity";
+const ENABLEMENT = "20260808090000_customer_intelligence_enablement";
 
 /** The only migrations that may define or alter Customer Intelligence schema. */
-const CI_MIGRATIONS = [FOUNDATION, CORRECTIONS, IDENTITY_INTEGRITY] as const;
+const CI_MIGRATIONS = [FOUNDATION, CORRECTIONS, IDENTITY_INTEGRITY, ENABLEMENT] as const;
 
 /** Tenant-scoped Customer Intelligence tables (quoted Prisma identifiers). */
 const CI_TABLES = [
@@ -50,7 +51,8 @@ const CI_TABLES = [
   "QuickBooksServiceMappingRule",
   "CustomerFxRate",
   "CustomerRevenueLine",
-  "CustomerMonthlyFinancial"
+  "CustomerMonthlyFinancial",
+  "CustomerIntelligenceEnablement"
 ] as const;
 
 /**
@@ -168,7 +170,7 @@ function tableBlock(sql: string, table: string): string | null {
 }
 
 describe("Customer Intelligence migration inventory", () => {
-  it("covers exactly the three known migrations, each with migration.sql and migration_lock.toml", () => {
+  it("covers exactly the four known migrations, each with migration.sql and migration_lock.toml", () => {
     const folders = migrationFolderNames();
     for (const name of CI_MIGRATIONS) {
       expect(folders, `${name} must exist under ${MIGRATION_ROOT}`).toContain(name);
@@ -179,7 +181,7 @@ describe("Customer Intelligence migration inventory", () => {
     }
   });
 
-  it("confines Customer Intelligence table references to exactly the three known migrations", () => {
+  it("confines Customer Intelligence table references to exactly the four known migrations", () => {
     const referencing = migrationFolderNames().filter((name) => {
       const sql = migrationSql(name);
       return CI_TABLES.some((table) => sql.includes(`"${table}"`));
@@ -189,7 +191,7 @@ describe("Customer Intelligence migration inventory", () => {
 });
 
 describe("migration structural guard: additive and non-destructive", () => {
-  it("contains no data-loss or destructive statements in any of the three migrations", () => {
+  it("contains no data-loss or destructive statements in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       const sql = migrationSql(name);
       for (const { label, pattern } of DESTRUCTIVE_PATTERNS) {
@@ -216,7 +218,7 @@ describe("migration structural guard: statement allowlist", () => {
     "INSERT INTO"
   ] as const;
 
-  it("permits only additive statement verbs in any of the three migrations", () => {
+  it("permits only additive statement verbs in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       const statements = sqlStatements(migrationSql(name));
       expect(statements.length, `${name} must contain at least one SQL statement`).toBeGreaterThan(0);
@@ -247,7 +249,7 @@ describe("migration structural guard: statement allowlist", () => {
     }
   });
 
-  it("never issues UPDATE, MERGE, or REPLACE statements in any of the three migrations", () => {
+  it("never issues UPDATE, MERGE, or REPLACE statements in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       for (const statement of sqlStatements(migrationSql(name))) {
         expect(leadingSqlVerb(statement), `${name} must not rewrite rows`).not.toMatch(
@@ -257,7 +259,7 @@ describe("migration structural guard: statement allowlist", () => {
     }
   });
 
-  it("restricts ALTER TABLE to ADD COLUMN and ADD CONSTRAINT in any of the three migrations", () => {
+  it("restricts ALTER TABLE to ADD COLUMN and ADD CONSTRAINT in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       for (const statement of sqlStatements(migrationSql(name))) {
         if (leadingSqlVerb(statement) !== "ALTER TABLE") continue;
@@ -275,7 +277,7 @@ describe("migration structural guard: statement allowlist", () => {
     }
   });
 
-  it("restricts ALTER TYPE to ADD VALUE in any of the three migrations", () => {
+  it("restricts ALTER TYPE to ADD VALUE in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       for (const statement of sqlStatements(migrationSql(name))) {
         if (leadingSqlVerb(statement) !== "ALTER TYPE") continue;
@@ -284,7 +286,7 @@ describe("migration structural guard: statement allowlist", () => {
     }
   });
 
-  it("gives every data INSERT an idempotency marker (ON CONFLICT) in any of the three migrations", () => {
+  it("gives every data INSERT an idempotency marker (ON CONFLICT) in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       for (const statement of sqlStatements(migrationSql(name))) {
         if (leadingSqlVerb(statement) !== "INSERT INTO") continue;
@@ -295,7 +297,7 @@ describe("migration structural guard: statement allowlist", () => {
 });
 
 describe("migration structural guard: legacy cashflow untouched", () => {
-  it("never references any legacy cashflow structure in any of the three migrations", () => {
+  it("never references any legacy cashflow structure in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       const sql = migrationSql(name);
       for (const structure of LEGACY_CASHFLOW_STRUCTURES) {
@@ -304,7 +306,7 @@ describe("migration structural guard: legacy cashflow untouched", () => {
     }
   });
 
-  it("never rewrites CashflowCustomer or CashflowLegalEntity in any of the three migrations", () => {
+  it("never rewrites CashflowCustomer or CashflowLegalEntity in any of the Customer Intelligence migrations", () => {
     for (const name of CI_MIGRATIONS) {
       const sql = migrationSql(name);
       expect(sql, `${name} must never touch CashflowCustomer`).not.toContain("CashflowCustomer");
@@ -314,10 +316,16 @@ describe("migration structural guard: legacy cashflow untouched", () => {
 });
 
 describe("foundation migration (20260805120000_add_customer_intelligence_foundation)", () => {
+  // The foundation migration creates the ten base tables; the live-sync
+  // enablement table is added by the later enablement migration.
+  const FOUNDATION_TABLES = CI_TABLES.filter(
+    (table) => table !== "CustomerIntelligenceEnablement"
+  );
+
   it("creates the additive Customer Intelligence table family with a tenantId on every table", () => {
     const sql = migrationSql(FOUNDATION);
-    expect(sql.match(/CREATE TABLE/g)).toHaveLength(CI_TABLES.length);
-    for (const table of CI_TABLES) {
+    expect(sql.match(/CREATE TABLE/g)).toHaveLength(FOUNDATION_TABLES.length);
+    for (const table of FOUNDATION_TABLES) {
       const block = tableBlock(sql, table);
       expect(block, `foundation migration must declare CREATE TABLE "${table}"`).not.toBeNull();
       expect(block!.includes('"tenantId" TEXT NOT NULL'), `${table} must be tenant-scoped`).toBe(
@@ -452,5 +460,43 @@ describe("identity-integrity migration (20260805160000_customer_intelligence_ide
     expect(corrections).toContain(
       'CREATE UNIQUE INDEX "CustomerIdentityMatch_one_approved_per_source_key"'
     );
+  });
+});
+
+describe("enablement migration (20260808090000_customer_intelligence_enablement)", () => {
+  it("creates the tenant-scoped live-sync enablement table with default-off enabled", () => {
+    const sql = migrationSql(ENABLEMENT);
+    const block = tableBlock(sql, "CustomerIntelligenceEnablement");
+    expect(block, "enablement migration must declare CREATE TABLE").not.toBeNull();
+    expect(block!.includes('"tenantId" TEXT NOT NULL'), "must be tenant-scoped").toBe(true);
+    expect(block!.includes('"operatingCompanyId" TEXT NOT NULL')).toBe(true);
+    // Default-off for every operating company: enabled defaults to false and no
+    // bootstrap INSERT exists, so no operating company is ever auto-enabled.
+    expect(block!.includes('"enabled" BOOLEAN NOT NULL DEFAULT false')).toBe(true);
+    expect(sql).not.toContain("INSERT INTO");
+  });
+
+  it("adds only tenant-scoped foreign keys, unique keys, an index, and the approval CHECK", () => {
+    const sql = migrationSql(ENABLEMENT);
+    expect(sql).toContain(
+      'ADD CONSTRAINT "CustomerIntelligenceEnablement_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE'
+    );
+    expect(sql).toContain(
+      'ADD CONSTRAINT "CustomerIntelligenceEnablement_tenantId_operatingCompanyId_fkey" FOREIGN KEY ("tenantId", "operatingCompanyId") REFERENCES "OperatingCompany"("tenantId", "id") ON DELETE CASCADE'
+    );
+    expect(sql).toContain(
+      'CREATE UNIQUE INDEX "CustomerIntelligenceEnablement_tenantId_operatingCompanyId_key"'
+    );
+    expect(sql).toContain(
+      'CREATE INDEX "CustomerIntelligenceEnablement_tenantId_enabled_idx"'
+    );
+    expect(sql).toContain('ADD CONSTRAINT "CustomerIntelligenceEnablement_enabled_requires_approval"');
+    // An enabled record always carries explicit owner approval evidence.
+    expect(sql).toContain(
+      'CHECK ("enabled" = false OR ("approvedByUserId" IS NOT NULL AND "approvedAt" IS NOT NULL))'
+    );
+    // No table/type creation beyond the one enablement table and no data writes.
+    expect(sql.match(/CREATE TABLE/g)).toHaveLength(1);
+    expect(sql).not.toMatch(/CREATE TYPE/);
   });
 });

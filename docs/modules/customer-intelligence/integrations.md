@@ -4,8 +4,10 @@
 > operating companies (code and tests only; no OAuth initiation and no live
 > connection). CP-PHASE-02B-2 adds the read-only, idempotent QuickBooks customer
 > ingestion. CP-PHASE-02B-5 adds the read-only QuickBooks financial
-> materialization (revenue detail + AR aging). The final design is read-only
-> toward Microsoft 365 and QuickBooks; no QuickBooks write is ever performed.
+> materialization (revenue detail + AR aging). CP-PHASE-02B-8 adds the
+> owner-controlled live-sync enablement gate (default-off, recorded approval,
+> ADMIN-only audited enablement). The final design is read-only toward Microsoft
+> 365 and QuickBooks; no QuickBooks write is ever performed.
 
 ## Connection model (CP-PHASE-02B-1)
 
@@ -45,9 +47,12 @@
   through the validated and audited `associateQuickBooksCredential` action; operating-company
   registration cannot bypass the tenant/provider/ACTIVE-status/realm checks.
 - Connecting a QuickBooks company never auto-enables live synchronization (owner decision
-  CP-02B-8-Q1): live sync needs a separate tenant- and operating-company-scoped enablement
-  record that is not part of this phase and any migration for it remains separately
-  owner-gated.
+  CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`): live sync requires the separate tenant- and
+  operating-company-scoped `CustomerIntelligenceEnablement` record implemented in
+  CP-PHASE-02B-8, which defaults to disabled and requires explicit owner approval recorded
+  for audit. The live ingestion and materialization entry points refuse to run for an
+  operating company without an enabled, approval-carrying enablement record; dry-run
+  verification remains available as the owner's zero-write preview tool.
 
 ## Read-only QuickBooks customer ingestion (CP-PHASE-02B-2)
 
@@ -57,6 +62,12 @@
   OPERATIONS, READ_ONLY, and FINANCE are denied even for a dry run. Every live run writes an
   `AuditLog` (`customer-intelligence.quickbooks-ingestion.run`); skipped companies and
   errors write their own audited warnings.
+- **Live-sync enablement gate (CP-PHASE-02B-8)**: a live run refuses to sync an operating
+  company without an enabled, approval-carrying `CustomerIntelligenceEnablement` record for
+  that operating company. Explicitly scoped live runs throw before any QuickBooks access;
+  unscoped live runs skip unenabled companies with an audited `SKIPPED_NOT_ENABLED` section.
+  Dry-run (`dryRun: true`) performs zero writes and remains available for unenabled
+  companies as the owner's preview tool.
 - **Transport is GET-only**: customer records are fetched from
   `GET /v3/company/{realmId}/query` with `select * from Customer startposition N maxresults 1000`
   pagination (`src/modules/customer-intelligence/quickbooks-ingestion.ts`). The access token is
@@ -137,6 +148,10 @@
   OPERATIONS, READ_ONLY, and FINANCE are denied even for a dry run. The core
   lives in `src/modules/customer-intelligence/financial-materialization.ts`;
   deterministic FX helpers live in `src/modules/customer-intelligence/fx.ts`.
+  A live run also requires the same CP-PHASE-02B-8 enablement gate as customer
+  ingestion: unenabled operating companies are refused (scoped runs throw,
+  unscoped runs skip with an audited `SKIPPED_NOT_ENABLED` section), while
+  dry-run verification stays available as the owner's preview tool.
 - **Owner-approved report sources (CP-02B-5-Q1, `PNL_DETAIL_PLUS_AGING`)**:
   `GET /v3/company/{realmId}/reports/ProfitAndLossDetail` supplies customer
   revenue transaction detail over the confirmed 24-month window

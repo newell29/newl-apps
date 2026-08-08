@@ -8,7 +8,7 @@ Customer Intelligence is a leadership-only module that creates one tenant-wide p
 
 No live Microsoft 365, QuickBooks, Brave, Apollo, or customer-communication workflow is implemented in Phase 1. The module is read-only toward Microsoft 365 and QuickBooks in the final design; this foundation ships no external integration calls.
 
-Main evidence: `prisma/schema.prisma` (Customer Intelligence models), `prisma/migrations/20260805120000_add_customer_intelligence_foundation`, `prisma/migrations/20260805150000_customer_intelligence_corrections`, `prisma/migrations/20260805160000_customer_intelligence_identity_integrity`, `src/modules/customer-intelligence/*`, `tests/customer-intelligence-*.test.ts`.
+Main evidence: `prisma/schema.prisma` (Customer Intelligence models), `prisma/migrations/20260805120000_add_customer_intelligence_foundation`, `prisma/migrations/20260805150000_customer_intelligence_corrections`, `prisma/migrations/20260805160000_customer_intelligence_identity_integrity`, `prisma/migrations/20260808090000_customer_intelligence_enablement`, `src/modules/customer-intelligence/*`, `tests/customer-intelligence-*.test.ts`.
 
 ## Customer Profile UI design reference
 
@@ -189,6 +189,44 @@ financials (ADMIN, MANAGER, FINANCE via `requireReadAccess`), served from
   operational; nothing reads or references the `Cashflow*` tables (see
   `docs/modules/customer-cashflow/overview.md`).
 
+## Live-sync enablement (CP-PHASE-02B-8)
+
+Owner-controlled activation of live QuickBooks synchronization (owner decision
+CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`): live sync has a separate
+tenant-scoped and operating-company-scoped enablement record that defaults to
+disabled and requires explicit owner approval recorded for audit.
+
+- **Enablement record**: `CustomerIntelligenceEnablement` (one per
+  `(tenantId, operatingCompanyId)`) with `enabled` defaulting to `false`, plus
+  recorded approval evidence (`approvedByUserId`, `approvedAt`, `approvalNote`)
+  and `updatedByUserId`. The additive migration
+  `20260808090000_customer_intelligence_enablement` creates the table,
+  tenant-scoped foreign keys/indexes, and the CHECK constraint
+  `CustomerIntelligenceEnablement_enabled_requires_approval` — an enabled row
+  without approval evidence is impossible. It writes no data: every operating
+  company is default-off.
+- **Gating**: the live sync entry points `runQuickBooksCustomerIngestion` and
+  `runFinancialMaterialization` refuse to run without enablement plus a
+  recorded approval for that operating company. Explicitly scoped live runs
+  throw before any QuickBooks access or write; unscoped live runs skip
+  unenabled operating companies with an audited `SKIPPED_NOT_ENABLED` section
+  and continue over the enabled ones. Dry-run verification (`dryRun: true` and
+  the consolidated `runCustomerIntelligenceDryRun`) performs zero writes and
+  stays available for every operating company — it is the owner's preview tool
+  for building the evidence reviewed before approving a live run.
+- **Enablement changes are ADMIN-only, audited, and carry explicit approval
+  evidence**: `setLiveSyncEnablement` (via `requireAdminSettings` +
+  `requireWrite`) requires the `APPROVE_LIVE_SYNC` confirmation token to
+  enable, records the approver/timestamp/note on the row, and writes a
+  tenant-scoped AuditLog entry (`customer-intelligence.enablement.enabled` /
+  `.disabled`). Disabling clears the approval evidence so a later enable always
+  requires a fresh recorded approval.
+- **No auto-enable**: connecting a QuickBooks company
+  (`associateQuickBooksCredential`) never writes an enablement record, and
+  scheduling remains deferred until the owner separately approves a cadence.
+- Enablement state is readable by leadership (`getLiveSyncEnablement`,
+  `listLiveSyncEnablements` via `requireReadAccess`).
+
 ## Permissions
 
 - Read access: ADMIN, MANAGER, FINANCE (leadership only in v1).
@@ -200,7 +238,7 @@ See `docs/modules/customer-intelligence/permissions.md`.
 
 ## Data model
 
-Additive models in `prisma/schema.prisma`: `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, `CustomerMonthlyFinancial`. See `docs/modules/customer-intelligence/data-model.md`.
+Additive models in `prisma/schema.prisma`: `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, `CustomerMonthlyFinancial`, `CustomerIntelligenceEnablement` (CP-PHASE-02B-8 live-sync enablement). See `docs/modules/customer-intelligence/data-model.md`.
 
 ```mermaid
 flowchart LR
@@ -211,11 +249,11 @@ flowchart LR
 
 ## Failure modes
 
-Expected failures: missing tenant entitlement, read-only mutation attempts, leadership-role denial, cross-tenant ID references (returns null or throws), operating company / company / relationship / contact not in the caller's tenant, duplicate source accounts keyed by `(tenantId, realmId, quickBooksCustomerId)`, and evidence fragments over 240 characters. Recovery uses the module review records and documented dry-run scripts in later phases.
+Expected failures: missing tenant entitlement, read-only mutation attempts, leadership-role denial, cross-tenant ID references (returns null or throws), operating company / company / relationship / contact not in the caller's tenant, duplicate source accounts keyed by `(tenantId, realmId, quickBooksCustomerId)`, evidence fragments over 240 characters, and live sync without enablement (CP-PHASE-02B-8: scoped live runs throw `LIVE_SYNC_NOT_ENABLED_REASON`; unscoped live runs report `SKIPPED_NOT_ENABLED` sections; a record with `enabled = true` but no recorded approval is never treated as enabled). Recovery uses the module review records and documented dry-run scripts in later phases.
 
 ## Testing
 
-Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), `tests/customer-intelligence-ingestion.test.ts` (CP-PHASE-02B-2 read-only QuickBooks customer ingestion), `tests/customer-intelligence-materialization.test.ts` and `tests/customer-intelligence-fx.test.ts` (CP-PHASE-02B-5 financial materialization), `tests/customer-intelligence-reporting.test.tsx` (CP-PHASE-02B-6 guarded reporting, PROVISIONAL FX labeling, and server-rendered reporting pages), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
+Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe actions, shared company, multi-account, cross-tenant attacks, cashflow compatibility), `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts`, `tests/customer-intelligence-profile-ui.test.tsx` (directory/profile queries, guarded contact corrections, and server-rendered pages), `tests/customer-intelligence-ingestion.test.ts` (CP-PHASE-02B-2 read-only QuickBooks customer ingestion), `tests/customer-intelligence-materialization.test.ts` and `tests/customer-intelligence-fx.test.ts` (CP-PHASE-02B-5 financial materialization), `tests/customer-intelligence-reporting.test.tsx` (CP-PHASE-02B-6 guarded reporting, PROVISIONAL FX labeling, and server-rendered reporting pages), `tests/customer-intelligence-enablement.test.ts` (CP-PHASE-02B-8 default-off live-sync gating, recorded-approval enforcement, ADMIN-only audited enablement, and no auto-enable on QuickBooks connection), and the `CUSTOMER_INTELLIGENCE` assertions in `tests/authorization.test.ts`.
 
 ## Source map
 
@@ -225,6 +263,7 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Queries | `src/modules/customer-intelligence/queries.ts` |
 | Read-only QuickBooks customer ingestion (CP-PHASE-02B-2) | `src/modules/customer-intelligence/quickbooks-ingestion.ts` |
 | Read-only QuickBooks financial materialization (CP-PHASE-02B-5) | `src/modules/customer-intelligence/financial-materialization.ts` |
+| Live-sync enablement gate and ADMIN actions (CP-PHASE-02B-8) | `src/modules/customer-intelligence/enablement.ts` |
 | Deterministic FX helpers (CP-PHASE-02B-5) | `src/modules/customer-intelligence/fx.ts` |
 | Financial reporting queries (CP-PHASE-02B-6) | `src/modules/customer-intelligence/reporting-queries.ts` |
 | Financial reporting pages (CP-PHASE-02B-6) | `src/app/(authenticated)/customer-intelligence/reporting/page.tsx`, `src/app/(authenticated)/customer-intelligence/reporting/operating-companies/[operatingCompanyId]/page.tsx` |
@@ -236,7 +275,7 @@ Relevant tests: `tests/customer-intelligence-foundation.test.ts` (tenant-safe ac
 | Pure logic | `src/modules/customer-intelligence/identity.ts`, `service-lines.ts`, `lifecycle.ts`, `constants.ts` |
 | Cashflow compatibility | `src/modules/customer-intelligence/cashflow-compatibility.ts` |
 | Audit | `src/modules/customer-intelligence/audit.ts` |
-| Schema/migration | `prisma/schema.prisma`, `prisma/migrations/20260805120000_add_customer_intelligence_foundation` |
+| Schema/migration | `prisma/schema.prisma`, `prisma/migrations/20260805120000_add_customer_intelligence_foundation`, `prisma/migrations/20260805150000_customer_intelligence_corrections`, `prisma/migrations/20260805160000_customer_intelligence_identity_integrity`, `prisma/migrations/20260808090000_customer_intelligence_enablement` |
 | Role policy | `src/server/auth/role-policy.ts` |
 | Seed | `prisma/seed.ts` |
 

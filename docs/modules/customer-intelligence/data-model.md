@@ -2,7 +2,7 @@
 
 > Evidence status: Confirmed from schema and migration. Additive to the existing platform; nothing here rewrites `CashflowCustomer` or `CashflowLegalEntity`.
 
-Migrations: `20260805120000_add_customer_intelligence_foundation` (base tables/enums), `20260805150000_customer_intelligence_corrections` (open AR, operating-company-scoped identity matches, evidence conflicts, one-approved-per-source database index, and the deployable Module/TenantModuleAccess/OperatingCompany bootstrap), and `20260805160000_customer_intelligence_identity_integrity` (tenant-scoped company foreign keys and approved-state CHECK constraints).
+Migrations: `20260805120000_add_customer_intelligence_foundation` (base tables/enums), `20260805150000_customer_intelligence_corrections` (open AR, operating-company-scoped identity matches, evidence conflicts, one-approved-per-source database index, and the deployable Module/TenantModuleAccess/OperatingCompany bootstrap), `20260805160000_customer_intelligence_identity_integrity` (tenant-scoped company foreign keys and approved-state CHECK constraints), and `20260808090000_customer_intelligence_enablement` (CP-PHASE-02B-8 live-sync enablement record with default-off `enabled`, recorded approval evidence, tenant-scoped foreign keys/indexes, and the enabled-requires-approval CHECK constraint).
 
 ## Canonical structure
 
@@ -40,6 +40,12 @@ One row per QuickBooks customer record, keyed by `(tenantId, realmId, quickBooks
 - **CustomerFxRate**: `currency`, `monthKey` (YYYY-MM), `rateToCad` (Decimal 12,6), `status` (`PROVISIONAL | FINAL`), `source`, `fetchedAt`. Unique `(tenantId, currency, monthKey)`.
 - **CustomerRevenueLine**: immutable QuickBooks report line identity. Fields: `realmId`, `sourceKey` (deterministic identity including the stable QuickBooks transaction-line ID), `sourceAccountId`, `companyId`, `operatingCompanyId`, `transactionDate`, `transactionType`, `transactionNumber`, `accountRef`, `classRef`, `itemRef`, `fileRef`, `serviceLine`, `nativeAmount`, `nativeCurrency`, `homeAmount`, `homeCurrency`, `cadAmount`, `fxSource`, `syncMetadata`. Unique `(tenantId, sourceKey)`; re-inserting identical evidence returns the existing row, while conflicting evidence fails closed.
 - **CustomerMonthlyFinancial**: materialized monthly totals. Fields: `monthKey`, `companyId`, `operatingCompanyId`, `companyOperatingRelationshipId`, `sourceAccountId`, `sourceAccountKey` ("ALL" or account id; keeps the unique index NULL-safe), `serviceLine`, `currency`, `nativeRevenue`, `nativeCost`, `nativeGrossProfit`, `cadRevenue`, `nativeOpenAr`, `cadOpenAr`, `reconciliationStatus` (`RECONCILED | INCOMPLETE | UNRECONCILED`). Unique `(tenantId, companyOperatingRelationshipId, sourceAccountKey, serviceLine, currency, monthKey)`.
+- **CustomerIntelligenceEnablement** (CP-PHASE-02B-8): owner-controlled activation of live QuickBooks synchronization. One tenant-scoped, operating-company-scoped record gates the live sync entry points (`runQuickBooksCustomerIngestion`, `runFinancialMaterialization`). Fields: `enabled` (default `false` — live sync defaults off for every operating company), `approvedByUserId`, `approvedAt`, `approvalNote` (the recorded owner approval evidence required before any live run; cleared on disable so a later enable requires a fresh approval), `updatedByUserId`. Unique `(tenantId, operatingCompanyId)`.
+
+  Integrity (`20260808090000_customer_intelligence_enablement`):
+  - Tenant-scoped foreign keys `(tenantId)` → `Tenant` and `(tenantId, operatingCompanyId)` → `OperatingCompany`, both `ON DELETE CASCADE`.
+  - CHECK `CustomerIntelligenceEnablement_enabled_requires_approval`: `enabled = true` requires non-null `approvedByUserId` and `approvedAt`, so a live sync gate can always trust the recorded approval. The migration writes no data: no operating company is auto-enabled.
+  - Enablement changes are ADMIN-only and audited (`customer-intelligence.enablement.enabled` / `.disabled`); `associateQuickBooksCredential` never writes an enablement record, and scheduling remains deferred until the owner separately approves a cadence.
 
 ## Service lines
 
@@ -68,4 +74,5 @@ flowchart LR
   Company --> CustomerMonthlyFinancial
   OperatingCompany --> CustomerMonthlyFinancial
   CustomerSourceAccount --> CustomerMonthlyFinancial
+  OperatingCompany --> CustomerIntelligenceEnablement
 ```

@@ -15,13 +15,13 @@
 - `tests/customer-intelligence-identity.test.ts` — 17 tests. Pure identity scoring, normalization, free-mail rules, name-alone never auto-links.
 - `tests/customer-intelligence-service-lines.test.ts` — 9 tests. The seven service lines and deterministic precedence.
 - `tests/customer-intelligence-lifecycle.test.ts` — 12 tests. Per-relationship lifecycle and rollup ordering.
-- `tests/customer-intelligence-migrations.test.ts` — structural migration-guard suite (CP-PHASE-02A). Reads the SQL source of the three Customer Intelligence migrations (`20260805120000_add_customer_intelligence_foundation`, `20260805150000_customer_intelligence_corrections`, `20260805160000_customer_intelligence_identity_integrity`) and proves at the source level that each is:
+- `tests/customer-intelligence-migrations.test.ts` — structural migration-guard suite (CP-PHASE-02A). Reads the SQL source of the four Customer Intelligence migrations (`20260805120000_add_customer_intelligence_foundation`, `20260805150000_customer_intelligence_corrections`, `20260805160000_customer_intelligence_identity_integrity`, `20260808090000_customer_intelligence_enablement`) and proves at the source level that each is:
   - **additive** — a statement-level allowlist admits only `CREATE TYPE` / `ALTER TYPE ... ADD VALUE` / `CREATE TABLE` / `ALTER TABLE` restricted to `ADD COLUMN` and `ADD CONSTRAINT` / `CREATE INDEX` (including `CREATE UNIQUE INDEX`) / `INSERT ... ON CONFLICT`; `UPDATE`, `MERGE`, `REPLACE`, and non-additive `ALTER TABLE` forms (`ALTER COLUMN`, `RENAME`, `DROP`) are explicitly rejected;
   - **idempotent where it writes data** — every data `INSERT` carries `ON CONFLICT` (`DO NOTHING` or `DO UPDATE`);
   - **non-destructive** — no `DROP TABLE`, `TRUNCATE`, `DELETE FROM`, or column/index/constraint/type drops, matched case-insensitively so lowercase destructive SQL cannot pass;
   - **never touching legacy finance** — none of the migrations references `CashflowCustomer`, `CashflowLegalEntity`, or any other `Cashflow*` structure; and
   - **tenant-scoped bootstrap** — the `Module`/`TenantModuleAccess`/`OperatingCompany` bootstrap is scoped to the `newl-group` tenant only.
-  The statement splitter removes full-line `--` comment lines before splitting on semicolons, so comment prose containing semicolons can never be parsed as a phantom statement (CP-PHASE-02A confirmed regression, pinned by a dedicated test). It also guards the inventory: exactly the three known migrations may reference Customer Intelligence tables, so renaming, removing, or silently adding a Customer Intelligence migration fails the suite. Phase-2 backfill migrations must pass the same statement allowlist and idempotency guards.
+  The statement splitter removes full-line `--` comment lines before splitting on semicolons, so comment prose containing semicolons can never be parsed as a phantom statement (CP-PHASE-02A confirmed regression, pinned by a dedicated test). It also guards the inventory: exactly the four known migrations may reference Customer Intelligence tables, so renaming, removing, or silently adding a Customer Intelligence migration fails the suite. Phase-2 backfill migrations must pass the same statement allowlist and idempotency guards. The enablement migration block additionally proves the new table is default-off (`enabled` default `false`, no bootstrap `INSERT`), tenant-scoped, and protected by the enabled-requires-approval CHECK constraint.
 - `tests/customer-intelligence-ingestion.test.ts` — CP-PHASE-02B-2 read-only QuickBooks customer ingestion suite. Prisma is mocked; the authorization module is REAL; `fetch` is mocked. Covers:
   - **GET-only transport**: the customer query URL is built against `GET /v3/company/{realmId}/query` (the access token is never embedded in the query URL — it is carried by the request `Authorization` header), every QuickBooks request is asserted to be GET with a Bearer token, and pagination stops on a short page.
   - **Bounded pagination regression**: the full-page mock reads the URL-encoded `query` value through `URL.searchParams` and asserts requests advance from `startposition 1` to `startposition 1001`. This prevents the mock from mistaking form-encoded `+` separators for literal spaces, returning the first 1,000-row page forever, and growing the fetched-customer array without bound.
@@ -65,6 +65,13 @@
   - **Run-record audit contract**: successful AutomationJobRun output and AuditLog evidence carry counts and classifications only; customer identifiers, source keys, transaction identifiers, amounts, bearer tokens, credential references, and authorization headers are proven absent. If an engine throws, the run is tenant-scoped to ERROR and a sanitized, actor-scoped `customer-intelligence.dry-run.failed` AuditLog entry is associated with that run; provider exception content is never copied, and the failure regression still proves zero Customer Intelligence and credential writes.
   - **Three-operating-company fixture matrix**: synthetic QuickBooks fixtures per operating company (Newl Worldwide, Newl USA, Newell's Express) cover partial evidence (including a persisted proposal whose current QuickBooks source evidence changes and a partially populated aging snapshot) and completely missing evidence (an Id-only customer) across ingestion, reconciliation, and materialization simultaneously. A DB-consistent new-source regression proves reconciliation evaluates the would-be proposal and materialization uses its would-be approved mapping; every operating-company path is asserted independently with zero data-model writes.
   - **Permissions**: MANAGER, SALES, OPERATIONS, READ_ONLY, and FINANCE are denied on the consolidated entry before any database write or QuickBooks fetch; the reconciliation dry-run evaluator is ADMIN/FINANCE-only like the live engine; a foreign or nonexistent operating-company id is rejected before any write.
+- `tests/customer-intelligence-enablement.test.ts` — CP-PHASE-02B-8 owner-controlled activation suite. Prisma is mocked; the authorization module is REAL; `fetch` is mocked. Covers:
+  - **Default-off and recorded-approval gate**: `isLiveSyncEnabled` is true only for an enabled record carrying `approvedByUserId` + `approvedAt`; an enabled-but-unapproved record, a disabled record, a missing record, and undefined are never treated as enabled. Live runs for an operating company without an enabled approval-carrying record refuse to sync: explicitly scoped live ingestion/materialization runs throw before any QuickBooks access or write, and unscoped live runs skip unenabled operating companies with an audited `SKIPPED_NOT_ENABLED` section (`customer-intelligence.quickbooks-ingestion.skipped-not-enabled` / `customer-intelligence.financial-materialization.skipped-not-enabled`), a `notEnabledCompanies` total, zero fetched records, and no customer/financial/credential/enablement writes (only the skip audit).
+  - **Cross-tenant scope**: a foreign-tenant enablement record is never accepted because every gate read carries the authenticated `tenantId`.
+  - **Dry-run stays available**: unenabled operating companies still produce the full zero-write dry-run preview (the owner's evidence tool), with `ASSOCIATED` sections and no data-model writes.
+  - **ADMIN-only audited enablement**: `setLiveSyncEnablement` requires `requireAdminSettings` + `requireWrite` (MANAGER, SALES, OPERATIONS, READ_ONLY, and FINANCE denied before any write; FINANCE denied even with `canMutate=true`), requires the explicit `APPROVE_LIVE_SYNC` confirmation to enable, records `approvedByUserId`/`approvedAt`/`approvalNote` on the row and in the tenant-scoped `customer-intelligence.enablement.enabled` audit, rejects cross-tenant operating companies, and clears approval evidence on disable (`customer-intelligence.enablement.disabled`). A re-enable always requires a fresh recorded approval.
+  - **Enablement reads**: `getLiveSyncEnablement`/`listLiveSyncEnablements` are leadership-only (`requireReadAccess`) and tenant-scoped.
+  - **No auto-enable**: `associateQuickBooksCredential` writes no enablement record, so connecting a QuickBooks company leaves live sync default-off.
 - `tests/customer-intelligence-profile-ui.test.tsx` — CP-PHASE-02B-4 Customer Profile UI suite. Prisma is mocked; the authorization module is REAL; `next/cache`, `next/navigation`, `next/link`, and the `getAuthenticatedContext` session resolver are mocked. Runs in the Node vitest environment (`.test.tsx` is included by the vitest config); Vitest mirrors Next.js with the automatic React JSX runtime when importing `.tsx` modules directly, and server-rendered pages are rendered to static markup with `react-dom/server` (no DOM/browser library is used). Covers:
   - **Stored-evidence potential contacts**: `extractPotentialContactsFromEvidence` reads email/phone values from stored identity-match evidence only, never invents values from missing/empty/malformed evidence, de-duplicates, and skips oversized fields. All examples are synthetic reserved values (`purchasing@example.com`, `+1 416 555 0199`).
   - **Leadership role matrix**: SALES denied on every new query (`listCompanyDirectory`, `getUnmatchedCustomerDirectory`, `getCompanyProfileDetail`); OPERATIONS and READ_ONLY denied on reads; FINANCE and MANAGER granted; the contact-details mutation (`updateContactDetails`) is denied for SALES, OPERATIONS, READ_ONLY, and MANAGER before any database write (contact edits are ADMIN/FINANCE via `requireMatchApproval`), and FINANCE is denied when the tenant mutation gate sets `canMutate=false`.
@@ -109,7 +116,8 @@ The handoff inventory was reconciled against this checkout. Every item is presen
 | Migration 1: foundation | `prisma/migrations/20260805120000_add_customer_intelligence_foundation/migration.sql` (+ `migration_lock.toml`) | Present |
 | Migration 2: corrections | `prisma/migrations/20260805150000_customer_intelligence_corrections/migration.sql` (+ `migration_lock.toml`) | Present |
 | Migration 3: identity integrity | `prisma/migrations/20260805160000_customer_intelligence_identity_integrity/migration.sql` (+ `migration_lock.toml`) | Present |
-| Module source | `src/modules/customer-intelligence/` — 10 files: `actions.ts`, `audit.ts`, `cashflow-compatibility.ts`, `constants.ts`, `identity-approval.ts`, `identity.ts`, `lifecycle.ts`, `permissions.ts`, `queries.ts`, `service-lines.ts` | Present |
+| Migration 4: live-sync enablement (CP-PHASE-02B-8) | `prisma/migrations/20260808090000_customer_intelligence_enablement/migration.sql` (+ `migration_lock.toml`) | Present |
+| Module source | `src/modules/customer-intelligence/` — 11 files: `actions.ts`, `audit.ts`, `cashflow-compatibility.ts`, `constants.ts`, `enablement.ts`, `identity-approval.ts`, `identity.ts`, `lifecycle.ts`, `permissions.ts`, `queries.ts`, `service-lines.ts` | Present |
 | Customer Intelligence test suites | `tests/customer-intelligence-foundation.test.ts`, `tests/customer-intelligence-identity.test.ts`, `tests/customer-intelligence-service-lines.test.ts`, `tests/customer-intelligence-lifecycle.test.ts` (77 tests) | Present |
 | Authorization suite | `tests/authorization.test.ts` (27 tests, including the `CUSTOMER_INTELLIGENCE` leadership matrix) | Present |
 | Module documentation | `docs/modules/customer-intelligence/` — `overview.md`, `data-model.md`, `permissions.md`, `business-rules.md`, `integrations.md`, `testing.md`, `open-questions.md` | Present |
@@ -257,9 +265,9 @@ Every migration run against an isolated preview PostgreSQL must first pass the d
 Each approved migration validation must record:
 
 1. **Preview identity**: the isolated preview PostgreSQL identity (host, port, database) and the `DATABASE_ENVIRONMENT=preview` label the gate enforced. No other database may be targeted.
-2. **Empty-database run**: a fresh preview database with no migrations applied, then `npm run db:migrate:preview` — the full migration history applies cleanly from scratch, including the three Customer Intelligence migrations.
-3. **Upgrade-path run**: a preview database advanced to the migration immediately before `20260805120000_add_customer_intelligence_foundation`, then `npm run db:migrate:preview` — the three Customer Intelligence migrations apply on top of the existing schema. The migration-guard suite in `tests/customer-intelligence-migrations.test.ts` is the source-level proof of additivity; the upgrade-path run is the live proof that pre-existing schema/data survive.
-4. **Post-run bootstrap verification**: the `Module` catalog row exists, `TenantModuleAccess` is enabled for the `newl-group` tenant only, and exactly the three Newl operating companies exist — no other tenant is enabled or seeded.
+2. **Empty-database run**: a fresh preview database with no migrations applied, then `npm run db:migrate:preview` — the full migration history applies cleanly from scratch, including the four Customer Intelligence migrations.
+3. **Upgrade-path run**: a preview database advanced to the migration immediately before `20260805120000_add_customer_intelligence_foundation`, then `npm run db:migrate:preview` — the four Customer Intelligence migrations apply on top of the existing schema. The migration-guard suite in `tests/customer-intelligence-migrations.test.ts` is the source-level proof of additivity; the upgrade-path run is the live proof that pre-existing schema/data survive.
+4. **Post-run bootstrap verification**: the `Module` catalog row exists, `TenantModuleAccess` is enabled for the `newl-group` tenant only, and exactly the three Newl operating companies exist — no other tenant is enabled or seeded. No `CustomerIntelligenceEnablement` rows exist (live sync is default-off for every operating company).
 5. **Human approval record**: who approved the run, when, and which database identity the approval covered.
 
 ### Approval boundary
@@ -393,3 +401,35 @@ Each approved dry-run validation must record:
 - Migrations, deployments, Teamship writes, financial posting, customer
   communication, and permission changes remain excluded from this phase and
   require their own distinct human approvals.
+
+## Phase scope (CP-PHASE-02B-8)
+
+CP-PHASE-02B-8 ships the owner-controlled activation gate for live QuickBooks
+synchronization (owner decision CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`):
+
+- one additive migration `20260808090000_customer_intelligence_enablement`
+  (create `CustomerIntelligenceEnablement`, tenant-scoped foreign
+  keys/indexes, and the enabled-requires-approval CHECK constraint; no data
+  writes, so live sync defaults off for every operating company). The migration
+  passes the guard allowlist and inventory update in
+  `tests/customer-intelligence-migrations.test.ts` and is applied only through
+  the approved preview migration runbook above;
+- the enablement module `src/modules/customer-intelligence/enablement.ts`
+  (`getLiveSyncEnablement`, `listLiveSyncEnablements`, `setLiveSyncEnablement`,
+  `isLiveSyncEnabled`, `assertLiveSyncEnabled`);
+- the live sync entry points (`runQuickBooksCustomerIngestion`,
+  `runFinancialMaterialization`) refuse to run without an enabled,
+  approval-carrying enablement record for the operating company — scoped live
+  runs throw, unscoped live runs skip with an audited `SKIPPED_NOT_ENABLED`
+  section; dry-run verification stays available as the owner's preview tool;
+- enablement changes are ADMIN-only, audited
+  (`customer-intelligence.enablement.enabled` / `.disabled`), and carry
+  explicit approval evidence (`APPROVE_LIVE_SYNC` confirmation +
+  recorded approver/timestamp/note);
+- connecting a QuickBooks company never auto-enables live sync, and scheduling
+  remains deferred until the owner separately approves a cadence.
+
+The regression suite is `tests/customer-intelligence-enablement.test.ts`;
+live-run fixtures in the ingestion and materialization suites default to an
+enabled approval-carrying enablement record so the sync behaviour under test is
+reachable, and the enablement suite overrides it to prove the gate.
