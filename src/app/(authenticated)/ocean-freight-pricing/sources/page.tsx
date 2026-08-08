@@ -1,7 +1,11 @@
 import { ModuleKey } from "@prisma/client";
 
 import { PageHeader } from "@/components/page-header";
-import { saveOceanFreightMicrosoftGraphSettingsAction } from "@/modules/ocean-freight-pricing/actions";
+import {
+  createOceanFreightRateCandidateFromSourceAction,
+  markOceanFreightSourceNotAgentRateAction,
+  saveOceanFreightMicrosoftGraphSettingsAction
+} from "@/modules/ocean-freight-pricing/actions";
 import { getOceanFreightSourcesShell, type OceanFreightSourceFilters } from "@/modules/ocean-freight-pricing/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -19,6 +23,9 @@ function formatBytes(bytes: number | null) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function isSentFromConfiguredMailbox(source: { fromAddress: string | null; mailboxAddress: string }) {
+  return source.fromAddress?.toLowerCase() === source.mailboxAddress.toLowerCase();
 }
 
 export default async function OceanFreightSourcesPage({ searchParams }: { searchParams: SearchParams }) {
@@ -93,6 +100,60 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
           </div>
 
           <p className="text-sm leading-6 text-mutedForeground">{shell.microsoftGraphSettings.runtimeNotes}</p>
+          <div className="rounded-md border border-border bg-muted/20 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Classification and autopost controls</h3>
+                <p className="mt-1 text-sm leading-6 text-mutedForeground">
+                  Keep the team focused on high-confidence candidate rates and exceptions. Autopost stays off until you are ready to trust specific agents and thresholds.
+                </p>
+              </div>
+              <span className="rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground">
+                {shell.automationSettings.autoPostEnabled ? "Autopost on" : "Autopost off"}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <label className="grid gap-2 text-sm font-semibold text-foreground">
+                Cheap classifier model
+                <input
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                  name="oceanClassificationModel"
+                  defaultValue={shell.automationSettings.classificationModel}
+                  placeholder="gpt-5-nano"
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-foreground">
+                High-confidence threshold
+                <input
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                  name="oceanHighConfidenceThreshold"
+                  type="number"
+                  min="1"
+                  max="100"
+                  defaultValue={shell.automationSettings.highConfidenceThreshold}
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-semibold text-foreground">
+                Autopost threshold
+                <input
+                  className="rounded-md border border-input bg-background px-3 py-2 text-sm font-normal"
+                  name="oceanAutoPostMinimumConfidence"
+                  type="number"
+                  min="1"
+                  max="100"
+                  defaultValue={shell.automationSettings.autoPostMinimumConfidence}
+                />
+              </label>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <ToggleBox name="oceanClassificationEnabled" defaultChecked={shell.automationSettings.classificationEnabled} title="Classify every email" description="Use the configured model once classifier wiring is enabled." />
+              <ToggleBox name="oceanExtractionEnabled" defaultChecked={shell.automationSettings.extractionEnabled} title="Extract candidate rates" description="Create structured candidates from likely inbound agent rates." />
+              <ToggleBox name="oceanExceptionOnlyReview" defaultChecked={shell.automationSettings.exceptionOnlyReview} title="Exception-only review" description="Default queue shows high-confidence candidates and exceptions only." />
+              <ToggleBox name="oceanAutoPostEnabled" defaultChecked={shell.automationSettings.autoPostEnabled} title="Allow autopost" description="Only eligible candidates above the autopost threshold can publish automatically." />
+              <ToggleBox name="oceanTrustedAgentOnlyAutoPost" defaultChecked={shell.automationSettings.trustedAgentOnlyAutoPost} title="Trusted agents only" description="Require a matched agent before any automatic publishing." />
+              <ToggleBox name="oceanRequireValidityEndDate" defaultChecked={shell.automationSettings.requireValidityEndDate} title="Require validity end" description="Prevents open-ended rate offers from autoposting." />
+            </div>
+          </div>
           <button className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
             Save pricing mailbox settings
           </button>
@@ -110,23 +171,37 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
         <input name="receivedTo" type="date" defaultValue={filters.receivedTo} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />
         <label className="flex items-center gap-2 text-sm text-mutedForeground"><input name="detectedOnly" value="true" type="checkbox" defaultChecked={filters.detectedOnly === "true"} /> Detected only</label>
         <button className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primaryForeground md:col-span-1">Apply filters</button>
+        <a className="rounded-md border border-border px-3 py-2 text-center text-sm font-semibold text-foreground hover:bg-muted" href="/ocean-freight-pricing/review">Review queue</a>
       </form>
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <h2 className="text-lg font-semibold text-foreground">Source emails</h2>
         <div className="mt-5 overflow-x-auto">
-          <table className="min-w-[1200px] divide-y divide-border text-sm">
+          <table className="min-w-[1500px] divide-y divide-border text-sm">
             <thead className="bg-muted/50 text-left text-xs font-semibold uppercase tracking-wide text-mutedForeground">
-              <tr><th className="px-3 py-3">Received</th><th className="px-3 py-3">Mailbox</th><th className="px-3 py-3">Sender</th><th className="px-3 py-3">Subject</th><th className="px-3 py-3">Detected</th><th className="px-3 py-3">Attachments</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Preview</th><th className="px-3 py-3">Processed</th><th className="px-3 py-3">Link</th></tr>
+              <tr><th className="px-3 py-3">Received</th><th className="px-3 py-3">Mailbox</th><th className="px-3 py-3">Sender</th><th className="px-3 py-3">Subject</th><th className="px-3 py-3">Agent rate?</th><th className="px-3 py-3">Review</th><th className="px-3 py-3">Attachments</th><th className="px-3 py-3">Reason</th><th className="px-3 py-3">Preview</th><th className="px-3 py-3">Processed</th><th className="px-3 py-3">Link</th><th className="px-3 py-3">Actions</th></tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {shell.sources.length === 0 ? <tr><td className="px-3 py-8 text-center text-mutedForeground" colSpan={10}>No source emails match these filters.</td></tr> : shell.sources.map((source) => (
+              {shell.sources.length === 0 ? <tr><td className="px-3 py-8 text-center text-mutedForeground" colSpan={12}>No source emails match these filters.</td></tr> : shell.sources.map((source) => (
                 <tr key={source.id} className="align-top hover:bg-muted/30">
                   <td className="whitespace-nowrap px-3 py-3 text-mutedForeground">{formatDate(source.receivedAt)}</td>
                   <td className="px-3 py-3 text-mutedForeground">{source.mailboxAddress}</td>
                   <td className="px-3 py-3"><div className="font-medium text-foreground">{source.fromName || source.fromAddress || "Unknown"}</div>{source.fromAddress ? <div className="text-xs text-mutedForeground">{source.fromAddress}</div> : null}</td>
                   <td className="max-w-[260px] px-3 py-3 text-foreground">{source.subject}</td>
-                  <td className="px-3 py-3 font-medium">{source.rateDetected ? "Yes" : "No"}</td>
+                  <td className="px-3 py-3 font-medium">
+                    {source.rateDetected ? (
+                      <span className="rounded-full border border-green-200 bg-green-50 px-2 py-1 text-xs font-semibold text-green-700">Likely inbound</span>
+                    ) : isSentFromConfiguredMailbox(source) ? (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">Outbound/RFQ</span>
+                    ) : (
+                      <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs font-semibold text-mutedForeground">No</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-mutedForeground">
+                    {source.candidates[0] ? (
+                      <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs font-semibold text-foreground">{source.candidates[0].status}</span>
+                    ) : "Not queued"}
+                  </td>
                   <td className="max-w-[300px] px-3 py-3 text-mutedForeground">
                     {source.attachments.length === 0 ? "None" : (
                       <details>
@@ -147,6 +222,30 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
                   <td className="max-w-[320px] px-3 py-3 text-mutedForeground">{source.bodyPreview || source.normalizedBodyText?.slice(0, 220) || "No preview"}</td>
                   <td className="whitespace-nowrap px-3 py-3 text-mutedForeground">{formatDate(source.processedAt)}</td>
                   <td className="px-3 py-3">{source.webLink ? <a href={source.webLink} target="_blank" rel="noreferrer" className="text-primary hover:underline">Open</a> : "—"}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex min-w-[160px] flex-col gap-2">
+                      {isSentFromConfiguredMailbox(source) ? (
+                        <span className="text-xs text-mutedForeground">Sent from pricing mailbox</span>
+                      ) : source.candidates[0] ? (
+                        <a href="/ocean-freight-pricing/review" className="text-sm font-semibold text-primary hover:underline">Open review</a>
+                      ) : (
+                        <form action={createOceanFreightRateCandidateFromSourceAction}>
+                          <input type="hidden" name="sourceEmailId" value={source.id} />
+                          <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground">
+                            Send to review
+                          </button>
+                        </form>
+                      )}
+                      {source.rateDetected ? (
+                        <form action={markOceanFreightSourceNotAgentRateAction}>
+                          <input type="hidden" name="sourceEmailId" value={source.id} />
+                          <button className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">
+                            Not agent rate
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -154,5 +253,27 @@ export default async function OceanFreightSourcesPage({ searchParams }: { search
         </div>
       </section>
     </div>
+  );
+}
+
+function ToggleBox({
+  name,
+  defaultChecked,
+  title,
+  description
+}: {
+  name: string;
+  defaultChecked: boolean;
+  title: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-start gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm">
+      <input name={name} value="true" type="checkbox" defaultChecked={defaultChecked} className="mt-1" />
+      <span>
+        <span className="block font-semibold text-foreground">{title}</span>
+        <span className="mt-1 block leading-5 text-mutedForeground">{description}</span>
+      </span>
+    </label>
   );
 }

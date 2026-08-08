@@ -6,6 +6,11 @@ import {
   parseMicrosoftGraphSettings,
   type MicrosoftGraphSettings
 } from "@/server/integrations/microsoft-graph";
+import {
+  buildOceanFreightAutomationConfig,
+  DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS,
+  type OceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 
 export const OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME = "Microsoft 365 Ocean Freight Pricing";
 
@@ -26,8 +31,10 @@ export function buildOceanFreightMicrosoftGraphConfig(input: {
   mailLookbackDays: number;
   maxMailMessagesPerMailbox: number;
   mailSyncEnabled: boolean;
+  automationSettings?: OceanFreightAutomationSettings;
 }) {
-  return buildMicrosoftGraphConfig({
+  return {
+    ...buildMicrosoftGraphConfig({
     scopes: DEFAULT_MICROSOFT_GRAPH_SCOPES,
     adminMailboxTargets: input.adminMailboxTargets,
     mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
@@ -36,5 +43,7 @@ export function buildOceanFreightMicrosoftGraphConfig(input: {
     mailSyncEnabled: input.mailSyncEnabled,
     fileSyncEnabled: false,
     draftingEnabled: false
-  });
+    }),
+    ...buildOceanFreightAutomationConfig(input.automationSettings ?? DEFAULT_OCEAN_FREIGHT_AUTOMATION_SETTINGS)
+  };
 }
