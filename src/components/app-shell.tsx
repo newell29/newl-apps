@@ -13,6 +13,7 @@ type NavEntry = {
   label: string;
   exact?: boolean;
   moduleKey?: ModuleKey;
+  requiredRoles?: PlatformRole[];
   children?: never;
 };
 
@@ -169,6 +170,37 @@ const navEntries: NavNode[] = [
       { id: "credit-settings", href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
     ]
   },
+  {
+    id: "customer-intelligence",
+    label: "Customer Intelligence",
+    moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey,
+    children: [
+      {
+        id: "ci-company-profiles",
+        href: "/customer-intelligence",
+        label: "Company Profiles",
+        exact: true,
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      },
+      {
+        id: "ci-identity-review",
+        href: "/customer-intelligence/review",
+        label: "Identity Review",
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      },
+      {
+        id: "ci-reporting",
+        href: "/customer-intelligence/reporting",
+        label: "Reporting",
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey,
+        // Matches requireReadAccess in customer-intelligence/permissions.ts:
+        // the reporting pages are leadership-only, so the navigation entry must
+        // never be shown to READ_ONLY or other roles that receive every enabled
+        // module from the role policy but cannot actually open the route.
+        requiredRoles: ["ADMIN", "MANAGER", "FINANCE"] as PlatformRole[]
+      }
+    ]
+  },
   { id: "settings", href: "/settings", label: "Settings" }
 ];
 
@@ -199,8 +231,8 @@ export function AppShell({
   const displayName = userName?.trim() || userEmail || "Signed in";
   const [expandedNavIds, setExpandedNavIds] = useState<Record<string, boolean>>({});
   const visibleNavEntries = useMemo(
-    () => filterVisibleNavEntries(navEntries, enabledModuleKeys),
-    [enabledModuleKeys]
+    () => filterVisibleNavEntries(navEntries, role, enabledModuleKeys),
+    [role, enabledModuleKeys]
   );
 
   useEffect(() => {
@@ -344,12 +376,16 @@ function NavTree({
   );
 }
 
-function filterVisibleNavEntries(entries: NavNode[], enabledModuleKeys?: ModuleKey[]): NavNode[] {
+function filterVisibleNavEntries(
+  entries: NavNode[],
+  role: PlatformRole | undefined,
+  enabledModuleKeys?: ModuleKey[]
+): NavNode[] {
   const visibleEntries: NavNode[] = [];
 
   for (const entry of entries) {
     if (isNavGroup(entry)) {
-      const children = filterVisibleNavEntries(entry.children, enabledModuleKeys);
+      const children = filterVisibleNavEntries(entry.children, role, enabledModuleKeys);
       if (children.length > 0) {
         visibleEntries.push({ ...entry, children });
       }
@@ -357,6 +393,10 @@ function filterVisibleNavEntries(entries: NavNode[], enabledModuleKeys?: ModuleK
     }
 
     if (entry.moduleKey && !enabledModuleKeys?.includes(entry.moduleKey)) {
+      continue;
+    }
+
+    if (entry.requiredRoles && (!role || !entry.requiredRoles.includes(role))) {
       continue;
     }
 

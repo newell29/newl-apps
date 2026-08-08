@@ -1,4 +1,5 @@
 import {
+  ContactStatus,
   CustomerIdentityMatchKind,
   CustomerIdentityMatchStatus,
   CustomerIntelligenceServiceLine,
@@ -37,10 +38,19 @@ import {
   requireMatchApproval,
   requireWrite
 } from "@/modules/customer-intelligence/permissions";
+import { assertLiveSyncEnabled } from "@/modules/customer-intelligence/enablement";
 import {
   ingestQuickBooksCustomers,
   type QuickBooksCustomerIngestionReport
 } from "@/modules/customer-intelligence/quickbooks-ingestion";
+import {
+  materializeCustomerFinancials,
+  type FinancialMaterializationReport
+} from "@/modules/customer-intelligence/financial-materialization";
+import {
+  reconcileQuickBooksIdentityMatches,
+  type IdentityReconciliationReport
+} from "@/modules/customer-intelligence/reconciliation";
 
 function toInputJson(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined
@@ -56,6 +66,16 @@ function isUniqueConstraintError(error: unknown): boolean {
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === "P2002"
   );
+}
+
+/** Existing canonical Company key format used by seed and ingestion paths. */
+function normalizeCanonicalCompanyName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export async function registerOperatingCompany(
@@ -266,6 +286,13 @@ function readCredentialRealmId(value: Prisma.JsonValue | null | undefined): stri
  * - reviewed identity decisions are never overwritten;
  * - `dryRun` performs zero database writes and returns the would-be report.
  *
+ * Live sync (CP-PHASE-02B-8): a live run for an explicitly scoped operating
+ * company refuses to run without an enabled, approval-carrying enablement
+ * record for that operating company (`assertLiveSyncEnabled`, owner decision
+ * CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`). Unscoped live runs skip unenabled
+ * operating companies with an audited `SKIPPED_NOT_ENABLED` section; dry-run
+ * verification stays available as the owner's zero-write preview tool.
+ *
  * Operating companies without an associated tenant-scoped, ACTIVE QuickBooks
  * credential are skipped with an audited warning. Every run writes an
  * `AuditLog` entry unless `dryRun` is true.
@@ -275,7 +302,74 @@ export async function runQuickBooksCustomerIngestion(
   input: { operatingCompanyId?: string; dryRun?: boolean } = {}
 ): Promise<QuickBooksCustomerIngestionReport> {
   await requireIngestionAdmin(ctx);
+  // Fail closed at the entry point for a live run explicitly scoped to one
+  // operating company before any engine work; the engine enforces the same
+  // gate per operating company for unscoped runs. The tenant-scoped existence
+  // check runs first so a foreign or missing company id still fails with the
+  // precise cross-tenant error before any gate evaluation.
+  if (input.dryRun !== true && input.operatingCompanyId) {
+    const scopedCompany = await prisma.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: input.operatingCompanyId })
+    });
+    if (!scopedCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+    await assertLiveSyncEnabled(ctx, input.operatingCompanyId);
+  }
   return ingestQuickBooksCustomers(ctx, input);
+}
+
+/**
+ * Leadership-triggered deterministic identity reconciliation (CP-PHASE-02B-3).
+ * ADMIN and FINANCE (requireMatchApproval) re-score the tenant's PROPOSED
+ * QUICKBOOKS_ACCOUNT matches against canonical companies using only the
+ * approved identity.ts scoring rules and route ambiguity to the leadership
+ * review queue. The core enforces the same permission guards defensively.
+ */
+export async function runIdentityReconciliation(
+  ctx: AuthenticatedContext,
+  input: { operatingCompanyId?: string } = {}
+): Promise<IdentityReconciliationReport> {
+  await requireMatchApproval(ctx);
+  return reconcileQuickBooksIdentityMatches(ctx, input);
+}
+
+/**
+ * ADMIN-triggered financial materialization (CP-PHASE-02B-5). Materializes the
+ * owner-approved GET-only QuickBooks report sources (PNL_DETAIL_PLUS_AGING)
+ * into immutable CustomerRevenueLine rows, applies the existing deterministic
+ * service-line mapping and Bank of Canada FX, aggregates CustomerMonthlyFinancial
+ * under the existing monthly unique key, and refreshes lifecycle through the
+ * existing guarded refreshRelationshipLifecycle action. Dry-run performs zero
+ * database writes; no QuickBooks posting is performed.
+ *
+ * Live sync (CP-PHASE-02B-8): a live run for an explicitly scoped operating
+ * company refuses to run without an enabled, approval-carrying enablement
+ * record for that operating company (`assertLiveSyncEnabled`, owner decision
+ * CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`). Unscoped live runs skip unenabled
+ * operating companies with an audited `SKIPPED_NOT_ENABLED` section; dry-run
+ * verification stays available as the owner's zero-write preview tool.
+ */
+export async function runFinancialMaterialization(
+  ctx: AuthenticatedContext,
+  input: { operatingCompanyId?: string; dryRun?: boolean } = {}
+): Promise<FinancialMaterializationReport> {
+  await requireIngestionAdmin(ctx);
+  // Fail closed at the entry point for a live run explicitly scoped to one
+  // operating company before any engine work; the engine enforces the same
+  // gate per operating company for unscoped runs. The tenant-scoped existence
+  // check runs first so a foreign or missing company id still fails with the
+  // precise cross-tenant error before any gate evaluation.
+  if (input.dryRun !== true && input.operatingCompanyId) {
+    const scopedCompany = await prisma.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: input.operatingCompanyId })
+    });
+    if (!scopedCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+    await assertLiveSyncEnabled(ctx, input.operatingCompanyId);
+  }
+  return materializeCustomerFinancials(ctx, input);
 }
 
 export async function upsertCompanyOperatingRelationship(
@@ -366,12 +460,15 @@ export async function upsertCompanyOperatingRelationship(
  */
 export async function refreshRelationshipLifecycle(
   ctx: AuthenticatedContext,
-  relationshipId: string
+  relationshipId: string,
+  options: { client?: Prisma.TransactionClient } = {}
 ) {
   await requireMatchApproval(ctx);
   await requireMutationAccess(ctx);
 
-  const relationship = await prisma.companyOperatingRelationship.findFirst({
+  const client = options.client ?? prisma;
+
+  const relationship = await client.companyOperatingRelationship.findFirst({
     where: tenantWhere(ctx, { id: relationshipId })
   });
   if (!relationship) {
@@ -379,24 +476,25 @@ export async function refreshRelationshipLifecycle(
   }
 
   const [recentRevenue, openArEvidence, sourceAccounts, approvedMapping] = await Promise.all([
-    prisma.customerRevenueLine.count({
+    client.customerRevenueLine.count({
       where: tenantWhere(ctx, {
         companyId: relationship.companyId,
         operatingCompanyId: relationship.operatingCompanyId,
+        transactionType: { in: ["Invoice", "Credit Memo"] },
         transactionDate: { gte: trailingMonthsAgo(12) }
       })
     }),
-    prisma.customerMonthlyFinancial.count({
+    client.customerMonthlyFinancial.count({
       where: tenantWhere(ctx, {
         companyOperatingRelationshipId: relationshipId,
         nativeOpenAr: { gt: 0 },
         monthKey: { gte: trailingMonthKey(12) }
       })
     }),
-    prisma.customerSourceAccount.findMany({
+    client.customerSourceAccount.findMany({
       where: tenantWhere(ctx, { companyOperatingRelationshipId: relationshipId })
     }),
-    prisma.customerIdentityMatch.count({
+    client.customerIdentityMatch.count({
       where: tenantWhere(ctx, {
         kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
         status: CustomerIdentityMatchStatus.APPROVED,
@@ -419,7 +517,7 @@ export async function refreshRelationshipLifecycle(
   const lifecycle = computeRelationshipLifecycle(activity);
   const before = relationship;
 
-  const updated = await prisma.companyOperatingRelationship.update({
+  const updated = await client.companyOperatingRelationship.update({
     where: { tenantId_id: { tenantId: ctx.tenantId, id: relationshipId } },
     data: { lifecycle }
   });
@@ -430,7 +528,8 @@ export async function refreshRelationshipLifecycle(
     entityType: "CompanyOperatingRelationship",
     entityId: relationshipId,
     before,
-    after: updated
+    after: updated,
+    client
   });
 
   return updated;
@@ -736,84 +835,393 @@ export async function proposeIdentityMatch(
   return record;
 }
 
+export type IdentityMatchReviewDecision = "APPROVE" | "REJECT" | "DEFER";
+
+export type IdentityMatchReviewInput = {
+  /**
+   * Canonical target to persist with the review. For APPROVE this is required
+   * (falls back to the match's stored companyId) and must exist in the
+   * authenticated tenant. For REJECT a provided target is recorded as the
+   * considered-but-rejected company after the same tenant validation.
+   */
+  companyId?: string;
+  /**
+   * Operating company for a QUICKBOOKS_ACCOUNT approval. Falls back to the
+   * match's stored operatingCompanyId; a provided value must belong to the
+   * tenant.
+   */
+  operatingCompanyId?: string;
+  /** Human review note recorded in the match evidence. */
+  note?: string;
+};
+
+/**
+ * Manual leadership review of an identity match. Enforces the same shared
+ * approval invariants as automatic approval (`identity-approval.ts`):
+ *
+ * - APPROVE requires a non-null, tenant-valid canonical companyId; a
+ *   QUICKBOOKS_ACCOUNT approval requires a tenant-valid operatingCompanyId;
+ *   one source can never be approved to two canonical companies. A target
+ *   supplied here is persisted with the approval.
+ * - REJECT records the reviewed decision (an optional tenant-valid target may
+ *   be persisted as the considered-but-rejected company).
+ * - DEFER returns the match to PROPOSED (reviewer identity/timestamp cleared)
+ *   so it stays in the leadership review queue for a later decision.
+ *
+ * Every approval, rejection, and deferral writes an AuditLog entry.
+ */
 export async function reviewIdentityMatch(
   ctx: AuthenticatedContext,
   matchId: string,
-  decision: "APPROVE" | "REJECT",
-  note?: string
+  decision: IdentityMatchReviewDecision,
+  input: IdentityMatchReviewInput = {}
 ) {
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
-  const existing = await prisma.customerIdentityMatch.findFirst({
+  // Read only the source coordinates needed to acquire the same lock as
+  // ingestion/reconciliation. The authoritative row is re-read after locking.
+  const lockCoordinates = await prisma.customerIdentityMatch.findFirst({
     where: tenantWhere(ctx, { id: matchId })
   });
-  if (!existing) {
+  if (!lockCoordinates) {
     throw new Error("Identity match does not exist in this tenant.");
   }
-
-  // Manual approval enforces the same approval-invariant validator as
-  // automatic approval: a canonical company is required, a QUICKBOOKS_ACCOUNT
-  // approval requires an operating company, and one source cannot be approved
-  // to two canonical companies.
-  if (decision === "APPROVE") {
-    await assertCanApproveIdentityMatch(ctx, {
-      kind: existing.kind,
-      companyId: existing.companyId,
-      operatingCompanyId: existing.operatingCompanyId,
-      candidateCompanyId: existing.candidateCompanyId
-    });
-    const companyId = existing.companyId;
-    if (!companyId) {
-      throw new Error("Cannot approve an identity match without a canonical company.");
-    }
-    const conflicting = await findApprovedConflict(ctx, {
-      kind: existing.kind,
-      sourceRecordKey: existing.sourceRecordKey,
-      companyId,
-      selfId: existing.id
-    });
-    if (conflicting) {
-      throw new Error("Source record is already approved to another canonical company.");
-    }
+  if (
+    input.operatingCompanyId &&
+    lockCoordinates.operatingCompanyId &&
+    input.operatingCompanyId !== lockCoordinates.operatingCompanyId
+  ) {
+    throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
   }
 
-  const status =
-    decision === "APPROVE"
-      ? CustomerIdentityMatchStatus.APPROVED
-      : CustomerIdentityMatchStatus.REJECTED;
-
-  const evidenceBase =
-    existing.evidence && typeof existing.evidence === "object" && !Array.isArray(existing.evidence)
-      ? { ...(existing.evidence as Prisma.JsonObject) }
-      : {};
-  const evidence = note
-    ? ({ ...evidenceBase, reviewNote: note } as Prisma.InputJsonValue)
-    : toInputJson(existing.evidence);
-
-  const updated = await prisma.customerIdentityMatch.update({
-    where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
-    data: {
-      status,
-      reviewerUserId: ctx.userId,
-      reviewedAt: new Date(),
-      evidence
+  return prisma.$transaction(async (transaction) => {
+    if (
+      lockCoordinates.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT &&
+      lockCoordinates.operatingCompanyId &&
+      lockCoordinates.sourceRecordKey
+    ) {
+      const lockKey = [
+        "customer-intelligence.quickbooks-proposal",
+        ctx.tenantId,
+        lockCoordinates.operatingCompanyId,
+        lockCoordinates.sourceRecordKey
+      ].join(":");
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+      );
+    } else {
+      const lockKey = [
+        "customer-intelligence.identity-match",
+        ctx.tenantId,
+        matchId
+      ].join(":");
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+      );
     }
-  });
 
-  await auditEntry({
-    actor: ctx,
-    action:
-      decision === "APPROVE"
-        ? "customer-intelligence.identity-match.approved"
-        : "customer-intelligence.identity-match.rejected",
-    entityType: "CustomerIdentityMatch",
-    entityId: matchId,
-    before: existing,
-    after: updated
-  });
+    const existing = await transaction.customerIdentityMatch.findFirst({
+      where: tenantWhere(ctx, { id: matchId })
+    });
+    if (!existing) {
+      throw new Error("Identity match does not exist in this tenant.");
+    }
+    if (
+      input.operatingCompanyId &&
+      existing.operatingCompanyId &&
+      input.operatingCompanyId !== existing.operatingCompanyId
+    ) {
+      throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
+    }
 
-  return updated;
+    const evidenceBase =
+      existing.evidence &&
+      typeof existing.evidence === "object" &&
+      !Array.isArray(existing.evidence)
+        ? { ...(existing.evidence as Prisma.JsonObject) }
+        : {};
+    const evidence = input.note
+      ? ({ ...evidenceBase, reviewNote: input.note } as Prisma.InputJsonValue)
+      : toInputJson(existing.evidence);
+
+    let updated;
+    let action: string;
+    if (decision === "APPROVE") {
+      const companyId = input.companyId ?? existing.companyId;
+      if (!companyId) {
+        throw new Error("Cannot approve an identity match without a canonical company.");
+      }
+      const operatingCompanyId = input.operatingCompanyId ?? existing.operatingCompanyId;
+      await assertCanApproveIdentityMatch(
+        ctx,
+        {
+          kind: existing.kind,
+          companyId,
+          operatingCompanyId,
+          candidateCompanyId: existing.candidateCompanyId
+        },
+        transaction
+      );
+      const conflicting = await findApprovedConflict(
+        ctx,
+        {
+          kind: existing.kind,
+          sourceRecordKey: existing.sourceRecordKey,
+          companyId,
+          selfId: existing.id
+        },
+        transaction
+      );
+      if (conflicting) {
+        throw new Error("Source record is already approved to another canonical company.");
+      }
+      updated = await transaction.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+        data: {
+          status: CustomerIdentityMatchStatus.APPROVED,
+          companyId,
+          operatingCompanyId,
+          reviewerUserId: ctx.userId,
+          reviewedAt: new Date(),
+          evidence
+        }
+      });
+      action = "customer-intelligence.identity-match.approved";
+    } else if (decision === "REJECT") {
+      const data: Prisma.CustomerIdentityMatchUncheckedUpdateInput = {
+        status: CustomerIdentityMatchStatus.REJECTED,
+        reviewerUserId: ctx.userId,
+        reviewedAt: new Date(),
+        evidence
+      };
+      if (input.companyId !== undefined) {
+        await validateReferencedCompanies(
+          ctx,
+          {
+            companyId: input.companyId,
+            operatingCompanyId: input.operatingCompanyId ?? undefined,
+            candidateCompanyId: existing.candidateCompanyId
+          },
+          transaction
+        );
+        data.companyId = input.companyId;
+      }
+      updated = await transaction.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+        data
+      });
+      action = "customer-intelligence.identity-match.rejected";
+    } else {
+      updated = await transaction.customerIdentityMatch.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+        data: {
+          status: CustomerIdentityMatchStatus.PROPOSED,
+          reviewerUserId: null,
+          reviewedAt: null,
+          evidence
+        }
+      });
+      action = "customer-intelligence.identity-match.deferred";
+    }
+
+    await auditEntry({
+      actor: ctx,
+      action,
+      entityType: "CustomerIdentityMatch",
+      entityId: matchId,
+      before: existing,
+      after: updated,
+      client: transaction
+    });
+    return updated;
+  });
+}
+
+export type ApproveIdentityMatchWithNewCompanyInput = {
+  /** Explicit reviewer-entered canonical name; source evidence is never used as a fallback. */
+  companyName: string;
+  domain?: string;
+  operatingCompanyId?: string;
+  note?: string;
+  /** Deliberate human confirmation required by CP-02B-3-Q1. */
+  confirmation: "CREATE_AND_APPROVE";
+};
+
+/**
+ * Narrow MANUAL_ONLY path for an ADMIN/FINANCE reviewer to create a canonical
+ * Company and approve an unmatched QuickBooks identity in one transaction.
+ * Nothing is derived from the QuickBooks name: the canonical name is explicit
+ * reviewer input, and the confirmation token prevents this path from being
+ * called as an automatic fallback.
+ */
+export async function approveIdentityMatchWithNewCompany(
+  ctx: AuthenticatedContext,
+  matchId: string,
+  input: ApproveIdentityMatchWithNewCompanyInput
+) {
+  await requireMatchApproval(ctx);
+  await requireWrite(ctx);
+
+  if (input.confirmation !== "CREATE_AND_APPROVE") {
+    throw new Error("Explicit confirmation is required to create and approve a canonical company.");
+  }
+  const companyName = input.companyName.trim();
+  if (!companyName || companyName.length > 200) {
+    throw new Error("Canonical company name is required and must be 200 characters or fewer.");
+  }
+  const normalizedName = normalizeCanonicalCompanyName(companyName);
+  if (!normalizedName) {
+    throw new Error("Canonical company name must contain letters or numbers.");
+  }
+  const domain = input.domain?.trim().toLowerCase() || null;
+  if (domain && !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
+    throw new Error("Canonical company domain must be a valid hostname.");
+  }
+
+  const lockCoordinates = await prisma.customerIdentityMatch.findFirst({
+    where: tenantWhere(ctx, { id: matchId })
+  });
+  if (!lockCoordinates) {
+    throw new Error("Identity match does not exist in this tenant.");
+  }
+  if (
+    input.operatingCompanyId &&
+    lockCoordinates.operatingCompanyId &&
+    input.operatingCompanyId !== lockCoordinates.operatingCompanyId
+  ) {
+    throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
+  }
+
+  return prisma.$transaction(async (transaction) => {
+    const operatingCompanyId = input.operatingCompanyId ?? lockCoordinates.operatingCompanyId;
+    const lockKey =
+      lockCoordinates.kind === CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT &&
+      lockCoordinates.operatingCompanyId &&
+      lockCoordinates.sourceRecordKey
+        ? [
+            "customer-intelligence.quickbooks-proposal",
+            ctx.tenantId,
+            lockCoordinates.operatingCompanyId,
+            lockCoordinates.sourceRecordKey
+          ].join(":")
+        : ["customer-intelligence.identity-match", ctx.tenantId, matchId].join(":");
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+    );
+
+    const existing = await transaction.customerIdentityMatch.findFirst({
+      where: tenantWhere(ctx, { id: matchId })
+    });
+    if (!existing) {
+      throw new Error("Identity match does not exist in this tenant.");
+    }
+    if (existing.status !== CustomerIdentityMatchStatus.PROPOSED) {
+      throw new Error("Only a PROPOSED identity match can create a new canonical company.");
+    }
+    if (existing.kind !== CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT) {
+      throw new Error("This company-creation approval is limited to QuickBooks identity review.");
+    }
+    if (
+      existing.operatingCompanyId &&
+      existing.operatingCompanyId !== operatingCompanyId
+    ) {
+      throw new Error("A QuickBooks identity match cannot be moved to another operating company.");
+    }
+    if (!operatingCompanyId) {
+      throw new Error("operatingCompanyId is required for QUICKBOOKS_ACCOUNT identity matches.");
+    }
+    const operatingCompany = await transaction.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: operatingCompanyId })
+    });
+    if (!operatingCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+    const duplicate = await transaction.company.findFirst({
+      where: tenantWhere(ctx, { normalizedName })
+    });
+    if (duplicate) {
+      throw new Error("A canonical company with this normalized name already exists; select it instead.");
+    }
+    const conflict = existing.sourceRecordKey
+      ? await transaction.customerIdentityMatch.findFirst({
+          where: tenantWhere(ctx, {
+            kind: existing.kind,
+            sourceRecordKey: existing.sourceRecordKey,
+            status: CustomerIdentityMatchStatus.APPROVED,
+            id: { not: existing.id }
+          })
+        })
+      : null;
+    if (conflict) {
+      throw new Error("Source record is already approved to another canonical company.");
+    }
+
+    const company = await transaction.company.create({
+      data: {
+        tenantId: ctx.tenantId,
+        name: companyName,
+        normalizedName,
+        domain,
+        source: "CUSTOMER_INTELLIGENCE_IDENTITY_REVIEW"
+      }
+    });
+    const relationship = await transaction.companyOperatingRelationship.create({
+      data: {
+        tenantId: ctx.tenantId,
+        companyId: company.id,
+        operatingCompanyId,
+        lifecycle: CustomerLifecycle.PROSPECT,
+        status: "ACTIVE"
+      }
+    });
+    const evidenceBase =
+      existing.evidence && typeof existing.evidence === "object" && !Array.isArray(existing.evidence)
+        ? { ...(existing.evidence as Prisma.JsonObject) }
+        : {};
+    const evidence = input.note?.trim()
+      ? ({ ...evidenceBase, reviewNote: input.note.trim().slice(0, 500) } as Prisma.InputJsonValue)
+      : toInputJson(existing.evidence);
+    const updated = await transaction.customerIdentityMatch.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: matchId } },
+      data: {
+        companyId: company.id,
+        candidateCompanyId: company.id,
+        operatingCompanyId,
+        status: CustomerIdentityMatchStatus.APPROVED,
+        reviewerUserId: ctx.userId,
+        reviewedAt: new Date(),
+        evidence
+      }
+    });
+
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.company.created-from-identity-review",
+      entityType: "Company",
+      entityId: company.id,
+      after: { id: company.id, name: company.name, domain: company.domain },
+      client: transaction
+    });
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.relationship.created",
+      entityType: "CompanyOperatingRelationship",
+      entityId: relationship.id,
+      after: relationship,
+      client: transaction
+    });
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.identity-match.approved",
+      entityType: "CustomerIdentityMatch",
+      entityId: matchId,
+      before: existing,
+      after: updated,
+      client: transaction
+    });
+    return { company, relationship, match: updated };
+  });
 }
 
 export async function upsertServiceMappingRule(
@@ -979,25 +1387,28 @@ export async function recordRevenueLine(
     cadAmount?: number;
     fxSource?: string;
     syncMetadata?: Prisma.InputJsonValue;
-  }
+  },
+  options: { client?: Prisma.TransactionClient } = {}
 ) {
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
-  const company = await prisma.company.findFirst({
+  const client = options.client ?? prisma;
+
+  const company = await client.company.findFirst({
     where: tenantWhere(ctx, { id: input.companyId })
   });
   if (!company) {
     throw new Error("Company does not exist in this tenant.");
   }
-  const operatingCompany = await prisma.operatingCompany.findFirst({
+  const operatingCompany = await client.operatingCompany.findFirst({
     where: tenantWhere(ctx, { id: input.operatingCompanyId })
   });
   if (!operatingCompany) {
     throw new Error("Operating company does not exist in this tenant.");
   }
   if (input.sourceAccountId) {
-    const account = await prisma.customerSourceAccount.findFirst({
+    const account = await client.customerSourceAccount.findFirst({
       where: tenantWhere(ctx, {
         id: input.sourceAccountId,
         companyId: input.companyId,
@@ -1009,7 +1420,7 @@ export async function recordRevenueLine(
     }
   }
 
-  const existing = await prisma.customerRevenueLine.findFirst({
+  const existing = await client.customerRevenueLine.findFirst({
     where: tenantWhere(ctx, { sourceKey: input.sourceKey })
   });
 
@@ -1017,7 +1428,7 @@ export async function recordRevenueLine(
     return existing;
   }
 
-  const record = await prisma.customerRevenueLine.create({
+  const record = await client.customerRevenueLine.create({
     data: {
       tenantId: ctx.tenantId,
       realmId: input.realmId,
@@ -1048,7 +1459,15 @@ export async function recordRevenueLine(
     action: "customer-intelligence.revenue-line.created",
     entityType: "CustomerRevenueLine",
     entityId: record.id,
-    after: record
+    // Audits carry classifications and counts only: never customer or
+    // transaction identifiers, sourceKeys, amounts, or provider content.
+    after: {
+      serviceLine: record.serviceLine,
+      nativeCurrency: record.nativeCurrency,
+      homeCurrency: record.homeCurrency,
+      fxSource: record.fxSource ?? undefined
+    },
+    client
   });
 
   return record;
@@ -1070,14 +1489,18 @@ export async function upsertMonthlyFinancial(
     nativeGrossProfit?: number;
     cadRevenue?: number;
     nativeOpenAr?: number;
-    cadOpenAr?: number;
+    cadOpenAr?: number | null;
     reconciliationStatus?: "RECONCILED" | "INCOMPLETE" | "UNRECONCILED";
-  }
+    preserveRevenue?: boolean;
+  },
+  options: { client?: Prisma.TransactionClient } = {}
 ) {
   await requireMatchApproval(ctx);
   await requireWrite(ctx);
 
-  const relationship = await prisma.companyOperatingRelationship.findFirst({
+  const client = options.client ?? prisma;
+
+  const relationship = await client.companyOperatingRelationship.findFirst({
     where: tenantWhere(ctx, {
       id: input.companyOperatingRelationshipId,
       companyId: input.companyId,
@@ -1088,7 +1511,7 @@ export async function upsertMonthlyFinancial(
     throw new Error("Relationship does not exist in this tenant for the given company.");
   }
   if (input.sourceAccountId) {
-    const account = await prisma.customerSourceAccount.findFirst({
+    const account = await client.customerSourceAccount.findFirst({
       where: tenantWhere(ctx, {
         id: input.sourceAccountId,
         companyOperatingRelationshipId: input.companyOperatingRelationshipId
@@ -1101,7 +1524,7 @@ export async function upsertMonthlyFinancial(
 
   const sourceAccountKey = input.sourceAccountKey ?? input.sourceAccountId ?? "ALL";
 
-  const existing = await prisma.customerMonthlyFinancial.findFirst({
+  const existing = await client.customerMonthlyFinancial.findFirst({
     where: tenantWhere(ctx, {
       companyOperatingRelationshipId: input.companyOperatingRelationshipId,
       sourceAccountKey,
@@ -1111,7 +1534,7 @@ export async function upsertMonthlyFinancial(
     })
   });
 
-  const record = await prisma.customerMonthlyFinancial.upsert({
+  const record = await client.customerMonthlyFinancial.upsert({
     where: {
       tenantId_companyOperatingRelationshipId_sourceAccountKey_serviceLine_currency_monthKey: {
         tenantId: ctx.tenantId,
@@ -1124,12 +1547,20 @@ export async function upsertMonthlyFinancial(
     },
     update: {
       sourceAccountId: input.sourceAccountId ?? existing?.sourceAccountId ?? null,
-      nativeRevenue: input.nativeRevenue,
-      nativeCost: input.nativeCost ?? existing?.nativeCost ?? 0,
-      nativeGrossProfit: input.nativeGrossProfit ?? existing?.nativeGrossProfit ?? 0,
-      cadRevenue: input.cadRevenue ?? existing?.cadRevenue ?? null,
+      nativeRevenue: input.preserveRevenue ? existing?.nativeRevenue ?? input.nativeRevenue : input.nativeRevenue,
+      nativeCost: input.preserveRevenue
+        ? existing?.nativeCost ?? input.nativeCost ?? 0
+        : input.nativeCost ?? existing?.nativeCost ?? 0,
+      nativeGrossProfit: input.preserveRevenue
+        ? existing?.nativeGrossProfit ?? input.nativeGrossProfit ?? 0
+        : input.nativeGrossProfit ?? existing?.nativeGrossProfit ?? 0,
+      cadRevenue: input.preserveRevenue
+        ? existing?.cadRevenue ?? input.cadRevenue ?? null
+        : input.cadRevenue ?? existing?.cadRevenue ?? null,
       nativeOpenAr: input.nativeOpenAr ?? existing?.nativeOpenAr ?? 0,
-      cadOpenAr: input.cadOpenAr ?? existing?.cadOpenAr ?? null,
+      cadOpenAr: Object.prototype.hasOwnProperty.call(input, "cadOpenAr")
+        ? input.cadOpenAr
+        : existing?.cadOpenAr ?? null,
       reconciliationStatus:
         input.reconciliationStatus ?? existing?.reconciliationStatus ?? "UNRECONCILED"
     },
@@ -1154,6 +1585,27 @@ export async function upsertMonthlyFinancial(
   });
 
   return record;
+}
+
+/** Contact-point value types accepted by the normalized ContactPoint writers. */
+type EditableContactPointType = "EMAIL" | "PHONE" | "WEBSITE" | "ADDRESS" | "OTHER";
+
+/**
+ * Deterministic normalization shared by every ContactPoint writer so equivalent
+ * emails and phone numbers deduplicate against one stored value key. Email is
+ * trimmed and lowercased; phone keeps only its digits (a leading country code
+ * "1" is stripped when it produces an 11-digit number); other values are
+ * lowercased. An empty result means the value is not valid for its type.
+ */
+function normalizeContactPointValue(type: EditableContactPointType, rawValue: string): string {
+  switch (type) {
+    case "EMAIL":
+      return normalizeEmail(rawValue);
+    case "PHONE":
+      return normalizePhone(rawValue);
+    default:
+      return rawValue.toLowerCase();
+  }
 }
 
 export async function upsertContactPoint(
@@ -1189,18 +1641,7 @@ export async function upsertContactPoint(
 
   // Store a normalized value (the unique key) so equivalent emails and phone
   // numbers deduplicate deterministically, and keep a human display value.
-  let value: string;
-  switch (input.type) {
-    case "EMAIL":
-      value = normalizeEmail(rawValue);
-      break;
-    case "PHONE":
-      value = normalizePhone(rawValue);
-      break;
-    default:
-      value = rawValue.toLowerCase();
-      break;
-  }
+  const value = normalizeContactPointValue(input.type, rawValue);
   if (!value) {
     throw new Error("Contact point value is not valid for its type.");
   }
@@ -1370,5 +1811,258 @@ export async function upsertContactEvidence(
       reviewStatus: "UNREVIEWED",
       conflictingValue: null
     }
+  });
+}
+
+function deriveContactFullName(firstName: string | null, lastName: string | null): string {
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
+
+/**
+ * CP-PHASE-02B-4: guarded manual correction of a contact's details (name,
+ * title, department, email, phone, and contact status) on the Customer Profile
+ * UI. ADMIN/FINANCE only (requireMatchApproval + requireWrite); the contact and
+ * its company must both exist in the caller's tenant or the update fails closed
+ * before any write. The authoritative contact is locked and loaded inside the
+ * transaction; only submitted fields are written, preventing omitted fields
+ * from overwriting a concurrent correction.
+ *
+ * Email and phone corrections flow through the existing normalized ContactPoint
+ * model: submitted values are normalized for deterministic deduplication, a
+ * primary point records the corrected value, and the replaced point is retained
+ * as prior evidence — never silently overwritten or deleted (design reference
+ * `customer-profile-ui-design.md` lines 64-66). The contact row, the
+ * contact-point corrections, and the AuditLog entry commit in one Prisma
+ * transaction, so a manual correction can never persist unaudited.
+ */
+export async function updateContactDetails(
+  ctx: AuthenticatedContext,
+  input: {
+    contactId: string;
+    companyId: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    title?: string | null;
+    department?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    contactStatus?: ContactStatus;
+  }
+) {
+  await requireMatchApproval(ctx);
+  await requireWrite(ctx);
+
+  const cleanSubmitted = (value: string | null): string | null => {
+    const trimmed = value?.trim() ?? "";
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  return prisma.$transaction(async (transaction) => {
+    // Lock the tenant-owned row before loading decision-critical values. This
+    // makes the snapshot used for name derivation, ContactPoint retention, and
+    // audit evidence authoritative for the remainder of this transaction.
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "Contact" WHERE "tenantId" = ${ctx.tenantId} AND "companyId" = ${input.companyId} AND "id" = ${input.contactId} FOR UPDATE`
+    );
+
+    const contact = await transaction.contact.findFirst({
+      where: tenantWhere(ctx, { id: input.contactId, companyId: input.companyId })
+    });
+    if (!contact) {
+      throw new Error("Contact does not exist in this tenant for the given company.");
+    }
+
+    const firstName =
+      input.firstName === undefined ? contact.firstName : cleanSubmitted(input.firstName);
+    const lastName =
+      input.lastName === undefined ? contact.lastName : cleanSubmitted(input.lastName);
+    const email = input.email === undefined ? contact.email : cleanSubmitted(input.email);
+    const phone = input.phone === undefined ? contact.phone : cleanSubmitted(input.phone);
+
+    const nameWasSubmitted = input.firstName !== undefined || input.lastName !== undefined;
+    const fullName = deriveContactFullName(firstName, lastName);
+    if (nameWasSubmitted && !fullName) {
+      throw new Error("Contact full name is required; clearing both first and last name is not allowed.");
+    }
+
+    const before = {
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      fullName: contact.fullName,
+      title: contact.title,
+      department: contact.department,
+      email: contact.email,
+      phone: contact.phone,
+      contactStatus: contact.contactStatus
+    };
+
+    const updated = await transaction.contact.update({
+      where: { tenantId_id: { tenantId: ctx.tenantId, id: contact.id } },
+      data: {
+        ...(input.firstName !== undefined ? { firstName } : {}),
+        ...(input.lastName !== undefined ? { lastName } : {}),
+        ...(nameWasSubmitted ? { fullName } : {}),
+        ...(input.title !== undefined ? { title: cleanSubmitted(input.title) } : {}),
+        ...(input.department !== undefined
+          ? { department: cleanSubmitted(input.department) }
+          : {}),
+        ...(input.email !== undefined ? { email } : {}),
+        ...(input.phone !== undefined ? { phone } : {}),
+        ...(input.contactStatus !== undefined ? { contactStatus: input.contactStatus } : {})
+      }
+    });
+
+    // Submitted email/phone values are recorded as normalized ContactPoints.
+    // The prior direct value is retained as evidence (never deleted) while the
+    // corrected value becomes the primary point, so a replacement is a
+    // reviewable correction rather than a silent rewrite of accepted facts.
+    if (input.email !== undefined) {
+      await applyContactPointCorrection(
+        transaction,
+        ctx,
+        contact.id,
+        contact.companyId,
+        "EMAIL",
+        contact.email,
+        email,
+        contact.source
+      );
+    }
+    if (input.phone !== undefined) {
+      await applyContactPointCorrection(
+        transaction,
+        ctx,
+        contact.id,
+        contact.companyId,
+        "PHONE",
+        contact.phone,
+        phone,
+        contact.source
+      );
+    }
+
+    await auditEntry({
+      actor: ctx,
+      action: "customer-intelligence.contact.details-updated",
+      entityType: "Contact",
+      entityId: contact.id,
+      before,
+      after: updated,
+      client: transaction
+    });
+
+    return updated;
+  });
+}
+
+/**
+ * Record a corrected email/phone value as a normalized ContactPoint for the
+ * contact. Deterministic deduplication uses the same normalized value key as
+ * `upsertContactPoint`. A prior nonempty direct Contact value is first retained
+ * as a non-primary point when replacement or clearing would otherwise erase
+ * its only representation. A cleared value demotes every prior primary point;
+ * otherwise the corrected point becomes primary and all other primary points
+ * of the same type are demoted. No prior evidence is deleted.
+ */
+async function applyContactPointCorrection(
+  transaction: Prisma.TransactionClient,
+  ctx: AuthenticatedContext,
+  contactId: string,
+  companyId: string,
+  type: "EMAIL" | "PHONE",
+  priorValue: string | null,
+  correctedValue: string | null,
+  priorSource: string
+): Promise<void> {
+  const rawValue = correctedValue?.trim() ?? "";
+  const value = rawValue ? normalizeContactPointValue(type, rawValue) : null;
+  if (rawValue && !value) {
+    throw new Error("Contact point value is not valid for its type.");
+  }
+
+  const rawPriorValue = priorValue?.trim() ?? "";
+  const priorNormalizedValue = rawPriorValue
+    ? normalizeContactPointValue(type, rawPriorValue)
+    : null;
+  if (rawPriorValue && !priorNormalizedValue) {
+    throw new Error("Prior contact point value cannot be normalized and was not replaced.");
+  }
+
+  if (priorNormalizedValue && priorNormalizedValue !== value) {
+    await transaction.contactPoint.upsert({
+      where: {
+        tenantId_contactId_type_value: {
+          tenantId: ctx.tenantId,
+          contactId,
+          type,
+          value: priorNormalizedValue
+        }
+      },
+      update: { primary: false },
+      create: {
+        tenantId: ctx.tenantId,
+        contactId,
+        companyId,
+        type,
+        value: priorNormalizedValue,
+        displayValue: rawPriorValue,
+        primary: false,
+        verificationStatus: "UNVERIFIED",
+        source: priorSource
+      }
+    });
+  }
+
+  if (!value) {
+    await transaction.contactPoint.updateMany({
+      where: tenantWhere(ctx, { contactId, type, primary: true }),
+      data: { primary: false }
+    });
+    return;
+  }
+
+  const existing = await transaction.contactPoint.findFirst({
+    where: tenantWhere(ctx, { contactId, type, value })
+  });
+
+  const point = await transaction.contactPoint.upsert({
+    where: {
+      tenantId_contactId_type_value: {
+        tenantId: ctx.tenantId,
+        contactId,
+        type,
+        value
+      }
+    },
+    update: {
+      displayValue: rawValue,
+      primary: true,
+      lastSeenAt: new Date(),
+      source: existing?.source ?? "MANUAL"
+    },
+    create: {
+      tenantId: ctx.tenantId,
+      contactId,
+      companyId,
+      type,
+      value,
+      displayValue: rawValue,
+      primary: true,
+      verificationStatus: "UNVERIFIED",
+      firstSeenAt: new Date(),
+      lastSeenAt: new Date(),
+      source: "MANUAL"
+    }
+  });
+
+  // Retain the replaced point as evidence: it is never deleted, only demoted.
+  await transaction.contactPoint.updateMany({
+    where: tenantWhere(ctx, {
+      contactId,
+      type,
+      primary: true,
+      id: { not: point.id }
+    }),
+    data: { primary: false }
   });
 }

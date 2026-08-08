@@ -598,6 +598,7 @@ model Tenant {
   customerFxRates                         CustomerFxRate[]
   customerRevenueLines                    CustomerRevenueLine[]
   customerMonthlyFinancials               CustomerMonthlyFinancial[]
+  customerIntelligenceEnablements         CustomerIntelligenceEnablement[]
   assistantRetrievedSources               AssistantRetrievedSource[]
   assistantKnowledgeDocuments             AssistantKnowledgeDocument[]
   assistantKnowledgeChunks                AssistantKnowledgeChunk[]
@@ -3628,6 +3629,7 @@ model OperatingCompany {
   revenueLines       CustomerRevenueLine[]
   monthlyFinancials  CustomerMonthlyFinancial[]
   identityMatches    CustomerIdentityMatch[]
+  enablements        CustomerIntelligenceEnablement[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, slug])
@@ -3908,4 +3910,36 @@ model CustomerMonthlyFinancial {
   @@index([tenantId, sourceAccountId])
   @@index([tenantId, monthKey])
   @@index([tenantId, serviceLine])
+}
+
+/// Owner-controlled activation of live QuickBooks synchronization
+/// (CP-PHASE-02B-8, owner decision CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`).
+///
+/// One tenant-scoped, operating-company-scoped record gates live sync. It
+/// defaults to disabled (`enabled = false`) for every operating company;
+/// connecting a QuickBooks company never auto-enables live sync. Enabling
+/// requires explicit owner approval whose evidence is recorded on the row
+/// (`approvedByUserId` / `approvedAt` / `approvalNote`) and audited. The
+/// database CHECK constraint makes an enabled row without approval evidence
+/// impossible, so a live sync gate can always trust the recorded approval.
+model CustomerIntelligenceEnablement {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  operatingCompanyId String
+  enabled            Boolean  @default(false)
+  // Explicit owner approval evidence (CP-02B-8-Q1). Cleared on disable so a
+  // later enable always requires a fresh recorded approval.
+  approvedByUserId   String?
+  approvedAt         DateTime?
+  approvalNote       String?
+  updatedByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operatingCompany  OperatingCompany @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, operatingCompanyId])
+  @@index([tenantId, enabled])
 }

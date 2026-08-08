@@ -13,6 +13,10 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 import { tenantWhere } from "@/server/tenant-query";
 import { auditEntry } from "@/modules/customer-intelligence/audit";
 import { upsertSourceAccount } from "@/modules/customer-intelligence/actions";
+import {
+  LIVE_SYNC_NOT_ENABLED_REASON,
+  assertLiveSyncEnabled
+} from "@/modules/customer-intelligence/enablement";
 import { requireIngestionAdmin } from "@/modules/customer-intelligence/permissions";
 import {
   decryptQuickBooksSecret,
@@ -39,6 +43,14 @@ import {
  * - partial or completely missing QuickBooks fields are stored as missing and
  *   never invented;
  * - `dryRun` performs zero database writes and returns the would-be report.
+ *
+ * Live sync (CP-PHASE-02B-8, owner decision CP-02B-8-Q1
+ * `FEATURE_ENABLEMENT_RECORD`): a live run refuses to sync an operating
+ * company without an enabled, approval-carrying enablement record. Explicitly
+ * scoped live runs throw before any work; unscoped live runs skip unenabled
+ * operating companies with an audited `SKIPPED_NOT_ENABLED` section. Dry-run
+ * verification stays available for every operating company (zero writes) as
+ * the owner's preview tool.
  *
  * Operating companies without an associated tenant-scoped, ACTIVE QuickBooks
  * credential are skipped with an audited warning. Token refresh reuses
@@ -335,7 +347,7 @@ export type OperatingCompanyIngestionSection = {
   operatingCompanyId: string;
   slug: string;
   displayName: string;
-  status: "ASSOCIATED" | "SKIPPED_UNASSOCIATED" | "ERROR";
+  status: "ASSOCIATED" | "SKIPPED_UNASSOCIATED" | "SKIPPED_NOT_ENABLED" | "ERROR";
   reason?: string;
   fetchedCustomers: number;
   matched: number;
@@ -368,8 +380,41 @@ export type QuickBooksCustomerIngestionReport = {
     skipped: number;
     recordErrors: number;
     unassociatedCompanies: number;
+    notEnabledCompanies: number;
     erroredCompanies: number;
   };
+};
+
+/**
+ * Non-persisted evidence emitted only for the consolidated dry-run pipeline.
+ * It lets later dry-run stages evaluate the exact state ingestion would have
+ * committed without exposing that state in the returned or audited report.
+ */
+export type QuickBooksIngestionDryRunProposal = {
+  id: string;
+  tenantId: string;
+  operatingCompanyId: string;
+  sourceRecordKey: string;
+  score: number;
+  evidence: Prisma.InputJsonValue;
+  normalizedCustomer: NormalizedQuickBooksCustomer;
+};
+
+export type QuickBooksIngestionDryRunSourceAccount = {
+  id: string;
+  tenantId: string;
+  operatingCompanyId: string;
+  realmId: string;
+  quickBooksCustomerId: string;
+  companyId: string;
+  companyOperatingRelationshipId: string;
+  currency: string;
+  displayName: string;
+};
+
+export type QuickBooksIngestionDryRunState = {
+  proposals: QuickBooksIngestionDryRunProposal[];
+  sourceAccounts: QuickBooksIngestionDryRunSourceAccount[];
 };
 
 type ResolvedCanonicalTarget = {
@@ -461,9 +506,13 @@ async function persistUnmatchedProposal(
       }
     });
     if (existing) {
+      const refreshedEvidence = mergeSourceEvidenceWithReviewNote(
+        existing.evidence,
+        input.evidence
+      );
       if (
         existing.sourceLabel === input.sourceLabel &&
-        jsonValuesEqual(existing.evidence, input.evidence)
+        jsonValuesEqual(existing.evidence, refreshedEvidence)
       ) {
         return {
           match: existing,
@@ -475,11 +524,12 @@ async function persistUnmatchedProposal(
         where: { tenantId_id: { tenantId: ctx.tenantId, id: existing.id } },
         // Only unreviewed source-owned fields are refreshed. In particular,
         // companyId, candidateCompanyId, score, reviewerUserId, and reviewedAt
-        // remain exactly as the human review workflow left them. Replacing the
-        // complete evidence object also removes evidence absent from this sync.
+        // remain exactly as the human review workflow left them. Source-owned
+        // evidence is replaced so removed QuickBooks fields disappear, while
+        // the human-owned reviewNote is merged back explicitly.
         data: {
           sourceLabel: input.sourceLabel,
-          evidence: input.evidence
+          evidence: refreshedEvidence
         }
       });
       return {
@@ -544,7 +594,7 @@ async function inspectUnmatchedProposal(
     sourceLabel: string | null;
     evidence: Prisma.InputJsonValue;
   }
-): Promise<UnmatchedProposalOutcome> {
+): Promise<{ outcome: UnmatchedProposalOutcome; existing: CustomerIdentityMatch | null }> {
   const reviewed = await prisma.customerIdentityMatch.findFirst({
     where: {
       ...unmatchedMatchWhere(ctx, input.operatingCompanyId, input.sourceRecordKey),
@@ -554,7 +604,7 @@ async function inspectUnmatchedProposal(
     }
   });
   if (reviewed) {
-    return "REVIEWED_PRESERVED";
+    return { outcome: "REVIEWED_PRESERVED", existing: reviewed };
   }
 
   const existing = await prisma.customerIdentityMatch.findFirst({
@@ -564,12 +614,20 @@ async function inspectUnmatchedProposal(
     }
   });
   if (!existing) {
-    return "CREATED";
+    return { outcome: "CREATED", existing: null };
   }
-  return existing.sourceLabel === input.sourceLabel &&
-    jsonValuesEqual(existing.evidence, input.evidence)
-    ? "UNCHANGED"
-    : "REFRESHED";
+  const refreshedEvidence = mergeSourceEvidenceWithReviewNote(
+    existing.evidence,
+    input.evidence
+  );
+  return {
+    outcome:
+      existing.sourceLabel === input.sourceLabel &&
+      jsonValuesEqual(existing.evidence, refreshedEvidence)
+        ? "UNCHANGED"
+        : "REFRESHED",
+    existing
+  };
 }
 
 function countUnmatchedProposalOutcome(
@@ -614,6 +672,37 @@ function jsonValuesEqual(left: unknown, right: unknown): boolean {
         key === rightKeys[index] && jsonValuesEqual(leftRecord[key], rightRecord[key])
     )
   );
+}
+
+/**
+ * QuickBooks owns the refreshed source fields, while reviewNote is written by
+ * the guarded human-review workflow. Preserve only that explicitly
+ * human-owned field so stale QuickBooks evidence is still removed on reruns.
+ */
+function mergeSourceEvidenceWithReviewNote(
+  existingEvidence: Prisma.JsonValue | null,
+  sourceEvidence: Prisma.InputJsonValue
+): Prisma.InputJsonValue {
+  if (
+    !existingEvidence ||
+    typeof existingEvidence !== "object" ||
+    Array.isArray(existingEvidence) ||
+    !sourceEvidence ||
+    typeof sourceEvidence !== "object" ||
+    Array.isArray(sourceEvidence)
+  ) {
+    return sourceEvidence;
+  }
+
+  const reviewNote = (existingEvidence as Prisma.JsonObject).reviewNote;
+  if (typeof reviewNote !== "string" || !reviewNote.trim()) {
+    return sourceEvidence;
+  }
+
+  return {
+    ...(sourceEvidence as Prisma.InputJsonObject),
+    reviewNote
+  };
 }
 
 /**
@@ -677,7 +766,9 @@ async function ingestQuickBooksCustomersForOperatingCompany(
     quickBooksRealmId: string | null;
     quickBooksCredentialId: string | null;
   },
-  dryRun: boolean
+  dryRun: boolean,
+  virtualState?: QuickBooksIngestionDryRunState,
+  scoped = false
 ): Promise<OperatingCompanyIngestionSection> {
   const section: OperatingCompanyIngestionSection = {
     operatingCompanyId: operatingCompany.id,
@@ -733,6 +824,29 @@ async function ingestQuickBooksCustomersForOperatingCompany(
       });
     }
     return section;
+  }
+
+  // Live sync gate (CP-PHASE-02B-8, owner decision CP-02B-8-Q1
+  // FEATURE_ENABLEMENT_RECORD): a live run refuses to sync an operating
+  // company without an enabled, approval-carrying enablement record. Dry-run
+  // verification performs zero writes and stays available for every operating
+  // company as the owner's preview tool.
+  if (!dryRun) {
+    const enabled = await assertLiveSyncEnabled(ctx, operatingCompany.id, {
+      mode: scoped ? "THROW" : "SKIP"
+    });
+    if (!enabled) {
+      section.status = "SKIPPED_NOT_ENABLED";
+      section.reason = LIVE_SYNC_NOT_ENABLED_REASON;
+      await auditEntry({
+        actor: ctx,
+        action: "customer-intelligence.quickbooks-ingestion.skipped-not-enabled",
+        entityType: "OperatingCompany",
+        entityId: operatingCompany.id,
+        after: { reason: section.reason }
+      });
+      return section;
+    }
   }
 
   const realmId = operatingCompany.quickBooksRealmId;
@@ -838,10 +952,24 @@ async function ingestQuickBooksCustomersForOperatingCompany(
         evidence: buildMatchEvidence(normalized)
       };
       if (dryRun) {
-        countUnmatchedProposalOutcome(
-          section,
-          await inspectUnmatchedProposal(ctx, proposalInput)
-        );
+        const inspected = await inspectUnmatchedProposal(ctx, proposalInput);
+        countUnmatchedProposalOutcome(section, inspected.outcome);
+        if (inspected.outcome !== "REVIEWED_PRESERVED" && virtualState) {
+          virtualState.proposals.push({
+            id:
+              inspected.existing?.id ??
+              `dry-run:${operatingCompany.id}:${sourceRecordKey}`,
+            tenantId: ctx.tenantId,
+            operatingCompanyId: operatingCompany.id,
+            sourceRecordKey,
+            score: inspected.existing?.score ?? 0,
+            evidence: mergeSourceEvidenceWithReviewNote(
+              inspected.existing?.evidence ?? null,
+              proposalInput.evidence
+            ),
+            normalizedCustomer: normalized
+          });
+        }
       } else {
         const proposal = await persistUnmatchedProposal(ctx, proposalInput);
         countUnmatchedProposalOutcome(section, proposal.outcome);
@@ -916,6 +1044,28 @@ async function ingestQuickBooksCustomersForOperatingCompany(
         parentQuickBooksCustomerId: normalized.parentQuickBooksCustomerId,
         lastSyncedAt: new Date()
       });
+    } else if (virtualState) {
+      const existingSourceAccount = await prisma.customerSourceAccount.findFirst({
+        where: tenantWhere(ctx, {
+          realmId,
+          quickBooksCustomerId: customerId,
+          operatingCompanyId: resolved.operatingCompanyId
+        }),
+        select: { id: true }
+      });
+      virtualState.sourceAccounts.push({
+        id:
+          existingSourceAccount?.id ??
+          `dry-run-source:${resolved.operatingCompanyId}:${realmId}:${customerId}`,
+        tenantId: ctx.tenantId,
+        operatingCompanyId: resolved.operatingCompanyId,
+        realmId,
+        quickBooksCustomerId: customerId,
+        companyId: resolved.companyId,
+        companyOperatingRelationshipId: relationship.id,
+        currency: normalized.currency,
+        displayName: normalized.displayName
+      });
     }
     section.matched += 1;
     } catch {
@@ -940,11 +1090,17 @@ async function ingestQuickBooksCustomersForOperatingCompany(
  */
 export async function ingestQuickBooksCustomers(
   ctx: AuthenticatedContext,
-  input: { operatingCompanyId?: string; dryRun?: boolean } = {}
+  input: {
+    operatingCompanyId?: string;
+    dryRun?: boolean;
+    /** Internal non-writing state handoff used by the consolidated dry-run. */
+    virtualState?: QuickBooksIngestionDryRunState;
+  } = {}
 ): Promise<QuickBooksCustomerIngestionReport> {
   await requireIngestionAdmin(ctx);
 
   const dryRun = input.dryRun === true;
+  const scoped = Boolean(input.operatingCompanyId);
   const startedAt = new Date().toISOString();
 
   const operatingCompanies = input.operatingCompanyId
@@ -968,7 +1124,13 @@ export async function ingestQuickBooksCustomers(
       continue;
     }
     sections.push(
-      await ingestQuickBooksCustomersForOperatingCompany(ctx, operatingCompany, dryRun)
+      await ingestQuickBooksCustomersForOperatingCompany(
+        ctx,
+        operatingCompany,
+        dryRun,
+        dryRun ? input.virtualState : undefined,
+        scoped
+      )
     );
   }
 
@@ -985,6 +1147,9 @@ export async function ingestQuickBooksCustomers(
       if (section.status === "SKIPPED_UNASSOCIATED") {
         acc.unassociatedCompanies += 1;
       }
+      if (section.status === "SKIPPED_NOT_ENABLED") {
+        acc.notEnabledCompanies += 1;
+      }
       if (section.status === "ERROR") {
         acc.erroredCompanies += 1;
       }
@@ -1000,6 +1165,7 @@ export async function ingestQuickBooksCustomers(
       skipped: 0,
       recordErrors: 0,
       unassociatedCompanies: 0,
+      notEnabledCompanies: 0,
       erroredCompanies: 0
     }
   );
@@ -1033,10 +1199,11 @@ function buildIngestionAuditSummary(report: QuickBooksCustomerIngestionReport) {
     (counts, section) => {
       if (section.status === "ASSOCIATED") counts.associated += 1;
       if (section.status === "SKIPPED_UNASSOCIATED") counts.skippedUnassociated += 1;
+      if (section.status === "SKIPPED_NOT_ENABLED") counts.skippedNotEnabled += 1;
       if (section.status === "ERROR") counts.error += 1;
       return counts;
     },
-    { associated: 0, skippedUnassociated: 0, error: 0 }
+    { associated: 0, skippedUnassociated: 0, skippedNotEnabled: 0, error: 0 }
   );
 
   return {
