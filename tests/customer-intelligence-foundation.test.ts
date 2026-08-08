@@ -528,6 +528,17 @@ describe("identity target integrity", () => {
       sourceRecordKey: "realm-1:1001",
       status: CustomerIdentityMatchStatus.PROPOSED
     });
+    // Manual review re-reads the authoritative match after taking the source
+    // advisory lock, before checking for a conflicting approved target.
+    prismaTest.model("customerIdentityMatch").findFirst.mockResolvedValueOnce({
+      id: "match-proposed",
+      tenantId: "tenant-a",
+      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+      companyId: "company-2",
+      operatingCompanyId: "oc-ww",
+      sourceRecordKey: "realm-1:1001",
+      status: CustomerIdentityMatchStatus.PROPOSED
+    });
     prismaTest.model("company").findFirst.mockResolvedValue({ id: "company-2" });
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({ id: "oc-ww" });
     prismaTest.model("customerIdentityMatch").findFirst.mockResolvedValueOnce({

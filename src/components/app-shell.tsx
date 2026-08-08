@@ -169,6 +169,26 @@ const navEntries: NavNode[] = [
       { id: "credit-settings", href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
     ]
   },
+  {
+    id: "customer-intelligence",
+    label: "Customer Intelligence",
+    moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey,
+    children: [
+      {
+        id: "ci-company-profiles",
+        href: "/customer-intelligence",
+        label: "Company Profiles",
+        exact: true,
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      },
+      {
+        id: "ci-identity-review",
+        href: "/customer-intelligence/review",
+        label: "Identity Review",
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      }
+    ]
+  },
   { id: "settings", href: "/settings", label: "Settings" }
 ];
 

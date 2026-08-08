@@ -769,6 +769,9 @@ describe("Version 1B.1 evidence packets and evaluators", () => {
       }
     );
     expect(prompt).toContain("Tests 20 passed");
+    expect(prompt).toContain(
+      "If missing test coverage is the only problem, represent it as a finding"
+    );
     expect(prompt.length).toBeLessThan(20_000);
   });
 
