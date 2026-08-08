@@ -388,6 +388,304 @@ export async function reconcileQuickBooksIdentityMatches(
 }
 
 /**
+ * Read-only dry-run evaluation of deterministic reconciliation
+ * (CP-PHASE-02B-7).
+ *
+ * Computes exactly the decision each PROPOSED match would receive from a live
+ * reconciliation run — AUTO_LINKED, ROUTED_TO_REVIEW, or REVIEWED_PRESERVED —
+ * without writing any database row or audit entry. Every read stays
+ * tenant-scoped and the same scoring/invariant helpers as the live path are
+ * reused, so a would-change report can never disagree with the guarded live
+ * engine. The consolidated dry-run entry point
+ * (`runCustomerIntelligenceDryRun` in dry-run.ts) records the verification
+ * run through the existing AutomationJobRun/AuditLog patterns.
+ */
+export type ReconciliationDryRunMatch = {
+  matchId: string;
+  sourceRecordKey: string | null;
+  operatingCompanyId: string | null;
+  currentScore: number;
+  wouldChangeTo: IdentityReconciliationOutcome;
+  wouldScore: number;
+  bestCandidateCompanyId: string | null;
+  reason:
+    | ReconciliationRoutingReason
+    | "REVIEWED"
+    | "MISSING_SOURCE_CONTEXT"
+    | "APPROVED_CONFLICT"
+    | "APPROVAL_INVARIANT_FAILED"
+    | "PROCESSING_FAILED";
+};
+
+export type ReconciliationDryRunReport = {
+  tenantId: string;
+  dryRun: true;
+  startedAt: string;
+  completedAt: string;
+  matches: ReconciliationDryRunMatch[];
+  totals: {
+    evaluated: number;
+    autoLinked: number;
+    routedToReview: number;
+    reviewedPreserved: number;
+    errors: number;
+  };
+};
+
+/** A non-persisted PROPOSED match supplied by an earlier dry-run stage. */
+export type ReconciliationDryRunVirtualMatch = {
+  id: string;
+  tenantId: string;
+  operatingCompanyId: string;
+  sourceRecordKey: string;
+  score: number;
+  evidence: Prisma.JsonValue;
+};
+
+/**
+ * Read-only dry-run evaluation of the tenant's PROPOSED QUICKBOOKS_ACCOUNT
+ * matches (optionally for one operating company). Reports what a live
+ * reconciliation run would change and performs zero writes; a foreign or
+ * nonexistent operating-company id is rejected before any evaluation.
+ */
+export async function evaluateReconciliationDryRun(
+  ctx: AuthenticatedContext,
+  input: {
+    operatingCompanyId?: string;
+    /** Internal would-be ingestion state; it overrides stale persisted proposals. */
+    virtualMatches?: ReconciliationDryRunVirtualMatch[];
+  } = {}
+): Promise<ReconciliationDryRunReport> {
+  await requireMatchApproval(ctx);
+  await requireWrite(ctx);
+
+  const startedAt = new Date().toISOString();
+
+  if (input.operatingCompanyId) {
+    const operatingCompany = await prisma.operatingCompany.findFirst({
+      where: tenantWhere(ctx, { id: input.operatingCompanyId }),
+      select: { id: true }
+    });
+    if (!operatingCompany) {
+      throw new Error("Operating company does not exist in this tenant.");
+    }
+  }
+
+  const persistedMatches = await prisma.customerIdentityMatch.findMany({
+    where: tenantWhere(ctx, {
+      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+      status: CustomerIdentityMatchStatus.PROPOSED,
+      ...(input.operatingCompanyId ? { operatingCompanyId: input.operatingCompanyId } : {})
+    }),
+    select: {
+      id: true,
+      operatingCompanyId: true,
+      sourceRecordKey: true,
+      score: true,
+      evidence: true
+    }
+  });
+  const virtualMatches = (input.virtualMatches ?? []).filter(
+    (match) => !input.operatingCompanyId || match.operatingCompanyId === input.operatingCompanyId
+  );
+  if (virtualMatches.some((match) => match.tenantId !== ctx.tenantId)) {
+    throw new Error("Virtual reconciliation evidence does not belong to this tenant.");
+  }
+
+  // A fetched customer refresh replaces source-owned evidence in a live
+  // ingestion. Mirror that replacement in memory, while retaining unrelated
+  // persisted proposals from the same coherent starting snapshot.
+  const matchesBySource = new Map(
+    persistedMatches.map((match) => [
+      `${match.operatingCompanyId ?? ""}:${match.sourceRecordKey ?? ""}`,
+      match
+    ])
+  );
+  for (const match of virtualMatches) {
+    matchesBySource.set(`${match.operatingCompanyId}:${match.sourceRecordKey}`, match);
+  }
+  const matches = [...matchesBySource.values()];
+
+  const totals: ReconciliationDryRunReport["totals"] = {
+    evaluated: 0,
+    autoLinked: 0,
+    routedToReview: 0,
+    reviewedPreserved: 0,
+    errors: 0
+  };
+
+  const evaluated: ReconciliationDryRunMatch[] = [];
+  for (const match of matches) {
+    try {
+      const outcome = await evaluateReconciliationMatchDryRun(ctx, match);
+      evaluated.push(outcome);
+      totals.evaluated += 1;
+      if (outcome.wouldChangeTo === "AUTO_LINKED") {
+        totals.autoLinked += 1;
+      } else if (outcome.wouldChangeTo === "ROUTED_TO_REVIEW") {
+        totals.routedToReview += 1;
+      } else if (outcome.wouldChangeTo === "REVIEWED_PRESERVED") {
+        totals.reviewedPreserved += 1;
+      } else {
+        totals.errors += 1;
+      }
+    } catch {
+      // Deterministic classification only; source identifiers never reach the
+      // would-change report.
+      totals.evaluated += 1;
+      totals.errors += 1;
+      evaluated.push({
+        matchId: match.id,
+        sourceRecordKey: match.sourceRecordKey,
+        operatingCompanyId: match.operatingCompanyId,
+        currentScore: match.score,
+        wouldChangeTo: "ERROR",
+        wouldScore: match.score,
+        bestCandidateCompanyId: null,
+        reason: "PROCESSING_FAILED"
+      });
+    }
+  }
+
+  return {
+    tenantId: ctx.tenantId,
+    dryRun: true,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    matches: evaluated,
+    totals
+  };
+}
+
+async function evaluateReconciliationMatchDryRun(
+  ctx: AuthenticatedContext,
+  match: {
+    id: string;
+    operatingCompanyId: string | null;
+    sourceRecordKey: string | null;
+    score: number;
+    evidence: Prisma.JsonValue | null;
+  }
+): Promise<ReconciliationDryRunMatch> {
+  const base = {
+    matchId: match.id,
+    sourceRecordKey: match.sourceRecordKey,
+    operatingCompanyId: match.operatingCompanyId,
+    currentScore: match.score
+  };
+
+  // Matches without a source key or operating company cannot be routed (the
+  // live path defers them for review); the dry-run mirrors that decision.
+  const sourceRecordKey = match.sourceRecordKey;
+  if (!sourceRecordKey || !match.operatingCompanyId) {
+    return {
+      ...base,
+      wouldChangeTo: "ROUTED_TO_REVIEW",
+      wouldScore: match.score,
+      bestCandidateCompanyId: null,
+      reason: "MISSING_SOURCE_CONTEXT"
+    };
+  }
+  const operatingCompanyId = match.operatingCompanyId;
+
+  // Reviewed decisions are authoritative and persist across re-runs.
+  const reviewed = await prisma.customerIdentityMatch.findFirst({
+    where: tenantWhere(ctx, {
+      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+      operatingCompanyId,
+      sourceRecordKey,
+      status: {
+        in: [CustomerIdentityMatchStatus.APPROVED, CustomerIdentityMatchStatus.REJECTED]
+      }
+    })
+  });
+  if (reviewed) {
+    return {
+      ...base,
+      wouldChangeTo: "REVIEWED_PRESERVED",
+      wouldScore: match.score,
+      bestCandidateCompanyId: null,
+      reason: "REVIEWED"
+    };
+  }
+
+  // The same candidate snapshot the live path would load after taking the
+  // source advisory lock, read without any lock (a dry-run holds no locks and
+  // performs no writes).
+  const client = prisma as unknown as Prisma.TransactionClient;
+  const snapshot = await loadLockedCandidateSnapshot(
+    ctx,
+    { operatingCompanyId, sourceRecordKey },
+    client
+  );
+  const scoring = scoreQuickBooksReconciliation(
+    readQuickBooksMatchEvidence(match),
+    snapshot.candidates,
+    snapshot.domainCompanyCounts
+  );
+
+  if (scoring.reason === "AUTO_LINK") {
+    const companyId = scoring.bestCandidateCompanyId!;
+    try {
+      await assertCanApproveIdentityMatch(
+        ctx,
+        {
+          kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+          companyId,
+          operatingCompanyId,
+          candidateCompanyId: null
+        },
+        client
+      );
+    } catch {
+      return {
+        ...base,
+        wouldChangeTo: "ERROR",
+        wouldScore: scoring.score,
+        bestCandidateCompanyId: companyId,
+        reason: "APPROVAL_INVARIANT_FAILED"
+      };
+    }
+    const conflicting = await findApprovedConflict(
+      ctx,
+      {
+        kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+        sourceRecordKey,
+        companyId,
+        selfId: match.id
+      },
+      client
+    );
+    if (conflicting) {
+      // One APPROVED target per source wins; the live path would route this
+      // record back to the review queue instead of overriding the decision.
+      return {
+        ...base,
+        wouldChangeTo: "ROUTED_TO_REVIEW",
+        wouldScore: scoring.score,
+        bestCandidateCompanyId: null,
+        reason: "APPROVED_CONFLICT"
+      };
+    }
+    return {
+      ...base,
+      wouldChangeTo: "AUTO_LINKED",
+      wouldScore: scoring.score,
+      bestCandidateCompanyId: companyId,
+      reason: scoring.reason
+    };
+  }
+
+  return {
+    ...base,
+    wouldChangeTo: "ROUTED_TO_REVIEW",
+    wouldScore: scoring.score,
+    bestCandidateCompanyId: scoring.bestCandidateCompanyId,
+    reason: scoring.reason
+  };
+}
+
+/**
  * Load every decision-critical candidate fact after the source advisory lock
  * is held. This prevents a queued reconciliation from approving with evidence
  * or relationship eligibility that ingestion changed while it waited.

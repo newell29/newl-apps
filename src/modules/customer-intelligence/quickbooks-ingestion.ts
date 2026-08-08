@@ -372,6 +372,38 @@ export type QuickBooksCustomerIngestionReport = {
   };
 };
 
+/**
+ * Non-persisted evidence emitted only for the consolidated dry-run pipeline.
+ * It lets later dry-run stages evaluate the exact state ingestion would have
+ * committed without exposing that state in the returned or audited report.
+ */
+export type QuickBooksIngestionDryRunProposal = {
+  id: string;
+  tenantId: string;
+  operatingCompanyId: string;
+  sourceRecordKey: string;
+  score: number;
+  evidence: Prisma.InputJsonValue;
+  normalizedCustomer: NormalizedQuickBooksCustomer;
+};
+
+export type QuickBooksIngestionDryRunSourceAccount = {
+  id: string;
+  tenantId: string;
+  operatingCompanyId: string;
+  realmId: string;
+  quickBooksCustomerId: string;
+  companyId: string;
+  companyOperatingRelationshipId: string;
+  currency: string;
+  displayName: string;
+};
+
+export type QuickBooksIngestionDryRunState = {
+  proposals: QuickBooksIngestionDryRunProposal[];
+  sourceAccounts: QuickBooksIngestionDryRunSourceAccount[];
+};
+
 type ResolvedCanonicalTarget = {
   companyId: string;
   operatingCompanyId: string;
@@ -549,7 +581,7 @@ async function inspectUnmatchedProposal(
     sourceLabel: string | null;
     evidence: Prisma.InputJsonValue;
   }
-): Promise<UnmatchedProposalOutcome> {
+): Promise<{ outcome: UnmatchedProposalOutcome; existing: CustomerIdentityMatch | null }> {
   const reviewed = await prisma.customerIdentityMatch.findFirst({
     where: {
       ...unmatchedMatchWhere(ctx, input.operatingCompanyId, input.sourceRecordKey),
@@ -559,7 +591,7 @@ async function inspectUnmatchedProposal(
     }
   });
   if (reviewed) {
-    return "REVIEWED_PRESERVED";
+    return { outcome: "REVIEWED_PRESERVED", existing: reviewed };
   }
 
   const existing = await prisma.customerIdentityMatch.findFirst({
@@ -569,16 +601,20 @@ async function inspectUnmatchedProposal(
     }
   });
   if (!existing) {
-    return "CREATED";
+    return { outcome: "CREATED", existing: null };
   }
   const refreshedEvidence = mergeSourceEvidenceWithReviewNote(
     existing.evidence,
     input.evidence
   );
-  return existing.sourceLabel === input.sourceLabel &&
-    jsonValuesEqual(existing.evidence, refreshedEvidence)
-    ? "UNCHANGED"
-    : "REFRESHED";
+  return {
+    outcome:
+      existing.sourceLabel === input.sourceLabel &&
+      jsonValuesEqual(existing.evidence, refreshedEvidence)
+        ? "UNCHANGED"
+        : "REFRESHED",
+    existing
+  };
 }
 
 function countUnmatchedProposalOutcome(
@@ -717,7 +753,8 @@ async function ingestQuickBooksCustomersForOperatingCompany(
     quickBooksRealmId: string | null;
     quickBooksCredentialId: string | null;
   },
-  dryRun: boolean
+  dryRun: boolean,
+  virtualState?: QuickBooksIngestionDryRunState
 ): Promise<OperatingCompanyIngestionSection> {
   const section: OperatingCompanyIngestionSection = {
     operatingCompanyId: operatingCompany.id,
@@ -878,10 +915,24 @@ async function ingestQuickBooksCustomersForOperatingCompany(
         evidence: buildMatchEvidence(normalized)
       };
       if (dryRun) {
-        countUnmatchedProposalOutcome(
-          section,
-          await inspectUnmatchedProposal(ctx, proposalInput)
-        );
+        const inspected = await inspectUnmatchedProposal(ctx, proposalInput);
+        countUnmatchedProposalOutcome(section, inspected.outcome);
+        if (inspected.outcome !== "REVIEWED_PRESERVED" && virtualState) {
+          virtualState.proposals.push({
+            id:
+              inspected.existing?.id ??
+              `dry-run:${operatingCompany.id}:${sourceRecordKey}`,
+            tenantId: ctx.tenantId,
+            operatingCompanyId: operatingCompany.id,
+            sourceRecordKey,
+            score: inspected.existing?.score ?? 0,
+            evidence: mergeSourceEvidenceWithReviewNote(
+              inspected.existing?.evidence ?? null,
+              proposalInput.evidence
+            ),
+            normalizedCustomer: normalized
+          });
+        }
       } else {
         const proposal = await persistUnmatchedProposal(ctx, proposalInput);
         countUnmatchedProposalOutcome(section, proposal.outcome);
@@ -956,6 +1007,28 @@ async function ingestQuickBooksCustomersForOperatingCompany(
         parentQuickBooksCustomerId: normalized.parentQuickBooksCustomerId,
         lastSyncedAt: new Date()
       });
+    } else if (virtualState) {
+      const existingSourceAccount = await prisma.customerSourceAccount.findFirst({
+        where: tenantWhere(ctx, {
+          realmId,
+          quickBooksCustomerId: customerId,
+          operatingCompanyId: resolved.operatingCompanyId
+        }),
+        select: { id: true }
+      });
+      virtualState.sourceAccounts.push({
+        id:
+          existingSourceAccount?.id ??
+          `dry-run-source:${resolved.operatingCompanyId}:${realmId}:${customerId}`,
+        tenantId: ctx.tenantId,
+        operatingCompanyId: resolved.operatingCompanyId,
+        realmId,
+        quickBooksCustomerId: customerId,
+        companyId: resolved.companyId,
+        companyOperatingRelationshipId: relationship.id,
+        currency: normalized.currency,
+        displayName: normalized.displayName
+      });
     }
     section.matched += 1;
     } catch {
@@ -980,7 +1053,12 @@ async function ingestQuickBooksCustomersForOperatingCompany(
  */
 export async function ingestQuickBooksCustomers(
   ctx: AuthenticatedContext,
-  input: { operatingCompanyId?: string; dryRun?: boolean } = {}
+  input: {
+    operatingCompanyId?: string;
+    dryRun?: boolean;
+    /** Internal non-writing state handoff used by the consolidated dry-run. */
+    virtualState?: QuickBooksIngestionDryRunState;
+  } = {}
 ): Promise<QuickBooksCustomerIngestionReport> {
   await requireIngestionAdmin(ctx);
 
@@ -1008,7 +1086,12 @@ export async function ingestQuickBooksCustomers(
       continue;
     }
     sections.push(
-      await ingestQuickBooksCustomersForOperatingCompany(ctx, operatingCompany, dryRun)
+      await ingestQuickBooksCustomersForOperatingCompany(
+        ctx,
+        operatingCompany,
+        dryRun,
+        dryRun ? input.virtualState : undefined
+      )
     );
   }
 

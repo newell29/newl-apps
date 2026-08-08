@@ -723,6 +723,19 @@ export type FinancialMaterializationReport = {
   totals: FinancialMaterializationTotals;
 };
 
+/** Non-persisted source-account mapping supplied by the consolidated dry-run. */
+export type FinancialMaterializationDryRunSourceAccount = {
+  id: string;
+  tenantId: string;
+  currency: string;
+  companyId: string;
+  companyOperatingRelationshipId: string;
+  operatingCompanyId: string;
+  realmId: string;
+  quickBooksCustomerId: string;
+  displayName: string;
+};
+
 /** A resolved revenue/aging customer within the authenticated tenant. */
 type ResolvedCustomerTarget = {
   companyId: string;
@@ -781,9 +794,10 @@ async function resolveReportCustomer(
     customerId: string | null;
     operatingCompanyId: string;
     realmId: string;
-  }
+  },
+  virtualSourceAccounts: FinancialMaterializationDryRunSourceAccount[] = []
 ): Promise<ResolvedCustomerTarget | null> {
-  const sourceAccounts: Array<{
+  const persistedSourceAccounts: Array<{
     id: string;
     currency: string;
     companyId: string;
@@ -797,6 +811,31 @@ async function resolveReportCustomer(
       realmId: input.realmId
     })
   });
+
+  const scopedVirtualAccounts = virtualSourceAccounts.filter(
+    (account) =>
+      account.tenantId === ctx.tenantId &&
+      account.operatingCompanyId === input.operatingCompanyId &&
+      account.realmId === input.realmId
+  );
+  if (virtualSourceAccounts.some((account) => account.tenantId !== ctx.tenantId)) {
+    throw new Error("Virtual materialization evidence does not belong to this tenant.");
+  }
+  const virtualKeys = new Set(
+    scopedVirtualAccounts.map(
+      (account) =>
+        `${account.operatingCompanyId}:${account.realmId}:${account.quickBooksCustomerId}`
+    )
+  );
+  const sourceAccounts = [
+    ...persistedSourceAccounts.filter(
+      (account) =>
+        !virtualKeys.has(
+          `${account.operatingCompanyId}:${input.realmId}:${account.quickBooksCustomerId}`
+        )
+    ),
+    ...scopedVirtualAccounts
+  ];
 
   const customerId = input.customerId?.trim();
   if (!customerId) {
@@ -1468,7 +1507,8 @@ async function materializeForOperatingCompany(
     quickBooksRealmId: string | null;
     quickBooksCredentialId: string | null;
   },
-  dryRun: boolean
+  dryRun: boolean,
+  virtualSourceAccounts: FinancialMaterializationDryRunSourceAccount[] = []
 ): Promise<OperatingCompanyMaterializationSection> {
   const section = newSection(operatingCompany);
 
@@ -1844,7 +1884,7 @@ async function materializeForOperatingCompany(
         customerId: row.customerId,
         operatingCompanyId: operatingCompany.id,
         realmId
-      });
+      }, virtualSourceAccounts);
       if (!target) {
         section.revenueSkippedUnmatched += 1;
         incomplete(monthKey);
@@ -2083,7 +2123,7 @@ async function materializeForOperatingCompany(
           customerId: customerRow.customerId,
           operatingCompanyId: operatingCompany.id,
           realmId
-        });
+        }, virtualSourceAccounts);
         if (target) targets.push(target);
       }
       const relationshipIds = new Set(targets.map((target) => target.relationshipId));
@@ -2272,7 +2312,7 @@ async function materializeForOperatingCompany(
         customerId: row.customerId,
         operatingCompanyId: operatingCompany.id,
         realmId
-      });
+      }, virtualSourceAccounts);
       if (!target) {
         agingSnapshotIncomplete = true;
         section.agingSkippedUnmatched += 1;
@@ -2662,7 +2702,12 @@ function addMonthsUtc(date: Date, months: number): Date {
  */
 export async function materializeCustomerFinancials(
   ctx: AuthenticatedContext,
-  input: { operatingCompanyId?: string; dryRun?: boolean } = {}
+  input: {
+    operatingCompanyId?: string;
+    dryRun?: boolean;
+    /** Internal would-be mappings supplied by the consolidated dry-run. */
+    virtualSourceAccounts?: FinancialMaterializationDryRunSourceAccount[];
+  } = {}
 ): Promise<FinancialMaterializationReport> {
   await requireIngestionAdmin(ctx);
 
@@ -2689,7 +2734,14 @@ export async function materializeCustomerFinancials(
     if (!operatingCompany) {
       continue;
     }
-    sections.push(await materializeForOperatingCompany(ctx, operatingCompany, dryRun));
+    sections.push(
+      await materializeForOperatingCompany(
+        ctx,
+        operatingCompany,
+        dryRun,
+        dryRun ? input.virtualSourceAccounts : undefined
+      )
+    );
   }
 
   const totals = sections.reduce<FinancialMaterializationTotals>(

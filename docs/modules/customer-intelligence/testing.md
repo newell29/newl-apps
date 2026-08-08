@@ -59,6 +59,12 @@
   - **Dry-run zero-write contract**: `{ dryRun: true }` computes the full would-be report and asserts no create/update/upsert/delete on any model and no audits; an expired token in dry-run is reported as a limitation instead of refreshing.
   - **Permissions**: MANAGER, SALES, OPERATIONS, READ_ONLY, and FINANCE are denied for both live and dry-run entry points before any database write or QuickBooks fetch; a foreign operating-company id is rejected.
   - **Audit contract**: successful runs write the terminal `customer-intelligence.financial-materialization.run` entry with counts/classifications only — transaction identifiers, customer names, source keys, amounts, bearer tokens, and `secretRef` are proven absent from audit evidence; dry-run writes no audits.
+- `tests/customer-intelligence-dry-run.test.ts` — CP-PHASE-02B-7 consolidated end-to-end dry-run verification suite. Prisma is mocked; the authorization module is REAL; `fetch` is mocked. Covers:
+  - **Per-engine zero-write proofs**: ingestion dry-run, the read-only reconciliation dry-run evaluator (`evaluateReconciliationDryRun` in `reconciliation.ts`), and materialization dry-run each compute their complete would-change report with zero database writes (a strict assertion that no write of any kind, run records included, occurred).
+  - **Consolidated entry point** (`runCustomerIntelligenceDryRun` in `src/modules/customer-intelligence/dry-run.ts`): runs all three engines in dry-run for the tenant (optionally scoped to one operating company), returns the aggregate would-change report, and records the verification run through the existing tenant-scoped `AutomationJobRun` ledger (created RUNNING, completed SUCCESS) plus one sanitized `customer-intelligence.dry-run.completed` AuditLog entry. A tenant-scoped, non-persisted virtual pipeline carries ingestion's would-be new/refreshed proposal evidence into reconciliation and carries would-be approved mappings into materialization, so all three reports describe one coherent sequential state rather than three independent persisted snapshots. The zero-write proof asserts the only writes ever performed are that run record and its audit entry — no Customer Intelligence data model or integration credential is written.
+  - **Run-record audit contract**: successful AutomationJobRun output and AuditLog evidence carry counts and classifications only; customer identifiers, source keys, transaction identifiers, amounts, bearer tokens, credential references, and authorization headers are proven absent. If an engine throws, the run is tenant-scoped to ERROR and a sanitized, actor-scoped `customer-intelligence.dry-run.failed` AuditLog entry is associated with that run; provider exception content is never copied, and the failure regression still proves zero Customer Intelligence and credential writes.
+  - **Three-operating-company fixture matrix**: synthetic QuickBooks fixtures per operating company (Newl Worldwide, Newl USA, Newell's Express) cover partial evidence (including a persisted proposal whose current QuickBooks source evidence changes and a partially populated aging snapshot) and completely missing evidence (an Id-only customer) across ingestion, reconciliation, and materialization simultaneously. A DB-consistent new-source regression proves reconciliation evaluates the would-be proposal and materialization uses its would-be approved mapping; every operating-company path is asserted independently with zero data-model writes.
+  - **Permissions**: MANAGER, SALES, OPERATIONS, READ_ONLY, and FINANCE are denied on the consolidated entry before any database write or QuickBooks fetch; the reconciliation dry-run evaluator is ADMIN/FINANCE-only like the live engine; a foreign or nonexistent operating-company id is rejected before any write.
 - `tests/customer-intelligence-profile-ui.test.tsx` — CP-PHASE-02B-4 Customer Profile UI suite. Prisma is mocked; the authorization module is REAL; `next/cache`, `next/navigation`, `next/link`, and the `getAuthenticatedContext` session resolver are mocked. Runs in the Node vitest environment (`.test.tsx` is included by the vitest config); Vitest mirrors Next.js with the automatic React JSX runtime when importing `.tsx` modules directly, and server-rendered pages are rendered to static markup with `react-dom/server` (no DOM/browser library is used). Covers:
   - **Stored-evidence potential contacts**: `extractPotentialContactsFromEvidence` reads email/phone values from stored identity-match evidence only, never invents values from missing/empty/malformed evidence, de-duplicates, and skips oversized fields. All examples are synthetic reserved values (`purchasing@example.com`, `+1 416 555 0199`).
   - **Leadership role matrix**: SALES denied on every new query (`listCompanyDirectory`, `getUnmatchedCustomerDirectory`, `getCompanyProfileDetail`); OPERATIONS and READ_ONLY denied on reads; FINANCE and MANAGER granted; the contact-details mutation (`updateContactDetails`) is denied for SALES, OPERATIONS, READ_ONLY, and MANAGER before any database write (contact edits are ADMIN/FINANCE via `requireMatchApproval`), and FINANCE is denied when the tenant mutation gate sets `canMutate=false`.
@@ -155,6 +161,76 @@ workaround is fully reverted; no heap increase, concurrency reduction, test
 skip, exclusion, or assertion weakening is used. The controller owns the full
 suite verification.
 
+## Verification correction (CP-PHASE-02B-7)
+
+Two mandatory-verification failures in the consolidated dry-run phase were
+corrected without changing behaviour, schema, or scope:
+
+- **Type-only compile failure**: `CustomerIntelligenceDryRunReport.runRecord`
+  annotated `status: JobStatus.SUCCESS`, which uses the Prisma enum member in
+  a *type* position. Prisma generates `JobStatus` as a const object plus a
+  union type, so `JobStatus.SUCCESS` is not a valid type reference and the
+  suite failed `npm run typecheck`/`npm run build`. The annotation now uses the
+  repo-wide pattern `status: JobStatus` (the union type), matching every other
+  `AutomationJobRun` report type in the repository; the runtime value written
+  to the run record remains `JobStatus.SUCCESS`.
+- **Suite import failure**: the dry-run suite built its synthetic QuickBooks
+  credentials at module scope via `credentialsById`/`quickBooksCredential`,
+  whose encrypted `secretRef` requires `AUTH_SECRET`. That variable is only
+  installed by `setQuickBooksEnv()` in each `beforeEach`, so the module
+  evaluation threw `AUTH_SECRET is required to encrypt QuickBooks OAuth
+  secrets` before any test could run (0 tests reported). The credentials are
+  now built lazily inside `configureData()`, which runs after
+  `setQuickBooksEnv()`, matching the fixture pattern used by the ingestion and
+  materialization suites. No fixture, assertion, or zero-write proof changed.
+
+### Fixture and harness corrections (CP-PHASE-02B-7 verification 2)
+
+A second mandatory-verification run observed seven failures in
+`tests/customer-intelligence-dry-run.test.ts`. All were corrected without
+changing engine behaviour, schema, or phase scope:
+
+- **Revenue dated in the previous month**: the realm-1 and realm-3 revenue
+  rows used `monthDate(0)` (the current month), so the open-AR snapshot
+  (always as-of today) merged into the same monthly bucket as revenue. The
+  materializer then reported `monthlyRowsWritten` 2 for Newl Worldwide instead
+  of 3 and the consolidated `wouldChangeRecords` 13 instead of 16. Revenue rows
+  now use `monthDate(-1)` exactly like the materialization suite's documented
+  pattern ("Revenue is dated in the previous month so the open-AR snapshot
+  always forms a separate monthly bucket regardless of run date"), restoring
+  one revenue bucket, one open-AR bucket, and one gross-profit bucket per
+  affected operating company.
+- **Realm-3 revenue customer identity**: the realm-3 revenue row kept the
+  helper's default `Customer ID` of `1001`, which only resolves in realm-1, so
+  Newell's Express revenue was skipped as unmatched (`revenueMaterialized` 0
+  instead of 1). The row now carries its own synthetic customer `4004`,
+  matching the realm-3 source account and the partially populated aging
+  fixture.
+- **Run-record writes recorded in the mocked harness**:
+  `configureData` replaced the harness's recording wrapper for
+  `automationJobRun.create`/`.update` with `mockImplementation`, so the
+  zero-write proof saw no run-record write at all. The mocked implementations
+  now log those calls into `prismaTest.modelCalls`, so
+  `assertOnlyRunRecordWrites` proves the only writes ever performed are the one
+  `AutomationJobRun` create + update and the single sanitized AuditLog entry.
+
+### Audit recorder correction (CP-PHASE-02B-7 verification 3)
+
+The full mandatory suite exposed an order-dependent mock-harness regression in
+the same zero-write proof. The proxy initially gave `auditLog.create` a
+recording implementation, but `prismaTest.reset()` called Vitest's
+`mockReset()`, which retained the mock function while clearing that
+implementation. As a result, the first consolidated test invoked and recorded
+the audit normally, while each later test still invoked `auditLog.create` but
+did not append it to `modelCalls`; the strict write allowlist therefore saw
+zero audit writes and failed four assertions. `configureData()` now restores an
+explicit recording implementation for `auditLog.create` on every test setup,
+matching the existing `AutomationJobRun` mock treatment. The assertions remain
+strict: every consolidated and per-operating-company path must observe exactly
+one tenant-scoped audit create, one job create, one job update, and no Customer
+Intelligence or credential writes. Runtime behaviour, tenant scope, schema,
+and approval boundaries are unchanged.
+
 ## Baseline debt (recorded at CP-PHASE-02A verification time)
 
 - The CP-PHASE-02A run observed **no unrelated global failures**. The three failures previously listed as origin/main baseline debt (the OPERATIONS `accessibleModuleKeys` expectation omitting `WEBSITE_GROWTH`, and one failure each in `assistant-runtime.test.ts` and `settings-queries.test.ts`) were **not reproduced**: `tests/authorization.test.ts` (27 tests), `tests/assistant-runtime.test.ts` (8 tests), and `tests/settings-queries.test.ts` (5 tests) all passed. The OPERATIONS matrix in `tests/authorization.test.ts` now includes `WEBSITE_GROWTH`.
@@ -245,3 +321,75 @@ customer communication**, and **no production write**. The legacy Customer
 Cashflow UI is treated per owner decision CP-02B-6-Q1 (`RETIRE_NAV`): it is not
 removed or redirected before Customer Profile reporting has been validated as
 operational.
+
+## Phase scope (CP-PHASE-02B-7)
+
+CP-PHASE-02B-7 introduces the consolidated end-to-end dry-run verification
+module (`src/modules/customer-intelligence/dry-run.ts`), the read-only
+reconciliation dry-run evaluator (`evaluateReconciliationDryRun` in
+`reconciliation.ts`), one test suite
+(`tests/customer-intelligence-dry-run.test.ts`), and the dry-run validation
+runbook below. It adds **no schema change and no migration**, so the
+migration-guard suite still proves the Customer Intelligence migrations are
+additive and never touch the legacy `Cashflow*` tables. The dry-run engine
+executes nothing live: ingestion and materialization reuse their existing
+`dryRun: true` paths, reconciliation is evaluated read-only, and a non-writing
+virtual state handoff makes downstream stages evaluate upstream would-be
+changes. Every shared data path carries authenticated `tenantId` filtering.
+
+## Dry-run validation runbook (CP-PHASE-02B-7)
+
+> Live execution status: this phase performs no live run. Running ingestion,
+> reconciliation, or materialization against any preview or production
+> environment is owner-approved operational work, not engine authority. The
+> engine (Codex/OpenClaw) prepares and documents this runbook only; it never
+> executes a live run.
+
+### Safety gate
+
+Every consolidated dry-run verification must pass the ADMIN guard
+(`requireIngestionAdmin`, enforced at the dry-run module and defensively by
+each engine), run in `dryRun: true` mode (ingestion/materialization) or through
+the read-only reconciliation evaluator, and target only the authenticated
+tenant's operating companies. The consolidated path must retain its in-memory
+virtual state between stages; independently running the three engines against
+persisted state is not equivalent verification. The zero-write proof is the regression-suite
+assertion that the only writes ever performed are the tenant-scoped
+`AutomationJobRun` run record and its single sanitized AuditLog entry.
+
+### Required evidence
+
+Each approved dry-run validation must record:
+
+1. **Operator identity and tenant**: who triggered the dry-run, from which
+   authenticated tenant, and which operating companies were scoped (or "all").
+2. **The complete would-change report**: the returned
+   `CustomerIntelligenceDryRunReport` — ingestion totals per operating company,
+   reconciliation per-match would-change outcomes, materialization section
+   statuses, and the aggregate `wouldChangeRecords` count.
+3. **Zero-write proof**: the run record (jobRunId, jobType
+   `customer-intelligence.dry-run`, status SUCCESS) and the sanitized
+   `customer-intelligence.dry-run.completed` audit entry, plus the
+   regression-suite assertion that no Customer Intelligence data row was
+   created, updated, upserted, or deleted. A failed validation instead requires
+   the tenant-scoped ERROR run update and associated sanitized
+   `customer-intelligence.dry-run.failed` audit; provider exception content must
+   not appear in either record.
+4. **Fixture matrix coverage**: the three-operating-company synthetic matrix
+   results (partial and completely missing evidence) from
+   `tests/customer-intelligence-dry-run.test.ts`.
+5. **Human approval record**: who approved the live run, when, and which
+   tenant/operating-company scope the approval covered.
+
+### Approval boundary
+
+- A consolidated **dry-run** is an ADMIN-triggered read/verification action and
+  performs zero live data writes; it may be run for verification without a
+  separate owner approval beyond the ADMIN guard.
+- **Live execution** of ingestion, reconciliation, or materialization is
+  operational work that requires explicit human approval enforced by the
+  repository human-approval boundaries; the dry-run would-change report is the
+  evidence the owner reviews before approving a live run.
+- Migrations, deployments, Teamship writes, financial posting, customer
+  communication, and permission changes remain excluded from this phase and
+  require their own distinct human approvals.
