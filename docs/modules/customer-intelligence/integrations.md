@@ -39,10 +39,11 @@
   must belong to the caller's tenant; the credential must be `provider = QUICKBOOKS` and
   `status = ACTIVE`; and the supplied `quickBooksRealmId` must equal the realm stored in the
   credential's `publicConfig`. The credential's stored legal entity must also map exactly to
-  the selected operating-company slug. Transaction-scoped advisory locks serialize claims on both
-  the credential ID and realm ID; a connection already associated with another operating
-  company in the tenant is rejected before any update. Cross-tenant, duplicate, or
-  mismatched references are rejected before any write.
+  the selected operating-company slug. A serializable transaction protects the tenant-scoped
+  conflict predicate and association update without depending on advisory-lock support in the
+  production connection proxy. One serialization conflict is retried; the retry re-runs the
+  authoritative conflict query, so a connection claimed concurrently is rejected before update.
+  Cross-tenant, duplicate, or mismatched references are rejected before any write.
 - `registerOperatingCompany` does not accept or persist either QuickBooks association field,
   including when an untyped runtime caller supplies them. All association writes must pass
   through the validated and audited `associateQuickBooksCredential` action; operating-company
@@ -69,10 +70,16 @@
   hide an existing claim on the credential or realm. The eventual operating-company update and
   its `AuditLog` entry commit in one Prisma transaction; an audit failure rolls the association
   back. Failed actions return only a bounded reason code (`PERMISSION_DENIED`, `STALE_MATCH`,
-  `CONFLICT`, validation-specific codes, `AUDIT_FAILED`, or `DATABASE_WRITE_FAILED`) and safe
+  `CONFLICT`, validation-specific codes, `CONFLICT_CHECK_FAILED`,
+  `ASSOCIATION_UPDATE_FAILED`, `AUDIT_FAILED`, `TRANSACTION_FAILED`, or
+  `SERIALIZATION_RETRY_EXHAUSTED`) and safe
   operator text. Provider payloads, database exception text, credential IDs, realm IDs, tokens,
   and secrets are never returned. This diagnostic contract was added after the first production
   Newl USA attempt failed closed while the earlier generic envelope concealed its failure stage.
+  A second production attempt isolated that failure to the former database transaction. To
+  remove its environment-specific advisory-lock dependency, the compatibility repair now uses
+  the serializable boundary described above and retains stage-specific fail-closed reporting for
+  any remaining database failure.
 
 ## Read-only QuickBooks customer ingestion (CP-PHASE-02B-2)
 

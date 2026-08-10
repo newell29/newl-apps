@@ -70,6 +70,15 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
+function isSerializationConflictError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "P2034"
+  );
+}
+
 /** Existing canonical Company key format used by seed and ingestion paths. */
 function normalizeCanonicalCompanyName(value: string): string {
   return value
@@ -238,84 +247,108 @@ export async function associateQuickBooksCredential(
     quickBooksCredentialId: operatingCompany.quickBooksCredentialId
   };
 
-  const associationLockKeys = [
-    `customer-intelligence.quickbooks-credential:${ctx.tenantId}:${credential.id}`,
-    `customer-intelligence.quickbooks-realm:${ctx.tenantId}:${credentialRealmId}`
-  ].sort();
-
-  try {
-    return await prisma.$transaction(async (transaction) => {
-      // A credential and its realm identify one QuickBooks company. Serialize
-      // association attempts for both keys so two operating companies cannot
-      // concurrently claim the same connection without a schema migration.
-      for (const lockKey of associationLockKeys) {
-        await transaction.$queryRaw(
-          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
-        );
-      }
-
-      const conflictingAssociations =
-        (await transaction.operatingCompany.findMany({
-          where: tenantWhere(ctx, {
-            id: { not: operatingCompany.id },
-            OR: [
-              { quickBooksCredentialId: credential.id },
-              { quickBooksRealmId: credentialRealmId }
-            ]
-          }),
-          select: {
-            id: true,
-            displayName: true,
-            quickBooksCredentialId: true,
-            quickBooksRealmId: true
-          }
-        })) ?? [];
-
-      if (conflictingAssociations.length > 0) {
-        throw new QuickBooksAssociationError(
-          "CONFLICT",
-          "This QuickBooks credential or realm is already associated with another operating company in this tenant."
-        );
-      }
-
-      const updated = await transaction.operatingCompany.update({
-        where: { tenantId_id: { tenantId: ctx.tenantId, id: operatingCompany.id } },
-        data: {
-          quickBooksRealmId: credentialRealmId,
-          quickBooksCredentialId: credential.id
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (transaction) => {
+        // SERIALIZABLE makes the conflict predicate and association update one
+        // concurrency boundary without relying on advisory-lock support in the
+        // production connection proxy. A serialization conflict is retried
+        // once; the retry re-runs this authoritative tenant-scoped read.
+        let conflictingAssociations;
+        try {
+          conflictingAssociations =
+            (await transaction.operatingCompany.findMany({
+              where: tenantWhere(ctx, {
+                id: { not: operatingCompany.id },
+                OR: [
+                  { quickBooksCredentialId: credential.id },
+                  { quickBooksRealmId: credentialRealmId }
+                ]
+              }),
+              select: {
+                id: true,
+                displayName: true,
+                quickBooksCredentialId: true,
+                quickBooksRealmId: true
+              }
+            })) ?? [];
+        } catch {
+          throw new QuickBooksAssociationError(
+            "CONFLICT_CHECK_FAILED",
+            "Existing QuickBooks associations could not be checked."
+          );
         }
+
+        if (conflictingAssociations.length > 0) {
+          throw new QuickBooksAssociationError(
+            "CONFLICT",
+            "This QuickBooks credential or realm is already associated with another operating company in this tenant."
+          );
+        }
+
+        let updated;
+        try {
+          updated = await transaction.operatingCompany.update({
+            where: { tenantId_id: { tenantId: ctx.tenantId, id: operatingCompany.id } },
+            data: {
+              quickBooksRealmId: credentialRealmId,
+              quickBooksCredentialId: credential.id
+            }
+          });
+        } catch {
+          throw new QuickBooksAssociationError(
+            "ASSOCIATION_UPDATE_FAILED",
+            "The operating-company association could not be updated."
+          );
+        }
+        try {
+          await auditEntry({
+            actor: ctx,
+            action: "customer-intelligence.operating-company.quickbooks-associated",
+            entityType: "OperatingCompany",
+            entityId: operatingCompany.id,
+            before,
+            after: {
+              quickBooksRealmId: updated.quickBooksRealmId,
+              quickBooksCredentialId: updated.quickBooksCredentialId
+            },
+            client: transaction
+          });
+        } catch {
+          throw new QuickBooksAssociationError(
+            "AUDIT_FAILED",
+            "The association audit record could not be written."
+          );
+        }
+
+        return updated;
+      }, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable
       });
-      try {
-        await auditEntry({
-          actor: ctx,
-          action: "customer-intelligence.operating-company.quickbooks-associated",
-          entityType: "OperatingCompany",
-          entityId: operatingCompany.id,
-          before,
-          after: {
-            quickBooksRealmId: updated.quickBooksRealmId,
-            quickBooksCredentialId: updated.quickBooksCredentialId
-          },
-          client: transaction
-        });
-      } catch {
+    } catch (error) {
+      if (error instanceof QuickBooksAssociationError) {
+        throw error;
+      }
+      if (isSerializationConflictError(error)) {
+        if (attempt < 2) {
+          continue;
+        }
         throw new QuickBooksAssociationError(
-          "AUDIT_FAILED",
-          "The association audit record could not be written."
+          "SERIALIZATION_RETRY_EXHAUSTED",
+          "The association changed concurrently and could not be retried safely."
         );
       }
-
-      return updated;
-    });
-  } catch (error) {
-    if (error instanceof QuickBooksAssociationError) {
-      throw error;
+      throw new QuickBooksAssociationError(
+        "TRANSACTION_FAILED",
+        "The association transaction could not be started or committed."
+      );
     }
-    throw new QuickBooksAssociationError(
-      "DATABASE_WRITE_FAILED",
-      "The association transaction could not be completed."
-    );
   }
+
+  throw new QuickBooksAssociationError(
+    "TRANSACTION_FAILED",
+    "The association transaction could not be completed."
+  );
 }
 
 function readCredentialRealmId(value: Prisma.JsonValue | null | undefined): string | null {

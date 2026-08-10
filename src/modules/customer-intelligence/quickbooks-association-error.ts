@@ -9,8 +9,11 @@ export type QuickBooksAssociationFailureCode =
   | "CREDENTIAL_LEGAL_ENTITY_INVALID"
   | "CREDENTIAL_LEGAL_ENTITY_MISMATCH"
   | "CONFLICT"
+  | "CONFLICT_CHECK_FAILED"
+  | "ASSOCIATION_UPDATE_FAILED"
   | "AUDIT_FAILED"
-  | "DATABASE_WRITE_FAILED";
+  | "TRANSACTION_FAILED"
+  | "SERIALIZATION_RETRY_EXHAUSTED";
 
 export class QuickBooksAssociationError extends Error {
   constructor(
