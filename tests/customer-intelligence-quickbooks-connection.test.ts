@@ -114,6 +114,10 @@ vi.mock("@/server/tenant-context", () => ({
 import { GET as quickBooksConnectGET } from "@/app/api/integrations/quickbooks/connect/route";
 import { GET as quickBooksCallbackGET } from "@/app/api/integrations/quickbooks/callback/route";
 import { associateQuickBooksCredential } from "@/modules/customer-intelligence/actions";
+import {
+  getExistingQuickBooksAssociationOptions,
+  resolveExistingQuickBooksAssociations
+} from "@/modules/customer-intelligence/existing-quickbooks-association";
 import { AuthorizationError } from "@/server/auth/authorization";
 import {
   buildQuickBooksAuthorizationUrl,
@@ -571,6 +575,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
   it("associates an ACTIVE QUICKBOOKS credential with a matching realm and audits it", async () => {
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
       id: "oc-ww",
+      slug: "newl-worldwide",
       tenantId: "tenant-a",
       quickBooksRealmId: null,
       quickBooksCredentialId: null
@@ -581,6 +586,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
     prismaTest.model("operatingCompany").update.mockImplementation(
       ({ data }: { data: Record<string, unknown> }) => ({
         id: "oc-ww",
+        slug: "newl-worldwide",
         tenantId: "tenant-a",
         quickBooksRealmId: null,
         quickBooksCredentialId: null,
@@ -601,6 +607,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
     expect(updateArg.where.tenantId_id.id).toBe("oc-ww");
     expect(updateArg.data.quickBooksRealmId).toBe("realm-1");
     expect(updateArg.data.quickBooksCredentialId).toBe("cred-qb-1");
+    expect(prismaTest.model("integrationCredential").update).not.toHaveBeenCalled();
 
     const audit = prismaTest.model("auditLog").create.mock.calls[0][0] as {
       data: Record<string, unknown>;
@@ -620,6 +627,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
     async (_kind, conflictingAssociation) => {
       prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
         id: "oc-ww",
+        slug: "newl-worldwide",
         tenantId: "tenant-a",
         quickBooksRealmId: null,
         quickBooksCredentialId: null
@@ -658,6 +666,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
   it("rejects a credential from another tenant before any write", async () => {
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
       id: "oc-ww",
+      slug: "newl-worldwide",
       tenantId: "tenant-a"
     });
     prismaTest.model("integrationCredential").findFirst.mockResolvedValue(null);
@@ -671,6 +680,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
   it("rejects a credential whose provider is not QUICKBOOKS", async () => {
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
       id: "oc-ww",
+      slug: "newl-worldwide",
       tenantId: "tenant-a"
     });
     prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
@@ -686,6 +696,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
   it("rejects an inactive credential", async () => {
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
       id: "oc-ww",
+      slug: "newl-worldwide",
       tenantId: "tenant-a"
     });
     prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
@@ -701,6 +712,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
   it("rejects a realm that does not match the credential's stored realm", async () => {
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
       id: "oc-ww",
+      slug: "newl-worldwide",
       tenantId: "tenant-a"
     });
     prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
@@ -719,6 +731,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
   it("rejects a credential that stores no realm ID", async () => {
     prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
       id: "oc-ww",
+      slug: "newl-worldwide",
       tenantId: "tenant-a"
     });
     prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
@@ -727,6 +740,24 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
 
     await expect(associateQuickBooksCredential(ADMIN, VALID_INPUT)).rejects.toThrow(
       /does not store a realm ID/
+    );
+    assertNoDatabaseWrites();
+  });
+
+  it("rejects a credential whose legal entity belongs to a different operating company", async () => {
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
+      id: "oc-ww",
+      slug: "newl-worldwide",
+      tenantId: "tenant-a"
+    });
+    prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
+      activeQuickBooksCredential({
+        publicConfig: { realmId: "realm-1", legalEntity: "NEWL_USA" }
+      })
+    );
+
+    await expect(associateQuickBooksCredential(ADMIN, VALID_INPUT)).rejects.toThrow(
+      /legal entity does not match/
     );
     assertNoDatabaseWrites();
   });
@@ -768,11 +799,19 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
 
 describe("settings surface guard (CP-02B-1)", () => {
   it("shows all three operating companies and never renders secrets in the settings page", () => {
-    const page = readFileSync("src/app/(authenticated)/settings/page.tsx", "utf8");
+    const page = [
+      readFileSync("src/app/(authenticated)/settings/page.tsx", "utf8"),
+      readFileSync(
+        "src/modules/customer-intelligence/components/existing-quickbooks-association-control.tsx",
+        "utf8"
+      )
+    ].join("\n");
     expect(page).toContain("newl-worldwide");
     expect(page).toContain("newl-usa");
     expect(page).toContain("newells-express");
     expect(page).toContain("Newell's Express and Warehousing Ltd.");
+    expect(page).toContain("Associate existing connection");
+    expect(page).toContain("Customer Intelligence:");
     // The page renders realm/company/environment metadata only.
     expect(page).not.toContain("secretRef");
     expect(page).not.toContain("refreshToken");
@@ -793,5 +832,61 @@ describe("settings surface guard (CP-02B-1)", () => {
     expect(integrations).toContain("newl-worldwide");
     expect(integrations).toContain("newl-usa");
     expect(integrations).toContain("newells-express");
+  });
+});
+
+describe("existing QuickBooks connection discovery", () => {
+  beforeEach(() => {
+    prismaTest.reset();
+    configureAuth();
+  });
+
+  it("discovers an exact, active, secret-backed connection for each approved company without exposing IDs or secrets", async () => {
+    prismaTest.model("operatingCompany").findMany.mockResolvedValue([
+      { id: "oc-ww", slug: "newl-worldwide", quickBooksCredentialId: null, quickBooksRealmId: null },
+      { id: "oc-usa", slug: "newl-usa", quickBooksCredentialId: null, quickBooksRealmId: null },
+      { id: "oc-express", slug: "newells-express", quickBooksCredentialId: null, quickBooksRealmId: null }
+    ]);
+    prismaTest.model("integrationCredential").findMany.mockResolvedValue([
+      { id: "cred-ww", publicConfig: { legalEntity: "NEWL_WORLDWIDE", realmId: "realm-ww", companyName: "Worldwide", environment: "production" } },
+      { id: "cred-usa", publicConfig: { legalEntity: "NEWL_USA", realmId: "realm-usa", companyName: "USA", environment: "production" } },
+      { id: "cred-express", publicConfig: { legalEntity: "NEWELLS_EXPRESS", realmId: "realm-express", companyName: "Express", environment: "production" } }
+    ]);
+
+    const options = await getExistingQuickBooksAssociationOptions(ADMIN);
+
+    expect(options.map((option) => [option.operatingCompanySlug, option.status])).toEqual([
+      ["newl-worldwide", "AVAILABLE"],
+      ["newl-usa", "AVAILABLE"],
+      ["newells-express", "AVAILABLE"]
+    ]);
+    expect(JSON.stringify(options)).not.toContain("cred-");
+    expect(JSON.stringify(options)).not.toContain("realm-");
+    expect(JSON.stringify(options)).not.toContain("secret");
+
+    const companyWhere = prismaTest.model("operatingCompany").findMany.mock.calls[0][0].where;
+    const credentialWhere = prismaTest.model("integrationCredential").findMany.mock.calls[0][0].where;
+    expect(companyWhere.tenantId).toBe("tenant-a");
+    expect(credentialWhere.tenantId).toBe("tenant-a");
+    expect(credentialWhere.provider).toBe(IntegrationProvider.QUICKBOOKS);
+    expect(credentialWhere.status).toBe(IntegrationStatus.ACTIVE);
+    expect(credentialWhere.secretRef).toEqual({ not: null });
+  });
+
+  it("fails closed for ambiguous and conflicting matches", async () => {
+    prismaTest.model("operatingCompany").findMany.mockResolvedValue([
+      { id: "oc-ww", slug: "newl-worldwide", quickBooksCredentialId: null, quickBooksRealmId: null },
+      { id: "oc-usa", slug: "newl-usa", quickBooksCredentialId: "different", quickBooksRealmId: null }
+    ]);
+    prismaTest.model("integrationCredential").findMany.mockResolvedValue([
+      { id: "cred-ww-1", publicConfig: { legalEntity: "NEWL_WORLDWIDE", realmId: "realm-ww-1" } },
+      { id: "cred-ww-2", publicConfig: { legalEntity: "NEWL_WORLDWIDE", realmId: "realm-ww-2" } },
+      { id: "cred-usa", publicConfig: { legalEntity: "NEWL_USA", realmId: "realm-usa" } }
+    ]);
+
+    const resolved = await resolveExistingQuickBooksAssociations(ADMIN);
+    expect(resolved.find((item) => item.operatingCompanySlug === "newl-worldwide")?.status).toBe("AMBIGUOUS");
+    expect(resolved.find((item) => item.operatingCompanySlug === "newl-usa")?.status).toBe("CONFLICT");
+    expect(resolved.find((item) => item.operatingCompanySlug === "newells-express")?.status).toBe("MISSING_OPERATING_COMPANY");
   });
 });

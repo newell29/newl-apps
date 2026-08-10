@@ -38,7 +38,8 @@
 - Validation is deterministic and tenant-scoped: the operating company and the credential
   must belong to the caller's tenant; the credential must be `provider = QUICKBOOKS` and
   `status = ACTIVE`; and the supplied `quickBooksRealmId` must equal the realm stored in the
-  credential's `publicConfig`. Transaction-scoped advisory locks serialize claims on both
+  credential's `publicConfig`. The credential's stored legal entity must also map exactly to
+  the selected operating-company slug. Transaction-scoped advisory locks serialize claims on both
   the credential ID and realm ID; a connection already associated with another operating
   company in the tenant is rejected before any update. Cross-tenant, duplicate, or
   mismatched references are rejected before any write.
@@ -53,6 +54,16 @@
   for audit. The live ingestion and materialization entry points refuse to run for an
   operating company without an enabled, approval-carrying enablement record; dry-run
   verification remains available as the owner's zero-write preview tool.
+- **Existing-connection compatibility repair:** the ADMIN Settings page discovers active,
+  secret-backed QuickBooks credentials for the three approved legal-entity keys and compares
+  them with their tenant-owned operating-company records. Exactly one unclaimed match can be
+  associated one company at a time after explicit confirmation. Missing, ambiguous, conflicting,
+  cross-company, inactive, or unsupported records fail closed. The browser submits only the
+  operating-company ID; the server re-resolves the credential and realm immediately before the
+  audited association. This path never reads a token into the UI, updates an
+  `IntegrationCredential`, performs OAuth, enables live sync, or calls QuickBooks. It is intended
+  to preserve pre-existing invoice-posting connections while adding the Customer Intelligence
+  references those read-only engines require.
 
 ## Read-only QuickBooks customer ingestion (CP-PHASE-02B-2)
 

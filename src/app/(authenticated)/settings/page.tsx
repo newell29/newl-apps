@@ -27,6 +27,8 @@ import { connectMicrosoftGraphAction } from "@/server/auth/actions";
 import { requireAdmin } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 import { getTeamshipBrowserReadRuntimeStatus } from "@/modules/teamship/browser-read-execution";
+import { ExistingQuickBooksAssociationControl } from "@/modules/customer-intelligence/components/existing-quickbooks-association-control";
+import { getExistingQuickBooksAssociationOptions } from "@/modules/customer-intelligence/existing-quickbooks-association";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +42,10 @@ const leadGenAiModelOptions = [
 export default async function SettingsPage() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
-  const settings = await getSettingsShell(context);
+  const [settings, quickBooksAssociationOptions] = await Promise.all([
+    getSettingsShell(context),
+    getExistingQuickBooksAssociationOptions(context)
+  ]);
   const teamshipBrowserRuntime = getTeamshipBrowserReadRuntimeStatus();
   const loginUrl = `${process.env.AUTH_URL ?? "https://newl-apps.vercel.app"}/login`;
 
@@ -153,6 +158,9 @@ export default async function SettingsPage() {
             const connection = settings.quickbooksConnections.find(
               (item) => item.operatingCompanySlug === target.slug
             );
+            const association = quickBooksAssociationOptions.find(
+              (item) => item.operatingCompanySlug === target.slug
+            );
 
             return (
               <div key={target.slug} className="rounded-md border border-border bg-muted/40 p-4">
@@ -177,6 +185,9 @@ export default async function SettingsPage() {
                   <p>Realm ID: {connection?.realmId ?? "Not connected yet"}</p>
                   <p>Company: {connection?.companyName ?? "Pending QuickBooks callback"}</p>
                   <p>Environment: {connection?.environment ?? "production"}</p>
+                  <p>
+                    Customer Intelligence: {formatQuickBooksAssociationStatus(association?.status)}
+                  </p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -187,6 +198,11 @@ export default async function SettingsPage() {
                     {connection ? "Reconnect QuickBooks" : "Connect QuickBooks"}
                   </a>
                 </div>
+                {association?.status === "AVAILABLE" && association.operatingCompanyId ? (
+                  <ExistingQuickBooksAssociationControl
+                    operatingCompanyId={association.operatingCompanyId}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -1857,6 +1873,23 @@ export default async function SettingsPage() {
       </section>
     </div>
   );
+}
+
+function formatQuickBooksAssociationStatus(status: string | undefined) {
+  switch (status) {
+    case "ASSOCIATED":
+      return "Associated";
+    case "AVAILABLE":
+      return "Existing connection ready to associate";
+    case "AMBIGUOUS":
+      return "Needs review — multiple matching connections";
+    case "CONFLICT":
+      return "Needs review — conflicting association";
+    case "MISSING_OPERATING_COMPANY":
+      return "Operating company record is missing";
+    default:
+      return "No matching active connection";
+  }
 }
 
 function Field({
