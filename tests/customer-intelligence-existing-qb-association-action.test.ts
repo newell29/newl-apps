@@ -105,8 +105,8 @@ describe("associateExistingQuickBooksConnectionAction", () => {
     form.set("confirmation", EXISTING_QUICKBOOKS_ASSOCIATION_CONFIRMATION);
     mocks.associate.mockRejectedValueOnce(
       new QuickBooksAssociationError(
-        "DATABASE_WRITE_FAILED",
-        "The association transaction could not be completed."
+        "TRANSACTION_FAILED",
+        "The association transaction could not be started or committed."
       )
     );
 
@@ -114,9 +114,9 @@ describe("associateExistingQuickBooksConnectionAction", () => {
 
     expect(failed).toEqual({
       status: "error",
-      code: "DATABASE_WRITE_FAILED",
+      code: "TRANSACTION_FAILED",
       message:
-        "DATABASE_WRITE_FAILED: The association transaction could not be completed."
+        "TRANSACTION_FAILED: The association transaction could not be started or committed."
     });
   });
 });

@@ -654,7 +654,39 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
     await associateQuickBooksCredential(ADMIN, VALID_INPUT);
 
     expect(prismaTest.transaction).toHaveBeenCalledTimes(1);
+    const transactionArgs = prismaTest.transaction.mock.calls[0] as unknown[];
+    expect(transactionArgs[1]).toEqual({ isolationLevel: "Serializable" });
+    expect(prismaTest.queryRaw).not.toHaveBeenCalled();
     expect(prismaTest.model("auditLog").create).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries one serialization conflict and reruns the authoritative conflict check", async () => {
+    prismaTest.transaction
+      .mockRejectedValueOnce({ code: "P2034" })
+      .mockImplementationOnce(async (callback) => callback(prismaTest.proxy));
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
+      id: "oc-ww",
+      slug: "newl-worldwide",
+      tenantId: "tenant-a",
+      quickBooksRealmId: null,
+      quickBooksCredentialId: null
+    });
+    prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
+      activeQuickBooksCredential()
+    );
+    prismaTest.model("operatingCompany").findMany.mockResolvedValue([]);
+    prismaTest.model("operatingCompany").update.mockResolvedValue({
+      id: "oc-ww",
+      quickBooksRealmId: "realm-1",
+      quickBooksCredentialId: "cred-qb-1"
+    });
+
+    await associateQuickBooksCredential(ADMIN, VALID_INPUT);
+
+    expect(prismaTest.transaction).toHaveBeenCalledTimes(2);
+    expect(prismaTest.model("operatingCompany").findMany).toHaveBeenCalledTimes(1);
+    expect(prismaTest.model("operatingCompany").update).toHaveBeenCalledTimes(1);
+    expect(prismaTest.queryRaw).not.toHaveBeenCalled();
   });
 
   it("fails the transaction with a safe code when its audit cannot be written", async () => {
@@ -716,7 +748,7 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
       );
 
       expect(prismaTest.transaction).toHaveBeenCalledTimes(1);
-      expect(prismaTest.queryRaw).toHaveBeenCalledTimes(2);
+      expect(prismaTest.queryRaw).not.toHaveBeenCalled();
       expect(prismaTest.model("operatingCompany").update).not.toHaveBeenCalled();
       assertNoDatabaseWrites();
     }
