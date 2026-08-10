@@ -1408,6 +1408,35 @@ NEWLS 2604816191908 1.00 ( )`
     );
   });
 
+  it("uses the approved Frymaster dimensions and weight for UHCTHD6T00004", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS123456",
+      srNumber: "SR812345",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "DIMENSION TEST CUSTOMER",
+      shipToPo: "PO-DIMENSION-TEST",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["UHCTHD6T00004"],
+      serialNumbers: []
+    });
+
+    const review = buildGarlandTeamshipReview([pdfOrder], []);
+
+    expect(review.reviews[0]?.productDimensions).toEqual([
+      expect.objectContaining({
+        sku: "UHCTHD6T00004",
+        source: "GARLAND_REFERENCE",
+        productType: "Frymaster",
+        lengthIn: 33,
+        widthIn: 58,
+        heightIn: 36,
+        weightLb: 396,
+        confidence: "HIGH"
+      })
+    ]);
+  });
+
   it("adds learned Teamship dimension recommendations ahead of Garland reference rows", () => {
     const pdfOrder = samplePdfOrder({
       psNumber: "PS210502",

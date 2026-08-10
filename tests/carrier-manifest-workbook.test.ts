@@ -46,10 +46,15 @@ describe("Garland carrier manifest workbook", () => {
 
     expect(html.match(/class="manifest-row/g)).toHaveLength(16);
     expect(html).toContain('<col class="sr-col"/>');
+    expect(html).toContain('<col class="time-in-col"/>');
+    expect(html).toContain('<col class="time-out-col"/>');
     expect(html).toContain("font-size:11pt");
     expect(html).toContain("Driver signature");
+    expect(html).toContain("Driver&#039;s time in");
+    expect(html).toContain("Driver&#039;s time out");
     expect(html).toContain("Manifest date");
     expect(html).toContain('<td class="skids">13</td>');
+    expect(html.match(/<td class="time-entry"><\/td>/g)).toHaveLength(34);
   });
 
   it("preserves identifiers as text and escapes labels safely", () => {

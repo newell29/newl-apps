@@ -34,6 +34,8 @@ For non-UPS Garland orders, SKU prefixes have these fixed pallet dimension and w
 
 The rule applies to every SKU beginning with the prefix, not only the exact SKU examples in the static Garland dimension sheet. It takes precedence over Teamship pallet observations, learned dimensions, and exact-sheet rows. The existing Garland UPS rule remains the higher-priority exception and uses `1 x 1 x 1` at `1 lb` regardless of SKU.
 
+The approved exact reference for Frymaster SKU `UHCTHD6T00004` is `33 x 58 x 36` inches at `396 lbs`.
+
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.
