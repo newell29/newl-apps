@@ -245,6 +245,16 @@ the QuickBooks access token is expired, dry-run does not refresh and write the
 credential: the preview fails safely and instructs the operator to reconnect
 the company before retrying.
 
+If reconciliation cannot read or validate its candidate snapshot, the preview
+shows a warning rather than a successful-looking completion banner and reports
+only bounded count categories for a known missing table/column or the failed
+boundary (reviewed decisions, operating-company relationships, canonical
+companies, approved mappings, evidence scoring, approval invariants, or
+approved-conflict checks). Raw
+database messages and record identifiers never cross the server-action or
+run-ledger boundary. Any such category blocks live-sync approval until a later
+read-only preview completes without reconciliation errors.
+
 ## Permissions
 
 - Read access: ADMIN, MANAGER, FINANCE (leadership only in v1).

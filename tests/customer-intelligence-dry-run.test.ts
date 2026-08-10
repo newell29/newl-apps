@@ -828,6 +828,63 @@ describe("per-engine dry-run zero-write proofs (CP-PHASE-02B-7)", () => {
     assertNoDatabaseWrites();
   });
 
+  it.each([
+    [
+      "operating-company relationships",
+      "companyOperatingRelationship",
+      "OPERATING_RELATIONSHIP_READ_FAILED"
+    ],
+    ["canonical companies", "company", "CANONICAL_COMPANY_READ_FAILED"],
+    ["approved mappings", "customerIdentityMatch", "APPROVED_MAPPING_READ_FAILED"]
+  ])(
+    "classifies a %s snapshot failure without exposing raw database details",
+    async (_label, modelName, expectedClassification) => {
+      configureData();
+      const privateError = new Error(
+        "private database payload customer@example.com Authorization: Bearer private-token"
+      );
+      if (modelName === "customerIdentityMatch") {
+        prismaTest.model(modelName).findMany
+          .mockResolvedValueOnce(PROPOSED_MATCHES)
+          .mockRejectedValue(privateError);
+      } else {
+        prismaTest.model(modelName).findMany.mockRejectedValue(privateError);
+      }
+
+      const report = await evaluateReconciliationDryRun(ADMIN, {});
+
+      expect(report.totals).toMatchObject({
+        evaluated: 2,
+        errors: 2,
+        errorClassifications: { [expectedClassification]: 2 }
+      });
+      expect(report.matches.every((match) => match.reason === expectedClassification)).toBe(true);
+      const serialized = JSON.stringify(report);
+      expect(serialized).not.toContain("private database payload");
+      expect(serialized).not.toContain("private-token");
+      expect(serialized).not.toContain("customer@example.com");
+      assertNoDatabaseWrites();
+    }
+  );
+
+  it("distinguishes a missing production schema column without retaining Prisma details", async () => {
+    configureData();
+    prismaTest.model("company").findMany.mockRejectedValue(
+      Object.assign(new Error("private column name and database endpoint"), { code: "P2022" })
+    );
+
+    const report = await evaluateReconciliationDryRun(ADMIN, {});
+
+    expect(report.totals.errorClassifications).toEqual({
+      DATABASE_SCHEMA_COLUMN_MISSING: 2
+    });
+    expect(report.matches.every((match) => match.reason === "DATABASE_SCHEMA_COLUMN_MISSING")).toBe(
+      true
+    );
+    expect(JSON.stringify(report)).not.toContain("private column name");
+    assertNoDatabaseWrites();
+  });
+
   it("materialization dry-run computes the full would-change report with zero database writes", async () => {
     configureData({ operatingCompanies: [OPERATING_COMPANIES[0]] });
     stubConsolidatedQuickBooksFetch({

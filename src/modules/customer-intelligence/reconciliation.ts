@@ -413,9 +413,49 @@ export type ReconciliationDryRunMatch = {
     | "REVIEWED"
     | "MISSING_SOURCE_CONTEXT"
     | "APPROVED_CONFLICT"
-    | "APPROVAL_INVARIANT_FAILED"
-    | "PROCESSING_FAILED";
+    | ReconciliationDryRunErrorClassification;
 };
+
+/**
+ * Bounded, non-sensitive failure categories for production dry-run diagnosis.
+ * These values identify only the deterministic engine boundary that failed;
+ * raw database/provider messages and record identifiers are never retained.
+ */
+export type ReconciliationDryRunErrorClassification =
+  | "DATABASE_SCHEMA_TABLE_MISSING"
+  | "DATABASE_SCHEMA_COLUMN_MISSING"
+  | "REVIEWED_DECISION_READ_FAILED"
+  | "OPERATING_RELATIONSHIP_READ_FAILED"
+  | "CANONICAL_COMPANY_READ_FAILED"
+  | "APPROVED_MAPPING_READ_FAILED"
+  | "EVIDENCE_SCORING_FAILED"
+  | "APPROVAL_INVARIANT_FAILED"
+  | "APPROVED_CONFLICT_READ_FAILED"
+  | "PROCESSING_FAILED";
+
+type ReconciliationDryRunErrorCounts = Partial<
+  Record<ReconciliationDryRunErrorClassification, number>
+>;
+
+class ReconciliationDryRunDiagnosticError extends Error {
+  constructor(readonly classification: ReconciliationDryRunErrorClassification) {
+    super(classification);
+    this.name = "ReconciliationDryRunDiagnosticError";
+  }
+}
+
+function classifyReconciliationReadFailure(
+  error: unknown,
+  fallback: ReconciliationDryRunErrorClassification
+): ReconciliationDryRunErrorClassification {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  if (code === "P2021") return "DATABASE_SCHEMA_TABLE_MISSING";
+  if (code === "P2022") return "DATABASE_SCHEMA_COLUMN_MISSING";
+  return fallback;
+}
 
 export type ReconciliationDryRunReport = {
   tenantId: string;
@@ -429,6 +469,7 @@ export type ReconciliationDryRunReport = {
     routedToReview: number;
     reviewedPreserved: number;
     errors: number;
+    errorClassifications: ReconciliationDryRunErrorCounts;
   };
 };
 
@@ -511,7 +552,8 @@ export async function evaluateReconciliationDryRun(
     autoLinked: 0,
     routedToReview: 0,
     reviewedPreserved: 0,
-    errors: 0
+    errors: 0,
+    errorClassifications: {}
   };
 
   const evaluated: ReconciliationDryRunMatch[] = [];
@@ -528,12 +570,18 @@ export async function evaluateReconciliationDryRun(
         totals.reviewedPreserved += 1;
       } else {
         totals.errors += 1;
+        incrementDryRunErrorClassification(totals.errorClassifications, outcome.reason);
       }
-    } catch {
+    } catch (error) {
       // Deterministic classification only; source identifiers never reach the
       // would-change report.
+      const classification =
+        error instanceof ReconciliationDryRunDiagnosticError
+          ? error.classification
+          : "PROCESSING_FAILED";
       totals.evaluated += 1;
       totals.errors += 1;
+      incrementDryRunErrorClassification(totals.errorClassifications, classification);
       evaluated.push({
         matchId: match.id,
         sourceRecordKey: match.sourceRecordKey,
@@ -542,7 +590,7 @@ export async function evaluateReconciliationDryRun(
         wouldChangeTo: "ERROR",
         wouldScore: match.score,
         bestCandidateCompanyId: null,
-        reason: "PROCESSING_FAILED"
+        reason: classification
       });
     }
   }
@@ -555,6 +603,24 @@ export async function evaluateReconciliationDryRun(
     matches: evaluated,
     totals
   };
+}
+
+function incrementDryRunErrorClassification(
+  counts: ReconciliationDryRunErrorCounts,
+  reason: ReconciliationDryRunMatch["reason"]
+) {
+  if (
+    reason === "AUTO_LINK" ||
+    reason === "BELOW_THRESHOLD" ||
+    reason === "AMBIGUOUS" ||
+    reason === "NO_CANDIDATE" ||
+    reason === "REVIEWED" ||
+    reason === "MISSING_SOURCE_CONTEXT" ||
+    reason === "APPROVED_CONFLICT"
+  ) {
+    return;
+  }
+  counts[reason] = (counts[reason] ?? 0) + 1;
 }
 
 async function evaluateReconciliationMatchDryRun(
@@ -589,16 +655,23 @@ async function evaluateReconciliationMatchDryRun(
   const operatingCompanyId = match.operatingCompanyId;
 
   // Reviewed decisions are authoritative and persist across re-runs.
-  const reviewed = await prisma.customerIdentityMatch.findFirst({
-    where: tenantWhere(ctx, {
-      kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
-      operatingCompanyId,
-      sourceRecordKey,
-      status: {
-        in: [CustomerIdentityMatchStatus.APPROVED, CustomerIdentityMatchStatus.REJECTED]
-      }
-    })
-  });
+  let reviewed;
+  try {
+    reviewed = await prisma.customerIdentityMatch.findFirst({
+      where: tenantWhere(ctx, {
+        kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+        operatingCompanyId,
+        sourceRecordKey,
+        status: {
+          in: [CustomerIdentityMatchStatus.APPROVED, CustomerIdentityMatchStatus.REJECTED]
+        }
+      })
+    });
+  } catch (error) {
+    throw new ReconciliationDryRunDiagnosticError(
+      classifyReconciliationReadFailure(error, "REVIEWED_DECISION_READ_FAILED")
+    );
+  }
   if (reviewed) {
     return {
       ...base,
@@ -618,11 +691,16 @@ async function evaluateReconciliationMatchDryRun(
     { operatingCompanyId, sourceRecordKey },
     client
   );
-  const scoring = scoreQuickBooksReconciliation(
-    readQuickBooksMatchEvidence(match),
-    snapshot.candidates,
-    snapshot.domainCompanyCounts
-  );
+  let scoring;
+  try {
+    scoring = scoreQuickBooksReconciliation(
+      readQuickBooksMatchEvidence(match),
+      snapshot.candidates,
+      snapshot.domainCompanyCounts
+    );
+  } catch {
+    throw new ReconciliationDryRunDiagnosticError("EVIDENCE_SCORING_FAILED");
+  }
 
   if (scoring.reason === "AUTO_LINK") {
     const companyId = scoring.bestCandidateCompanyId!;
@@ -646,16 +724,21 @@ async function evaluateReconciliationMatchDryRun(
         reason: "APPROVAL_INVARIANT_FAILED"
       };
     }
-    const conflicting = await findApprovedConflict(
-      ctx,
-      {
-        kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
-        sourceRecordKey,
-        companyId,
-        selfId: match.id
-      },
-      client
-    );
+    let conflicting;
+    try {
+      conflicting = await findApprovedConflict(
+        ctx,
+        {
+          kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
+          sourceRecordKey,
+          companyId,
+          selfId: match.id
+        },
+        client
+      );
+    } catch {
+      throw new ReconciliationDryRunDiagnosticError("APPROVED_CONFLICT_READ_FAILED");
+    }
     if (conflicting) {
       // One APPROVED target per source wins; the live path would route this
       // record back to the review queue instead of overriding the decision.
@@ -701,12 +784,21 @@ async function loadLockedCandidateSnapshot(
   candidates: ReconciliationCandidate[];
   domainCompanyCounts: Record<string, number>;
 }> {
-  const [relationships, companies, approvedStableMappings] = await Promise.all([
-    transaction.companyOperatingRelationship.findMany({
+  let relationships;
+  try {
+    relationships = await transaction.companyOperatingRelationship.findMany({
       where: tenantWhere(ctx, { operatingCompanyId: input.operatingCompanyId }),
       select: { companyId: true }
-    }),
-    transaction.company.findMany({
+    });
+  } catch (error) {
+    throw new ReconciliationDryRunDiagnosticError(
+      classifyReconciliationReadFailure(error, "OPERATING_RELATIONSHIP_READ_FAILED")
+    );
+  }
+
+  let companies;
+  try {
+    companies = await transaction.company.findMany({
       where: tenantWhere(ctx),
       select: {
         id: true,
@@ -725,8 +817,16 @@ async function loadLockedCandidateSnapshot(
           }
         }
       }
-    }),
-    transaction.customerIdentityMatch.findMany({
+    });
+  } catch (error) {
+    throw new ReconciliationDryRunDiagnosticError(
+      classifyReconciliationReadFailure(error, "CANONICAL_COMPANY_READ_FAILED")
+    );
+  }
+
+  let approvedStableMappings;
+  try {
+    approvedStableMappings = await transaction.customerIdentityMatch.findMany({
       where: tenantWhere(ctx, {
         kind: CustomerIdentityMatchKind.QUICKBOOKS_ACCOUNT,
         status: CustomerIdentityMatchStatus.APPROVED,
@@ -738,8 +838,12 @@ async function loadLockedCandidateSnapshot(
         companyId: true,
         sourceRecordKey: true
       }
-    })
-  ]);
+    });
+  } catch (error) {
+    throw new ReconciliationDryRunDiagnosticError(
+      classifyReconciliationReadFailure(error, "APPROVED_MAPPING_READ_FAILED")
+    );
+  }
 
   const eligibleCompanyIds = new Set(relationships.map((relationship) => relationship.companyId));
   const domainCompanyCounts: Record<string, number> = {};

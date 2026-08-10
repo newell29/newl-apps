@@ -8,7 +8,7 @@ export const CUSTOMER_INTELLIGENCE_DRY_RUN_PREVIEW_CONFIRMATION =
   "RUN_READ_ONLY_PREVIEW";
 
 export type CustomerIntelligenceDryRunPreviewState = {
-  status: "idle" | "success" | "error";
+  status: "idle" | "success" | "warning" | "error";
   message?: string;
   report?: {
     operatingCompanyName: string;
@@ -33,6 +33,7 @@ export type CustomerIntelligenceDryRunPreviewState = {
       routedToReview: number;
       reviewedPreserved: number;
       errors: number;
+      errorClassifications: Array<{ code: string; count: number }>;
     };
     materialization: {
       status: string;

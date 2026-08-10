@@ -24,7 +24,10 @@ vi.mock("@/modules/customer-intelligence/dry-run", () => ({
   runCustomerIntelligenceDryRun: mocks.runCustomerIntelligenceDryRun
 }));
 
-import { CustomerIntelligenceDryRunPreviewControl } from "@/modules/customer-intelligence/components/dry-run-preview-control";
+import {
+  CustomerIntelligenceDryRunPreviewControl,
+  PreviewReport
+} from "@/modules/customer-intelligence/components/dry-run-preview-control";
 import { runCustomerIntelligenceDryRunPreviewAction } from "@/modules/customer-intelligence/dry-run-preview-actions";
 import {
   CUSTOMER_INTELLIGENCE_DRY_RUN_PREVIEW_CONFIRMATION,
@@ -116,7 +119,8 @@ function safeDryRunReport() {
         autoLinked: 1,
         routedToReview: 4,
         reviewedPreserved: 2,
-        errors: 0
+        errors: 0,
+        errorClassifications: {}
       }
     },
     materialization: {
@@ -233,6 +237,32 @@ describe("Customer Intelligence production preview action", () => {
     expect(serialized).not.toContain("private-company-id");
     expect(serialized).not.toContain("tenant-a");
     expect(serialized).not.toContain("cadConsolidation");
+  });
+
+  it("warns and displays only bounded count diagnostics when reconciliation is blocked", async () => {
+    const report = safeDryRunReport();
+    report.reconciliation.totals.errors = 5;
+    report.reconciliation.totals.routedToReview = 0;
+    report.reconciliation.totals.errorClassifications = {
+      CANONICAL_COMPANY_READ_FAILED: 5
+    };
+    report.materialization.operatingCompanies[0].status = "LIMITATION";
+    mocks.runCustomerIntelligenceDryRun.mockResolvedValue(report);
+
+    const state = await runCustomerIntelligenceDryRunPreviewAction(
+      EMPTY_CUSTOMER_INTELLIGENCE_DRY_RUN_PREVIEW_STATE,
+      previewForm({ operatingCompanyId: "oc-usa", confirmed: true })
+    );
+    const html = renderToStaticMarkup(<PreviewReport report={state.report!} />);
+
+    expect(state.status).toBe("warning");
+    expect(state.message).toContain("Live sync remains disabled");
+    expect(state.report?.reconciliation.errorClassifications).toEqual([
+      { code: "CANONICAL_COMPANY_READ_FAILED", count: 5 }
+    ]);
+    expect(JSON.stringify(state)).not.toContain("provider-private");
+    expect(html).toContain("Canonical-company candidates unavailable");
+    expect(html).not.toContain("provider-private");
   });
 
   it("rejects inactive companies before any QuickBooks call", async () => {
