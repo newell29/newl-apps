@@ -114,6 +114,7 @@ vi.mock("@/server/tenant-context", () => ({
 import { GET as quickBooksConnectGET } from "@/app/api/integrations/quickbooks/connect/route";
 import { GET as quickBooksCallbackGET } from "@/app/api/integrations/quickbooks/callback/route";
 import { associateQuickBooksCredential } from "@/modules/customer-intelligence/actions";
+import { QuickBooksAssociationError } from "@/modules/customer-intelligence/quickbooks-association-error";
 import {
   getExistingQuickBooksAssociationOptions,
   resolveExistingQuickBooksAssociations
@@ -619,6 +620,72 @@ describe("associateQuickBooksCredential (ADMIN-only, audited, tenant-scoped)", (
     expect(audit.data.entityId).toBe("oc-ww");
   });
 
+  it("writes the association and audit in one transaction", async () => {
+    let transactionActive = false;
+    prismaTest.transaction.mockImplementation(async (callback) => {
+      transactionActive = true;
+      try {
+        return await callback(prismaTest.proxy);
+      } finally {
+        transactionActive = false;
+      }
+    });
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
+      id: "oc-ww",
+      slug: "newl-worldwide",
+      tenantId: "tenant-a",
+      quickBooksRealmId: null,
+      quickBooksCredentialId: null
+    });
+    prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
+      activeQuickBooksCredential()
+    );
+    prismaTest.model("operatingCompany").findMany.mockResolvedValue([]);
+    prismaTest.model("operatingCompany").update.mockResolvedValue({
+      id: "oc-ww",
+      quickBooksRealmId: "realm-1",
+      quickBooksCredentialId: "cred-qb-1"
+    });
+    prismaTest.model("auditLog").create.mockImplementation(() => {
+      expect(transactionActive).toBe(true);
+      return { id: "audit-1" };
+    });
+
+    await associateQuickBooksCredential(ADMIN, VALID_INPUT);
+
+    expect(prismaTest.transaction).toHaveBeenCalledTimes(1);
+    expect(prismaTest.model("auditLog").create).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails the transaction with a safe code when its audit cannot be written", async () => {
+    prismaTest.model("operatingCompany").findFirst.mockResolvedValue({
+      id: "oc-ww",
+      slug: "newl-worldwide",
+      tenantId: "tenant-a",
+      quickBooksRealmId: null,
+      quickBooksCredentialId: null
+    });
+    prismaTest.model("integrationCredential").findFirst.mockResolvedValue(
+      activeQuickBooksCredential()
+    );
+    prismaTest.model("operatingCompany").findMany.mockResolvedValue([]);
+    prismaTest.model("operatingCompany").update.mockResolvedValue({
+      id: "oc-ww",
+      quickBooksRealmId: "realm-1",
+      quickBooksCredentialId: "cred-qb-1"
+    });
+    prismaTest.model("auditLog").create.mockRejectedValue(
+      new Error("synthetic database detail that must not escape")
+    );
+
+    await expect(associateQuickBooksCredential(ADMIN, VALID_INPUT)).rejects.toMatchObject({
+      name: "QuickBooksAssociationError",
+      code: "AUDIT_FAILED",
+      message: "The association audit record could not be written."
+    } satisfies Partial<QuickBooksAssociationError>);
+    expect(prismaTest.model("integrationCredential").update).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["credential", { quickBooksCredentialId: "cred-qb-1", quickBooksRealmId: "realm-other" }],
     ["realm", { quickBooksCredentialId: "cred-qb-other", quickBooksRealmId: "realm-1" }]
@@ -867,6 +934,7 @@ describe("existing QuickBooks connection discovery", () => {
     const companyWhere = prismaTest.model("operatingCompany").findMany.mock.calls[0][0].where;
     const credentialWhere = prismaTest.model("integrationCredential").findMany.mock.calls[0][0].where;
     expect(companyWhere.tenantId).toBe("tenant-a");
+    expect(companyWhere).not.toHaveProperty("slug");
     expect(credentialWhere.tenantId).toBe("tenant-a");
     expect(credentialWhere.provider).toBe(IntegrationProvider.QUICKBOOKS);
     expect(credentialWhere.status).toBe(IntegrationStatus.ACTIVE);
@@ -888,5 +956,34 @@ describe("existing QuickBooks connection discovery", () => {
     expect(resolved.find((item) => item.operatingCompanySlug === "newl-worldwide")?.status).toBe("AMBIGUOUS");
     expect(resolved.find((item) => item.operatingCompanySlug === "newl-usa")?.status).toBe("CONFLICT");
     expect(resolved.find((item) => item.operatingCompanySlug === "newells-express")?.status).toBe("MISSING_OPERATING_COMPANY");
+  });
+
+  it("detects a credential claimed by any tenant operating company, including a legacy slug", async () => {
+    prismaTest.model("operatingCompany").findMany.mockResolvedValue([
+      {
+        id: "oc-usa",
+        slug: "newl-usa",
+        quickBooksCredentialId: null,
+        quickBooksRealmId: null
+      },
+      {
+        id: "oc-legacy",
+        slug: "legacy-usa",
+        quickBooksCredentialId: "cred-usa",
+        quickBooksRealmId: "realm-usa"
+      }
+    ]);
+    prismaTest.model("integrationCredential").findMany.mockResolvedValue([
+      {
+        id: "cred-usa",
+        publicConfig: { legalEntity: "NEWL_USA", realmId: "realm-usa" }
+      }
+    ]);
+
+    const resolved = await resolveExistingQuickBooksAssociations(ADMIN);
+
+    expect(resolved.find((item) => item.operatingCompanySlug === "newl-usa")?.status).toBe(
+      "CONFLICT"
+    );
   });
 });

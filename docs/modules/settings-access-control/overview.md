@@ -18,6 +18,9 @@ Settings, roles, module entitlements, integrations is documented because code, r
   match, requires one-company confirmation, and updates no credential, token, live-sync gate,
   invoice-posting behavior, or external system. Ambiguous or conflicting matches require code
   review rather than an automatic repair.
+- A failed compatibility association remains fail-closed but displays a bounded reason code so
+  an administrator can distinguish permission, stale/conflicting state, audit, and database
+  transaction failures without exposing credential or provider details.
 
 ## Data model
 

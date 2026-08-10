@@ -52,6 +52,7 @@ import {
   type IdentityReconciliationReport
 } from "@/modules/customer-intelligence/reconciliation";
 import { quickBooksLegalEntityToSlug } from "@/server/integrations/quickbooks";
+import { QuickBooksAssociationError } from "@/modules/customer-intelligence/quickbooks-association-error";
 
 function toInputJson(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined
@@ -165,44 +166,69 @@ export async function associateQuickBooksCredential(
 
   const realmId = input.quickBooksRealmId.trim();
   if (!realmId) {
-    throw new Error("quickBooksRealmId is required.");
+    throw new QuickBooksAssociationError(
+      "REALM_INPUT_MISSING",
+      "quickBooksRealmId is required."
+    );
   }
 
   const operatingCompany = await prisma.operatingCompany.findFirst({
     where: tenantWhere(ctx, { id: input.operatingCompanyId })
   });
   if (!operatingCompany) {
-    throw new Error("Operating company does not exist in this tenant.");
+    throw new QuickBooksAssociationError(
+      "OPERATING_COMPANY_NOT_FOUND",
+      "Operating company does not exist in this tenant."
+    );
   }
 
   const credential = await prisma.integrationCredential.findFirst({
     where: tenantWhere(ctx, { id: input.quickBooksCredentialId })
   });
   if (!credential) {
-    throw new Error("QuickBooks credential does not exist in this tenant.");
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_NOT_FOUND",
+      "QuickBooks credential does not exist in this tenant."
+    );
   }
   if (credential.provider !== IntegrationProvider.QUICKBOOKS) {
-    throw new Error("The selected credential is not a QuickBooks credential.");
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_PROVIDER_INVALID",
+      "The selected credential is not a QuickBooks credential."
+    );
   }
   if (credential.status !== IntegrationStatus.ACTIVE) {
-    throw new Error("The QuickBooks credential must be ACTIVE before it can be associated.");
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_INACTIVE",
+      "The QuickBooks credential must be ACTIVE before it can be associated."
+    );
   }
 
   const credentialRealmId = readCredentialRealmId(credential.publicConfig);
   if (!credentialRealmId) {
-    throw new Error("The QuickBooks credential does not store a realm ID.");
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_REALM_MISSING",
+      "The QuickBooks credential does not store a realm ID."
+    );
   }
   if (credentialRealmId !== realmId) {
-    throw new Error("quickBooksRealmId does not match the realm stored on the QuickBooks credential.");
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_REALM_MISMATCH",
+      "quickBooksRealmId does not match the realm stored on the QuickBooks credential."
+    );
   }
   const credentialOperatingCompanySlug = readCredentialOperatingCompanySlug(
     credential.publicConfig
   );
   if (!credentialOperatingCompanySlug) {
-    throw new Error("The QuickBooks credential does not store a supported legal entity.");
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_LEGAL_ENTITY_INVALID",
+      "The QuickBooks credential does not store a supported legal entity."
+    );
   }
   if (credentialOperatingCompanySlug !== operatingCompany.slug) {
-    throw new Error(
+    throw new QuickBooksAssociationError(
+      "CREDENTIAL_LEGAL_ENTITY_MISMATCH",
       "The QuickBooks credential legal entity does not match the selected operating company."
     );
   }
@@ -217,61 +243,79 @@ export async function associateQuickBooksCredential(
     `customer-intelligence.quickbooks-realm:${ctx.tenantId}:${credentialRealmId}`
   ].sort();
 
-  const updated = await prisma.$transaction(async (transaction) => {
-    // A credential and its realm identify one QuickBooks company. Serialize
-    // association attempts for both keys so two operating companies cannot
-    // concurrently claim the same connection without a schema migration.
-    for (const lockKey of associationLockKeys) {
-      await transaction.$queryRaw(
-        Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
-      );
-    }
-
-    const conflictingAssociations =
-      (await transaction.operatingCompany.findMany({
-        where: tenantWhere(ctx, {
-          id: { not: operatingCompany.id },
-          OR: [
-            { quickBooksCredentialId: credential.id },
-            { quickBooksRealmId: credentialRealmId }
-          ]
-        }),
-        select: {
-          id: true,
-          displayName: true,
-          quickBooksCredentialId: true,
-          quickBooksRealmId: true
-        }
-      })) ?? [];
-
-    if (conflictingAssociations.length > 0) {
-      throw new Error(
-        "This QuickBooks credential or realm is already associated with another operating company in this tenant."
-      );
-    }
-
-    return transaction.operatingCompany.update({
-      where: { tenantId_id: { tenantId: ctx.tenantId, id: operatingCompany.id } },
-      data: {
-        quickBooksRealmId: credentialRealmId,
-        quickBooksCredentialId: credential.id
+  try {
+    return await prisma.$transaction(async (transaction) => {
+      // A credential and its realm identify one QuickBooks company. Serialize
+      // association attempts for both keys so two operating companies cannot
+      // concurrently claim the same connection without a schema migration.
+      for (const lockKey of associationLockKeys) {
+        await transaction.$queryRaw(
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`
+        );
       }
+
+      const conflictingAssociations =
+        (await transaction.operatingCompany.findMany({
+          where: tenantWhere(ctx, {
+            id: { not: operatingCompany.id },
+            OR: [
+              { quickBooksCredentialId: credential.id },
+              { quickBooksRealmId: credentialRealmId }
+            ]
+          }),
+          select: {
+            id: true,
+            displayName: true,
+            quickBooksCredentialId: true,
+            quickBooksRealmId: true
+          }
+        })) ?? [];
+
+      if (conflictingAssociations.length > 0) {
+        throw new QuickBooksAssociationError(
+          "CONFLICT",
+          "This QuickBooks credential or realm is already associated with another operating company in this tenant."
+        );
+      }
+
+      const updated = await transaction.operatingCompany.update({
+        where: { tenantId_id: { tenantId: ctx.tenantId, id: operatingCompany.id } },
+        data: {
+          quickBooksRealmId: credentialRealmId,
+          quickBooksCredentialId: credential.id
+        }
+      });
+      try {
+        await auditEntry({
+          actor: ctx,
+          action: "customer-intelligence.operating-company.quickbooks-associated",
+          entityType: "OperatingCompany",
+          entityId: operatingCompany.id,
+          before,
+          after: {
+            quickBooksRealmId: updated.quickBooksRealmId,
+            quickBooksCredentialId: updated.quickBooksCredentialId
+          },
+          client: transaction
+        });
+      } catch {
+        throw new QuickBooksAssociationError(
+          "AUDIT_FAILED",
+          "The association audit record could not be written."
+        );
+      }
+
+      return updated;
     });
-  });
-
-  await auditEntry({
-    actor: ctx,
-    action: "customer-intelligence.operating-company.quickbooks-associated",
-    entityType: "OperatingCompany",
-    entityId: operatingCompany.id,
-    before,
-    after: {
-      quickBooksRealmId: updated.quickBooksRealmId,
-      quickBooksCredentialId: updated.quickBooksCredentialId
+  } catch (error) {
+    if (error instanceof QuickBooksAssociationError) {
+      throw error;
     }
-  });
-
-  return updated;
+    throw new QuickBooksAssociationError(
+      "DATABASE_WRITE_FAILED",
+      "The association transaction could not be completed."
+    );
+  }
 }
 
 function readCredentialRealmId(value: Prisma.JsonValue | null | undefined): string | null {
