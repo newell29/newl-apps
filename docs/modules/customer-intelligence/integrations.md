@@ -64,6 +64,15 @@
   `IntegrationCredential`, performs OAuth, enables live sync, or calls QuickBooks. It is intended
   to preserve pre-existing invoice-posting connections while adding the Customer Intelligence
   references those read-only engines require.
+- Association discovery loads every operating-company row in the authenticated tenant before
+  labeling a match available. A legacy or unexpected operating-company slug therefore cannot
+  hide an existing claim on the credential or realm. The eventual operating-company update and
+  its `AuditLog` entry commit in one Prisma transaction; an audit failure rolls the association
+  back. Failed actions return only a bounded reason code (`PERMISSION_DENIED`, `STALE_MATCH`,
+  `CONFLICT`, validation-specific codes, `AUDIT_FAILED`, or `DATABASE_WRITE_FAILED`) and safe
+  operator text. Provider payloads, database exception text, credential IDs, realm IDs, tokens,
+  and secrets are never returned. This diagnostic contract was added after the first production
+  Newl USA attempt failed closed while the earlier generic envelope concealed its failure stage.
 
 ## Read-only QuickBooks customer ingestion (CP-PHASE-02B-2)
 

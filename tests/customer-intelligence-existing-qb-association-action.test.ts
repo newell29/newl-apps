@@ -28,6 +28,7 @@ vi.mock("@/modules/customer-intelligence/existing-quickbooks-association", () =>
 
 import { associateExistingQuickBooksConnectionAction } from "@/modules/customer-intelligence/existing-quickbooks-association-actions";
 import { EXISTING_QUICKBOOKS_ASSOCIATION_CONFIRMATION } from "@/modules/customer-intelligence/existing-quickbooks-association-state";
+import { QuickBooksAssociationError } from "@/modules/customer-intelligence/quickbooks-association-error";
 
 describe("associateExistingQuickBooksConnectionAction", () => {
   beforeEach(() => {
@@ -94,6 +95,28 @@ describe("associateExistingQuickBooksConnectionAction", () => {
 
     mocks.resolve.mockRejectedValueOnce(new Error("secretRef=private-value"));
     const failed = await associateExistingQuickBooksConnectionAction({ status: "idle" }, form);
+    expect(failed.code).toBe("LOOKUP_FAILED");
     expect(failed.message).not.toContain("private-value");
+  });
+
+  it("returns only the safe deterministic failure code from the association boundary", async () => {
+    const form = new FormData();
+    form.set("operatingCompanyId", "oc-usa");
+    form.set("confirmation", EXISTING_QUICKBOOKS_ASSOCIATION_CONFIRMATION);
+    mocks.associate.mockRejectedValueOnce(
+      new QuickBooksAssociationError(
+        "DATABASE_WRITE_FAILED",
+        "The association transaction could not be completed."
+      )
+    );
+
+    const failed = await associateExistingQuickBooksConnectionAction({ status: "idle" }, form);
+
+    expect(failed).toEqual({
+      status: "error",
+      code: "DATABASE_WRITE_FAILED",
+      message:
+        "DATABASE_WRITE_FAILED: The association transaction could not be completed."
+    });
   });
 });

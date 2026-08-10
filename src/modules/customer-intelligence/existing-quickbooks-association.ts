@@ -52,7 +52,9 @@ export async function resolveExistingQuickBooksAssociations(
 ): Promise<ResolvedAssociation[]> {
   const [operatingCompanies, credentials] = await Promise.all([
     prisma.operatingCompany.findMany({
-      where: tenantWhere(ctx, { slug: { in: [...QUICKBOOKS_OPERATING_COMPANY_SLUGS] } }),
+      // Load every tenant operating company so a legacy or unexpected row
+      // cannot hide an existing claim on the same credential or realm.
+      where: tenantWhere(ctx),
       select: {
         id: true,
         slug: true,
