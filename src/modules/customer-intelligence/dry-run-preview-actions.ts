@@ -58,11 +58,27 @@ export async function runCustomerIntelligenceDryRunPreviewAction(
       );
     }
 
+    const hasBlockingIssues =
+      ingestion.status === "ERROR" ||
+      report.ingestion.totals.recordErrors > 0 ||
+      materialization.status === "ERROR" ||
+      materialization.status === "LIMITATION" ||
+      report.materialization.totals.recordErrors > 0 ||
+      report.reconciliation.totals.errors > 0;
+    const errorClassifications = Object.entries(
+      report.reconciliation.totals.errorClassifications ?? {}
+    )
+      .filter((entry): entry is [string, number] =>
+        typeof entry[1] === "number" && entry[1] > 0
+      )
+      .map(([code, count]) => ({ code, count }));
+
     revalidatePath(REVIEW_PATH);
     return {
-      status: "success",
-      message:
-        "Production preview completed. Only the dry-run ledger and audit record were written; no Customer Intelligence customer or financial data was changed.",
+      status: hasBlockingIssues ? "warning" : "success",
+      message: hasBlockingIssues
+        ? "Production preview completed safely but found blocking issues. Live sync remains disabled, and no Customer Intelligence customer or financial data was changed."
+        : "Production preview completed. Only the dry-run ledger and audit record were written; no Customer Intelligence customer or financial data was changed.",
       report: {
         operatingCompanyName: operatingCompany.displayName,
         startedAt: report.startedAt,
@@ -85,7 +101,8 @@ export async function runCustomerIntelligenceDryRunPreviewAction(
           autoLinked: report.reconciliation.totals.autoLinked,
           routedToReview: report.reconciliation.totals.routedToReview,
           reviewedPreserved: report.reconciliation.totals.reviewedPreserved,
-          errors: report.reconciliation.totals.errors
+          errors: report.reconciliation.totals.errors,
+          errorClassifications
         },
         materialization: {
           status: materialization.status,

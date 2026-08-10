@@ -76,7 +76,9 @@ export function CustomerIntelligenceDryRunPreviewControl({
           className={`rounded-md border px-3 py-2 text-sm leading-6 ${
             state.status === "error"
               ? "border-danger/30 bg-danger/10 text-danger"
-              : "border-success/30 bg-success/10 text-foreground"
+              : state.status === "warning"
+                ? "border-warning/30 bg-warning/10 text-foreground"
+                : "border-success/30 bg-success/10 text-foreground"
           }`}
           role="status"
         >
@@ -88,7 +90,7 @@ export function CustomerIntelligenceDryRunPreviewControl({
     </form>
   );
 }
-function PreviewReport({
+export function PreviewReport({
   report
 }: {
   report: NonNullable<
@@ -135,11 +137,46 @@ function PreviewReport({
           ]}
         />
       </div>
+      {report.reconciliation.errorClassifications.length > 0 ? (
+        <div className="rounded-md border border-warning/30 bg-warning/10 p-3">
+          <h4 className="text-sm font-semibold text-foreground">
+            Safe reconciliation diagnostics
+          </h4>
+          <p className="mt-1 text-xs leading-5 text-mutedForeground">
+            These categories identify the engine boundary that failed. They contain no customer
+            names, source records, database messages, or credentials.
+          </p>
+          <dl className="mt-2 space-y-1 text-xs text-mutedForeground">
+            {report.reconciliation.errorClassifications.map(({ code, count }) => (
+              <div key={code} className="flex justify-between gap-3">
+                <dt>{reconciliationDiagnosticLabel(code)}</dt>
+                <dd className="font-medium text-foreground">{count}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
       <p className="text-xs font-medium text-success">
         Verified dry-run contract: no Customer Intelligence customer or financial data writes.
       </p>
     </div>
   );
+}
+
+function reconciliationDiagnosticLabel(code: string): string {
+  const labels: Record<string, string> = {
+    DATABASE_SCHEMA_TABLE_MISSING: "Required database table is missing",
+    DATABASE_SCHEMA_COLUMN_MISSING: "Required database column is missing",
+    REVIEWED_DECISION_READ_FAILED: "Reviewed-decision lookup failed",
+    OPERATING_RELATIONSHIP_READ_FAILED: "Operating-company relationships unavailable",
+    CANONICAL_COMPANY_READ_FAILED: "Canonical-company candidates unavailable",
+    APPROVED_MAPPING_READ_FAILED: "Approved identity mappings unavailable",
+    EVIDENCE_SCORING_FAILED: "Identity evidence could not be scored",
+    APPROVAL_INVARIANT_FAILED: "Automatic-approval safety check failed",
+    APPROVED_CONFLICT_READ_FAILED: "Approved-match conflict check failed",
+    PROCESSING_FAILED: "Unexpected reconciliation processing failure"
+  };
+  return labels[code] ?? "Unknown fail-closed reconciliation error";
 }
 
 function PreviewGroup({
