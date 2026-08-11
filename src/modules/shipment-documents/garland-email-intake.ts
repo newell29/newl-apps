@@ -3,6 +3,7 @@ import { IntegrationProvider, IntegrationStatus, ModuleKey, Prisma } from "@pris
 
 import { requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
+import { isTeamshipBatchRetryStatus } from "@/modules/shipment-documents/garland-email-agent-retry";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
   fetchMicrosoftGraphMailboxMessages,
@@ -505,6 +506,10 @@ async function upsertGarlandSourceAttachment(
     where: { tenantId_sourceEmailId_graphAttachmentId: { tenantId, sourceEmailId, graphAttachmentId: attachment.id } },
     select: { id: true, intakeStatus: true }
   });
+  if (isTeamshipBatchRetryStatus(before?.intakeStatus)) {
+    return true;
+  }
+
   const createData = {
     tenantId,
     sourceEmailId,

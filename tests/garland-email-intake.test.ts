@@ -149,6 +149,36 @@ describe("Garland email intake", () => {
     expect(attachmentUpdate).not.toHaveProperty("parseError");
   });
 
+  it("does not reset a completely-missing Teamship batch or its retry timer during mailbox sync", async () => {
+    prismaMock.garlandSourceEmail.findUnique.mockResolvedValue({ id: "existing-email" });
+    prismaMock.garlandSourceAttachment.findUnique.mockResolvedValue({
+      id: "existing-attachment",
+      intakeStatus: "TEAMSHIP_BATCH_RETRY_PENDING_1"
+    });
+
+    const message = {
+      id: "graph-1",
+      mailboxAddress: "warehouse@example.com",
+      subject: "4 ORDERS 4 PAGES - PS123456 - PS123459",
+      body: { content: "Please see attached." },
+      receivedDateTime: "2026-08-11T12:30:00Z",
+      hasAttachments: true,
+      from: { emailAddress: { name: "Garland Sender", address: "sender@garland-group.com" } }
+    };
+
+    await persistGarlandSourceEmails({
+      tenantId: "tenant-a",
+      actorUserId: "user-a",
+      mailboxes: ["warehouse@example.com"],
+      messages: [message],
+      attachmentFetcher: async () => [
+        { id: "att-1", name: "4 ORDERS 4 PAGES - PS123456 - PS123459.pdf", contentType: "application/pdf", size: 131_000 }
+      ]
+    });
+
+    expect(prismaMock.garlandSourceAttachment.upsert).not.toHaveBeenCalled();
+  });
+
   it("groups duplicate Garland follow-up emails by shipment batch instead of showing separate work items", () => {
     const baseEmail = {
       tenantId: "tenant-a",

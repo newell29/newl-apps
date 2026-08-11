@@ -1,6 +1,12 @@
 import { ModuleKey, Prisma } from "@prisma/client";
 
 import { getGarlandGraphSettings } from "@/modules/shipment-documents/garland-email-intake";
+import {
+  MAX_TEAMSHIP_BATCH_RETRIES,
+  readTeamshipBatchRetryAttempt,
+  TEAMSHIP_BATCH_RETRY_DELAY_MS,
+  TEAMSHIP_BATCH_RETRY_STATUSES
+} from "@/modules/shipment-documents/garland-email-agent-retry";
 import { extractGarlandShippingOrdersFromPdfBytes } from "@/modules/shipment-documents/garland-pdf-server-extraction";
 import { getGarlandLearnedProductDimensionRecommendations } from "@/modules/shipment-documents/garland-product-dimension-directory";
 import { collectGarlandProductDimensionSkus } from "@/modules/shipment-documents/garland-product-dimensions";
@@ -26,6 +32,7 @@ export type GarlandEmailAgentAutomationResult = {
   parsedAttachmentCount: number;
   duplicateAttachmentCount: number;
   failedAttachmentCount: number;
+  deferredAllMissingAttachmentCount: number;
   createdReviewRunIds: string[];
   createdUpdateJobIds: string[];
   approvedUpdateJobIds: string[];
@@ -59,6 +66,7 @@ export async function processGarlandEmailAgentReadyAttachments(
 
   const maxAttachments = Math.min(25, Math.max(1, options.maxAttachments ?? DEFAULT_MAX_ATTACHMENTS));
   const receivedAfter = parseOptionalDate(options.receivedAfter) ?? parseOptionalDate(process.env.GARLAND_EMAIL_AGENT_START_AT);
+  const retryEligibleBefore = new Date(Date.now() - TEAMSHIP_BATCH_RETRY_DELAY_MS);
   const settings = await getGarlandGraphSettings(context.tenantId);
   if (!settings.mailSyncEnabled || !settings.crossMailboxReady) {
     return emptyResult([settings.runtimeNotes || "Microsoft Graph mail sync is not ready."]);
@@ -67,11 +75,19 @@ export async function processGarlandEmailAgentReadyAttachments(
   const attachments = await prisma.garlandSourceAttachment.findMany({
     where: {
       tenantId: context.tenantId,
-      intakeStatus: {
-        in: options.retryFailedAttachments
-          ? [READY_ATTACHMENT_STATUS, FAILED_ATTACHMENT_STATUS]
-          : [READY_ATTACHMENT_STATUS]
-      },
+      OR: [
+        {
+          intakeStatus: {
+            in: options.retryFailedAttachments
+              ? [READY_ATTACHMENT_STATUS, FAILED_ATTACHMENT_STATUS]
+              : [READY_ATTACHMENT_STATUS]
+          }
+        },
+        {
+          intakeStatus: { in: TEAMSHIP_BATCH_RETRY_STATUSES },
+          updatedAt: { lte: retryEligibleBefore }
+        }
+      ],
       sourceEmail: {
         is: {
           classification: { in: ["GARLAND_DOCUMENT_BATCH", "GARLAND_DOCUMENT_CORRECTION"] },
@@ -105,6 +121,7 @@ export async function processGarlandEmailAgentReadyAttachments(
     parsedAttachmentCount: 0,
     duplicateAttachmentCount: 0,
     failedAttachmentCount: 0,
+    deferredAllMissingAttachmentCount: 0,
     createdReviewRunIds: [],
     createdUpdateJobIds: [],
     approvedUpdateJobIds: [],
@@ -157,19 +174,6 @@ export async function processGarlandEmailAgentReadyAttachments(
         throw new Error("No Garland shipping orders were extracted from this PDF.");
       }
 
-      await prisma.garlandSourceAttachment.update({
-        where: { tenantId_id: { tenantId: context.tenantId, id: attachment.id } },
-        data: {
-          contentHash: extraction.contentHash,
-          pageCount: extraction.pageCount,
-          extractedPsNumbers: extraction.psNumbers,
-          extractedSrNumbers: extraction.srNumbers,
-          extractionFingerprint: buildExtractionFingerprint(extraction),
-          intakeStatus: "PDF_PARSED",
-          duplicateOfAttachmentId: null,
-          parseError: null
-        }
-      });
       result.parsedAttachmentCount += 1;
 
       const review = prepareReviewForAutomatedTeamshipUpdates(
@@ -179,6 +183,25 @@ export async function processGarlandEmailAgentReadyAttachments(
           orders: extraction.orders
         })
       );
+
+      const retryAttempt = readTeamshipBatchRetryAttempt(attachment.intakeStatus);
+      if (isCompletelyMissingTeamshipBatch(review) && retryAttempt < MAX_TEAMSHIP_BATCH_RETRIES) {
+        const nextAttempt = retryAttempt + 1;
+        await prisma.garlandSourceAttachment.update({
+          where: { tenantId_id: { tenantId: context.tenantId, id: attachment.id } },
+          data: buildParsedAttachmentUpdate(extraction, TEAMSHIP_BATCH_RETRY_STATUSES[nextAttempt - 1])
+        });
+        result.deferredAllMissingAttachmentCount += 1;
+        result.skippedReasons.push(
+          `${attachment.fileName}: all ${review.summary.pdfOrderCount} PDF orders were missing in Teamship; retry ${nextAttempt} of ${MAX_TEAMSHIP_BATCH_RETRIES} is deferred for 15 minutes.`
+        );
+        continue;
+      }
+
+      await prisma.garlandSourceAttachment.update({
+        where: { tenantId_id: { tenantId: context.tenantId, id: attachment.id } },
+        data: buildParsedAttachmentUpdate(extraction, "PDF_PARSED")
+      });
       const reviewRunId = await saveTeamshipReviewRun({
         context,
         documentLabel: buildDocumentLabel(attachment, extraction.psNumbers),
@@ -299,6 +322,30 @@ function buildExtractionFingerprint(extraction: Awaited<ReturnType<typeof extrac
   return [extraction.contentHash, extraction.pageCount, extraction.psNumbers.join(","), extraction.srNumbers.join(",")].join(":");
 }
 
+function buildParsedAttachmentUpdate(
+  extraction: Awaited<ReturnType<typeof extractGarlandShippingOrdersFromPdfBytes>>,
+  intakeStatus: string
+) {
+  return {
+    contentHash: extraction.contentHash,
+    pageCount: extraction.pageCount,
+    extractedPsNumbers: extraction.psNumbers,
+    extractedSrNumbers: extraction.srNumbers,
+    extractionFingerprint: buildExtractionFingerprint(extraction),
+    intakeStatus,
+    duplicateOfAttachmentId: null,
+    parseError: null
+  } satisfies Prisma.GarlandSourceAttachmentUncheckedUpdateInput;
+}
+
+export function isCompletelyMissingTeamshipBatch(review: GarlandTeamshipReviewResponse) {
+  return (
+    review.summary.pdfOrderCount > 0 &&
+    review.summary.missingTeamshipCount === review.summary.pdfOrderCount &&
+    review.summary.teamshipMatchedCount === 0
+  );
+}
+
 function buildDocumentLabel(attachment: GarlandAttachmentForProcessing, psNumbers: string[]) {
   const date = formatDisplayDate(attachment.sourceEmail.receivedAt);
   const psRange = compactRange(psNumbers);
@@ -343,6 +390,7 @@ function emptyResult(skippedReasons: string[]): GarlandEmailAgentAutomationResul
     parsedAttachmentCount: 0,
     duplicateAttachmentCount: 0,
     failedAttachmentCount: 0,
+    deferredAllMissingAttachmentCount: 0,
     createdReviewRunIds: [],
     createdUpdateJobIds: [],
     approvedUpdateJobIds: [],
