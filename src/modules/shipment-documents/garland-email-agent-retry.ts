@@ -1,5 +1,5 @@
 export const TEAMSHIP_BATCH_RETRY_STATUS_PREFIX = "TEAMSHIP_BATCH_RETRY_PENDING_";
-export const TEAMSHIP_BATCH_RETRY_STATUSES = [1, 2, 3].map(
+export const TEAMSHIP_BATCH_RETRY_STATUSES = Array.from({ length: 12 }, (_, index) => index + 1).map(
   (attempt) => `${TEAMSHIP_BATCH_RETRY_STATUS_PREFIX}${attempt}`
 );
 export const TEAMSHIP_BATCH_RETRY_DELAY_MINUTES = 5;
