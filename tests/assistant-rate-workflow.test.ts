@@ -37,13 +37,28 @@ describe("parseAssistantRatePrompt", () => {
       length: 40,
       width: 48,
       height: 50,
-      weight: 500
+      weight: 500,
+      weightType: "total",
+      freightClass: "200"
+    });
+  });
+
+  it("preserves an explicit freight class instead of recalculating density", () => {
+    const parsed = parseAssistantRatePrompt(
+      "Need a rate from Charlotte NC 28273 to Dallas TX 75201 48x40x60 at 1200 lbs for 2 pallets class 70."
+    );
+
+    expect(parsed?.request?.pieces[0]).toMatchObject({
+      qty: 2,
+      weight: 1200,
+      weightType: "total",
+      freightClass: "70"
     });
   });
 
   it("resolves known city names to default postal codes", () => {
     const parsed = parseAssistantRatePrompt(
-      "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs."
+      "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs for 1 pallet."
     );
 
     expect(parsed?.missingFields).toEqual([]);
@@ -59,7 +74,7 @@ describe("parseAssistantRatePrompt", () => {
 
   it("asks for a postal code when the city is not in the assistant lookup", () => {
     const parsed = parseAssistantRatePrompt(
-      "Need a rate from Madeupville to Dallas 40x48x50 at 500 lbs."
+      "Need a rate from Madeupville to Dallas 40x48x50 at 500 lbs for 1 pallet."
     );
 
     expect(parsed?.request).toBeNull();
@@ -86,7 +101,7 @@ describe("maybeRunAssistantRateRequest", () => {
       "Need a rate from Charlotte to Dallas 40x48x50."
     );
 
-    expect(result?.answer).toContain("Still needed: weight.");
+    expect(result?.answer).toContain("Still needed: weight, quantity.");
     expect(requireModule).not.toHaveBeenCalled();
   });
 
@@ -156,16 +171,203 @@ describe("maybeRunAssistantRateRequest", () => {
         userName: "Alex",
         role: "ADMIN"
       },
-      "Need a rate from Charlotte NC 28273 to Dallas TX 75201 40x48x50 at 500 lbs."
+      "Need a rate from Charlotte NC 28273 to Dallas TX 75201 40x48x50 at 500 lbs for 1 pallet."
     );
 
     expect(requireModule).toHaveBeenCalled();
     expect(getLtlQuotes).toHaveBeenCalledTimes(1);
+    expect(getLtlQuotes).toHaveBeenCalledWith(
+      expect.anything(),
+      [
+        expect.objectContaining({
+          pieces: [
+            expect.objectContaining({
+              qty: 1,
+              weight: 500,
+              weightType: "each",
+              freightClass: "100"
+            })
+          ]
+        })
+      ],
+      expect.anything()
+    );
     expect(result?.answer).toContain("Lowest rate: AAA Cooper at $412.33");
     expect(result?.sources[0]).toMatchObject({
       sourceKind: "RATE_TOOL",
       title: "AAA Cooper 7L quote"
     });
+  });
+
+  it("selects the live credentialed 7L account before an active dry-run account", async () => {
+    requireModule.mockResolvedValue(undefined);
+    getLtlRatePortalShell.mockResolvedValue({
+      accounts: [
+        {
+          id: "dry-run-account",
+          name: "7L Dry Run - Core LTL",
+          status: "ACTIVE",
+          dryRun: true,
+          secretConfigured: false,
+          carriers: [
+            {
+              carrierHash: "dry-carrier",
+              name: "Dry Run Carrier",
+              code: "DRY",
+              scac: "DRYY",
+              enabled: true
+            }
+          ]
+        },
+        {
+          id: "live-account",
+          name: "7L Live Preferred Carriers",
+          status: "ACTIVE",
+          dryRun: false,
+          secretConfigured: true,
+          carriers: [
+            {
+              carrierHash: "carrier-a",
+              name: "AAA Cooper",
+              code: "AAA",
+              scac: "AACT",
+              enabled: true
+            }
+          ]
+        }
+      ]
+    });
+    getLtlQuotes.mockResolvedValue({
+      data: [
+        {
+          customerReference: "ASSIST",
+          originCity: "CHARLOTTE",
+          originState: "NC",
+          originZipcode: "28273",
+          originCountry: "US",
+          destinationCity: "DALLAS",
+          destinationState: "TX",
+          destinationZipcode: "75201",
+          destinationCountry: "US",
+          pickupDate: "Not scheduled",
+          uom: "US",
+          accessorialCodes: [],
+          pieces: [],
+          carrierHash: "carrier-a",
+          carrierName: "AAA Cooper",
+          carrierCode: "AAA",
+          scac: "AACT",
+          serviceLevel: "Less than Truckload",
+          transitDays: 3,
+          quoteNumber: "AAA-ASSIST-1",
+          total: 412.33,
+          fuelCharge: 52.11,
+          accessorialCharge: 0,
+          linehaulCharge: 360.22,
+          rateRemarks: [],
+          mode: "live"
+        }
+      ],
+      errors: []
+    });
+
+    await maybeRunAssistantRateRequest(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "tenant-1",
+        tenantName: "Tenant 1",
+        userId: "user-1",
+        userEmail: "alex@newl.ca",
+        userName: "Alex",
+        role: "ADMIN"
+      },
+      "Need a rate from Charlotte NC 28273 to Dallas TX 75201 40x48x50 at 500 lbs for 1 pallet."
+    );
+
+    expect(getLtlQuotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "live-account",
+        name: "7L Live Preferred Carriers"
+      }),
+      expect.anything(),
+      ["carrier-a"]
+    );
+  });
+
+  it("normalizes Canadian postal codes before calling 7L", async () => {
+    requireModule.mockResolvedValue(undefined);
+    getLtlRatePortalShell.mockResolvedValue({
+      accounts: [
+        {
+          id: "live-account",
+          name: "7L Live Preferred Carriers",
+          status: "ACTIVE",
+          dryRun: false,
+          secretConfigured: true,
+          carriers: [
+            {
+              carrierHash: "carrier-a",
+              name: "AAA Cooper",
+              code: "AAA",
+              scac: "AACT",
+              enabled: true
+            }
+          ]
+        }
+      ]
+    });
+    getLtlQuotes.mockResolvedValue({
+      data: [
+        {
+          customerReference: "ASSIST",
+          originCity: "MONTREAL",
+          originState: "QC",
+          originZipcode: "H3B1A7",
+          originCountry: "CA",
+          destinationCity: "DALLAS",
+          destinationState: "TX",
+          destinationZipcode: "75201",
+          destinationCountry: "US",
+          pickupDate: "Not scheduled",
+          uom: "US",
+          accessorialCodes: [],
+          pieces: [],
+          carrierHash: "carrier-a",
+          carrierName: "AAA Cooper",
+          carrierCode: "AAA",
+          scac: "AACT",
+          serviceLevel: "Less than Truckload",
+          transitDays: 3,
+          quoteNumber: "AAA-ASSIST-CA",
+          total: 512.1,
+          fuelCharge: 60,
+          accessorialCharge: 0,
+          linehaulCharge: 452.1,
+          rateRemarks: [],
+          mode: "live"
+        }
+      ],
+      errors: []
+    });
+
+    await maybeRunAssistantRateRequest(
+      {
+        tenantId: "tenant-1",
+        tenantSlug: "tenant-1",
+        tenantName: "Tenant 1",
+        userId: "user-1",
+        userEmail: "alex@newl.ca",
+        userName: "Alex",
+        role: "ADMIN"
+      },
+      "Need a rate from Montreal QC H3B 1A7 to Dallas TX 75201 40x48x50 at 500 lbs for 1 pallet."
+    );
+
+    expect(getLtlQuotes).toHaveBeenCalledWith(
+      expect.anything(),
+      [expect.objectContaining({ originZipcode: "H3B1A7", destinationZipcode: "75201" })],
+      ["carrier-a"]
+    );
   });
 
   it("routes city-only rate requests to 7L using resolved default ZIP codes", async () => {
@@ -234,7 +436,7 @@ describe("maybeRunAssistantRateRequest", () => {
         userName: "Alex",
         role: "ADMIN"
       },
-      "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs."
+      "Need a rate from Charlotte to Dallas 40x48x50 at 500 lbs for 1 pallet."
     );
 
     expect(getLtlQuotes).toHaveBeenCalledWith(

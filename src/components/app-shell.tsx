@@ -13,6 +13,7 @@ type NavEntry = {
   label: string;
   exact?: boolean;
   moduleKey?: ModuleKey;
+  allowedRoles?: PlatformRole[];
   children?: never;
 };
 
@@ -20,6 +21,7 @@ type NavGroup = {
   id: string;
   label: string;
   moduleKey?: ModuleKey;
+  allowedRoles?: PlatformRole[];
   children: NavNode[];
 };
 
@@ -84,6 +86,13 @@ const navEntries: NavNode[] = [
             moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
           }
         ]
+      },
+      {
+        id: "supply-chain-design",
+        href: "/supply-chain-design",
+        label: "Supply Chain Design Studio",
+        moduleKey: "SUPPLY_CHAIN_DESIGN" as ModuleKey,
+        allowedRoles: ["ADMIN", "MANAGER"] as PlatformRole[]
       },
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
@@ -188,8 +197,8 @@ export function AppShell({
   const displayName = userName?.trim() || userEmail || "Signed in";
   const [expandedNavIds, setExpandedNavIds] = useState<Record<string, boolean>>({});
   const visibleNavEntries = useMemo(
-    () => filterVisibleNavEntries(navEntries, enabledModuleKeys),
-    [enabledModuleKeys]
+    () => filterVisibleNavEntries(navEntries, enabledModuleKeys, role),
+    [enabledModuleKeys, role]
   );
 
   useEffect(() => {
@@ -333,12 +342,20 @@ function NavTree({
   );
 }
 
-function filterVisibleNavEntries(entries: NavNode[], enabledModuleKeys?: ModuleKey[]): NavNode[] {
+export function filterVisibleNavEntries(
+  entries: NavNode[],
+  enabledModuleKeys?: ModuleKey[],
+  role?: PlatformRole
+): NavNode[] {
   const visibleEntries: NavNode[] = [];
 
   for (const entry of entries) {
+    if (entry.allowedRoles && (!role || !entry.allowedRoles.includes(role))) {
+      continue;
+    }
+
     if (isNavGroup(entry)) {
-      const children = filterVisibleNavEntries(entry.children, enabledModuleKeys);
+      const children = filterVisibleNavEntries(entry.children, enabledModuleKeys, role);
       if (children.length > 0) {
         visibleEntries.push({ ...entry, children });
       }

@@ -495,6 +495,11 @@ async function main() {
       description: "Apollo and TradeMining lead generation workflow"
     },
     {
+      key: ModuleKey.SUPPLY_CHAIN_DESIGN,
+      name: "Supply Chain Design Studio",
+      description: "Supply Chain Design Studio project workspace and modeling proofs"
+    },
+    {
       key: ModuleKey.UPS_TOOLS,
       name: "UPS Tools",
       description: "Future UPS calculators and account tools"
@@ -612,6 +617,10 @@ async function main() {
 
   const leadGenModule = await prisma.module.findUniqueOrThrow({
     where: { key: ModuleKey.LEAD_GEN }
+  });
+
+  const supplyChainDesignModule = await prisma.module.findUniqueOrThrow({
+    where: { key: ModuleKey.SUPPLY_CHAIN_DESIGN }
   });
 
   const assistantModule = await prisma.module.findUniqueOrThrow({
@@ -739,6 +748,21 @@ async function main() {
     create: {
       tenantId: tenant.id,
       moduleId: leadGenModule.id,
+      enabled: true
+    }
+  });
+
+  await prisma.tenantModuleAccess.upsert({
+    where: {
+      tenantId_moduleId: {
+        tenantId: tenant.id,
+        moduleId: supplyChainDesignModule.id
+      }
+    },
+    update: { enabled: true },
+    create: {
+      tenantId: tenant.id,
+      moduleId: supplyChainDesignModule.id,
       enabled: true
     }
   });

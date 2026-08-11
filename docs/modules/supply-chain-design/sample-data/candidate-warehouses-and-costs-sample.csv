@@ -1,0 +1,5 @@
+Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Inbound Fee Per Pallet,Outbound Fee Per Pallet,Storage Fee Per Pallet Per Month,Pallet Capacity,Currency,Notes
+CHI-3PL,Chicago Variable 3PL,Proposed 3PL,60601,US,,6.00,5.00,14.00,10000,USD,Variable-rate candidate near Midwest and Northeast demand.
+ATL-3PL,Atlanta Variable 3PL,Proposed 3PL,30303,US,,5.50,4.75,13.00,12000,USD,Variable-rate candidate near Southeast demand.
+PHX-3PL,Phoenix Variable 3PL,Proposed 3PL,85004,US,,6.25,5.25,15.00,9000,USD,Variable-rate candidate near western demand.
+DFW-ALLIN,Dallas Annual All-In Candidate,Proposed Leased,75201,US,195000,7.50,6.50,16.00,11000,USD,Annual all-in candidate; annual cost takes precedence over variable fields.
