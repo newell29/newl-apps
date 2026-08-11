@@ -17,6 +17,7 @@ type ScheduledEmailIntakeRequest = {
 };
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 export async function POST(request: Request) {
   try {
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
           parsedAttachmentCount: automation.parsedAttachmentCount,
           duplicateAttachmentCount: automation.duplicateAttachmentCount,
           failedAttachmentCount: automation.failedAttachmentCount,
+          deferredAllMissingAttachmentCount: automation.deferredAllMissingAttachmentCount,
           createdReviewRunIds: automation.createdReviewRunIds,
           createdUpdateJobIds: automation.createdUpdateJobIds,
           approvedUpdateJobIds: automation.approvedUpdateJobIds,

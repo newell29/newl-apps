@@ -7,7 +7,7 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-type DownloadType = "midland" | "speedy" | "suretrack" | "clarke" | "guilbault" | "signed";
+type DownloadType = "midland" | "speedy" | "suretrack" | "clarke" | "guilbault" | "rosedale" | "signed";
 
 type CarrierManifestRunRouteClient = typeof prisma & {
   shipmentCarrierManifestRun: {
@@ -26,6 +26,8 @@ type CarrierManifestRunRouteClient = typeof prisma & {
       clarkeWorkbookBytes?: Uint8Array | null;
       guilbaultFileName?: string | null;
       guilbaultWorkbookBytes?: Uint8Array | null;
+      rosedaleFileName?: string | null;
+      rosedaleWorkbookBytes?: Uint8Array | null;
       signedCopyFileName?: string | null;
       signedCopyContentType?: string | null;
       signedCopyBytes?: Uint8Array | null;
@@ -48,7 +50,7 @@ export async function GET(
 
     if (!isDownloadType(documentType)) {
       return NextResponse.json(
-        { error: "documentType must be midland, speedy, suretrack, clarke, guilbault, or signed." },
+        { error: "documentType must be midland, speedy, suretrack, clarke, guilbault, rosedale, or signed." },
         { status: 400 }
       );
     }
@@ -70,6 +72,8 @@ export async function GET(
         clarkeWorkbookBytes: true,
         guilbaultFileName: true,
         guilbaultWorkbookBytes: true,
+        rosedaleFileName: true,
+        rosedaleWorkbookBytes: true,
         signedCopyFileName: true,
         signedCopyContentType: true,
         signedCopyBytes: true
@@ -153,6 +157,7 @@ function isDownloadType(value: string | null): value is DownloadType {
     value === "suretrack" ||
     value === "clarke" ||
     value === "guilbault" ||
+    value === "rosedale" ||
     value === "signed"
   );
 }
@@ -169,6 +174,8 @@ function readDownload(
     clarkeWorkbookBytes?: Uint8Array | null;
     guilbaultFileName?: string | null;
     guilbaultWorkbookBytes?: Uint8Array | null;
+    rosedaleFileName?: string | null;
+    rosedaleWorkbookBytes?: Uint8Array | null;
     signedCopyFileName?: string | null;
     signedCopyContentType?: string | null;
     signedCopyBytes?: Uint8Array | null;
@@ -211,6 +218,14 @@ function readDownload(
     return {
       fileName: run.guilbaultFileName,
       bytes: run.guilbaultWorkbookBytes,
+      contentType: "application/vnd.ms-excel"
+    };
+  }
+
+  if (documentType === "rosedale") {
+    return {
+      fileName: run.rosedaleFileName,
+      bytes: run.rosedaleWorkbookBytes,
       contentType: "application/vnd.ms-excel"
     };
   }

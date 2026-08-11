@@ -22,7 +22,7 @@ Relevant tables and enums are in `prisma/schema.prisma`. Operationally important
 
 `ShipmentCarrierManifestAttachment` stores each additional PDF attached to a saved carrier-manifest run. The record carries both `tenantId` and `runId`, the original file name, PDF content type, byte size, binary contents, upload-complete state, uploader, and upload time. Existing single signed-copy columns on `ShipmentCarrierManifestRun` remain readable for backward compatibility.
 
-`ShipmentCarrierManifestRun` stores separate file-name and workbook-byte columns for Midland, Speedy, Suretrack, Clarke, and Guilbault Transport. `carrierCounts` and `manifestRows` retain the tenant-scoped per-run summary and extracted row evidence.
+`ShipmentCarrierManifestRun` stores separate file-name and workbook-byte columns for Midland, Speedy, Suretrack, Clarke, Guilbault Transport, and Rosedale. `carrierCounts` and `manifestRows` retain the tenant-scoped per-run summary and extracted row evidence.
 
 ```mermaid
 flowchart LR

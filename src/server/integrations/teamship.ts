@@ -7,6 +7,7 @@ import { getTenantTeamshipSettings, resolveTenantTeamshipCredentials } from "@/s
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
 const DEFAULT_PAGE_LIMIT = 500;
 const DEFAULT_MAX_PAGES = 30;
+const DEFAULT_TARGETED_MAX_PAGES = 100;
 
 type TeamshipFetchOptions = {
   tenantId?: string | null;
@@ -148,11 +149,26 @@ export async function fetchTeamshipShippingOrdersForReview({
   let webCookieHeader: string | null | undefined;
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
-  const maxPages = getTeamshipMaxPages();
+  const maxPages = getTeamshipMaxPages(targetOrderReferences.length > 0);
+  const seenPageFingerprints = new Set<string>();
+  let offset = 0;
+  let scannedRowCount = 0;
+  let stopReason: "ALL_MATCHES_FOUND" | "EMPTY_PAGE" | "REPEATED_PAGE" | "MAX_PAGES" = "MAX_PAGES";
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const offset = pageIndex * pageLimit;
     const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
+    if (rows.length === 0) {
+      stopReason = "EMPTY_PAGE";
+      break;
+    }
+
+    const pageFingerprint = buildTeamshipListPageFingerprint(rows);
+    if (seenPageFingerprints.has(pageFingerprint)) {
+      stopReason = "REPEATED_PAGE";
+      break;
+    }
+    seenPageFingerprints.add(pageFingerprint);
+    scannedRowCount += rows.length;
 
     for (const row of rows) {
       const matchingTargetReferences = targetOrderReferences.filter(
@@ -231,15 +247,47 @@ export async function fetchTeamshipShippingOrdersForReview({
       targetOrderReferences.length > 0 &&
       matchedTargetReferenceKeys.size === targetOrderReferences.length
     ) {
+      stopReason = "ALL_MATCHES_FOUND";
       break;
     }
 
-    if (rows.length < pageLimit) {
-      break;
-    }
+    // Teamship may return fewer rows than the requested limit even when another
+    // page exists. Advance by the number actually returned instead of assuming
+    // the requested limit was honoured, otherwise exact PS/SR matches can be
+    // skipped or the first capped page can be mistaken for the end of the list.
+    offset += rows.length;
+  }
+
+  if (targetOrderReferences.length > 0 && matchedTargetReferenceKeys.size === 0) {
+    console.warn("Teamship targeted order lookup returned no exact matches.", {
+      requestedReferenceCount: targetOrderReferences.length,
+      requestedPageLimit: pageLimit,
+      configuredMaxPages: maxPages,
+      scannedPageCount: seenPageFingerprints.size,
+      scannedRowCount,
+      stopReason
+    });
   }
 
   return Array.from(details.values());
+}
+
+function buildTeamshipListPageFingerprint(rows: TeamshipShippingOrderSummary[]) {
+  return rows
+    .map((row, index) => {
+      const rowId = row.id ?? row.order_id;
+      if (rowId !== null && rowId !== undefined && String(rowId).trim()) {
+        return `ID:${String(rowId).trim()}`;
+      }
+
+      return [
+        `ROW:${index}`,
+        normalizeTeamshipPsNumber(row),
+        normalizeTeamshipShipmentId(row),
+        String(row.created_at ?? "")
+      ].join(":");
+    })
+    .join("|");
 }
 
 export async function searchTeamshipProductsForShipping({
@@ -743,13 +791,16 @@ function getTeamshipPageLimit() {
   return Math.min(parsed, DEFAULT_PAGE_LIMIT);
 }
 
-function getTeamshipMaxPages() {
-  const parsed = Number.parseInt(process.env.TEAMSHIP_MAX_LIST_PAGES ?? "", 10);
+function getTeamshipMaxPages(targetedOrderLookup = false) {
+  const variableName = targetedOrderLookup
+    ? "TEAMSHIP_TARGETED_MAX_LIST_PAGES"
+    : "TEAMSHIP_MAX_LIST_PAGES";
+  const parsed = Number.parseInt(process.env[variableName] ?? "", 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_MAX_PAGES;
+    return targetedOrderLookup ? DEFAULT_TARGETED_MAX_PAGES : DEFAULT_MAX_PAGES;
   }
 
-  return parsed;
+  return targetedOrderLookup ? Math.min(parsed, DEFAULT_TARGETED_MAX_PAGES) : parsed;
 }
 
 function isGarlandOrder(order: TeamshipShippingOrderSummary) {
@@ -805,6 +856,84 @@ function normalizeTeamshipPsNumber(order: TeamshipShippingOrderSummary) {
   return "";
 }
 
+function readTeamshipReferenceTokens(order: TeamshipShippingOrderSummary) {
+  const psNumbers = new Set<string>();
+  const srNumbers = new Set<string>();
+  const visited = new Set<object>();
+  let visitedScalarCount = 0;
+
+  const addTokens = (value: unknown) => {
+    const text = String(value ?? "").toUpperCase();
+
+    for (const match of text.matchAll(/(?:^|[^A-Z0-9])(PS\d{6})(?=$|[^A-Z0-9])/g)) {
+      if (match[1]) psNumbers.add(match[1]);
+    }
+
+    for (const match of text.matchAll(/(?:^|[^A-Z0-9])(SR\d{6})(?=$|[^A-Z0-9])/g)) {
+      if (match[1]) srNumbers.add(match[1]);
+    }
+  };
+
+  const visit = (value: unknown, referenceContext: boolean, depth: number) => {
+    if (value === null || value === undefined || depth > 4 || visitedScalarCount >= 200) {
+      return;
+    }
+
+    if (typeof value === "string" || typeof value === "number") {
+      if (referenceContext) {
+        visitedScalarCount += 1;
+        addTokens(value);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, referenceContext, depth + 1);
+      }
+      return;
+    }
+
+    if (typeof value !== "object" || visited.has(value)) {
+      return;
+    }
+
+    visited.add(value);
+    const record = value as Record<string, unknown>;
+    const descriptor = [record.label, record.edi_key, record.name]
+      .find((candidate) => typeof candidate === "string");
+    const describedReference = typeof descriptor === "string" && isTeamshipReferenceKey(descriptor);
+
+    for (const [key, childValue] of Object.entries(record)) {
+      if (isSensitiveTeamshipKey(key)) {
+        continue;
+      }
+
+      visit(
+        childValue,
+        referenceContext || isTeamshipReferenceKey(key) || describedReference,
+        depth + 1
+      );
+    }
+  };
+
+  visit(order, false, 0);
+
+  return { psNumbers, srNumbers };
+}
+
+function isTeamshipReferenceKey(key: string) {
+  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+  return (
+    normalized.startsWith("ps") ||
+    normalized.startsWith("sr") ||
+    ["record", "order", "shipment", "reference", "external", "display", "edi"].some((token) =>
+      normalized.includes(token)
+    )
+  );
+}
+
 function normalizeTeamshipOrderReferences(
   orderReferences: TeamshipOrderReference[],
   legacySrNumbers: string[]
@@ -845,8 +974,17 @@ function teamshipOrderMatchesReference(
     return reference.psNumber === orderPsNumber;
   }
 
+  const referenceTokens = readTeamshipReferenceTokens(order);
+  if (reference.psNumber && referenceTokens.psNumbers.size > 0) {
+    return referenceTokens.psNumbers.has(reference.psNumber);
+  }
+
   const orderSrNumber = normalizeTeamshipShipmentId(order);
-  return Boolean(reference.srNumber && orderSrNumber === reference.srNumber);
+  if (reference.srNumber && orderSrNumber) {
+    return orderSrNumber === reference.srNumber;
+  }
+
+  return Boolean(reference.srNumber && referenceTokens.srNumbers.has(reference.srNumber));
 }
 
 function normalizeText(value: unknown) {

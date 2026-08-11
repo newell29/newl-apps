@@ -60,6 +60,7 @@ describe("scheduled Garland email intake route", () => {
       parsedAttachmentCount: 1,
       duplicateAttachmentCount: 0,
       failedAttachmentCount: 0,
+      deferredAllMissingAttachmentCount: 0,
       createdReviewRunIds: ["review-run-1"],
       createdUpdateJobIds: ["update-job-1"],
       approvedUpdateJobIds: ["update-job-1"],
@@ -121,6 +122,7 @@ describe("scheduled Garland email intake route", () => {
         },
         automation: {
           processedAttachmentCount: 1,
+          deferredAllMissingAttachmentCount: 0,
           createdReviewRunIds: ["review-run-1"]
         }
       }

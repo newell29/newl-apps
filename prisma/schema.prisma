@@ -1405,6 +1405,8 @@ model ShipmentCarrierManifestRun {
   clarkeWorkbookBytes    Bytes?
   guilbaultFileName      String?
   guilbaultWorkbookBytes Bytes?
+  rosedaleFileName       String?
+  rosedaleWorkbookBytes  Bytes?
   signedCopyFileName     String?
   signedCopyContentType  String?
   signedCopyBytes        Bytes?

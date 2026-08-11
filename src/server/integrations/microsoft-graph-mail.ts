@@ -1,5 +1,7 @@
 const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 45_000;
 const MICROSOFT_GRAPH_MAIL_PAGE_SIZE = 50;
+const MICROSOFT_GRAPH_READ_MAX_ATTEMPTS = 3;
+const MICROSOFT_GRAPH_READ_RETRY_DELAYS_MS = [250, 1_000] as const;
 
 export type MicrosoftGraphMailRecipient = {
   emailAddress?: {
@@ -110,10 +112,9 @@ export async function fetchMicrosoftGraphMailboxFolderMessages(
 export async function fetchMicrosoftGraphMessageAttachments(accessToken: string, mailbox: string, messageId: string) {
   const messagePath = mailbox === "me" ? "me/messages" : await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox);
   const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments?$select=id,name,contentType,size,isInline,lastModifiedDateTime`;
-  const response = await fetch(url, {
+  const response = await fetchMicrosoftGraphReadWithRetry(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+    cache: "no-store"
   });
 
   if (!response.ok) {
@@ -137,10 +138,9 @@ export async function fetchMicrosoftGraphMessageAttachmentContent(
   const url = `https://graph.microsoft.com/v1.0/${messagePath}/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(
     attachmentId
   )}/$value`;
-  const response = await fetch(url, {
+  const response = await fetchMicrosoftGraphReadWithRetry(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+    cache: "no-store"
   });
 
   if (!response.ok) {
@@ -433,6 +433,79 @@ async function extractMicrosoftGraphResponseError(response: Response) {
   }
 
   return `Microsoft Graph request failed with status ${response.status}${code ? ` (${code})` : ""}${message ? `: ${message}` : ""}.`;
+}
+
+async function fetchMicrosoftGraphReadWithRetry(url: string, init: RequestInit) {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < MICROSOFT_GRAPH_READ_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+      });
+      const canRetry =
+        attempt < MICROSOFT_GRAPH_READ_MAX_ATTEMPTS - 1 &&
+        isRetryableMicrosoftGraphReadStatus(response.status);
+
+      if (!canRetry) {
+        return response;
+      }
+
+      const retryDelayMs = resolveMicrosoftGraphRetryDelayMs(
+        response,
+        MICROSOFT_GRAPH_READ_RETRY_DELAYS_MS[attempt] ?? 1_000
+      );
+      await response.body?.cancel().catch(() => undefined);
+      await waitForMicrosoftGraphRetry(retryDelayMs);
+    } catch (error) {
+      lastError = error;
+      if (
+        attempt >= MICROSOFT_GRAPH_READ_MAX_ATTEMPTS - 1 ||
+        !isRetryableMicrosoftGraphReadError(error)
+      ) {
+        throw error;
+      }
+
+      await waitForMicrosoftGraphRetry(
+        MICROSOFT_GRAPH_READ_RETRY_DELAYS_MS[attempt] ?? 1_000
+      );
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Microsoft Graph read failed after bounded retry.");
+}
+
+function isRetryableMicrosoftGraphReadStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function isRetryableMicrosoftGraphReadError(error: unknown) {
+  if (error instanceof TypeError) return true;
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+    return error.name === "AbortError" || error.name === "TimeoutError";
+  }
+  return false;
+}
+
+function resolveMicrosoftGraphRetryDelayMs(response: Response, fallbackMs: number) {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) return fallbackMs;
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1_000, 5_000);
+  }
+
+  const retryAt = new Date(retryAfter);
+  if (Number.isNaN(retryAt.getTime())) return fallbackMs;
+  return Math.min(Math.max(0, retryAt.getTime() - Date.now()), 5_000);
+}
+
+async function waitForMicrosoftGraphRetry(delayMs: number) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function escapeODataString(value: string) {

@@ -1122,6 +1122,44 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
     }
   }
 
+  async function recheckSavedRun(runId: string) {
+    setHistoryError(null);
+    setIsHistoryLoading(true);
+    setStatus("Rechecking this completely missed batch against live Teamship...");
+
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "recheckTeamship" })
+      });
+      const json = (await response.json().catch(() => null)) as {
+        review?: GarlandTeamshipReviewResponse;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !json?.review) {
+        throw new Error(json?.error ?? "Unable to recheck this Garland batch in Teamship.");
+      }
+
+      await fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates);
+      if (editingRunId === runId) {
+        setReview(json.review);
+      }
+      setStatus(
+        json.review.summary.teamshipMatchedCount > 0
+          ? `Teamship recheck complete: ${json.review.summary.teamshipMatchedCount} of ${json.review.summary.pdfOrderCount} PDF orders are now matched.`
+          : `Teamship recheck complete: all ${json.review.summary.pdfOrderCount} PDF orders are still missing from the Teamship response.`
+      );
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to recheck this Garland batch in Teamship.";
+      setHistoryError(message);
+      setStatus("The saved Garland batch was not changed.");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }
+
   async function updateSavedOrderWorkflow(runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") {
     setHistoryError(null);
     setIsHistoryLoading(true);
@@ -1294,6 +1332,7 @@ export function GarlandTeamshipReviewClient({ canDeleteRuns }: { canDeleteRuns: 
         onSearch={() => void fetchHistory(historySearch, historyDateFrom, historyDateTo, historyAllDates)}
         onDelete={(runId) => void deleteRun(runId)}
         onLoadForEditing={(runId) => void loadRunForEditing(runId)}
+        onRecheckTeamship={(runId) => void recheckSavedRun(runId)}
         onEmailCsrReport={(runId) => void emailCsrAgentReport(runId)}
         onOrderWorkflowAction={(runId, orderId, action) => void updateSavedOrderWorkflow(runId, orderId, action)}
       />
@@ -2743,6 +2782,7 @@ function TeamshipReviewHistorySection({
   onSearch,
   onDelete,
   onLoadForEditing,
+  onRecheckTeamship,
   onEmailCsrReport,
   onOrderWorkflowAction
 }: {
@@ -2765,6 +2805,7 @@ function TeamshipReviewHistorySection({
   onSearch: () => void;
   onDelete: (runId: string) => void;
   onLoadForEditing: (runId: string) => void;
+  onRecheckTeamship: (runId: string) => void;
   onEmailCsrReport: (runId: string) => void;
   onOrderWorkflowAction: (runId: string, orderId: string, action: "markBolPrinted" | "clearBolPrinted" | "markOrderComplete" | "clearOrderComplete") => void;
 }) {
@@ -3135,6 +3176,19 @@ function TeamshipReviewHistorySection({
                       >
                         Load/edit
                       </button>
+                      {isCompletelyMissingHistoryRun(run) ? (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            onRecheckTeamship(run.id);
+                          }}
+                          disabled={isHistoryLoading}
+                          className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm font-semibold text-warning transition-colors hover:bg-warning/15 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Recheck Teamship
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={(event) => {
@@ -3524,6 +3578,14 @@ function buildHistoryTotals(history: TeamshipReviewHistoryResponse) {
       pendingOrders: totals.pendingOrders + run.pendingTeamshipCount + run.noPdfCount
     }),
     { pdfOrders: 0, greenOrders: 0, reviewOrders: 0, pendingOrders: 0 }
+  );
+}
+
+function isCompletelyMissingHistoryRun(run: TeamshipReviewHistoryRun) {
+  return (
+    run.pdfOrderCount > 0 &&
+    run.missingTeamshipCount === run.pdfOrderCount &&
+    run.teamshipMatchedCount === 0
   );
 }
 

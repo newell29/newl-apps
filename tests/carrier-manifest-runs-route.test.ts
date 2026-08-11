@@ -78,7 +78,8 @@ describe("Carrier manifest saved runs", () => {
           SPEEDY: 0,
           SURETRACK: 0,
           CLARKE: 1,
-          GUILBAULT: 0
+          GUILBAULT: 0,
+          ROSEDALE: 0
         },
         clarkeFileName: "Clarke Manifest July 30, 2026.xls",
         clarkeWorkbookBytes: workbookBytes
@@ -160,7 +161,8 @@ describe("Carrier manifest saved runs", () => {
           SPEEDY: 0,
           SURETRACK: 0,
           CLARKE: 0,
-          GUILBAULT: 1
+          GUILBAULT: 1,
+          ROSEDALE: 0
         },
         guilbaultFileName: "Guilbault Transport Manifest August 4, 2026.xls",
         guilbaultWorkbookBytes: workbookBytes
@@ -196,6 +198,89 @@ describe("Carrier manifest saved runs", () => {
         select: expect.objectContaining({
           guilbaultFileName: true,
           guilbaultWorkbookBytes: true
+        })
+      })
+    );
+  });
+
+  it("stores a separate Rosedale workbook and count in the tenant-scoped run", async () => {
+    const workbookBytes = Buffer.from("synthetic Rosedale workbook");
+    const response = await POST(
+      new Request("https://newl.test/api/shipment-documents/carrier-manifest/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          shipmentDate: "2026-08-11",
+          documentLabel: "August 11, 2026",
+          sourceBolFileName: "synthetic-bols.pdf",
+          rows: [
+            {
+              carrier: "ROSEDALE",
+              pageNumber: 1,
+              srNumber: "812345",
+              psNumber: "PS123456",
+              cityProvince: "OTTAWA, ON",
+              skids: 1,
+              confidence: "HIGH",
+              notes: null
+            }
+          ],
+          workbooks: {
+            ROSEDALE: {
+              fileName: "Rosedale Manifest August 11, 2026.xls",
+              base64: workbookBytes.toString("base64")
+            }
+          }
+        })
+      })
+    );
+
+    expect(response.status).toBe(201);
+    expect(prismaMock.shipmentCarrierManifestRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        carrierCounts: {
+          MIDLAND: 0,
+          SPEEDY: 0,
+          SURETRACK: 0,
+          CLARKE: 0,
+          GUILBAULT: 0,
+          ROSEDALE: 1
+        },
+        rosedaleFileName: "Rosedale Manifest August 11, 2026.xls",
+        rosedaleWorkbookBytes: workbookBytes
+      })
+    });
+  });
+
+  it("downloads only the Rosedale workbook from the requested tenant run", async () => {
+    const workbookBytes = Buffer.from("synthetic Rosedale workbook");
+    prismaMock.shipmentCarrierManifestRun.findFirst.mockResolvedValue({
+      rosedaleFileName: "Rosedale Manifest August 11, 2026.xls",
+      rosedaleWorkbookBytes: workbookBytes
+    });
+
+    const response = await GET(
+      new Request("https://newl.test/api/shipment-documents/carrier-manifest/runs/run-1?documentType=rosedale"),
+      { params: Promise.resolve({ runId: "run-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/vnd.ms-excel");
+    expect(response.headers.get("content-disposition")).toContain(
+      'filename="Rosedale Manifest August 11, 2026.xls"'
+    );
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(workbookBytes);
+    expect(prismaMock.shipmentCarrierManifestRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "run-1",
+          tenantId: "tenant-1",
+          deletedAt: null
+        },
+        select: expect.objectContaining({
+          rosedaleFileName: true,
+          rosedaleWorkbookBytes: true
         })
       })
     );
