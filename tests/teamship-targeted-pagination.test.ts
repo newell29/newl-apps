@@ -97,6 +97,9 @@ describe("targeted Teamship pagination", () => {
 
       if (url.includes("/api/ship-inventories/dashboard?")) {
         const requestUrl = new URL(url);
+        if (requestUrl.searchParams.get("statusSearch") === "requested") {
+          return Response.json({ result: [], count: 0 });
+        }
         archiveOffsets.push(requestUrl.searchParams.get("skip") ?? "");
         expect(requestUrl.searchParams.get("statusSearch")).toBe("shipped");
         expect(requestUrl.searchParams.get("take")).toBe("2");
@@ -156,6 +159,83 @@ describe("targeted Teamship pagination", () => {
         record_no: "PS123456",
         status: "Complete"
       })
+    ]);
+  });
+
+  it("uses Teamship's server-side active Garland search instead of scanning the full active API", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "500";
+    process.env.TEAMSHIP_TARGETED_MAX_LIST_PAGES = "100";
+
+    const dashboardStatuses: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "synthetic-token" } });
+      }
+
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-synthetic">', {
+          headers: { "set-cookie": "teamship_session=before-login; Path=/" }
+        });
+      }
+
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: { "set-cookie": "teamship_session=after-login; Path=/" }
+        });
+      }
+
+      if (url.includes("/api/ship-inventories/dashboard?")) {
+        const requestUrl = new URL(url);
+        dashboardStatuses.push(requestUrl.searchParams.get("statusSearch") ?? "");
+        expect(JSON.parse(requestUrl.searchParams.get("search") ?? "[]")).toEqual([
+          {
+            fields: [],
+            operator: "contains",
+            key: "Garland Canada Distribution",
+            ignoreCase: true
+          }
+        ]);
+        return Response.json({
+          result: [{ id: 61, record_no: "PS123456", shipment_id: "SR812345", status: "Open" }],
+          count: 1
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/61")) {
+        return Response.json({
+          data: {
+            id: 61,
+            record_no: "PS123456",
+            shipment_id: "SR812345",
+            ship_city: "SYNTHETIC CITY",
+            ship_state: "ON",
+            ship_zip: "A1A 1A1",
+            items: [{ sku: "SYNTHETIC-SKU", serial_number: "9900000000012" }]
+          }
+        });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        throw new Error("The full active API must not be scanned after the dashboard search succeeds.");
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR812345", psNumber: "PS123456" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(dashboardStatuses).toEqual(["requested"]);
+    expect(orders).toEqual([
+      expect.objectContaining({ shipment_id: "SR812345", record_no: "PS123456" })
     ]);
   });
 
@@ -278,18 +358,34 @@ describe("targeted Teamship pagination", () => {
     process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
     process.env.TEAMSHIP_TARGETED_MAX_LIST_PAGES = "1";
 
-    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+    const dashboardStatuses: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = String(input);
 
       if (url.endsWith("/api/v1/login")) {
         return Response.json({ data: { token: "synthetic-token" } });
       }
 
-      if (url.includes("/api/v1/ship-inventories?")) {
-        return Response.json({ data: [] });
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-synthetic">', {
+          headers: { "set-cookie": "teamship_session=before-login; Path=/" }
+        });
       }
 
-      throw new Error(`Ordinary review must not consult the completed archive: ${url}`);
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: { "set-cookie": "teamship_session=after-login; Path=/" }
+        });
+      }
+
+      if (url.includes("/api/ship-inventories/dashboard?")) {
+        const statusSearch = new URL(url).searchParams.get("statusSearch") ?? "";
+        dashboardStatuses.push(statusSearch);
+        return Response.json({ result: [], count: 0 });
+      }
+
+      throw new Error(`Unexpected ordinary-review request: ${url}`);
     });
 
     const orders = await fetchTeamshipShippingOrdersForReview({
@@ -298,6 +394,6 @@ describe("targeted Teamship pagination", () => {
     });
 
     expect(orders).toEqual([]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(dashboardStatuses).toEqual(["requested"]);
   });
 });

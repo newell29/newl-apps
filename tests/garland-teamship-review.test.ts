@@ -1634,7 +1634,7 @@ NEWLS 2604816191908 1.00 ( )`
         url: "https://teamship.test/ship-inventories/10"
       }
     ]);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET" || init?.method === "POST")).toBe(
       true
     );
@@ -2382,7 +2382,7 @@ NEWLS 2604816191908 1.00 ( )`
       teamshipValue: expect.stringContaining("2604816191908")
     });
     expect(orders[0]?.url).toBe("https://app.teamshipos.com/ship-inventories/30202");
-    expect(fetchMock.mock.calls.some(([input]) => String(input) === "https://app.teamshipos.com/login")).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "https://app.teamshipos.com/login")).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input) === "https://app.teamshipos.com/ship-inventories/30202")).toBe(
       false
     );

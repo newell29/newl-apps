@@ -168,7 +168,126 @@ export async function fetchTeamshipShippingOrdersForReview({
   let scannedRowCount = 0;
   let stopReason: "ALL_MATCHES_FOUND" | "EMPTY_PAGE" | "REPEATED_PAGE" | "MAX_PAGES" = "MAX_PAGES";
 
-  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+  const collectTargetedDashboardMatches = async (statusSearch: "requested" | "shipped") => {
+    if (webSession === undefined) {
+      webSession = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl);
+    }
+    if (!webSession) {
+      throw new Error("Teamship web login did not return a usable session.");
+    }
+
+    const dashboardFingerprints = new Set<string>();
+    let dashboardOffset = 0;
+    let dashboardRowCount = 0;
+
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const rows = await listTeamshipDashboardShippingOrders({
+        webBaseUrl,
+        webSession,
+        statusSearch,
+        limit: pageLimit,
+        offset: dashboardOffset,
+        fetchImpl
+      });
+      if (rows.length === 0) {
+        break;
+      }
+
+      const pageFingerprint = buildTeamshipListPageFingerprint(rows);
+      if (dashboardFingerprints.has(pageFingerprint)) {
+        break;
+      }
+      dashboardFingerprints.add(pageFingerprint);
+      dashboardRowCount += rows.length;
+
+      for (const row of rows) {
+        const matchingTargetReferences = targetOrderReferences.filter(
+          (reference) =>
+            !matchedTargetReferenceKeys.has(reference.key) &&
+            teamshipOrderMatchesReference(row, reference)
+        );
+        if (matchingTargetReferences.length === 0) {
+          continue;
+        }
+
+        const orderId = row.id ?? row.order_id;
+        if (!orderId) {
+          continue;
+        }
+
+        const detail = await getTeamshipShippingOrder({
+          apiBaseUrl,
+          token,
+          id: String(orderId),
+          fetchImpl
+        });
+        let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
+        mergedDetail = {
+          ...mergedDetail,
+          teamship_internal_id: String(orderId),
+          url: buildTeamshipOrderUrl(webBaseUrl, String(orderId))
+        };
+
+        const confirmedTargetReferences = matchingTargetReferences.filter((reference) =>
+          teamshipOrderMatchesReference(mergedDetail, reference)
+        );
+        if (confirmedTargetReferences.length !== 1) {
+          continue;
+        }
+
+        if (
+          !hasTeamshipSerialEvidence(mergedDetail) ||
+          hasIncompleteTeamshipShipToEvidence(mergedDetail)
+        ) {
+          const uiDetail = await getTeamshipShippingOrderUiDetail({
+            webBaseUrl,
+            webCookieHeader: webSession.cookieHeader,
+            id: String(orderId),
+            fetchImpl
+          }).catch(() => null);
+
+          if (uiDetail) {
+            mergedDetail = mergeTeamshipUiDetail(mergedDetail, uiDetail);
+          }
+        }
+
+        const reference = confirmedTargetReferences[0];
+        details.set(reference.key, mergedDetail);
+        matchedTargetReferenceKeys.add(reference.key);
+      }
+
+      if (matchedTargetReferenceKeys.size === targetOrderReferences.length) {
+        break;
+      }
+
+      dashboardOffset += rows.length;
+    }
+
+    return {
+      scannedPageCount: dashboardFingerprints.size,
+      scannedRowCount: dashboardRowCount
+    };
+  };
+
+  let usedTargetedActiveDashboard = false;
+  if (targetOrderReferences.length > 0) {
+    try {
+      const activeDashboardScan = await collectTargetedDashboardMatches("requested");
+      usedTargetedActiveDashboard = true;
+      scannedRowCount = activeDashboardScan.scannedRowCount;
+      stopReason =
+        matchedTargetReferenceKeys.size === targetOrderReferences.length
+          ? "ALL_MATCHES_FOUND"
+          : "EMPTY_PAGE";
+    } catch (error) {
+      console.warn("Teamship targeted active-dashboard lookup failed; using the legacy active API scan.", {
+        requestedReferenceCount: targetOrderReferences.length,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  for (let pageIndex = 0; !usedTargetedActiveDashboard && pageIndex < maxPages; pageIndex += 1) {
     const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
     if (rows.length === 0) {
       stopReason = "EMPTY_PAGE";
@@ -277,95 +396,7 @@ export async function fetchTeamshipShippingOrdersForReview({
     matchedTargetReferenceKeys.size < targetOrderReferences.length
   ) {
     try {
-      if (webSession === undefined) {
-        webSession = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl);
-      }
-
-      if (webSession) {
-        const archiveFingerprints = new Set<string>();
-        let archiveOffset = 0;
-
-        for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-          const rows = await listTeamshipCompletedShippingOrders({
-            webBaseUrl,
-            webSession,
-            limit: pageLimit,
-            offset: archiveOffset,
-            fetchImpl
-          });
-          if (rows.length === 0) {
-            break;
-          }
-
-          const pageFingerprint = buildTeamshipListPageFingerprint(rows);
-          if (archiveFingerprints.has(pageFingerprint)) {
-            break;
-          }
-          archiveFingerprints.add(pageFingerprint);
-
-          for (const row of rows) {
-            const matchingTargetReferences = targetOrderReferences.filter(
-              (reference) =>
-                !matchedTargetReferenceKeys.has(reference.key) &&
-                teamshipOrderMatchesReference(row, reference)
-            );
-            if (matchingTargetReferences.length === 0) {
-              continue;
-            }
-
-            const orderId = row.id ?? row.order_id;
-            if (!orderId) {
-              continue;
-            }
-
-            const detail = await getTeamshipShippingOrder({
-              apiBaseUrl,
-              token,
-              id: String(orderId),
-              fetchImpl
-            });
-            let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
-            mergedDetail = {
-              ...mergedDetail,
-              teamship_internal_id: String(orderId),
-              url: buildTeamshipOrderUrl(webBaseUrl, String(orderId))
-            };
-
-            const confirmedTargetReferences = matchingTargetReferences.filter((reference) =>
-              teamshipOrderMatchesReference(mergedDetail, reference)
-            );
-            if (confirmedTargetReferences.length !== 1) {
-              continue;
-            }
-
-            if (
-              !hasTeamshipSerialEvidence(mergedDetail) ||
-              hasIncompleteTeamshipShipToEvidence(mergedDetail)
-            ) {
-              const uiDetail = await getTeamshipShippingOrderUiDetail({
-                webBaseUrl,
-                webCookieHeader: webSession.cookieHeader,
-                id: String(orderId),
-                fetchImpl
-              }).catch(() => null);
-
-              if (uiDetail) {
-                mergedDetail = mergeTeamshipUiDetail(mergedDetail, uiDetail);
-              }
-            }
-
-            const reference = confirmedTargetReferences[0];
-            details.set(reference.key, mergedDetail);
-            matchedTargetReferenceKeys.add(reference.key);
-          }
-
-          if (matchedTargetReferenceKeys.size === targetOrderReferences.length) {
-            break;
-          }
-
-          archiveOffset += rows.length;
-        }
-      }
+      await collectTargetedDashboardMatches("shipped");
     } catch (error) {
       console.warn("Teamship completed-order archive lookup failed.", {
         requestedReferenceCount: targetOrderReferences.length,
@@ -728,15 +759,17 @@ async function listTeamshipShippingOrders({
   return json.data;
 }
 
-async function listTeamshipCompletedShippingOrders({
+async function listTeamshipDashboardShippingOrders({
   webBaseUrl,
   webSession,
+  statusSearch,
   limit,
   offset,
   fetchImpl
 }: {
   webBaseUrl: string;
   webSession: TeamshipWebSession;
+  statusSearch: "requested" | "shipped";
   limit: number;
   offset: number;
   fetchImpl: typeof fetch;
@@ -745,7 +778,7 @@ async function listTeamshipCompletedShippingOrders({
   url.searchParams.set("skip", String(offset));
   url.searchParams.set("take", String(limit));
   url.searchParams.set("requiresCounts", "true");
-  url.searchParams.set("statusSearch", "shipped");
+  url.searchParams.set("statusSearch", statusSearch);
   url.searchParams.set(
     "search",
     JSON.stringify([
@@ -775,7 +808,7 @@ async function listTeamshipCompletedShippingOrders({
 
   if (!response.ok || !Array.isArray(rows)) {
     throw new Error(
-      `Unable to list completed Teamship shipping orders. Teamship returned status ${response.status}.`
+      `Unable to list ${statusSearch === "shipped" ? "completed" : "active"} Teamship shipping orders. Teamship returned status ${response.status}.`
     );
   }
 
