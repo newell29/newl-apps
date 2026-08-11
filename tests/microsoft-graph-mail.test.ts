@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAndSendMicrosoftGraphMailboxMessage,
   fetchMicrosoftGraphMailboxFolderMessages,
+  fetchMicrosoftGraphMessageAttachments,
   fetchMicrosoftGraphMessageAttachmentContent
 } from "@/server/integrations/microsoft-graph-mail";
 
@@ -27,6 +28,65 @@ describe("Microsoft Graph mail attachment downloads", () => {
 
     const [url] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("https://graph.microsoft.com/v1.0/me/messages/message-1/attachments/attachment-1/$value");
+  });
+
+  it("retries transient attachment metadata failures before giving up on a Garland PDF", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        value: [{ id: "attachment-1", name: "orders.pdf", contentType: "application/pdf" }]
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = fetchMicrosoftGraphMessageAttachments("token", "me", "message-1");
+    await vi.runAllTimersAsync();
+
+    await expect(resultPromise).resolves.toEqual([
+      expect.objectContaining({ id: "attachment-1", name: "orders.pdf" })
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("does not retry permanent attachment metadata failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        error: { code: "ErrorAccessDenied", message: "Mailbox permission denied." }
+      }), {
+        status: 403,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMicrosoftGraphMessageAttachments("token", "me", "message-1"))
+      .rejects.toThrow("Mailbox permission denied");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries transient raw attachment download failures", async () => {
+    vi.useFakeTimers();
+    const pdfBytes = Buffer.from("%PDF-1.7");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(pdfBytes, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = fetchMicrosoftGraphMessageAttachmentContent(
+      "token",
+      "me",
+      "message-1",
+      "attachment-1"
+    );
+    await vi.runAllTimersAsync();
+
+    await expect(resultPromise).resolves.toMatchObject({
+      id: "attachment-1",
+      contentBytes: pdfBytes.toString("base64")
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });
 
