@@ -752,8 +752,18 @@ model User {
   teamshipReviewRuns                 TeamshipReviewRun[]
   teamshipUpdateJobsCreated          TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobCreatedBy")
   teamshipUpdateJobsApproved         TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobApprovedBy")
+  teamshipPrintBatchesRequested      TeamshipPrintBatch[]                @relation("TeamshipPrintBatchRequestedBy")
+  teamshipPrintBatchesApproved       TeamshipPrintBatch[]                @relation("TeamshipPrintBatchApprovedBy")
   teamshipPrintJobsRequested         TeamshipPrintJob[]                  @relation("TeamshipPrintJobRequestedBy")
   teamshipPrintJobsApproved          TeamshipPrintJob[]                  @relation("TeamshipPrintJobApprovedBy")
+  supplyChainDesignProjectsCreated   SupplyChainDesignProject[]          @relation("SupplyChainDesignProjectCreatedBy")
+  supplyChainDesignFilesUploaded     SupplyChainDesignProjectFile[]      @relation("SupplyChainDesignProjectFileUploadedBy")
+  supplyChainDesignMappingsCreated   SupplyChainDesignFileMapping[]      @relation("SupplyChainDesignFileMappingCreatedBy")
+  supplyChainDesignModelRunsCreated  SupplyChainDesignModelRun[]         @relation("SupplyChainDesignModelRunCreatedBy")
+  supplyChainDesignScenariosCreated  SupplyChainDesignScenario[]         @relation("SupplyChainDesignScenarioCreatedBy")
+  supplyChainDesignScreeningRunsCreated SupplyChainDesignScreeningRun[]   @relation("SupplyChainDesignScreeningRunCreatedBy")
+  supplyChainDesignLtlRatePreparationRunsCreated SupplyChainDesignLtlRatePreparationRun[] @relation("SupplyChainDesignLtlRatePreparationRunCreatedBy")
+  supplyChainDesignNetworkScenarioComparisonRunsCreated SupplyChainDesignNetworkScenarioComparisonRun[] @relation("SupplyChainDesignNetworkScenarioComparisonRunCreatedBy")
 
   @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }

@@ -931,9 +931,9 @@ describe("Supply Chain Design Studio persistence", () => {
       }
     ];
 
-    expect(filterVisibleNavEntries(entries, [ModuleKey.SUPPLY_CHAIN_DESIGN], PlatformRole.ADMIN)).toHaveLength(1);
-    expect(filterVisibleNavEntries(entries, [], PlatformRole.ADMIN)).toHaveLength(0);
-    expect(filterVisibleNavEntries(entries, [ModuleKey.SUPPLY_CHAIN_DESIGN], PlatformRole.OPERATIONS)).toHaveLength(0);
+    expect(filterVisibleNavEntries(entries, PlatformRole.ADMIN, [ModuleKey.SUPPLY_CHAIN_DESIGN])).toHaveLength(1);
+    expect(filterVisibleNavEntries(entries, PlatformRole.ADMIN, [])).toHaveLength(0);
+    expect(filterVisibleNavEntries(entries, PlatformRole.OPERATIONS, [ModuleKey.SUPPLY_CHAIN_DESIGN])).toHaveLength(0);
   });
 
   it("uploads a CSV file and persists header and preview metadata", async () => {
@@ -9893,7 +9893,9 @@ describe("3PL location screening proof", () => {
     const guide = readFileSync("docs/modules/supply-chain-design/fixtures/warehouse-location-strategy/historical-shipments-location-strategy-fixture-guide.md", "utf8");
     const rows = parseSimpleCsv(sample);
     const totalsByCluster = summarizeLocationStrategySample(rows);
-    const templateRecognition = recognizeSupplyChainDesignOfficialTemplate(sample.split("\n")[0].split(","));
+    const templateRecognition = recognizeSupplyChainDesignOfficialTemplate(
+      csvHeader("docs/modules/supply-chain-design/fixtures/warehouse-location-strategy/historical-shipments-location-strategy-fixture.csv")
+    );
     const sampleFieldMappings = templateRecognition?.fieldMappings ?? [];
     const shipments = runSupplyChainDesignWarehouseLocationStrategy(locationStrategyInputFixture({ maxRegions: 3, shipmentsCsv: sample, fieldMappings: sampleFieldMappings, weightingMethod: "SHIPMENTS_REPRESENTED", countryScope: "ALL" }));
     const twoRegionShipments = runSupplyChainDesignWarehouseLocationStrategy(locationStrategyInputFixture({ maxRegions: 2, shipmentsCsv: sample, fieldMappings: sampleFieldMappings, weightingMethod: "SHIPMENTS_REPRESENTED", countryScope: "ALL" }));
@@ -9914,7 +9916,7 @@ describe("3PL location screening proof", () => {
     expect(sample).toContain("Aggregated Activity");
     expect(sample).toContain("CAD");
     expect(sample).toContain("USD");
-    expect(sample.split("\n")[0]).toBe("Record Type,Shipment / Order Reference,Shipment Date,Origin Facility ID,Destination Customer / Group,Destination ZIP / Postal Code,Destination City / Region,Destination Country,State/Province,Shipments,Pallets,Units,Weight,Weight Unit,Length,Width,Height,Dimension Unit,Hazardous Materials,Transportation Mode,Transportation Cost,Transit Days,Service Level,SKU / Item,Currency");
+    expect(sample.split(/\r?\n/)[0]).toBe("Record Type,Shipment / Order Reference,Shipment Date,Origin Facility ID,Destination Customer / Group,Destination ZIP / Postal Code,Destination City / Region,Destination Country,State/Province,Shipments,Pallets,Units,Weight,Weight Unit,Length,Width,Height,Dimension Unit,Hazardous Materials,Transportation Mode,Transportation Cost,Transit Days,Service Level,SKU / Item,Currency");
     expect(sample.trim().split("\n").length).toBe(106);
     expect(rows).toHaveLength(105);
     expect(templateRecognition?.tableType).toBe("SHIPMENTS");
@@ -10354,7 +10356,7 @@ describe("3PL location screening proof", () => {
     expect(querySource).toContain("ltlRatePreparationRuns: {");
     expect(querySource).toContain("const recentLtlRatePreparationRuns = project.ltlRatePreparationRuns?.map");
     expect(querySource).toContain("latestLtlRatePreparationRun: recentLtlRatePreparationRuns[0] ?? null");
-    expect(querySource).toContain("orderBy: {\n          createdAt: \"desc\"");
+    expect(querySource).toMatch(/ltlRatePreparationRuns:\s*{\s*orderBy:\s*{\s*createdAt:\s*"desc"\s*}\s*,\s*take:\s*5/s);
     expect(querySource).toContain("getLtlRatePreparationReadiness(filesWithDuplicateLabels)");
     expect(querySource).not.toContain('candidates.customers[0] ? null : "CUSTOMERS mapping"');
   });

@@ -103,7 +103,7 @@ const navEntries: NavNode[] = [
         href: "/supply-chain-design",
         label: "Supply Chain Design Studio",
         moduleKey: "SUPPLY_CHAIN_DESIGN" as ModuleKey,
-        allowedRoles: ["ADMIN", "MANAGER"] as PlatformRole[]
+        requiredRoles: ["ADMIN", "MANAGER"] as PlatformRole[]
       },
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
@@ -385,13 +385,9 @@ function NavTree({
 }
 
 export function filterVisibleNavEntries(
-  
   entries: NavNode[],
   role: PlatformRole | undefined,
- 
   enabledModuleKeys?: ModuleKey[]
-,
-  role?: PlatformRole
 ): NavNode[] {
   const visibleEntries: NavNode[] = [];
 
