@@ -24,6 +24,7 @@ export async function recheckCompletelyMissingTeamshipReviewRun(
   const teamshipOrders = await fetchTeamshipShippingOrdersForReview({
     tenantId: context.tenantId,
     shipmentDate: workspace.shipmentDate,
+    includeCompletedArchive: true,
     orderReferences: review.pdfOrders.map((order) => ({
       psNumber: order.psNumber,
       srNumber: order.srNumber
