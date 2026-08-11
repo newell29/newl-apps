@@ -86,6 +86,21 @@ type GarlandEmailIntakeResponse = {
   error?: string;
 };
 
+type ManualReviewResponse = {
+  data?: {
+    processedAttachmentCount: number;
+    parsedAttachmentCount: number;
+    duplicateAttachmentCount: number;
+    failedAttachmentCount: number;
+    deferredAllMissingAttachmentCount: number;
+    createdReviewRunIds: string[];
+    createdUpdateJobIds: string[];
+    approvedUpdateJobIds: string[];
+    skippedReasons: string[];
+  };
+  error?: string;
+};
+
 const AUTO_SYNC_STALE_MINUTES = 10;
 
 export function GarlandEmailIntakeClient() {
@@ -258,7 +273,7 @@ export function GarlandEmailIntakeClient() {
         {groups.length > 0 ? (
           <div className="divide-y divide-border">
             {groups.map((group) => (
-              <EmailIntakeGroupRow key={group.id} group={group} />
+              <EmailIntakeGroupRow key={group.id} group={group} onReviewFinished={() => fetchEmailIntake()} />
             ))}
           </div>
         ) : (
@@ -273,9 +288,59 @@ export function GarlandEmailIntakeClient() {
   );
 }
 
-function EmailIntakeGroupRow({ group }: { group: GarlandEmailIntakeGroup }) {
+function EmailIntakeGroupRow({
+  group,
+  onReviewFinished
+}: {
+  group: GarlandEmailIntakeGroup;
+  onReviewFinished: () => Promise<GarlandEmailIntakeResponse | null>;
+}) {
   const email = group.primaryEmail;
   const attachments = group.emails.flatMap((sourceEmail) => sourceEmail.attachments);
+  const runnableAttachments = attachments.filter(isRunnablePdfAttachment);
+  const [isRunningReview, setIsRunningReview] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewCreated, setReviewCreated] = useState(false);
+
+  async function runTeamshipReview() {
+    const psRange = formatExpectedPsRange(group);
+    const confirmed = window.confirm(
+      `Run the Garland Teamship review for ${psRange}?\n\n` +
+        "This reprocesses the selected PDF, saves the exact PS/SR comparison, and may approve safe Teamship field, pallet, and editable-BOL cleanup updates for the VM worker. Nothing will print."
+    );
+    if (!confirmed) return;
+
+    setIsRunningReview(true);
+    setReviewMessage(null);
+    setReviewError(null);
+    setReviewCreated(false);
+
+    try {
+      const response = await fetch("/api/shipment-documents/teamship-review/email-intake/run-review", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          attachmentIds: runnableAttachments.map((attachment) => attachment.id),
+          expectedPsStart: group.expectedPsStart,
+          expectedPsEnd: group.expectedPsEnd,
+          confirmation: "RUN_GARLAND_TEAMSHIP_REVIEW"
+        })
+      });
+      const json = (await response.json().catch(() => null)) as ManualReviewResponse | null;
+      if (!response.ok || !json?.data) {
+        throw new Error(json?.error ?? "Unable to start this Garland Teamship review.");
+      }
+
+      setReviewMessage(formatManualReviewResult(json.data, psRange));
+      setReviewCreated(json.data.createdReviewRunIds.length > 0);
+      await onReviewFinished();
+    } catch (caught) {
+      setReviewError(caught instanceof Error ? caught.message : "Unable to start this Garland Teamship review.");
+    } finally {
+      setIsRunningReview(false);
+    }
+  }
 
   return (
     <details className="group bg-background" open={group.hasPdfAttachment}>
@@ -326,6 +391,38 @@ function EmailIntakeGroupRow({ group }: { group: GarlandEmailIntakeGroup }) {
       </summary>
 
       <div className="border-t border-border bg-muted/20 px-5 py-4">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void runTeamshipReview()}
+            disabled={isRunningReview || runnableAttachments.length === 0}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRunningReview ? "Running Teamship review..." : "Run Teamship review"}
+          </button>
+          {runnableAttachments.length === 0 ? (
+            <span className="text-xs text-mutedForeground">This batch has no unprocessed PDF ready to review.</span>
+          ) : (
+            <span className="text-xs text-mutedForeground">
+              Starts only this batch. A confirmation is required; nothing is printed.
+            </span>
+          )}
+          {reviewMessage && reviewCreated ? (
+            <a
+              href="/shipment-documents/teamship-review"
+              className="text-xs font-semibold text-primary hover:text-primaryHover"
+            >
+              {reviewMessage} Open Teamship Review
+            </a>
+          ) : reviewMessage ? (
+            <span className="text-xs font-semibold text-mutedForeground">{reviewMessage}</span>
+          ) : null}
+        </div>
+        {reviewError ? (
+          <div className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+            {reviewError}
+          </div>
+        ) : null}
         <div className="grid gap-3 lg:grid-cols-2">
           {group.emails.map((sourceEmail) => (
             <div key={sourceEmail.id} className="rounded-md border border-border bg-card px-3 py-2 text-sm">
@@ -357,6 +454,44 @@ function shouldAutoSync(latestRun: GarlandEmailIntakeResponse["latestRun"]) {
   const startedAtMs = new Date(latestRun.startedAt).getTime();
   if (Number.isNaN(startedAtMs)) return true;
   return Date.now() - startedAtMs > AUTO_SYNC_STALE_MINUTES * 60 * 1000;
+}
+
+function isRunnablePdfAttachment(attachment: GarlandEmailIntakeAttachment) {
+  const fileName = attachment.fileName.trim().toLowerCase();
+  const contentType = attachment.contentType?.trim().toLowerCase() ?? "";
+  const isPdf = fileName.endsWith(".pdf") || contentType === "application/pdf";
+  const status = attachment.intakeStatus ?? "";
+
+  return isPdf && (status === "PDF_METADATA_READY" || /^TEAMSHIP_BATCH_RETRY_PENDING_\d+$/.test(status));
+}
+
+function formatExpectedPsRange(group: GarlandEmailIntakeGroup) {
+  if (group.expectedPsStart && group.expectedPsEnd) {
+    return group.expectedPsStart === group.expectedPsEnd
+      ? group.expectedPsStart
+      : `${group.expectedPsStart}-${group.expectedPsEnd}`;
+  }
+
+  return group.primaryEmail.subject;
+}
+
+function formatManualReviewResult(result: NonNullable<ManualReviewResponse["data"]>, psRange: string) {
+  if (result.createdReviewRunIds.length > 0) {
+    const updateNote = result.approvedUpdateJobIds.length > 0
+      ? ` ${result.approvedUpdateJobIds.length} safe Teamship update job(s) were approved for the VM worker.`
+      : "";
+    return `Review created for ${psRange}.${updateNote}`;
+  }
+
+  if (result.deferredAllMissingAttachmentCount > 0) {
+    return `Teamship still returned every ${psRange} order as missing, so the batch remains queued for a safe retry.`;
+  }
+
+  if (result.failedAttachmentCount > 0) {
+    return `The ${psRange} PDF could not be reviewed. ${result.skippedReasons[0] ?? "Review the recorded intake error."}`;
+  }
+
+  return result.skippedReasons[0] ?? `No new review was created for ${psRange}.`;
 }
 
 function isErrorResponse(value: unknown): value is { error: string } {

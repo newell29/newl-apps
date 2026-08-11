@@ -7,6 +7,7 @@ import { getTenantTeamshipSettings, resolveTenantTeamshipCredentials } from "@/s
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
 const DEFAULT_PAGE_LIMIT = 500;
 const DEFAULT_MAX_PAGES = 30;
+const DEFAULT_TARGETED_MAX_PAGES = 100;
 
 type TeamshipFetchOptions = {
   tenantId?: string | null;
@@ -148,7 +149,7 @@ export async function fetchTeamshipShippingOrdersForReview({
   let webCookieHeader: string | null | undefined;
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
-  const maxPages = getTeamshipMaxPages();
+  const maxPages = getTeamshipMaxPages(targetOrderReferences.length > 0);
   const seenPageFingerprints = new Set<string>();
   let offset = 0;
   let scannedRowCount = 0;
@@ -790,13 +791,16 @@ function getTeamshipPageLimit() {
   return Math.min(parsed, DEFAULT_PAGE_LIMIT);
 }
 
-function getTeamshipMaxPages() {
-  const parsed = Number.parseInt(process.env.TEAMSHIP_MAX_LIST_PAGES ?? "", 10);
+function getTeamshipMaxPages(targetedOrderLookup = false) {
+  const variableName = targetedOrderLookup
+    ? "TEAMSHIP_TARGETED_MAX_LIST_PAGES"
+    : "TEAMSHIP_MAX_LIST_PAGES";
+  const parsed = Number.parseInt(process.env[variableName] ?? "", 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_MAX_PAGES;
+    return targetedOrderLookup ? DEFAULT_TARGETED_MAX_PAGES : DEFAULT_MAX_PAGES;
   }
 
-  return parsed;
+  return targetedOrderLookup ? Math.min(parsed, DEFAULT_TARGETED_MAX_PAGES) : parsed;
 }
 
 function isGarlandOrder(order: TeamshipShippingOrderSummary) {

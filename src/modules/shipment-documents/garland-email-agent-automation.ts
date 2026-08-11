@@ -60,12 +60,21 @@ export async function processGarlandEmailAgentReadyAttachments(
     maxAttachments?: number | null;
     receivedAfter?: Date | string | null;
     retryFailedAttachments?: boolean;
+    attachmentIds?: string[] | null;
   } = {}
 ): Promise<GarlandEmailAgentAutomationResult> {
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
   await requireMutationAccess(context);
 
-  const maxAttachments = Math.min(25, Math.max(1, options.maxAttachments ?? DEFAULT_MAX_ATTACHMENTS));
+  const attachmentIds = normalizeAttachmentIds(options.attachmentIds);
+  if (options.attachmentIds && attachmentIds.length === 0) {
+    return emptyResult(["Select at least one Garland PDF attachment to process."]);
+  }
+
+  const isTargetedRun = attachmentIds.length > 0;
+  const maxAttachments = isTargetedRun
+    ? attachmentIds.length
+    : Math.min(25, Math.max(1, options.maxAttachments ?? DEFAULT_MAX_ATTACHMENTS));
   const receivedAfter = parseOptionalDate(options.receivedAfter) ?? parseOptionalDate(process.env.GARLAND_EMAIL_AGENT_START_AT);
   const retryEligibleBefore = new Date(Date.now() - TEAMSHIP_BATCH_RETRY_DELAY_MS);
   const settings = await getGarlandGraphSettings(context.tenantId);
@@ -76,19 +85,32 @@ export async function processGarlandEmailAgentReadyAttachments(
   const attachments = await prisma.garlandSourceAttachment.findMany({
     where: {
       tenantId: context.tenantId,
-      OR: [
-        {
-          intakeStatus: {
-            in: options.retryFailedAttachments
-              ? [READY_ATTACHMENT_STATUS, FAILED_ATTACHMENT_STATUS]
-              : [READY_ATTACHMENT_STATUS]
-          }
-        },
-        {
-          intakeStatus: { in: TEAMSHIP_BATCH_RETRY_STATUSES },
-          updatedAt: { lte: retryEligibleBefore }
-        }
-      ],
+      ...(isTargetedRun ? { id: { in: attachmentIds } } : {}),
+      OR: isTargetedRun
+        ? [
+            {
+              intakeStatus: {
+                in: [
+                  READY_ATTACHMENT_STATUS,
+                  ...TEAMSHIP_BATCH_RETRY_STATUSES,
+                  ...(options.retryFailedAttachments ? [FAILED_ATTACHMENT_STATUS] : [])
+                ]
+              }
+            }
+          ]
+        : [
+            {
+              intakeStatus: {
+                in: options.retryFailedAttachments
+                  ? [READY_ATTACHMENT_STATUS, FAILED_ATTACHMENT_STATUS]
+                  : [READY_ATTACHMENT_STATUS]
+              }
+            },
+            {
+              intakeStatus: { in: TEAMSHIP_BATCH_RETRY_STATUSES },
+              updatedAt: { lte: retryEligibleBefore }
+            }
+          ],
       sourceEmail: {
         is: {
           classification: { in: ["GARLAND_DOCUMENT_BATCH", "GARLAND_DOCUMENT_CORRECTION"] },
@@ -374,6 +396,10 @@ function parseOptionalDate(value: Date | string | null | undefined) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeAttachmentIds(values: string[] | null | undefined) {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].slice(0, 25);
 }
 
 function formatDisplayDate(date: Date) {
