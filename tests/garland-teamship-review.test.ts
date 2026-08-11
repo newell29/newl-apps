@@ -1988,6 +1988,91 @@ NEWLS 2604816191908 1.00 ( )`
     warnSpy.mockRestore();
   });
 
+  it("finds an exact PS/SR stored in Teamship reference metadata", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            {
+              id: 10,
+              shipment_id: "SR899999",
+              custom_fields: [
+                {
+                  label: "Customer order reference",
+                  value: "PS123456-SR812345"
+                }
+              ]
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({ data: { id: 10, carrier: "Synthetic Carrier" } });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR812345", psNumber: "PS123456" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([
+      expect.objectContaining({ id: 10, carrier: "Synthetic Carrier" })
+    ]);
+  });
+
+  it("does not use partial or unrelated Teamship text as alternate reference evidence", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            {
+              id: 10,
+              source_references: { imported_order: "PS1234567-SR8123450" },
+              shipping_instructions: "Do not treat PS123456 or SR812345 in instructions as identifiers."
+            }
+          ]
+        });
+      }
+
+      throw new Error(`Alternate references must be exact and reference-scoped: ${url}`);
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR812345", psNumber: "PS123456" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([]);
+    warnSpy.mockRestore();
+  });
+
   it("parses Teamship UI page inventory serials from hidden order data", () => {
     const parsed = parseTeamshipShippingOrderUiPage(
       sampleTeamshipUiPageHtml({
