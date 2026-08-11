@@ -1,17 +1,18 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 
 import { runSupplyChainDesignNetworkScenarioComparisonAction } from "@/modules/supply-chain-design/actions";
+import type { SupplyChainDesignModelRunState } from "@/modules/supply-chain-design/actions";
 import type {
   NetworkScenarioComparisonRunListItem,
   NetworkScenarioComparisonScenarioInput
 } from "@/modules/supply-chain-design/network-scenario-comparison-persistence";
 import type { SupplyChainDesignNetworkScenarioComparisonReadiness } from "@/modules/supply-chain-design/types";
 
-const initialState = { ok: false, message: "" };
+const initialState: SupplyChainDesignModelRunState = { ok: false, message: "" };
 
 export function SupplyChainDesignNetworkScenarioComparisonForm({
   projectId,
@@ -31,8 +32,14 @@ export function SupplyChainDesignNetworkScenarioComparisonForm({
   const [facilitiesMappingId, setFacilitiesMappingId] = useState(submitted?.facilitiesMappingId ?? displayedRun?.inputReferences?.currentFacilities.mappingId ?? inputSelection.facilities.mappingId);
   const [shipmentsMappingId, setShipmentsMappingId] = useState(submitted?.shipmentsMappingId ?? displayedRun?.scenarioInputs?.historicalShipments.mappingId ?? inputSelection.shipments.mappingId);
   const [candidateFacilitiesMappingId, setCandidateFacilitiesMappingId] = useState(submitted?.candidateFacilitiesMappingId ?? displayedRun?.inputReferences?.candidateFacilities.mappingId ?? inputSelection.candidateFacilities.mappingId);
-  const currentFacilityOptions = inputSelection.currentFacilityOptionsByMappingId.find((item) => item.mappingId === facilitiesMappingId)?.options ?? [];
-  const candidateFacilityOptions = inputSelection.candidateFacilityOptionsByMappingId.find((item) => item.mappingId === candidateFacilitiesMappingId)?.options ?? [];
+  const currentFacilityOptions = useMemo(
+    () => inputSelection.currentFacilityOptionsByMappingId.find((item) => item.mappingId === facilitiesMappingId)?.options ?? [],
+    [facilitiesMappingId, inputSelection.currentFacilityOptionsByMappingId]
+  );
+  const candidateFacilityOptions = useMemo(
+    () => inputSelection.candidateFacilityOptionsByMappingId.find((item) => item.mappingId === candidateFacilitiesMappingId)?.options ?? [],
+    [candidateFacilitiesMappingId, inputSelection.candidateFacilityOptionsByMappingId]
+  );
   const facilityOptions = useMemo(() => [...currentFacilityOptions, ...candidateFacilityOptions], [currentFacilityOptions, candidateFacilityOptions]);
   const defaultA = latestScenarioA?.selectedFacilities.map((facility) => `${facility.sourceType}:${facility.facilityId}`) ?? [];
   const defaultB = latestScenarioB?.selectedFacilities.map((facility) => `${facility.sourceType}:${facility.facilityId}`) ?? [];
@@ -72,7 +79,7 @@ export function SupplyChainDesignNetworkScenarioComparisonForm({
     setScenarioBIds((current) => current.filter((id) => available.has(id)));
   }, [facilityOptions]);
 
-  function toggle(setter: (value: string[]) => void, current: string[], optionId: string) {
+  function toggle(setter: Dispatch<SetStateAction<string[]>>, current: string[], optionId: string) {
     setter(current.includes(optionId) ? current.filter((id) => id !== optionId) : [...current, optionId]);
   }
 

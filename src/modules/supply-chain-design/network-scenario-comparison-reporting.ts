@@ -405,6 +405,7 @@ function scenarioAssignmentRows(scenarioKey: "A" | "B", scenarioName: string, sc
       const alternative = objectValue(alternativeItem);
       const transportationAlternative = objectValue(alternative.transportationAlternative ?? {});
       const request = objectValue(transportationAlternative.request ?? {});
+      const reuseLineage = objectValue(transportationAlternative.reuseLineage ?? {});
       return [
         scenarioName,
         textValue(profile.sourceReference) || textValue(profile.profileKey),
@@ -422,8 +423,8 @@ function scenarioAssignmentRows(scenarioKey: "A" | "B", scenarioName: string, sc
           : [
               arrayValue(alternative.missingReasons).join("; "),
               textValue(transportationAlternative.selectedRateSource),
-              textValue(transportationAlternative.reuseLineage?.sourceLaneId ?? transportationAlternative.laneId),
-              textValue(transportationAlternative.reuseLineage?.sourceBatchId ?? transportationAlternative.batchId)
+              textValue(reuseLineage.sourceLaneId ?? transportationAlternative.laneId),
+              textValue(reuseLineage.sourceBatchId ?? transportationAlternative.batchId)
             ])
       ];
     });
@@ -437,6 +438,7 @@ function scenarioAlternativeRows(scenarioName: string, scenario: Record<string, 
       const alternative = objectValue(alternativeItem);
       const transportationAlternative = objectValue(alternative.transportationAlternative ?? {});
       const selectedQuote = objectValue(transportationAlternative.selectedQuote ?? {});
+      const reuseLineage = objectValue(transportationAlternative.reuseLineage ?? {});
       const selectedRate = numberValue(selectedQuote.total) ?? numberValue(transportationAlternative.selectedRate) ?? numberValue(transportationAlternative.reusedSelectedRate);
       return [
         scenarioName,
@@ -454,8 +456,8 @@ function scenarioAlternativeRows(scenarioName: string, scenario: Record<string, 
         csvNumber(alternative.combinedAssignmentCost),
         arrayValue(alternative.missingReasons).join("; "),
         textValue(transportationAlternative.selectedRateSource),
-        textValue(transportationAlternative.reuseLineage?.sourceLaneId ?? transportationAlternative.laneId),
-        textValue(transportationAlternative.reuseLineage?.sourceBatchId ?? transportationAlternative.batchId)
+        textValue(reuseLineage.sourceLaneId ?? transportationAlternative.laneId),
+        textValue(reuseLineage.sourceBatchId ?? transportationAlternative.batchId)
       ];
     });
   });
@@ -492,11 +494,11 @@ function winningAssignmentsByDelivery(scenario: Record<string, unknown>) {
   return rows;
 }
 
-function deliveryKey(profile: Record<string, any>) {
+function deliveryKey(profile: Record<string, unknown>) {
   return textValue(profile.destination) || textValue(profile.sourceReference) || textValue(profile.profileKey);
 }
 
-function deliveryLabel(profile: Record<string, any>) {
+function deliveryLabel(profile: Record<string, unknown>) {
   return textValue(profile.destination) || textValue(profile.sourceReference) || textValue(profile.profileKey);
 }
 
@@ -539,7 +541,7 @@ function comparisonInterpretation(result: { scenarioA: Record<string, unknown>; 
 }
 
 function sumNumbers(values: Array<number | null>) {
-  return values.reduce((total, value) => total + (value ?? 0), 0);
+  return values.reduce<number>((total, value) => total + (value ?? 0), 0);
 }
 
 function roundPercent(value: number) {
@@ -558,8 +560,8 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function objectValue(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function formatSourceType(value: string) {

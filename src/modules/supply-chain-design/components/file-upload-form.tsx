@@ -31,10 +31,9 @@ export function SupplyChainDesignFileUploadForm({ projectId, existingFileNames =
       action={formAction}
       className="space-y-3"
       onSubmit={(event) => {
-        const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
         const selectedNames = Array.from(fileInputRef.current?.files ?? []).map((file) => file.name);
         const duplicates = selectedNames.filter((name) => existingNames.has(name.toLowerCase()));
-        if (duplicates.length > 0 && submitter?.value !== "REPLACE") {
+        if (duplicates.length > 0) {
           event.preventDefault();
           setDuplicateFileNames(duplicates);
         }
@@ -62,17 +61,10 @@ export function SupplyChainDesignFileUploadForm({ projectId, existingFileNames =
       </div>
       {duplicateFileNames.length > 0 ? (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="dialog" aria-modal="false">
-          <p className="font-semibold">A file with this name already exists. Replace it?</p>
+          <p className="font-semibold">A file with this name already exists.</p>
           <p className="mt-1">{duplicateFileNames.join(", ")}</p>
+          <p className="mt-1">Rename the file before uploading so existing project evidence is preserved.</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="submit"
-              name="sameNameMode"
-              value="REPLACE"
-              className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primaryForeground"
-            >
-              Replace
-            </button>
             <button
               type="button"
               onClick={() => {

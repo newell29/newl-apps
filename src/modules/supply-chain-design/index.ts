@@ -5,6 +5,7 @@ export {
 export {
   createSupplyChainDesignProjectAction,
   deleteSupplyChainDesignProjectAction,
+  deleteSupplyChainDesignProjectFormAction,
   runSupplyChainDesignModel02OptimizerAction,
   runSupplyChainDesignModel02ProofAction,
   generateSupplyChainDesignCandidateLtlRatePreparationAction,

@@ -918,7 +918,8 @@ function selectWeight(method: WarehouseLocationStrategyWeightingMethod, values: 
 }
 
 function convertSpendWeight(value: number, currency: string | null, cadToUsdRate?: number | null) {
-  if (currency === "CAD" && isValidCadToUsdRate(cadToUsdRate)) return round2(value * cadToUsdRate);
+  const rate = typeof cadToUsdRate === "number" && isValidCadToUsdRate(cadToUsdRate) ? cadToUsdRate : null;
+  if (currency === "CAD" && rate !== null) return round2(value * rate);
   return value;
 }
 

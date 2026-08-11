@@ -472,13 +472,13 @@ function buildBenchmarkControls(results: ProviderCostResult[], expected: ReturnT
   if (expected.length === 0) return [];
   return expected.map((expectedRow) => {
     const actual = results.find((row) => row.providerOptionId === expectedRow.providerOptionId);
-    const passed =
-      Boolean(actual) &&
-      actual.rank === expectedRow.rank &&
-      actual.totalAnnualCost !== null &&
-      Math.abs(actual.totalAnnualCost - expectedRow.totalAnnualCost) <= 0.01 &&
-      Math.abs(actual.annualOutboundTransportationCost - expectedRow.outboundCost) <= 0.01 &&
-      Math.abs(actual.warehouseCost - expectedRow.warehouseCost) <= 0.01;
+    const passed = actual
+      ? actual.rank === expectedRow.rank &&
+        actual.totalAnnualCost !== null &&
+        Math.abs(actual.totalAnnualCost - expectedRow.totalAnnualCost) <= 0.01 &&
+        Math.abs(actual.annualOutboundTransportationCost - expectedRow.outboundCost) <= 0.01 &&
+        Math.abs(actual.warehouseCost - expectedRow.warehouseCost) <= 0.01
+      : false;
     return {
       label: `${expectedRow.providerName} expected result`,
       expected: `rank ${expectedRow.rank}; total ${expectedRow.totalAnnualCost}`,

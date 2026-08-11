@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
@@ -201,8 +203,8 @@ export async function createNetworkScenarioComparisonRun(
       inputReferences: inputReferences as unknown as object,
       scenarioInputs: scenarioInputs as unknown as object,
       ratingEvidence: ratingEvidence as unknown as object,
-      fxInput: fxInput as unknown as object | null,
-      resultSummary: resultSummary as unknown as object | null,
+      fxInput: fxInput ? (fxInput as unknown as object) : Prisma.JsonNull,
+      resultSummary: resultSummary ? (resultSummary as unknown as object) : Prisma.JsonNull,
       errorMessage: input.errorMessage ?? null,
       createdByUserId: context.userId
     }
@@ -427,7 +429,28 @@ export function buildNetworkScenarioComparisonFingerprint(input: {
   });
 }
 
-function parseRun(run: any): NetworkScenarioComparisonRunDetail {
+type NetworkScenarioComparisonRunRecord = {
+  id: string;
+  tenantId: string;
+  projectId: string;
+  status: unknown;
+  calculationVersion: unknown;
+  comparisonFingerprint: unknown;
+  transportationFingerprint: unknown;
+  scenarioAName: unknown;
+  scenarioBName: unknown;
+  inputReferences: unknown;
+  scenarioInputs: unknown;
+  ratingEvidence: unknown;
+  fxInput: unknown;
+  resultSummary: unknown;
+  errorMessage: unknown;
+  createdByUserId: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function parseRun(run: NetworkScenarioComparisonRunRecord): NetworkScenarioComparisonRunDetail {
   return {
     id: run.id,
     tenantId: run.tenantId,
@@ -450,7 +473,7 @@ function parseRun(run: any): NetworkScenarioComparisonRunDetail {
   };
 }
 
-function parseRunForList(run: any): NetworkScenarioComparisonRunListItem {
+function parseRunForList(run: NetworkScenarioComparisonRunRecord): NetworkScenarioComparisonRunListItem {
   try {
     const detail = parseRun(run);
     return {
@@ -662,9 +685,9 @@ function normalizeNullableText(value: string | null) {
   return value?.trim() ? normalizeText(value) : null;
 }
 
-function objectValue(value: unknown, label: string): Record<string, any> {
+function objectValue(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Network Scenario Comparison ${label} is malformed.`);
-  return value as Record<string, any>;
+  return value as Record<string, unknown>;
 }
 
 function stringValue(value: unknown, label: string) {

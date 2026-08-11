@@ -555,7 +555,7 @@ function getWarehouseLocationStrategyReadiness(
   }>
 ): SupplyChainDesignWarehouseLocationStrategyReadiness {
   const candidates = getModel01ProofCandidates(files).shipments.filter((candidate) =>
-    candidate.fieldMappings.some((mapping) => mapping.standardField === "postal_or_region_code" || mapping.standardField === "destination_id")
+    toFieldMappings(candidate.fieldMappings).some((mapping) => mapping.standardField === "postal_or_region_code" || mapping.standardField === "destination_id")
   );
   const missingInputs = candidates[0] ? [] : ["Historical Shipments mapping with destination postal code"];
   return {
@@ -1167,8 +1167,17 @@ function toLtlRatePreparationInputSelection(value: unknown) {
   }
   const candidate = value as Record<string, unknown>;
   const shipments = toSelectedInputReference(candidate.shipments);
+  const facilities = toSelectedInputReference(candidate.facilities);
   const candidateFacilities = toSelectedInputReference(candidate.candidateFacilities);
-  return shipments && candidateFacilities ? { shipments, candidateFacilities } : null;
+  return shipments && candidateFacilities
+    ? {
+        shipments,
+        facilities: facilities ?? shipments,
+        candidateFacilities,
+        existingFacilityOptions: [],
+        candidateFacilityOptions: []
+      }
+    : null;
 }
 
 function toLtlRatePreparationResult(value: unknown) {
@@ -1185,7 +1194,7 @@ function toLtlRatePreparationResult(value: unknown) {
   return value as SupplyChainDesignLtlRatePreparationRunSummary["resultSummary"];
 }
 
-function toThreePlScreeningInputSelection(value: unknown) {
+function toThreePlScreeningInputSelection(value: unknown): SupplyChainDesignThreePlScreeningReadiness["inputSelection"] {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -1198,6 +1207,10 @@ function toThreePlScreeningInputSelection(value: unknown) {
   if (!demandPoints) {
     return null;
   }
+  const studyType =
+    candidate.studyType === "COMPARE_KNOWN_WAREHOUSE_OPTIONS" || candidate.studyType === "FIND_BEST_WAREHOUSE_REGION"
+      ? candidate.studyType
+      : undefined;
   return {
     demandPoints,
     logisticsMarkets,
@@ -1216,10 +1229,7 @@ function toThreePlScreeningInputSelection(value: unknown) {
     expectedProviderResults: candidate.expectedProviderResults
       ? toSelectedInputReference(candidate.expectedProviderResults)
       : null,
-    studyType:
-      candidate.studyType === "COMPARE_KNOWN_WAREHOUSE_OPTIONS" || candidate.studyType === "FIND_BEST_WAREHOUSE_REGION"
-        ? candidate.studyType
-        : undefined
+    studyType
   };
 }
 
@@ -1398,7 +1408,7 @@ function toInputSelection(value: unknown): SupplyChainDesignModel01ProofInputSel
   const facilityCosts = candidate.facilityCosts ? toSelectedInputReference(candidate.facilityCosts) : null;
   const customers = candidate.customers ? toSelectedInputReference(candidate.customers) : null;
 
-  return facilities && shipments ? { facilities, shipments, inventory, facilityCosts, customers } : null;
+  return facilities || shipments ? { currentNetworkActivity: null, facilities, shipments, inventory, facilityCosts, customers } : null;
 }
 
 function toSelectedInputReference(value: unknown) {
@@ -1736,7 +1746,7 @@ function toOptionsByMappingId<TOption>(value: unknown, parseOptions: (value: unk
   });
 }
 
-function toCustomerAssignments(value: unknown) {
+function toCustomerAssignments(value: unknown): SupplyChainDesignModel02ProofResultSummary["customerAssignments"] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1760,7 +1770,7 @@ function toCustomerAssignments(value: unknown) {
   });
 }
 
-function toScenarioFacilitySummary(value: unknown) {
+function toScenarioFacilitySummary(value: unknown): SupplyChainDesignModel02ProofResultSummary["facilitySummary"] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1850,7 +1860,7 @@ function toOptimizationExceptions(value: unknown) {
   };
 }
 
-function toOptimizerAudit(value: unknown) {
+function toOptimizerAudit(value: unknown): SupplyChainDesignModel02ProofResultSummary["optimizerAudit"] {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -1906,7 +1916,7 @@ function toOptimizerSelectedMappings(value: unknown) {
   });
 }
 
-function toOptimizerFacilityCostEvidence(value: unknown) {
+function toOptimizerFacilityCostEvidence(value: unknown): NonNullable<SupplyChainDesignModel02ProofResultSummary["optimizerAudit"]>["facilityCostEvidence"] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1924,7 +1934,7 @@ function toOptimizerFacilityCostEvidence(value: unknown) {
   });
 }
 
-function toOptimizerLaneCostEvidence(value: unknown) {
+function toOptimizerLaneCostEvidence(value: unknown): NonNullable<SupplyChainDesignModel02ProofResultSummary["optimizerAudit"]>["laneCostEvidence"] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1954,7 +1964,7 @@ function toOptimizerLaneCostEvidence(value: unknown) {
   });
 }
 
-function toLaneCostSource(value: unknown) {
+function toLaneCostSource(value: unknown): "UPLOADED_SCENARIO_LANE_COST" | "HISTORICAL_EXISTING_LANE_AVERAGE" | "MISSING_RATE" {
   return value === "UPLOADED_SCENARIO_LANE_COST" ||
     value === "HISTORICAL_EXISTING_LANE_AVERAGE" ||
     value === "MISSING_RATE"
@@ -1990,7 +2000,7 @@ function toOptimizerConsistencyChecks(value: unknown) {
   });
 }
 
-function toSolverMetadata(value: unknown) {
+function toSolverMetadata(value: unknown): SupplyChainDesignModel02ProofResultSummary["solverMetadata"] {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -2082,17 +2092,21 @@ function toVolumeSummary(value: unknown) {
   };
 }
 
-function toCurrencyCosts(value: unknown, amountKey: string) {
+function toCurrencyCosts(value: unknown, amountKey: "transportationCost"): Array<{ currency: string; transportationCost: number }>;
+function toCurrencyCosts(value: unknown, amountKey: "facilityOperatingCost"): Array<{ currency: string; facilityOperatingCost: number }>;
+function toCurrencyCosts(value: unknown, amountKey: "observedCost"): Array<{ currency: string; observedCost: number }>;
+function toCurrencyCosts(value: unknown, amountKey: "transportationCost" | "facilityOperatingCost" | "observedCost") {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value.map((item) => {
     const row = item as Record<string, unknown>;
-    return {
-      currency: String(row.currency ?? ""),
-      [amountKey]: Number(row[amountKey] ?? 0)
-    };
+    const currency = String(row.currency ?? "");
+    const amount = Number(row[amountKey] ?? 0);
+    if (amountKey === "transportationCost") return { currency, transportationCost: amount };
+    if (amountKey === "facilityOperatingCost") return { currency, facilityOperatingCost: amount };
+    return { currency, observedCost: amount };
   });
 }
 

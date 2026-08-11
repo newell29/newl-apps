@@ -375,7 +375,6 @@ export function verifySupplyChainDesignThreePlScreeningResult(
   eligibleMarkets: LogisticsMarket[] = []
 ) {
   const assignedDemand = result.coverageSummary.demandAssigned;
-  const excludedDemand = sum(result.exceptions.filter((item) => item.type.includes("DEMAND")).map((item) => 0));
   if (Math.abs(result.coverageSummary.totalDemand - assignedDemand - result.coverageSummary.unassignedDemand) > 0.0001) {
     throw new Error("Screening result reconciliation failed: total demand does not equal assigned plus unassigned demand.");
   }
@@ -444,7 +443,6 @@ export function verifySupplyChainDesignThreePlScreeningResult(
   assertRankOrder(result.oneRegionRankings);
   assertRankOrder(result.twoRegionRankings);
   void usDemand;
-  void excludedDemand;
 }
 
 function readDemandPoints(file: SupplyChainDesignScreeningMappedFile) {
@@ -859,35 +857,6 @@ function buildDiscoveryRankings(
       }))
     ]
   };
-}
-
-function rankExplicitMarketPairs(demandPoints: DemandPoint[], pairs: LogisticsMarket[][]): ScreeningRanking[] {
-  const rankings = pairs.map((set) => {
-    const allocations = allocateToMarkets(demandPoints, set, "TWO_REGION");
-    const weightedAverageDistance =
-      sum(allocations.map((row) => row.screeningDistance * row.annualShipmentCount)) /
-      Math.max(1, sum(allocations.map((row) => row.annualShipmentCount)));
-    const assignedDemandByMarket = demandByMarket(allocations);
-    return {
-      rank: 0,
-      marketIds: set.map((market) => market.marketId).sort((a, b) => a.localeCompare(b)),
-      marketNames: set.map((market) => market.marketName),
-      majorCities: set.map((market) => market.majorCity),
-      stateProvinces: set.map((market) => market.stateProvince),
-      countries: set.map((market) => market.country),
-      assignedDemandByMarket,
-      totalAssignedDemand: sum(assignedDemandByMarket.map((row) => row.assignedDemand)),
-      weightedAverageDistance: round1(weightedAverageDistance),
-      differenceFromRecommended: 0
-    };
-  });
-  rankings.sort((left, right) => left.weightedAverageDistance - right.weightedAverageDistance || left.marketIds.join("+").localeCompare(right.marketIds.join("+")));
-  const best = rankings[0]?.weightedAverageDistance ?? 0;
-  return rankings.map((ranking, index) => ({
-    ...ranking,
-    rank: index + 1,
-    differenceFromRecommended: round1(ranking.weightedAverageDistance - best)
-  }));
 }
 
 function buildTwoClusterCandidatePairs(demandPoints: DemandPoint[], markets: LogisticsMarket[]) {

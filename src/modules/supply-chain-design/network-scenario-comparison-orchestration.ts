@@ -306,7 +306,7 @@ export function dedupeComparisonMissingRateManifest(
   for (const scenario of scenarios) {
     for (const missing of scenario.transportationEvaluation.missingRateManifest) {
       const existing = byFingerprint.get(missing.laneFingerprint);
-      const affected = missing.affectedAlternatives.map((alternative) => ({
+      const affected: ComparisonMissingRateRequest["affectedAlternatives"] = missing.affectedAlternatives.map((alternative) => ({
         ...alternative,
         scenarioKey: scenario.scenarioKey,
         scenarioName: scenario.scenarioName
@@ -323,12 +323,12 @@ export function dedupeComparisonMissingRateManifest(
     }
   }
   return [...byFingerprint.values()]
-    .map((missing) => ({
-      ...missing,
-      affectedAlternatives: missing.affectedAlternatives.sort((left, right) =>
+    .map((missing) => {
+      const affectedAlternatives: ComparisonMissingRateRequest["affectedAlternatives"] = [...missing.affectedAlternatives].sort((left, right) =>
         `${left.scenarioKey}:${left.profileKey}:${left.originSourceType}:${left.originFacilityId}`.localeCompare(`${right.scenarioKey}:${right.profileKey}:${right.originSourceType}:${right.originFacilityId}`)
-      )
-    }))
+      );
+      return { ...missing, affectedAlternatives };
+    })
     .sort((left, right) => left.laneFingerprint.localeCompare(right.laneFingerprint));
 }
 
@@ -387,7 +387,7 @@ function evaluateCombinedCostWithFx(
   scenario: ScenarioWork,
   fxInput: NetworkScenarioComparisonFxInput | null,
   evaluateCombinedCost: typeof evaluateSupplyChainDesignCombinedScenarioCost
-) {
+): { combined: SupplyChainDesignCombinedScenarioCostResult; fx: ScenarioFxEvidence } {
   const sourceCurrencies = collectScenarioCurrencies(scenario.combinedCostInput);
   const needsFx = sourceCurrencies.includes("USD") && sourceCurrencies.includes("CAD");
   if (needsFx && !fxInput) {

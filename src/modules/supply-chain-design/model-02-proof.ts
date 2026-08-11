@@ -522,6 +522,7 @@ function allocateWithCapacity(
       break;
     }
     const remainingCapacity = remainingCapacityByFacility.get(option.facility.facilityId);
+    if (remainingCapacity === undefined) continue;
     const assignableQuantity =
       remainingCapacity === null ? remainingShipmentCount : Math.min(remainingShipmentCount, remainingCapacity);
     if (assignableQuantity <= 0) {

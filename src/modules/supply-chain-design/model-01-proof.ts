@@ -1306,13 +1306,23 @@ function sortSkuCounts(values: Map<string, number>) {
     .map(([itemId, shipmentCount]) => ({ itemId, shipmentCount }));
 }
 
-function sortCurrencyCosts<TLabel extends "transportationCost" | "facilityOperatingCost">(
+function sortCurrencyCosts(
   values: Map<string, number>,
-  label: TLabel
-): Array<Record<"currency" | TLabel, string | number>> {
+  label: "transportationCost"
+): Array<{ currency: string; transportationCost: number }>;
+function sortCurrencyCosts(
+  values: Map<string, number>,
+  label: "facilityOperatingCost"
+): Array<{ currency: string; facilityOperatingCost: number }>;
+function sortCurrencyCosts(
+  values: Map<string, number>,
+  label: "transportationCost" | "facilityOperatingCost"
+) {
   return [...values.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([currency, value]) => ({ currency, [label]: value }) as Record<"currency" | TLabel, string | number>);
+    .map(([currency, value]) =>
+      label === "transportationCost" ? { currency, transportationCost: value } : { currency, facilityOperatingCost: value }
+    );
 }
 
 function sortObservedCostsByCurrency(transportation: Map<string, number>, facility: Map<string, number>) {

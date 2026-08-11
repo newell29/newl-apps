@@ -4,7 +4,6 @@ import {
   type SupplyChainDesignModel02ProofResult
 } from "@/modules/supply-chain-design/model-02-proof";
 import { parseCsvRows } from "@/modules/supply-chain-design/csv-intake";
-import { getSourceColumn } from "@/modules/supply-chain-design/model-01-proof";
 
 export const MODEL_02_OPTIMIZER_TYPE = "Exact small-network optimizer";
 export const MODEL_02_OPTIMIZER_SELECTABLE_FACILITY_LIMIT = 10;
@@ -426,7 +425,7 @@ export function buildModel02OptimizerResult(
     differenceFromRecommended: result.proposedObservedAnnualCost - recommended.proposedObservedAnnualCost
   }));
 
-  const result = {
+  const result: SupplyChainDesignModel02OptimizerResult = {
     ...recommended,
     scenarioName: input.scenarioName,
     optimizerType: MODEL_02_OPTIMIZER_TYPE,

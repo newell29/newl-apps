@@ -392,6 +392,7 @@ function buildFreightPiece({
         height: dimensions.height,
         dimensionUnit: "in"
       });
+  const resolvedFreightClass = freightClass ?? (calculated?.ok ? calculated.freightClass : "");
 
   return {
     qty: quantity,
@@ -401,7 +402,7 @@ function buildFreightPiece({
     width: dimensions.width,
     height: dimensions.height,
     dimType: "PLT",
-    freightClass: freightClass ?? (calculated.ok ? calculated.freightClass : ""),
+    freightClass: resolvedFreightClass,
     hazmat: false,
     stack: false
   };

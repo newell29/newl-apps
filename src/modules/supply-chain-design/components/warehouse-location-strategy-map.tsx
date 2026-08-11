@@ -151,7 +151,7 @@ export function WarehouseLocationStrategyMap({
       mapRef.current?.remove();
       mapRef.current = null;
     };
-  }, [retryKey]);
+  }, [mapData, retryKey]);
 
   useEffect(() => {
     if (!mapRef.current || !window.maplibregl) return;
@@ -350,7 +350,9 @@ function attachDestinationInteractions(maplibre: MapLibreApi, map: MapLibreMap, 
   });
 }
 
-function featureCoordinates(feature: MapLayerEvent["features"][number] | undefined, event: MapLayerEvent | undefined): [number, number] | null {
+type MapLayerFeature = NonNullable<MapLayerEvent["features"]>[number];
+
+function featureCoordinates(feature: MapLayerFeature | undefined, event: MapLayerEvent | undefined): [number, number] | null {
   const coordinates = feature?.geometry?.coordinates;
   if (Array.isArray(coordinates) && typeof coordinates[0] === "number" && typeof coordinates[1] === "number") {
     return [coordinates[0], coordinates[1]];
@@ -393,11 +395,11 @@ function fitMap(map: MapLibreMap, data: ReturnType<typeof buildWarehouseLocation
 export function buildWarehouseLocationStrategyMapData(solution: WarehouseLocationStrategyResultSummary["solutions"][number], weightingMethod: string) {
   const maxWeight = Math.max(1, ...solution.assignments.map((assignment) => assignment.selectedWeight));
   const destinationGroups = aggregateDestinationMarkers(solution);
-  const omittedDestinationCount = destinationGroups.filter((assignments) => !resolveDestinationMapPoint(assignments[0], solution)).length;
+  const omittedDestinationCount = destinationGroups.filter((assignments) => !resolveDestinationMapPoint(assignments[0])).length;
   const destinationMarkers = destinationGroups.flatMap((assignments, index) => {
     const group = { assignments };
     const assignment = group.assignments[0];
-    const destinationPoint = resolveDestinationMapPoint(assignment, solution);
+    const destinationPoint = resolveDestinationMapPoint(assignment);
     if (!destinationPoint) return [];
     const selectedWeight = group.assignments.reduce((total, row) => total + row.selectedWeight, 0);
     const shipments = group.assignments.reduce((total, row) => total + row.shipmentsRepresented, 0);
@@ -410,7 +412,7 @@ export function buildWarehouseLocationStrategyMapData(solution: WarehouseLocatio
     const transportationModes = uniqueList(group.assignments.map((row) => row.transportationMode ?? "Not supplied")).sort((left, right) => left.localeCompare(right));
     const selectedMetricHtml = selectedMetricLine(weightingMethod, selectedWeight);
     const broadHoverDetails = destinationPoint.broad
-      ? `<br/>Province: ${escapeHtml(broadProvinceLabel(group.assignments, solution))}<br/>Broad Canadian market approximation`
+      ? `<br/>Province: ${escapeHtml(broadProvinceLabel(group.assignments))}<br/>Broad Canadian market approximation`
       : "";
     const broadPopupDetails = destinationPoint.broad
       ? "<br/>Broad Canadian market approximation<br/>This marker represents multiple Canadian destinations using the approved broad market coordinate. It is not a precise postal location."
@@ -423,8 +425,8 @@ export function buildWarehouseLocationStrategyMapData(solution: WarehouseLocatio
       radius: destinationRadius(selectedWeight, maxWeight),
       broad: destinationPoint.broad,
       canadianDestination,
-      hoverHtml: `<strong>${escapeHtml(label)}</strong>${canadianDestination && !destinationPoint.broad ? `<br/>Province: ${escapeHtml(broadProvinceLabel(group.assignments, solution))}` : broadHoverDetails}<br/>Source profiles: ${formatNumber(group.assignments.length)}<br/>${formatDestinationListLabel(postalCodes)}: ${escapeHtml(postalCodes.join(", "))}<br/>Shipments represented: ${formatNumber(shipments)}${selectedMetricHtml}<br/>Assigned region: ${assignment.assignedRegion}`,
-      html: `<strong>${escapeHtml(label)}</strong>${canadianDestination && !destinationPoint.broad ? `<br/>Province: ${escapeHtml(broadProvinceLabel(group.assignments, solution))}` : broadPopupDetails}<br/>Source profiles: ${formatNumber(group.assignments.length)}<br/>Source references: ${escapeHtml(sourceReferences)}${group.assignments.length > 8 ? "..." : ""}<br/>${formatDestinationListLabel(postalCodes)}: ${escapeHtml(postalCodes.join(", "))}<br/>${formatListLabel("Record type", recordTypes)}: ${escapeHtml(recordTypes.join(", "))}<br/>${formatListLabel("Transportation mode", transportationModes)}: ${escapeHtml(transportationModes.join(", "))}<br/>Shipments represented: ${formatNumber(shipments)}${selectedMetricHtml}<br/>Assigned region: ${assignment.assignedRegion}<br/>Straight-line distance: ${formatNumber(distance)} miles`,
+      hoverHtml: `<strong>${escapeHtml(label)}</strong>${canadianDestination && !destinationPoint.broad ? `<br/>Province: ${escapeHtml(broadProvinceLabel(group.assignments))}` : broadHoverDetails}<br/>Source profiles: ${formatNumber(group.assignments.length)}<br/>${formatDestinationListLabel(postalCodes)}: ${escapeHtml(postalCodes.join(", "))}<br/>Shipments represented: ${formatNumber(shipments)}${selectedMetricHtml}<br/>Assigned region: ${assignment.assignedRegion}`,
+      html: `<strong>${escapeHtml(label)}</strong>${canadianDestination && !destinationPoint.broad ? `<br/>Province: ${escapeHtml(broadProvinceLabel(group.assignments))}` : broadPopupDetails}<br/>Source profiles: ${formatNumber(group.assignments.length)}<br/>Source references: ${escapeHtml(sourceReferences)}${group.assignments.length > 8 ? "..." : ""}<br/>${formatDestinationListLabel(postalCodes)}: ${escapeHtml(postalCodes.join(", "))}<br/>${formatListLabel("Record type", recordTypes)}: ${escapeHtml(recordTypes.join(", "))}<br/>${formatListLabel("Transportation mode", transportationModes)}: ${escapeHtml(transportationModes.join(", "))}<br/>Shipments represented: ${formatNumber(shipments)}${selectedMetricHtml}<br/>Assigned region: ${assignment.assignedRegion}<br/>Straight-line distance: ${formatNumber(distance)} miles`,
       index
     }];
   });
@@ -555,7 +557,7 @@ function LegendItem({ swatch, label }: { swatch: ReactNode; label: string }) {
 function aggregateDestinationMarkers(solution: WarehouseLocationStrategyResultSummary["solutions"][number]) {
   const groups = new Map<string, typeof solution.assignments>();
   for (const assignment of solution.assignments) {
-    const point = resolveDestinationMapPoint(assignment, solution);
+    const point = resolveDestinationMapPoint(assignment);
     const key = point
       ? `${assignment.assignedRegion}:${point.latitude}:${point.longitude}`
       : `omitted:${assignment.assignedRegion}:${assignment.destinationPostalCode}:${assignment.coordinatePrecision}`;
@@ -565,8 +567,7 @@ function aggregateDestinationMarkers(solution: WarehouseLocationStrategyResultSu
 }
 
 function resolveDestinationMapPoint(
-  assignment: WarehouseLocationStrategyResultSummary["solutions"][number]["assignments"][number],
-  solution: WarehouseLocationStrategyResultSummary["solutions"][number]
+  assignment: WarehouseLocationStrategyResultSummary["solutions"][number]["assignments"][number]
 ) {
   if (isFiniteNumber(assignment.destinationLatitude) && isFiniteNumber(assignment.destinationLongitude)) {
     return {
@@ -599,7 +600,7 @@ function formatListLabel(singular: string, values: string[]) {
   return values.length === 1 ? singular : `${singular}s`;
 }
 
-function broadProvinceLabel(assignments: WarehouseLocationStrategyResultSummary["solutions"][number]["assignments"], _solution: WarehouseLocationStrategyResultSummary["solutions"][number]) {
+function broadProvinceLabel(assignments: WarehouseLocationStrategyResultSummary["solutions"][number]["assignments"]) {
   return uniqueList(assignments.map((assignment) => {
     return assignment.destinationProvince || assignment.destinationPostalCode.slice(0, 3).toUpperCase() || "Canada";
   })).join(", ");

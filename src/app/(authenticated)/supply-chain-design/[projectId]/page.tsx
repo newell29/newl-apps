@@ -14,11 +14,11 @@ import { SupplyChainDesignWarehouseLocationStrategyForm } from "@/modules/supply
 import { WarehouseLocationStrategySolutionViewer } from "@/modules/supply-chain-design/components/warehouse-location-strategy-solution-viewer";
 import { DeleteConfirmationCancelButton } from "@/modules/supply-chain-design/components/delete-confirmation-cancel-button";
 import {
-  deleteSupplyChainDesignFileMappingAction,
-  deleteSupplyChainDesignProjectFileAction,
-  deleteSupplyChainDesignNetworkScenarioComparisonRunAction,
-  deleteSupplyChainDesignRunAction,
-  deleteSupplyChainDesignWarehouseLocationStrategyRunAction
+  deleteSupplyChainDesignFileMappingFormAction,
+  deleteSupplyChainDesignProjectFileFormAction,
+  deleteSupplyChainDesignNetworkScenarioComparisonRunFormAction,
+  deleteSupplyChainDesignRunFormAction,
+  deleteSupplyChainDesignWarehouseLocationStrategyRunFormAction
 } from "@/modules/supply-chain-design/actions";
 import { requireSupplyChainDesignStudioAccess } from "@/modules/supply-chain-design/access";
 import { getSupplyChainDesignProject } from "@/modules/supply-chain-design/queries";
@@ -53,52 +53,6 @@ const PROJECT_TABS = [
   { id: "warehouse-location-strategy", label: "Warehouse Location Strategy" },
   { id: "warehouse-cost-comparison", label: "Network Scenario Comparison" },
   { id: "run-history", label: "Run History" }
-] as const;
-
-const CUSTOMER_TEMPLATE_DOWNLOAD_LABELS = [
-  "These shared datasets are reused across applicable analyses.",
-  "Download templates",
-  "Current Facilities and Warehouse Costs",
-  "current-facilities-and-costs-template.csv",
-  "Historical Shipments",
-  "historical-shipments-template.csv",
-  "Candidate Warehouses and Proposed Costs",
-  "candidate-warehouses-and-costs-template.csv"
-] as const;
-
-const CURRENT_NETWORK_BASELINE_SECTION_LABELS = [
-  "Facility and warehouse cost",
-  "Shipment activity by destination group",
-  "Run information",
-  "Historical Shipment Origin Facility ID"
-] as const;
-
-const PAGE_SOURCE_COMPATIBILITY_MARKERS = [
-  "Future runs cannot use this uploaded file after deletion.",
-  "Associated model runs may no longer be ready",
-  "ApplySupplyChainDesignAutomaticMappingForm",
-  "Aggregated row totals are not multiplied by shipment count.",
-  "Pallet-, unit- and weight-based metrics were not calculated because those quantities were not supplied.",
-  "No data issues were identified.",
-  "lg:grid-cols-[minmax(0,0.55fr)_minmax(0,0.45fr)]",
-  "lg:grid-cols-[minmax(0,0.55fr)_minmax(0,1fr)]",
-  "Run workflow",
-  "Review unresolved shipments",
-  "Continue Network Design",
-  "Prepared LTL Rate Requests",
-  "Latest Network Comparison",
-  "No network comparison has been run yet.",
-  "Candidate warehouse",
-  "Pallets",
-  "Weight",
-  "Freight class",
-  "Issue",
-  "No ready LTL requests were prepared.",
-  'mode="LOCATION_STRATEGY"',
-  'mode="WAREHOUSE_COST_COMPARISON"',
-  "DeleteFileForm",
-  "DeleteMappingForm",
-  "DeleteRunForm"
 ] as const;
 
 export default async function SupplyChainDesignProjectPage({ params, searchParams }: PageProps) {
@@ -241,7 +195,7 @@ function ProjectDataPanel({ project }: { project: SupplyChainDesignProjectDetail
                           <p className="text-xs text-mutedForeground">
                             Deleting this mapping will keep the uploaded file, but analyses cannot use it until a new mapping is saved.
                           </p>
-                          <form action={deleteSupplyChainDesignFileMappingAction.bind(null, { ok: false, message: "" })} className="mt-2 flex items-center gap-2">
+                          <form action={deleteSupplyChainDesignFileMappingFormAction} className="mt-2 flex items-center gap-2">
                             <input type="hidden" name="projectId" value={project.id} />
                             <input type="hidden" name="mappingId" value={file.mappingId} />
                             <DeleteConfirmationCancelButton />
@@ -258,7 +212,7 @@ function ProjectDataPanel({ project }: { project: SupplyChainDesignProjectDetail
                         <p className="text-xs text-mutedForeground">
                           Deleting this file will also delete its saved mapping. Future analyses cannot use this data.
                         </p>
-                        <form action={deleteSupplyChainDesignProjectFileAction.bind(null, { ok: false, message: "" })} className="mt-2 flex items-center gap-2">
+                        <form action={deleteSupplyChainDesignProjectFileFormAction} className="mt-2 flex items-center gap-2">
                           <input type="hidden" name="projectId" value={project.id} />
                           <input type="hidden" name="fileId" value={file.id} />
                           <DeleteConfirmationCancelButton />
@@ -467,7 +421,6 @@ function WarehouseLocationStrategyPanel({
   const activeRunId = displayedRun?.id ?? null;
   const result = displayedRun?.resultSummary ?? null;
   const recommended = result?.recommendedSolution ?? null;
-  const recommendedSolutions = result?.recommendedSolutions?.length ? result.recommendedSolutions : recommended ? [recommended] : [];
   const selectedSolution = result?.solutions.find((solution) => solution.solutionId === selectedSolutionId) ?? recommended;
   const higherAvailableSolutions = result && recommended
     ? result.solutions.filter((solution) => solution.regionCount > recommended.regionCount && solution.recommendationStatus === "Available")
@@ -503,7 +456,7 @@ function WarehouseLocationStrategyPanel({
               An existing report with the same data and settings was opened.
             </div>
           ) : null}
-          {result && recommended ? (
+          {displayedRun && result && recommended ? (
             <>
               <DetailPanel title="Recommended Strategy">
                 <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Report from {formatDateTime(displayedRun.createdAt)}</p>
@@ -607,7 +560,7 @@ function WarehouseLocationStrategyPanel({
                         <summary className="cursor-pointer text-xs font-semibold text-danger">Delete report</summary>
                         <div className="mt-2 rounded-md border border-border bg-background p-3">
                           <p className="text-xs text-mutedForeground">Delete this saved Location Strategy report? This removes the saved result and download, but does not delete uploaded project data.</p>
-                          <form action={deleteSupplyChainDesignWarehouseLocationStrategyRunAction.bind(null, { ok: false, message: "" })} className="mt-2 flex items-center gap-2">
+                          <form action={deleteSupplyChainDesignWarehouseLocationStrategyRunFormAction} className="mt-2 flex items-center gap-2">
                             <input type="hidden" name="projectId" value={project.id} />
                             <input type="hidden" name="runId" value={run.id} />
                             {activeRunId ? <input type="hidden" name="currentRunId" value={activeRunId} /> : null}
@@ -776,8 +729,6 @@ function NetworkScenarioComparisonReport({ projectId, run }: { projectId: string
 function WarehouseCostComparisonPanel({ project, selectedRunId }: { project: SupplyChainDesignProjectDetail; selectedRunId?: string }) {
   const displayedComparisonRun =
     project.recentNetworkScenarioComparisonRuns.find((run) => run.id === selectedRunId) ?? project.latestNetworkScenarioComparisonRun;
-  const displayedRun =
-    project.recentWarehouseCostComparisonRuns.find((run) => run.id === selectedRunId) ?? project.latestWarehouseCostComparisonRun;
   const ratingEvidence = displayedComparisonRun?.ratingEvidence ?? null;
   const comparisonBatchId = ratingEvidence?.ratingBatchIds[0] ?? null;
   const comparisonBatch = comparisonBatchId ? project.recentLtlRateBatches.find((batch) => batch.id === comparisonBatchId) ?? null : null;
@@ -839,13 +790,13 @@ function WarehouseCostComparisonPanel({ project, selectedRunId }: { project: Sup
                     initialRated={comparisonBatch ? comparisonBatch.ratedSuccessfully + comparisonBatch.manuallyRated : 0}
                     initialProcessed={comparisonBatch?.processedRequests ?? 0}
                     initialIssues={comparisonBatch?.issueRequests ?? 0}
-                    total={comparisonBatch?.requestsSubmitted ?? ratingEvidence.missingRateCount}
+                    total={comparisonBatch?.requestsSubmitted ?? ratingEvidence?.missingRateCount ?? 0}
                   />
                 ) : null}
                 <details className="mt-3 rounded-md border border-border bg-background p-3">
                   <summary className="cursor-pointer text-xs font-semibold text-danger">Delete Result</summary>
                   <p className="mt-2 text-xs text-mutedForeground">Delete this saved Network Scenario Comparison result? This removes only this comparison run record and keeps uploaded project data and shared 7L rate evidence.</p>
-                  <form action={deleteSupplyChainDesignNetworkScenarioComparisonRunAction.bind(null, { ok: false, message: "" })} className="mt-2 flex items-center gap-2">
+                  <form action={deleteSupplyChainDesignNetworkScenarioComparisonRunFormAction} className="mt-2 flex items-center gap-2">
                     <input type="hidden" name="projectId" value={project.id} />
                     <input type="hidden" name="runId" value={displayedComparisonRun.id} />
                     <DeleteConfirmationCancelButton />
@@ -924,7 +875,7 @@ function NetworkScenarioComparisonRunHistory({
                       <summary className="cursor-pointer text-xs font-semibold text-danger">Delete Result</summary>
                       <div className="mt-2 rounded-md border border-border bg-background p-3">
                         <p className="text-xs text-mutedForeground">Delete only this saved Network Scenario Comparison result. Shared 7L evidence and uploaded project data remain.</p>
-                        <form action={deleteSupplyChainDesignNetworkScenarioComparisonRunAction.bind(null, { ok: false, message: "" })} className="mt-2 flex items-center gap-2">
+                        <form action={deleteSupplyChainDesignNetworkScenarioComparisonRunFormAction} className="mt-2 flex items-center gap-2">
                           <input type="hidden" name="projectId" value={projectId} />
                           <input type="hidden" name="runId" value={run.id} />
                           <DeleteConfirmationCancelButton />
@@ -1109,7 +1060,7 @@ function NetworkDesignRunHistory({ projectId, batches, selectedBatchId }: { proj
                       <summary className="cursor-pointer text-xs font-semibold text-danger">Delete report</summary>
                       <div className="mt-2 rounded-md border border-border bg-background p-3">
                         <p className="text-xs text-mutedForeground">Delete this saved Network Design report? This removes the saved comparison and rates for this report, but does not delete uploaded project data.</p>
-                        <form action={deleteSupplyChainDesignRunAction.bind(null, { ok: false, message: "" })} className="mt-2 flex items-center gap-2">
+                        <form action={deleteSupplyChainDesignRunFormAction} className="mt-2 flex items-center gap-2">
                           <input type="hidden" name="projectId" value={projectId} />
                           <input type="hidden" name="runId" value={batch.id} />
                           <input type="hidden" name="runType" value="NETWORK_DESIGN" />
@@ -1223,23 +1174,6 @@ function formatFxEvidence(run: NetworkScenarioComparisonRunListItem) {
   return "No FX conversion applied.";
 }
 
-function formatHistoricalReference(result: { scenarioA: Record<string, unknown>; historicalBaselineReference?: Record<string, unknown> }, currency: string) {
-  if (result.historicalBaselineReference) {
-    return typeof result.historicalBaselineReference.description === "string" ? result.historicalBaselineReference.description : "Historical baseline reference retained in result evidence.";
-  }
-  const historicalSpend = sumHistoricalTransportation(result.scenarioA.profileResults);
-  return historicalSpend > 0 ? `Historical transportation reference: ${formatOptionalCurrency(historicalSpend, currency)}.` : "No separate historical baseline reference was saved for this comparison.";
-}
-
-function sumHistoricalTransportation(profileResults: unknown) {
-  if (!Array.isArray(profileResults)) return 0;
-  return profileResults.reduce((total, item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return total;
-    const value = (item as Record<string, unknown>).historicalTransportationCost;
-    return total + (typeof value === "number" && Number.isFinite(value) ? value : 0);
-  }, 0);
-}
-
 function formatDateTime(value: Date | string) {
   return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Toronto" }).format(new Date(value));
 }
@@ -1258,10 +1192,6 @@ function formatMoney(value: number) {
 
 function formatOptionalCurrency(value: number | null, currency: string) {
   return value === null ? "Unavailable" : new Intl.NumberFormat("en", { style: "currency", currency }).format(value);
-}
-
-function formatOptionalMoney(value: number | null) {
-  return Number.isFinite(value) ? formatMoney(value as number) : "-";
 }
 
 function formatPercent(value: number) {
@@ -1283,14 +1213,6 @@ function formatLocationStrategyScope(value: string) {
   return "United States and Canada together";
 }
 
-function formatLocationStrategyMetricLabel(value: string) {
-  if (value === "PALLETS") return "Pallets represented";
-  if (value === "WEIGHT") return "Weight represented";
-  if (value === "UNITS") return "Units represented";
-  if (value === "CURRENT_TRANSPORTATION_COST") return "Historical transportation spend represented";
-  return "Shipments represented";
-}
-
 function formatLocationStrategySelectedMetric(value: number, currency?: string | null) {
   return currency ? `${formatNumber(value)} ${currency}` : formatNumber(value);
 }
@@ -1307,7 +1229,9 @@ function formatLocationStrategyRegionCount(regionCount: number) {
   return "Three warehouse regions";
 }
 
-function locationStrategyAvailableSolutionReason(solution: NonNullable<SupplyChainDesignProjectDetail["latestWarehouseLocationStrategyRun"]>["resultSummary"]["solutions"][number]) {
+type WarehouseLocationStrategyResult = NonNullable<NonNullable<SupplyChainDesignProjectDetail["latestWarehouseLocationStrategyRun"]>["resultSummary"]>;
+
+function locationStrategyAvailableSolutionReason(solution: WarehouseLocationStrategyResult["solutions"][number]) {
   const weakRegion = solution.regions.find((region) => region.selectedDemandSharePercent < 10);
   if (weakRegion) {
     return `the smallest region represents ${formatNumber(weakRegion.selectedDemandSharePercent)}% of selected demand, below the 10% minimum.`;
@@ -1316,13 +1240,6 @@ function locationStrategyAvailableSolutionReason(solution: NonNullable<SupplyCha
     return `the additional region improves weighted average distance by only ${formatNumber(solution.incrementalImprovementPercent ?? 0)}%, below the 15% minimum.`;
   }
   return "it did not meet the automatic recommendation rule.";
-}
-
-function locationStrategyDistinctDestinationCount(assignments: NonNullable<SupplyChainDesignProjectDetail["latestWarehouseLocationStrategyRun"]>["resultSummary"]["solutions"][number]["assignments"]) {
-  return new Set(assignments.map((assignment) => {
-    const postalCode = assignment.destinationPostalCode?.trim().toUpperCase();
-    return postalCode ? `${assignment.destinationCountry}:${postalCode}` : `${assignment.destinationCountry}:${assignment.recommendedMarketLabel}`;
-  })).size;
 }
 
 function formatNetworkDesignCandidateLabel(batch: SupplyChainDesignLtlRateBatchSummary) {

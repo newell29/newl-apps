@@ -153,7 +153,7 @@ export function calculateCandidateWarehouseCostFromSourceRows(input: {
   const storageCost = sumNullable(billingEvidence.map((row) => row.storageCost));
   const knownSubtotal = sum(billingEvidence.map((row) => row.knownSubtotal));
   const completeWarehouseCost = missingInputs.length === 0 ? knownSubtotal : null;
-  const billableStorageMonths = billingEvidence.length === 1 ? billingEvidence[0].billableStorageMonths : null;
+  const billableStorageMonths = billingEvidence.length === 1 ? billingEvidence[0]?.billableStorageMonths ?? null : null;
 
   return {
     facilityId: input.candidate.facilityId,
@@ -258,7 +258,7 @@ function safeQuantity(value: number) {
 }
 
 function sum(values: Array<number | null>) {
-  return values.reduce((total, value) => total + (typeof value === "number" && Number.isFinite(value) ? value : 0), 0);
+  return values.reduce<number>((total, value) => total + (typeof value === "number" && Number.isFinite(value) ? value : 0), 0);
 }
 
 function sumNullable(values: Array<number | null>) {

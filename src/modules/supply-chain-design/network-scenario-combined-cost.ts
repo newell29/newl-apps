@@ -418,7 +418,7 @@ function unique(values: string[]) {
 }
 
 function sum(values: Array<number | null>) {
-  return values.reduce((total, value) => total + (typeof value === "number" && Number.isFinite(value) ? value : 0), 0);
+  return values.reduce<number>((total, value) => total + (typeof value === "number" && Number.isFinite(value) ? value : 0), 0);
 }
 
 function roundCurrency(value: number) {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { JobStatus, SupplyChainDesignModelRunStatus, type Prisma } from "@prisma/client";
+import { JobStatus, Prisma, SupplyChainDesignModelRunStatus } from "@prisma/client";
 
 import {
   SCDS_LTL_RATE_PREPARATION_RESULT_VERSION,
@@ -661,7 +661,7 @@ export async function runSupplyChainDesignLtlRateBatch(
             requestJson,
             quotesJson: quotes,
             errorsJson: errors,
-            selectedQuoteJson: selectedQuote,
+            selectedQuoteJson: selectedQuote ?? Prisma.JsonNull,
             selectedRateSource: selectedQuote ? "7L selected rate" : "None"
           },
           create: {
@@ -674,7 +674,7 @@ export async function runSupplyChainDesignLtlRateBatch(
             requestJson,
             quotesJson: quotes,
             errorsJson: errors,
-            selectedQuoteJson: selectedQuote,
+            selectedQuoteJson: selectedQuote ?? Prisma.JsonNull,
             selectedRateSource: selectedQuote ? "7L selected rate" : "None"
           }
         });
@@ -798,11 +798,16 @@ export async function getSupplyChainDesignLtlRateBatches(context: AuthenticatedC
     }
   }
 
-  return normalNetworkDesignInputs
-    .map(({ job, input }) => mapScdsLtlRateBatchSummary(job, input, input ? preparationSummaries.get(input.preparationRunId) : undefined))
-    .filter((batch): batch is SupplyChainDesignLtlRateBatchSummary => Boolean(batch) && batch.projectId === projectId)
+  const summaries: Array<SupplyChainDesignLtlRateBatchSummary & { projectId: string }> = [];
+  for (const { job, input } of normalNetworkDesignInputs) {
+    const summary = mapScdsLtlRateBatchSummary(job, input, input ? preparationSummaries.get(input.preparationRunId) : undefined);
+    if (summary && summary.projectId === projectId) {
+      summaries.push(summary);
+    }
+  }
+  return summaries
     .sort(compareBatchSummariesForDisplay)
-    .map(({ projectId: _projectId, ...batch }) => batch)
+    .map(omitBatchProjectId)
     .slice(0, 10);
 }
 
@@ -837,11 +842,16 @@ export async function getSupplyChainDesignLtlRateBatchById(
         resultSummary: true
       }
     });
-    linkedPreparationSummary = readPreparationResultSummary(preparationRun?.resultSummary);
+    linkedPreparationSummary = readPreparationResultSummary(preparationRun?.resultSummary) ?? undefined;
   }
   const summary = mapScdsLtlRateBatchSummary(job, input, linkedPreparationSummary);
   if (!summary || summary.projectId !== projectId) return null;
-  const { projectId: _projectId, ...batch } = summary;
+  return omitBatchProjectId(summary);
+}
+
+function omitBatchProjectId(summary: SupplyChainDesignLtlRateBatchSummary & { projectId: string }): SupplyChainDesignLtlRateBatchSummary {
+  const batch: SupplyChainDesignLtlRateBatchSummary & { projectId?: string } = { ...summary };
+  delete batch.projectId;
   return batch;
 }
 
@@ -1155,6 +1165,7 @@ export async function findReusableSupplyChainDesignExactLaneRate(input: {
     if (input.currentJobRunId && lane.jobRunId === input.currentJobRunId) continue;
     const batchInput = readInput(lane.jobRun.input);
     if (!isReusableLaneBatchContext(batchInput, input.accountId, input.carrierHashes)) continue;
+    if (!batchInput) continue;
     const quote = readLiveReusableQuote(lane.selectedQuoteJson);
     if (!quote) continue;
     const storedRequest = isLtlQuoteRequest(lane.requestJson) ? lane.requestJson : quote;
@@ -1645,7 +1656,7 @@ function buildBatchCompatibilityFingerprint(input: ScdsLtlBatchInput) {
 }
 
 function hasInputCurrentCostEvidence(input: ScdsLtlBatchInput | null) {
-  return Boolean(input?.requests.length) && input.requests.every((request) => Number.isFinite(request.currentTransportationCost));
+  return input !== null && input.requests.length > 0 && input.requests.every((request) => Number.isFinite(request.currentTransportationCost));
 }
 
 function hasReusableCompletedBatch(

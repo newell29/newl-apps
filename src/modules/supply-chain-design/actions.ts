@@ -50,11 +50,19 @@ import {
 } from "@/modules/supply-chain-design/ltl-rate-batches";
 import { pickPreferredLiveSevenLAccount } from "@/modules/ltl-rate-portal/account-selection";
 import { getLtlRatePortalAccounts } from "@/modules/ltl-rate-portal/queries";
-import { normalizeSupplyChainDesignCandidateRatingOrigins, normalizeSupplyChainDesignCurrentFacilityRatingOrigins } from "@/modules/supply-chain-design/rating-origins";
-import { orchestrateSupplyChainDesignNetworkScenarioComparison } from "@/modules/supply-chain-design/network-scenario-comparison-orchestration";
+import {
+  normalizeSupplyChainDesignCandidateRatingOrigins,
+  normalizeSupplyChainDesignCurrentFacilityRatingOrigins,
+  type SupplyChainDesignRatingOrigin
+} from "@/modules/supply-chain-design/rating-origins";
+import {
+  orchestrateSupplyChainDesignNetworkScenarioComparison,
+  type SupplyChainDesignNetworkScenarioComparisonOrchestrationInput
+} from "@/modules/supply-chain-design/network-scenario-comparison-orchestration";
 import {
   deleteNetworkScenarioComparisonRun,
-  getNetworkScenarioComparisonRun
+  getNetworkScenarioComparisonRun,
+  type NetworkScenarioComparisonScenarioInput
 } from "@/modules/supply-chain-design/network-scenario-comparison-persistence";
 import { runSupplyChainDesignThreePlScreening } from "@/modules/supply-chain-design/three-pl-screening";
 import { runSupplyChainDesignProviderComparison } from "@/modules/supply-chain-design/three-pl-provider-comparison";
@@ -75,7 +83,8 @@ import {
 } from "@/modules/supply-chain-design/warehouse-location-strategy";
 import {
   readWarehouseCostFacilityOptions,
-  runWarehouseCostComparison
+  runWarehouseCostComparison,
+  type WarehouseCostComparisonFacilityOption
 } from "@/modules/supply-chain-design/warehouse-cost-comparison";
 import {
   buildWarehouseCostProfilesFromPreparedRequests,
@@ -170,15 +179,6 @@ function sha256(value: string | Buffer) {
 
 function normalizeHeader(value: string) {
   return value.replace(/^\uFEFF/, "").trim();
-}
-
-function missingMappedSourceColumns(fieldMappings: unknown, headers: string[]) {
-  const headerSet = new Set(headers.map(normalizeHeader));
-  return toFieldMappings(fieldMappings)
-    .map((field) => field.sourceColumn)
-    .filter((sourceColumn): sourceColumn is string => Boolean(sourceColumn))
-    .filter((sourceColumn, index, columns) => columns.indexOf(sourceColumn) === index)
-    .filter((sourceColumn) => !headerSet.has(normalizeHeader(sourceColumn)));
 }
 
 function jsonReferencesId(value: unknown, id: string): boolean {
@@ -314,6 +314,10 @@ export async function deleteSupplyChainDesignProjectAction(formData: FormData) {
   }
 }
 
+export async function deleteSupplyChainDesignProjectFormAction(formData: FormData): Promise<void> {
+  await deleteSupplyChainDesignProjectAction(formData);
+}
+
 export type SupplyChainDesignUploadState = {
   ok: boolean;
   message: string;
@@ -396,8 +400,6 @@ export async function uploadSupplyChainDesignProjectFilesAction(
   }
 
   const files = formData.getAll("files").filter((value): value is File => value instanceof File);
-  const submittedSameNameMode = text(formData, "sameNameMode") ?? "CANCEL";
-  const sameNameMode = submittedSameNameMode === "REPLACE" ? "REPLACE" : "CANCEL";
 
   if (files.length === 0) {
     return { ok: false, message: "Select at least one CSV file to upload." };
@@ -429,10 +431,10 @@ export async function uploadSupplyChainDesignProjectFilesAction(
       }
     });
 
-    if (sameNameFiles.length > 0 && sameNameMode === "CANCEL") {
+    if (sameNameFiles.length > 0) {
       return {
         ok: false,
-        message: `A file with this name already exists: ${sameNameFiles.map((file) => file.originalFileName).join(", ")}. Replace it or cancel the upload.`
+        message: `A file with this name already exists: ${sameNameFiles.map((file) => file.originalFileName).join(", ")}. Rename the file before uploading so existing project evidence is preserved.`
       };
     }
 
@@ -440,7 +442,6 @@ export async function uploadSupplyChainDesignProjectFilesAction(
       where: {
         tenantId: context.tenantId,
         projectId,
-        id: sameNameMode === "REPLACE" ? { notIn: sameNameFiles.map((file) => file.id) } : undefined,
         contentHash: {
           in: parsedFiles.map((file) => file.contentHash)
         }
@@ -463,65 +464,6 @@ export async function uploadSupplyChainDesignProjectFilesAction(
 
     await prisma.$transaction(async (tx) => {
       for (const parsed of parsedFiles) {
-        const sameNameFile = sameNameFiles.find((file) => file.originalFileName === parsed.safeFileName) ?? null;
-        if (sameNameFile && sameNameMode === "REPLACE") {
-          const missingColumnsByMapping = sameNameFile.mappings.map((mapping) => ({
-            mappingId: mapping.id,
-            tableType: mapping.tableType,
-            missingColumns: missingMappedSourceColumns(mapping.fieldMappings, parsed.headers)
-          }));
-
-          const updated = await tx.supplyChainDesignProjectFile.update({
-            where: {
-              tenantId_id: {
-                tenantId: context.tenantId,
-                id: sameNameFile.id
-              }
-            },
-            data: {
-              contentType: parsed.contentType,
-              sizeBytes: parsed.sizeBytes,
-              contentHash: parsed.contentHash,
-              fileBytes: parsed.bytes,
-              rowCount: parsed.rowCount,
-              detectedHeaders: parsed.headers,
-              previewRows: parsed.previewRows,
-              status: "READY",
-              uploadedByUserId: context.userId
-            }
-          });
-
-          await tx.auditLog.create({
-            data: {
-              tenantId: context.tenantId,
-              actorUserId: context.userId,
-              action: "supply-chain-design.file.replaced",
-              entityType: "SupplyChainDesignProjectFile",
-              entityId: updated.id,
-              after: {
-                moduleKey: ModuleKey.SUPPLY_CHAIN_DESIGN,
-                projectId,
-                fileId: updated.id,
-                originalFileName: updated.originalFileName,
-                missingColumnsByMapping
-              }
-            }
-          });
-          const automaticMapping = await trySaveAutomaticMappingFromOfficialTemplate(tx, {
-            tenantId: context.tenantId,
-            projectId,
-            fileId: updated.id,
-            userId: context.userId,
-            headers: parsed.headers
-          });
-          if (automaticMapping.ok) {
-            automaticallyMappedCount += 1;
-          } else if (automaticMapping.recognizedTableType) {
-            failedAutomaticTableType = automaticMapping.recognizedTableType;
-          }
-          continue;
-        }
-
         const created = await tx.supplyChainDesignProjectFile.create({
           data: {
             tenantId: context.tenantId,
@@ -585,10 +527,7 @@ export async function uploadSupplyChainDesignProjectFilesAction(
         : "";
     return {
       ok: true,
-      message:
-        sameNameMode === "REPLACE"
-          ? `${parsedFiles.length} CSV file${parsedFiles.length === 1 ? "" : "s"} processed; same-name files were replaced where selected.${autoMappedSuffix}`
-          : `${parsedFiles.length} CSV file${parsedFiles.length === 1 ? "" : "s"} uploaded.${autoMappedSuffix}`
+      message: `${parsedFiles.length} CSV file${parsedFiles.length === 1 ? "" : "s"} uploaded.${autoMappedSuffix}`
     };
   } catch (error) {
     return {
@@ -795,6 +734,10 @@ export async function deleteSupplyChainDesignProjectFileAction(
   return { ok: true, message: `${file.originalFileName} was deleted. Historical runs were preserved.` };
 }
 
+export async function deleteSupplyChainDesignProjectFileFormAction(formData: FormData): Promise<void> {
+  await deleteSupplyChainDesignProjectFileAction({ ok: false, message: "" }, formData);
+}
+
 export async function deleteSupplyChainDesignFileMappingAction(
   _previousState: SupplyChainDesignCleanupState,
   formData: FormData
@@ -845,6 +788,10 @@ export async function deleteSupplyChainDesignFileMappingAction(
   });
   revalidatePath(`/supply-chain-design/${projectId}`);
   return { ok: true, message: `${mapping.tableType} mapping was deleted.` };
+}
+
+export async function deleteSupplyChainDesignFileMappingFormAction(formData: FormData): Promise<void> {
+  await deleteSupplyChainDesignFileMappingAction({ ok: false, message: "" }, formData);
 }
 
 export async function deleteSupplyChainDesignRunAction(
@@ -926,6 +873,10 @@ export async function deleteSupplyChainDesignRunAction(
   return { ok: false, message: "Unsupported run type." };
 }
 
+export async function deleteSupplyChainDesignRunFormAction(formData: FormData): Promise<void> {
+  await deleteSupplyChainDesignRunAction({ ok: false, message: "" }, formData);
+}
+
 export async function deleteSupplyChainDesignWarehouseLocationStrategyRunAction(
   _previousState: SupplyChainDesignCleanupState,
   formData: FormData
@@ -994,6 +945,10 @@ export async function deleteSupplyChainDesignWarehouseLocationStrategyRunAction(
     redirect(`/supply-chain-design/${projectId}?tab=warehouse-location-strategy&locationStrategyRunId=${currentRunId}`);
   }
   return { ok: true, message: "Saved Location Strategy report was deleted." };
+}
+
+export async function deleteSupplyChainDesignWarehouseLocationStrategyRunFormAction(formData: FormData): Promise<void> {
+  await deleteSupplyChainDesignWarehouseLocationStrategyRunAction({ ok: false, message: "" }, formData);
 }
 
 export async function applySupplyChainDesignAutomaticMappingAction(
@@ -1121,7 +1076,7 @@ export async function saveSupplyChainDesignFileMappingAction(
   const headerSet = new Set(headers);
   const usedSourceColumns = new Set<string>();
   const definition = getSupplyChainDesignMappingDefinition(tableTypeValue);
-  const fieldMappings = [];
+  const fieldMappings: SupplyChainDesignFieldMapping[] = [];
 
   for (const field of definition) {
     const sourceColumn = text(formData, `field:${field.field}`);
@@ -1492,7 +1447,7 @@ export async function runSupplyChainDesignModel01ProofAction(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Current Network Baseline failed.";
 
-    const createdRun = await prisma.supplyChainDesignModelRun.create({
+    await prisma.supplyChainDesignModelRun.create({
       data: {
         tenantId: context.tenantId,
         projectId,
@@ -1723,8 +1678,7 @@ export async function runSupplyChainDesignWarehouseCostComparisonAction(
           },
           tableType: {
             in: ["FACILITIES", "CANDIDATE_FACILITIES"]
-          },
-          status: SupplyChainDesignMappingStatus.SAVED
+          }
         },
         include: {
           file: {
@@ -1856,7 +1810,6 @@ export async function runSupplyChainDesignNetworkScenarioComparisonAction(
           id: {
             in: [shipmentsMappingId, facilitiesMappingId, candidateFacilitiesMappingId]
           },
-          status: SupplyChainDesignMappingStatus.SAVED,
           tableType: {
             in: ["SHIPMENTS", "FACILITIES", "CANDIDATE_FACILITIES"]
           }
@@ -1933,6 +1886,10 @@ export async function deleteSupplyChainDesignNetworkScenarioComparisonRunAction(
     : { ok: false, message: "Network Scenario Comparison result was not found or could not be deleted." };
 }
 
+export async function deleteSupplyChainDesignNetworkScenarioComparisonRunFormAction(formData: FormData): Promise<void> {
+  await deleteSupplyChainDesignNetworkScenarioComparisonRunAction({ ok: false, message: "" }, formData);
+}
+
 export async function resumeSupplyChainDesignNetworkScenarioComparisonAction(input: {
   projectId: string;
   comparisonRunId: string;
@@ -1966,7 +1923,6 @@ export async function resumeSupplyChainDesignNetworkScenarioComparisonAction(inp
           id: {
             in: mappingIds
           },
-          status: SupplyChainDesignMappingStatus.SAVED,
           tableType: {
             in: ["SHIPMENTS", "FACILITIES", "CANDIDATE_FACILITIES"]
           }
@@ -2236,6 +2192,9 @@ export async function runSupplyChainDesignModel02ProofAction(
 
   if (missingInputs.length > 0) {
     return { ok: false, message: `Missing required Model 02 proof input: ${missingInputs.join(" and ")}.` };
+  }
+  if (!facilitiesMapping || !shipmentsMapping || !customersMapping || !candidateFacilitiesMapping || !baselineRun) {
+    return { ok: false, message: "Missing required Model 02 proof input." };
   }
 
   const inputReferences = {
@@ -2552,6 +2511,9 @@ export async function runSupplyChainDesignThreePlScreeningAction(
       message: preciseError ?? "Selected provider-comparison mappings were not found for this project and tenant."
     };
   }
+  if (!demandMapping) {
+    return { ok: false, message: "Selected DEMAND_POINTS mapping was not found for this project and tenant." };
+  }
   if (
     studyType === "FIND_BEST_WAREHOUSE_REGION" &&
     (countryScope === "CA" || countryScope === "US_CA") &&
@@ -2738,18 +2700,21 @@ export async function generateSupplyChainDesignCandidateLtlRatePreparationAction
   if (missingInputs.length > 0) {
     return { ok: false, message: missingInputs.join(" ") };
   }
+  if (!shipmentsMapping || !candidateFacilitiesMapping) {
+    return { ok: false, message: "Missing required Candidate LTL Rate Preparation input." };
+  }
 
   const inputReferences = {
-    shipments: toScenarioInputReference(shipmentsMapping!, shipmentsMappings),
-    candidateFacilities: toScenarioInputReference(candidateFacilitiesMapping!, candidateFacilitiesMappings)
+    shipments: toScenarioInputReference(shipmentsMapping, shipmentsMappings),
+    candidateFacilities: toScenarioInputReference(candidateFacilitiesMapping, candidateFacilitiesMappings)
   };
 
   try {
     const resultSummary = prepareSupplyChainDesignCandidateLtlRateRequests({
       tenantId: context.tenantId,
       projectId,
-      shipments: toMappedScenarioFile(shipmentsMapping!),
-      candidateFacilities: toMappedScenarioFile(candidateFacilitiesMapping!)
+      shipments: toMappedScenarioFile(shipmentsMapping),
+      candidateFacilities: toMappedScenarioFile(candidateFacilitiesMapping)
     });
 
     const createdRun = await prisma.supplyChainDesignLtlRatePreparationRun.create({
@@ -3153,6 +3118,9 @@ export async function runSupplyChainDesignModel02OptimizerAction(
   if (missingInputs.length > 0) {
     return { ok: false, message: `Missing required Model 02 optimizer input: ${missingInputs.join(" and ")}.` };
   }
+  if (!facilitiesMapping || !shipmentsMapping || !customersMapping || !candidateFacilitiesMapping || !baselineRun) {
+    return { ok: false, message: "Missing required Model 02 optimizer input." };
+  }
 
   const inputReferences = {
     baselineRunId,
@@ -3283,6 +3251,12 @@ function toFieldMappings(value: unknown): SupplyChainDesignFieldMapping[] {
     .filter((item): item is SupplyChainDesignFieldMapping => Boolean(item?.standardField));
 }
 
+function toMappedSourceFields(value: unknown): Array<{ standardField: string; sourceColumn: string }> {
+  return toFieldMappings(value).filter(
+    (mapping): mapping is SupplyChainDesignFieldMapping & { sourceColumn: string } => Boolean(mapping.sourceColumn)
+  );
+}
+
 function placeholderMappedFile(
   mapping: {
     fileId: string;
@@ -3377,7 +3351,6 @@ async function buildSupplyChainDesignLtlComparisonSetup(
     include: {
       mappings: {
         where: {
-          status: SupplyChainDesignMappingStatus.SAVED,
           id: {
             in: [facilitiesMappingId, candidateFacilitiesMappingId]
           }
@@ -3524,14 +3497,14 @@ function toScenarioInputReference<
 function toMappedScenarioFile(mapping: {
   fileId: string;
   id: string;
-  tableType: any;
+  tableType: SupplyChainDesignTableTypeValue;
   file: { originalFileName?: string; fileBytes: Uint8Array };
   fieldMappings: unknown;
 }) {
   return {
     fileId: mapping.fileId,
     mappingId: mapping.id,
-    fileName: mapping.file.originalFileName,
+    fileName: mapping.file.originalFileName ?? "Uploaded CSV",
     tableType: mapping.tableType,
     fileBytes: Buffer.from(mapping.file.fileBytes),
     fieldMappings: toFieldMappings(mapping.fieldMappings)
@@ -3544,7 +3517,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
   shipmentsMapping: {
     fileId: string;
     id: string;
-    tableType: any;
+    tableType: SupplyChainDesignTableTypeValue;
     updatedAt: Date;
     fieldMappings: unknown;
     file: { originalFileName: string; fileBytes: Uint8Array; contentHash?: string | null };
@@ -3552,7 +3525,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
   facilitiesMapping: {
     fileId: string;
     id: string;
-    tableType: any;
+    tableType: SupplyChainDesignTableTypeValue;
     updatedAt: Date;
     fieldMappings: unknown;
     file: { originalFileName: string; fileBytes: Uint8Array; contentHash?: string | null };
@@ -3560,7 +3533,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
   candidateFacilitiesMapping: {
     fileId: string;
     id: string;
-    tableType: any;
+    tableType: SupplyChainDesignTableTypeValue;
     updatedAt: Date;
     fieldMappings: unknown;
     file: { originalFileName: string; fileBytes: Uint8Array; contentHash?: string | null };
@@ -3571,7 +3544,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
   scenarioBFacilityOptionIds: string[];
   cadToUsdRate: number | null;
   submittedNetworkScenarioComparison?: SupplyChainDesignModelRunState["submittedNetworkScenarioComparison"];
-}) {
+}): Promise<SupplyChainDesignNetworkScenarioComparisonOrchestrationInput> {
   const accountState = await getLtlRatePortalAccounts(input.context);
   const account = pickPreferredLiveSevenLAccount(accountState.accounts);
   if (!account) {
@@ -3590,7 +3563,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
   const shipmentWarehouseCostRows = readHistoricalShipmentWarehouseCostContractRows({
     tableType: "SHIPMENTS",
     fileBytes: Buffer.from(input.shipmentsMapping.file.fileBytes),
-    fieldMappings: toFieldMappings(input.shipmentsMapping.fieldMappings)
+    fieldMappings: toMappedSourceFields(input.shipmentsMapping.fieldMappings)
   });
   const facilityOptions = readWarehouseCostFacilityOptions({
     currentFacilities: {
@@ -3602,6 +3575,17 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
       fieldMappings: toFieldMappings(input.candidateFacilitiesMapping.fieldMappings)
     }
   });
+
+  const scenarioAInput: NetworkScenarioComparisonScenarioInput = {
+    scenarioKey: "A",
+    scenarioName: input.scenarioAName,
+    selectedFacilities: toComparisonSelectedFacilities(input.scenarioAFacilityOptionIds, facilityOptions, input.facilitiesMapping, input.candidateFacilitiesMapping)
+  };
+  const scenarioBInput: NetworkScenarioComparisonScenarioInput = {
+    scenarioKey: "B",
+    scenarioName: input.scenarioBName,
+    selectedFacilities: toComparisonSelectedFacilities(input.scenarioBFacilityOptionIds, facilityOptions, input.facilitiesMapping, input.candidateFacilitiesMapping)
+  };
 
   return {
     context: input.context,
@@ -3615,18 +3599,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
     },
     scenarioInputs: {
       historicalShipments: toComparisonFileReference(input.shipmentsMapping),
-      scenarios: [
-        {
-          scenarioKey: "A" as const,
-          scenarioName: input.scenarioAName,
-          selectedFacilities: toComparisonSelectedFacilities(input.scenarioAFacilityOptionIds, facilityOptions, input.facilitiesMapping, input.candidateFacilitiesMapping)
-        },
-        {
-          scenarioKey: "B" as const,
-          scenarioName: input.scenarioBName,
-          selectedFacilities: toComparisonSelectedFacilities(input.scenarioBFacilityOptionIds, facilityOptions, input.facilitiesMapping, input.candidateFacilitiesMapping)
-        }
-      ]
+      scenarios: [scenarioAInput, scenarioBInput]
     },
     scenarioA: {
       scenarioKey: "A" as const,
@@ -3717,8 +3690,8 @@ function toScenarioShipmentReference(mapping: {
 
 function toSelectedScenarioOrigins(
   optionIds: string[],
-  currentOrigins: Array<{ sourceType: "CURRENT"; facilityId: string } & Record<string, unknown>>,
-  candidateOrigins: Array<{ sourceType: "CANDIDATE"; facilityId: string } & Record<string, unknown>>
+  currentOrigins: SupplyChainDesignRatingOrigin[],
+  candidateOrigins: SupplyChainDesignRatingOrigin[]
 ) {
   const selected = new Set(optionIds);
   return [...currentOrigins, ...candidateOrigins].filter((origin) => selected.has(`${origin.sourceType}:${origin.facilityId}`));
@@ -3726,15 +3699,7 @@ function toSelectedScenarioOrigins(
 
 function toCombinedScenarioFacilities(
   optionIds: string[],
-  facilityOptions: Array<{
-    optionId: string;
-    facilityType: "CURRENT" | "CANDIDATE";
-    facilityId: string;
-    facilityName: string;
-    currency: string | null;
-    annualFacilityWarehouseCost: number | null;
-    annualFixedCost: number | null;
-  }>
+  facilityOptions: WarehouseCostComparisonFacilityOption[]
 ) {
   const selected = new Set(optionIds);
   return facilityOptions
@@ -3770,21 +3735,7 @@ function toCombinedScenarioFacilities(
 
 function toComparisonSelectedFacilities(
   optionIds: string[],
-  facilityOptions: Array<{
-    optionId: string;
-    facilityType: "CURRENT" | "CANDIDATE";
-    facilityId: string;
-    facilityName: string;
-    city: string | null;
-    stateProvince: string | null;
-    country: string | null;
-    annualFacilityWarehouseCost: number | null;
-    annualFixedCost: number | null;
-    inboundFeePerPallet: number | null;
-    outboundFeePerPallet: number | null;
-    storageFeePerPalletPerMonth: number | null;
-    comparableAnnualWarehouseCost: number | null;
-  }>,
+  facilityOptions: WarehouseCostComparisonFacilityOption[],
   facilitiesMapping: { fileId: string; id: string; file: { contentHash?: string | null } },
   candidateFacilitiesMapping: { fileId: string; id: string; file: { contentHash?: string | null } }
 ) {

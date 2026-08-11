@@ -326,7 +326,7 @@ function prepareOneRequest({
     candidate,
     source,
     representedShipments,
-    currentTransportationCost: resolveCurrentTransportationCost(source, representedShipments),
+    currentTransportationCost: resolveCurrentTransportationCost(source),
     currentTransportationCostPerShipment: resolveCurrentTransportationCostPerShipment(source, representedShipments),
     representativePallets,
     representativeWeight,
@@ -348,7 +348,7 @@ function prepareOneRequest({
     ),
     rateRequestKey: requestKey,
     representedShipments,
-    currentTransportationCost: resolveCurrentTransportationCost(source, representedShipments),
+    currentTransportationCost: resolveCurrentTransportationCost(source),
     currentTransportationCostPerShipment: resolveCurrentTransportationCostPerShipment(source, representedShipments),
     representativePallets,
     representativeWeight,
@@ -408,7 +408,7 @@ function basePreparedRequest(
   };
 }
 
-function resolveCurrentTransportationCost(source: ShipmentSourceRow, representedShipments: number) {
+function resolveCurrentTransportationCost(source: ShipmentSourceRow) {
   if (source.transportationCost === null) {
     return null;
   }
@@ -678,6 +678,8 @@ function buildRateRequestKey(input: {
   candidate: CandidateFacility;
   source: ShipmentSourceRow;
   representedShipments: number;
+  currentTransportationCost: number | null;
+  currentTransportationCostPerShipment: number | null;
   representativePallets: number | null;
   representativeWeight: number | null;
   weightUnit: string | null;

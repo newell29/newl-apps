@@ -21,7 +21,7 @@ type NavGroup = {
   id: string;
   label: string;
   moduleKey?: ModuleKey;
-  allowedRoles?: PlatformRole[];
+  requiredRoles?: PlatformRole[];
   children: NavNode[];
 };
 
@@ -392,11 +392,11 @@ export function filterVisibleNavEntries(
   const visibleEntries: NavNode[] = [];
 
   for (const entry of entries) {
-    if (entry.allowedRoles && (!role || !entry.allowedRoles.includes(role))) {
-      continue;
-    }
-
     if (isNavGroup(entry)) {
+      if (entry.requiredRoles && (!role || !entry.requiredRoles.includes(role))) {
+        continue;
+      }
+
       const children = filterVisibleNavEntries(entry.children, role, enabledModuleKeys);
       if (children.length > 0) {
         visibleEntries.push({ ...entry, children });

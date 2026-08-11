@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { DeleteConfirmationCancelButton } from "@/modules/supply-chain-design/components/delete-confirmation-cancel-button";
 import {
   createSupplyChainDesignProjectAction,
-  deleteSupplyChainDesignProjectAction,
+  deleteSupplyChainDesignProjectFormAction,
   listSupplyChainDesignProjects,
   requireSupplyChainDesignStudioAccess
 } from "@/modules/supply-chain-design";
@@ -99,7 +99,7 @@ export default async function SupplyChainDesignStudioPage() {
                           <p className="text-xs text-mutedForeground">
                             Deleting this project will permanently remove its uploaded files, mappings, saved runs and results.
                           </p>
-                          <form action={deleteSupplyChainDesignProjectAction} className="mt-2 flex items-center gap-2">
+                          <form action={deleteSupplyChainDesignProjectFormAction} className="mt-2 flex items-center gap-2">
                             <input type="hidden" name="projectId" value={project.id} />
                             <DeleteConfirmationCancelButton />
                             <button type="submit" name="confirmDelete" value="on" className="rounded-md bg-danger px-2 py-1 font-semibold text-dangerForeground">
