@@ -1771,6 +1771,104 @@ NEWLS 2604816191908 1.00 ( )`
     expect(orders.map((order) => order.record_no)).toEqual(["PS210206", "PS210207"]);
   });
 
+  it("continues from the actual row count when Teamship caps a requested page", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "500";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "3";
+
+    const requestedOffsets: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        const offset = new URL(url).searchParams.get("offset") ?? "";
+        requestedOffsets.push(offset);
+
+        if (offset === "0") {
+          return Response.json({
+            data: [
+              { id: 10, record_no: "PS123450" },
+              { id: 11, record_no: "PS123451" }
+            ]
+          });
+        }
+
+        if (offset === "2") {
+          return Response.json({ data: [{ id: 12, record_no: "PS123456" }] });
+        }
+
+        return Response.json({ data: [] });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/12")) {
+        return Response.json({
+          data: { id: 12, shipment_id: "SR812345", record_no: "PS123456" }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR812345", psNumber: "PS123456" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(requestedOffsets).toEqual(["0", "2"]);
+    expect(orders).toEqual([
+      expect.objectContaining({ shipment_id: "SR812345", record_no: "PS123456" })
+    ]);
+  });
+
+  it("stops when Teamship repeats the same capped page", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "500";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "30";
+
+    const requestedOffsets: string[] = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        requestedOffsets.push(new URL(url).searchParams.get("offset") ?? "");
+        return Response.json({ data: [{ id: 10, record_no: "PS123450" }] });
+      }
+
+      throw new Error(`A repeated page must not fetch order details: ${url}`);
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR812345", psNumber: "PS123456" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(requestedOffsets).toEqual(["0", "1"]);
+    expect(orders).toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Teamship targeted order lookup returned no exact matches.",
+      expect.objectContaining({
+        requestedReferenceCount: 1,
+        scannedPageCount: 1,
+        scannedRowCount: 1,
+        stopReason: "REPEATED_PAGE"
+      })
+    );
+    warnSpy.mockRestore();
+  });
+
   it("prefers exact PS when a repeated SR belongs to a different Teamship PS", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
@@ -1880,12 +1978,14 @@ NEWLS 2604816191908 1.00 ( )`
       throw new Error(`A longer PS number must not be fetched for PS210206: ${url}`);
     });
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const orders = await fetchTeamshipShippingOrdersForReview({
       orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }],
       fetchImpl: fetchMock as unknown as typeof fetch
     });
 
     expect(orders).toEqual([]);
+    warnSpy.mockRestore();
   });
 
   it("parses Teamship UI page inventory serials from hidden order data", () => {

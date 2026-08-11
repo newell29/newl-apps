@@ -149,10 +149,25 @@ export async function fetchTeamshipShippingOrdersForReview({
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages();
+  const seenPageFingerprints = new Set<string>();
+  let offset = 0;
+  let scannedRowCount = 0;
+  let stopReason: "ALL_MATCHES_FOUND" | "EMPTY_PAGE" | "REPEATED_PAGE" | "MAX_PAGES" = "MAX_PAGES";
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const offset = pageIndex * pageLimit;
     const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
+    if (rows.length === 0) {
+      stopReason = "EMPTY_PAGE";
+      break;
+    }
+
+    const pageFingerprint = buildTeamshipListPageFingerprint(rows);
+    if (seenPageFingerprints.has(pageFingerprint)) {
+      stopReason = "REPEATED_PAGE";
+      break;
+    }
+    seenPageFingerprints.add(pageFingerprint);
+    scannedRowCount += rows.length;
 
     for (const row of rows) {
       const matchingTargetReferences = targetOrderReferences.filter(
@@ -231,15 +246,47 @@ export async function fetchTeamshipShippingOrdersForReview({
       targetOrderReferences.length > 0 &&
       matchedTargetReferenceKeys.size === targetOrderReferences.length
     ) {
+      stopReason = "ALL_MATCHES_FOUND";
       break;
     }
 
-    if (rows.length < pageLimit) {
-      break;
-    }
+    // Teamship may return fewer rows than the requested limit even when another
+    // page exists. Advance by the number actually returned instead of assuming
+    // the requested limit was honoured, otherwise exact PS/SR matches can be
+    // skipped or the first capped page can be mistaken for the end of the list.
+    offset += rows.length;
+  }
+
+  if (targetOrderReferences.length > 0 && matchedTargetReferenceKeys.size === 0) {
+    console.warn("Teamship targeted order lookup returned no exact matches.", {
+      requestedReferenceCount: targetOrderReferences.length,
+      requestedPageLimit: pageLimit,
+      configuredMaxPages: maxPages,
+      scannedPageCount: seenPageFingerprints.size,
+      scannedRowCount,
+      stopReason
+    });
   }
 
   return Array.from(details.values());
+}
+
+function buildTeamshipListPageFingerprint(rows: TeamshipShippingOrderSummary[]) {
+  return rows
+    .map((row, index) => {
+      const rowId = row.id ?? row.order_id;
+      if (rowId !== null && rowId !== undefined && String(rowId).trim()) {
+        return `ID:${String(rowId).trim()}`;
+      }
+
+      return [
+        `ROW:${index}`,
+        normalizeTeamshipPsNumber(row),
+        normalizeTeamshipShipmentId(row),
+        String(row.created_at ?? "")
+      ].join(":");
+    })
+    .join("|");
 }
 
 export async function searchTeamshipProductsForShipping({
