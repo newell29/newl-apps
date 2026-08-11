@@ -2,6 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fetchTeamshipShippingOrdersForReview } from "@/server/integrations/teamship";
 
+type TeamshipDashboardRequestBody = {
+  requiresCounts: boolean;
+  search: Array<{
+    fields: string[];
+    operator: string;
+    key: string;
+    ignoreCase: boolean;
+  }>;
+  skip: number;
+  take: number;
+  statusSearch: string;
+};
+
+function readTeamshipDashboardRequestBody(init?: RequestInit) {
+  return JSON.parse(String(init?.body ?? "{}")) as TeamshipDashboardRequestBody;
+}
+
 describe("targeted Teamship pagination", () => {
   afterEach(() => {
     delete process.env.TEAMSHIP_EMAIL;
@@ -95,15 +112,16 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
-      if (url.includes("/api/ship-inventories/dashboard?")) {
-        const requestUrl = new URL(url);
-        if (requestUrl.searchParams.get("statusSearch") === "requested") {
+      if (url.endsWith("/api/ship-inventories/dashboard")) {
+        const requestBody = readTeamshipDashboardRequestBody(init);
+        if (requestBody.statusSearch === "requested") {
           return Response.json({ result: [], count: 0 });
         }
-        archiveOffsets.push(requestUrl.searchParams.get("skip") ?? "");
-        expect(requestUrl.searchParams.get("statusSearch")).toBe("shipped");
-        expect(requestUrl.searchParams.get("take")).toBe("2");
-        expect(JSON.parse(requestUrl.searchParams.get("search") ?? "[]")).toEqual([
+        archiveOffsets.push(String(requestBody.skip));
+        expect(init?.method).toBe("POST");
+        expect(requestBody.statusSearch).toBe("shipped");
+        expect(requestBody.take).toBe(2);
+        expect(requestBody.search).toEqual([
           {
             fields: [],
             operator: "contains",
@@ -112,13 +130,15 @@ describe("targeted Teamship pagination", () => {
           }
         ]);
         expect(init?.headers).toMatchObject({
+          accept: "application/json",
+          "content-type": "application/json",
           cookie: "teamship_session=after-login",
           "x-csrf-token": "csrf-synthetic"
         });
 
         return Response.json({
           result:
-            requestUrl.searchParams.get("skip") === "2"
+            requestBody.skip === 2
               ? [{ id: 42, record_no: "PS123456", shipment_id: "SR812345", status: "Complete" }]
               : [
                   { id: 40, record_no: "PS123450", shipment_id: "SR812340" },
@@ -190,10 +210,17 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
-      if (url.includes("/api/ship-inventories/dashboard?")) {
-        const requestUrl = new URL(url);
-        dashboardStatuses.push(requestUrl.searchParams.get("statusSearch") ?? "");
-        expect(JSON.parse(requestUrl.searchParams.get("search") ?? "[]")).toEqual([
+      if (url.endsWith("/api/ship-inventories/dashboard")) {
+        const requestBody = readTeamshipDashboardRequestBody(init);
+        dashboardStatuses.push(requestBody.statusSearch);
+        expect(init?.method).toBe("POST");
+        expect(requestBody).toMatchObject({
+          requiresCounts: true,
+          skip: 0,
+          take: 100,
+          statusSearch: "requested"
+        });
+        expect(requestBody.search).toEqual([
           {
             fields: [],
             operator: "contains",
@@ -334,7 +361,7 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
-      if (url.includes("/api/ship-inventories/dashboard?")) {
+      if (url.endsWith("/api/ship-inventories/dashboard")) {
         return Response.json({ message: "temporary archive failure" }, { status: 503 });
       }
 
@@ -385,7 +412,7 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
-      if (url.includes("/api/ship-inventories/dashboard?")) {
+      if (url.endsWith("/api/ship-inventories/dashboard")) {
         return Response.json({ result: [], count: 0 });
       }
 
@@ -428,9 +455,9 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
-      if (url.includes("/api/ship-inventories/dashboard?")) {
-        const statusSearch = new URL(url).searchParams.get("statusSearch") ?? "";
-        dashboardStatuses.push(statusSearch);
+      if (url.endsWith("/api/ship-inventories/dashboard")) {
+        const requestBody = readTeamshipDashboardRequestBody(init);
+        dashboardStatuses.push(requestBody.statusSearch);
         return Response.json({ result: [], count: 0 });
       }
 

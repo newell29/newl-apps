@@ -8,6 +8,7 @@ const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
 const DEFAULT_PAGE_LIMIT = 500;
 const DEFAULT_MAX_PAGES = 30;
 const DEFAULT_TARGETED_MAX_PAGES = 100;
+const TEAMSHIP_DASHBOARD_PAGE_LIMIT = 100;
 
 type TeamshipFetchOptions = {
   tenantId?: string | null;
@@ -797,24 +798,24 @@ async function listTeamshipDashboardShippingOrders({
   fetchImpl: typeof fetch;
 }) {
   const url = new URL(`${webBaseUrl}/api/ship-inventories/dashboard`);
-  url.searchParams.set("skip", String(offset));
-  url.searchParams.set("take", String(limit));
-  url.searchParams.set("requiresCounts", "true");
-  url.searchParams.set("statusSearch", statusSearch);
-  url.searchParams.set(
-    "search",
-    JSON.stringify([
+  const requestBody = {
+    requiresCounts: true,
+    search: [
       {
         fields: [],
         operator: "contains",
         key: "Garland Canada Distribution",
         ignoreCase: true
       }
-    ])
-  );
+    ],
+    skip: offset,
+    take: Math.min(limit, TEAMSHIP_DASHBOARD_PAGE_LIMIT),
+    statusSearch
+  };
 
   const headers: Record<string, string> = {
     accept: "application/json",
+    "content-type": "application/json",
     cookie: webSession.cookieHeader
   };
   if (webSession.csrfToken) {
@@ -822,7 +823,9 @@ async function listTeamshipDashboardShippingOrders({
   }
 
   const response = await fetchImpl(url, {
+    method: "POST",
     headers,
+    body: JSON.stringify(requestBody),
     cache: "no-store"
   });
   const json = (await response.json().catch(() => null)) as TeamshipDashboardListResponse | null;
@@ -830,7 +833,7 @@ async function listTeamshipDashboardShippingOrders({
 
   if (!response.ok || !Array.isArray(rows)) {
     throw new Error(
-      `Unable to list ${statusSearch === "shipped" ? "completed" : "active"} Teamship shipping orders. Teamship returned status ${response.status}.`
+      `Unable to list ${statusSearch === "shipped" ? "completed" : "active"} Teamship shipping orders. Teamship dashboard POST returned status ${response.status}.`
     );
   }
 
