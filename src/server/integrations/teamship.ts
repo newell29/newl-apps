@@ -163,6 +163,11 @@ export async function fetchTeamshipShippingOrdersForReview({
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages(targetOrderReferences.length > 0);
+  const legacyActiveFallbackRowLimit = targetOrderReferences.length > 0 ? 1_000 : null;
+  const legacyActiveFallbackMaxPages =
+    legacyActiveFallbackRowLimit !== null
+      ? Math.min(maxPages, Math.max(1, Math.ceil(legacyActiveFallbackRowLimit / pageLimit)))
+      : maxPages;
   const seenPageFingerprints = new Set<string>();
   let offset = 0;
   let scannedRowCount = 0;
@@ -287,8 +292,25 @@ export async function fetchTeamshipShippingOrdersForReview({
     }
   }
 
-  for (let pageIndex = 0; !usedTargetedActiveDashboard && pageIndex < maxPages; pageIndex += 1) {
-    const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
+  for (
+    let pageIndex = 0;
+    !usedTargetedActiveDashboard && pageIndex < legacyActiveFallbackMaxPages;
+    pageIndex += 1
+  ) {
+    const remainingLegacyRows =
+      legacyActiveFallbackRowLimit === null
+        ? pageLimit
+        : Math.max(0, legacyActiveFallbackRowLimit - scannedRowCount);
+    if (remainingLegacyRows === 0) {
+      break;
+    }
+    const rows = await listTeamshipShippingOrders({
+      apiBaseUrl,
+      token,
+      limit: Math.min(pageLimit, remainingLegacyRows),
+      offset,
+      fetchImpl
+    });
     if (rows.length === 0) {
       stopReason = "EMPTY_PAGE";
       break;
@@ -410,7 +432,7 @@ export async function fetchTeamshipShippingOrdersForReview({
     console.warn("Teamship targeted order lookup returned no exact matches.", {
       requestedReferenceCount: targetOrderReferences.length,
       requestedPageLimit: pageLimit,
-      configuredMaxPages: maxPages,
+      configuredMaxPages: usedTargetedActiveDashboard ? maxPages : legacyActiveFallbackMaxPages,
       scannedPageCount: seenPageFingerprints.size,
       scannedRowCount,
       stopReason

@@ -239,6 +239,55 @@ describe("targeted Teamship pagination", () => {
     ]);
   });
 
+  it("caps the legacy targeted active API fallback at exactly 1,000 rows", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "400";
+    process.env.TEAMSHIP_TARGETED_MAX_LIST_PAGES = "100";
+
+    const requestedPages: Array<{ limit: string; offset: string }> = [];
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "synthetic-token" } });
+      }
+
+      if (url.endsWith("/login")) {
+        throw new Error("Synthetic dashboard outage");
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        const requestUrl = new URL(url);
+        const limit = requestUrl.searchParams.get("limit") ?? "";
+        const offset = requestUrl.searchParams.get("offset") ?? "";
+        requestedPages.push({ limit, offset });
+        return Response.json({
+          data: Array.from({ length: Number(limit) }, (_, index) => ({
+            id: `synthetic-${offset}-${index}`,
+            record_no: "PS123450",
+            shipment_id: "SR812340"
+          }))
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR812345", psNumber: "PS123456" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(requestedPages).toEqual([
+      { limit: "400", offset: "0" },
+      { limit: "400", offset: "400" },
+      { limit: "200", offset: "800" }
+    ]);
+    expect(orders).toEqual([]);
+  });
+
   it("preserves a partial exact result when the completed-order archive lookup fails", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";

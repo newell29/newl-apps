@@ -42,7 +42,7 @@ Record & Replay was not the primary source for this walkthrough. That means we a
 
 Observed in the signed-in Teamship shipping-order screen on 2026-08-11: **Complete** is a separate dashboard archive backed by the `shipped` status view. Warehouse staff move orders there after physically picking and completing them; this is not an automatic state applied when an order first arrives. Newl Apps reads this archive only during an explicit saved-batch **Recheck Teamship**, and only after the active API lookup misses one or more requested references. Normal automatic review remains limited to active orders. This read-only fallback supports later rechecks after warehouse completion and does not change Teamship status or order data.
 
-The signed-in **Open** dashboard is backed by the same dashboard endpoint with `statusSearch=requested`. For targeted Garland review, Newl Apps uses Teamship's server-side Garland search on this Open view and then confirms exact PS/SR pairs deterministically. This avoids exhaustive traversal of unrelated active orders. The broad active API list remains a compatibility fallback only when the dashboard request fails.
+The signed-in **Open** dashboard is backed by the same dashboard endpoint with `statusSearch=requested`. For targeted Garland review, Newl Apps uses Teamship's server-side Garland search on this Open view and then confirms exact PS/SR pairs deterministically. This avoids exhaustive traversal of unrelated active orders. The broad active API list remains a compatibility fallback only when the dashboard request fails and is capped at 1,000 rows.
 
 ## Source Of Truth Rules
 
