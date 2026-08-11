@@ -1,7 +1,29 @@
+import { createHash, randomUUID } from "node:crypto";
+
 const MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS = 45_000;
 const MICROSOFT_GRAPH_MAIL_PAGE_SIZE = 50;
 const MICROSOFT_GRAPH_READ_MAX_ATTEMPTS = 3;
 const MICROSOFT_GRAPH_READ_RETRY_DELAYS_MS = [250, 1_000] as const;
+
+type MicrosoftGraphReadOutcome =
+  | "success"
+  | "retry_scheduled"
+  | "recovered"
+  | "exhausted"
+  | "permanent_failure";
+
+type MicrosoftGraphReadDiagnostics = {
+  outcome: MicrosoftGraphReadOutcome;
+  attemptedAt: string;
+  attempt: number;
+  maxAttempts: number;
+  status: number | null;
+  graphRequestId: string | null;
+  clientRequestId: string;
+  resourceFingerprint: string;
+};
+
+const microsoftGraphReadDiagnostics = new WeakMap<Response, MicrosoftGraphReadDiagnostics>();
 
 export type MicrosoftGraphMailRecipient = {
   emailAddress?: {
@@ -428,30 +450,60 @@ async function extractMicrosoftGraphResponseError(response: Response) {
   const code = json?.error?.code;
   const message = json?.error?.message;
 
-  if (!code && !message) {
-    return null;
-  }
+  const diagnostics = microsoftGraphReadDiagnostics.get(response);
+  const diagnosticSuffix = diagnostics ? ` ${formatMicrosoftGraphReadDiagnostics(diagnostics)}` : "";
 
-  return `Microsoft Graph request failed with status ${response.status}${code ? ` (${code})` : ""}${message ? `: ${message}` : ""}.`;
+  if (!code && !message) return diagnostics ? `Microsoft Graph request failed with status ${response.status}.${diagnosticSuffix}` : null;
+
+  return `Microsoft Graph request failed with status ${response.status}${code ? ` (${code})` : ""}${message ? `: ${message}` : ""}.${diagnosticSuffix}`;
 }
 
 async function fetchMicrosoftGraphReadWithRetry(url: string, init: RequestInit) {
   let lastError: unknown = null;
+  const clientRequestId = randomUUID();
+  const resourceFingerprint = createHash("sha256").update(new URL(url).pathname).digest("hex").slice(0, 16);
 
   for (let attempt = 0; attempt < MICROSOFT_GRAPH_READ_MAX_ATTEMPTS; attempt += 1) {
     try {
       const response = await fetch(url, {
         ...init,
+        headers: {
+          ...readMicrosoftGraphHeaders(init.headers),
+          "client-request-id": clientRequestId,
+          "return-client-request-id": "true"
+        },
         signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
       });
       const canRetry =
         attempt < MICROSOFT_GRAPH_READ_MAX_ATTEMPTS - 1 &&
         isRetryableMicrosoftGraphReadStatus(response.status);
+      const diagnostics = buildMicrosoftGraphReadDiagnostics({
+        outcome: response.ok
+          ? attempt > 0
+            ? "recovered"
+            : "success"
+          : canRetry
+            ? "retry_scheduled"
+            : isRetryableMicrosoftGraphReadStatus(response.status)
+              ? "exhausted"
+              : "permanent_failure",
+        attempt,
+        response,
+        clientRequestId,
+        resourceFingerprint
+      });
 
       if (!canRetry) {
+        microsoftGraphReadDiagnostics.set(response, diagnostics);
+        if (diagnostics.outcome === "recovered") {
+          console.info("Microsoft Graph read recovered after a transient failure.", diagnostics);
+        } else if (diagnostics.outcome !== "success") {
+          console.warn("Microsoft Graph read did not succeed.", diagnostics);
+        }
         return response;
       }
 
+      console.warn("Microsoft Graph read will retry a transient failure.", diagnostics);
       const retryDelayMs = resolveMicrosoftGraphRetryDelayMs(
         response,
         MICROSOFT_GRAPH_READ_RETRY_DELAYS_MS[attempt] ?? 1_000
@@ -460,13 +512,29 @@ async function fetchMicrosoftGraphReadWithRetry(url: string, init: RequestInit) 
       await waitForMicrosoftGraphRetry(retryDelayMs);
     } catch (error) {
       lastError = error;
-      if (
-        attempt >= MICROSOFT_GRAPH_READ_MAX_ATTEMPTS - 1 ||
-        !isRetryableMicrosoftGraphReadError(error)
-      ) {
-        throw error;
+      const canRetry =
+        attempt < MICROSOFT_GRAPH_READ_MAX_ATTEMPTS - 1 &&
+        isRetryableMicrosoftGraphReadError(error);
+      const diagnostics: MicrosoftGraphReadDiagnostics = {
+        outcome: canRetry ? "retry_scheduled" : "exhausted",
+        attemptedAt: new Date().toISOString(),
+        attempt: attempt + 1,
+        maxAttempts: MICROSOFT_GRAPH_READ_MAX_ATTEMPTS,
+        status: null,
+        graphRequestId: null,
+        clientRequestId,
+        resourceFingerprint
+      };
+
+      if (!canRetry) {
+        console.warn("Microsoft Graph read transport failure was not recovered.", diagnostics);
+        throw new Error(
+          `${error instanceof Error ? error.message : "Microsoft Graph transport failure."} ${formatMicrosoftGraphReadDiagnostics(diagnostics)}`,
+          { cause: error }
+        );
       }
 
+      console.warn("Microsoft Graph read will retry a transient transport failure.", diagnostics);
       await waitForMicrosoftGraphRetry(
         MICROSOFT_GRAPH_READ_RETRY_DELAYS_MS[attempt] ?? 1_000
       );
@@ -476,6 +544,39 @@ async function fetchMicrosoftGraphReadWithRetry(url: string, init: RequestInit) 
   throw lastError instanceof Error
     ? lastError
     : new Error("Microsoft Graph read failed after bounded retry.");
+}
+
+function readMicrosoftGraphHeaders(headers: HeadersInit | undefined) {
+  return Object.fromEntries(new Headers(headers).entries());
+}
+
+function buildMicrosoftGraphReadDiagnostics({
+  outcome,
+  attempt,
+  response,
+  clientRequestId,
+  resourceFingerprint
+}: {
+  outcome: MicrosoftGraphReadOutcome;
+  attempt: number;
+  response: Response;
+  clientRequestId: string;
+  resourceFingerprint: string;
+}): MicrosoftGraphReadDiagnostics {
+  return {
+    outcome,
+    attemptedAt: new Date().toISOString(),
+    attempt: attempt + 1,
+    maxAttempts: MICROSOFT_GRAPH_READ_MAX_ATTEMPTS,
+    status: response.status,
+    graphRequestId: response.headers?.get("request-id") ?? null,
+    clientRequestId,
+    resourceFingerprint
+  };
+}
+
+function formatMicrosoftGraphReadDiagnostics(diagnostics: MicrosoftGraphReadDiagnostics) {
+  return `[Graph diagnostics: outcome=${diagnostics.outcome}; attempt=${diagnostics.attempt}/${diagnostics.maxAttempts}; requestId=${diagnostics.graphRequestId ?? "unavailable"}; clientRequestId=${diagnostics.clientRequestId}; resource=${diagnostics.resourceFingerprint}; at=${diagnostics.attemptedAt}]`;
 }
 
 function isRetryableMicrosoftGraphReadStatus(status: number) {

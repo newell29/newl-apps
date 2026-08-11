@@ -23,6 +23,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Rivet queue tests confirm that a later approved Garland suggestion waits behind active or review-blocked Garland work and is claimed automatically only after that workflow scope clears.
 - Garland email automation tests distinguish completely missed batches from partial matches, preserve the retry timer across mailbox rescans, defer each complete miss for 5 minutes, and finalize after the twelfth retry. Saved-review recovery tests require an all-missing zero-match batch, preserve tenant-scoped exact PS/SR references, refresh only Newl Apps review evidence, and reject the action for partial or completed comparisons.
 - Microsoft Graph mail regression tests retry transient attachment metadata and raw-download failures, recover within the three-attempt bound, and do not retry permanent authorization failures.
+- Graph diagnostic tests require a Microsoft request ID and hashed resource fingerprint for recovered reads and durable correlation evidence when all three attempts fail, without any Teams notification path.
 
 ## Data model
 

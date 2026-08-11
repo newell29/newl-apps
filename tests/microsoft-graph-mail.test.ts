@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAndSendMicrosoftGraphMailboxMessage,
@@ -6,6 +6,11 @@ import {
   fetchMicrosoftGraphMessageAttachments,
   fetchMicrosoftGraphMessageAttachmentContent
 } from "@/server/integrations/microsoft-graph-mail";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("Microsoft Graph mail attachment downloads", () => {
   beforeEach(() => {
@@ -32,11 +37,19 @@ describe("Microsoft Graph mail attachment downloads", () => {
 
   it("retries transient attachment metadata failures before giving up on a Garland PDF", async () => {
     vi.useFakeTimers();
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 500,
+        headers: { "request-id": "graph-request-1" }
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         value: [{ id: "attachment-1", name: "orders.pdf", contentType: "application/pdf" }]
-      }), { status: 200 }));
+      }), {
+        status: 200,
+        headers: { "request-id": "graph-request-2" }
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     const resultPromise = fetchMicrosoftGraphMessageAttachments("token", "me", "message-1");
@@ -46,7 +59,23 @@ describe("Microsoft Graph mail attachment downloads", () => {
       expect.objectContaining({ id: "attachment-1", name: "orders.pdf" })
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Microsoft Graph read will retry a transient failure.",
+      expect.objectContaining({
+        outcome: "retry_scheduled",
+        attempt: 1,
+        graphRequestId: "graph-request-1",
+        resourceFingerprint: expect.any(String)
+      })
+    );
+    expect(infoSpy).toHaveBeenCalledWith(
+      "Microsoft Graph read recovered after a transient failure.",
+      expect.objectContaining({
+        outcome: "recovered",
+        attempt: 2,
+        graphRequestId: "graph-request-2"
+      })
+    );
   });
 
   it("does not retry permanent attachment metadata failures", async () => {
@@ -67,6 +96,8 @@ describe("Microsoft Graph mail attachment downloads", () => {
 
   it("retries transient raw attachment download failures", async () => {
     vi.useFakeTimers();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const pdfBytes = Buffer.from("%PDF-1.7");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
@@ -86,7 +117,25 @@ describe("Microsoft Graph mail attachment downloads", () => {
       contentBytes: pdfBytes.toString("base64")
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    vi.useRealTimers();
+  });
+
+  it("persists safe correlation evidence after all transient attempts fail", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 500, headers: { "request-id": "graph-request-1" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 500, headers: { "request-id": "graph-request-2" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 500, headers: { "request-id": "graph-request-3" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = fetchMicrosoftGraphMessageAttachments("token", "me", "message-1");
+    const assertion = expect(resultPromise).rejects.toThrow(
+      /outcome=exhausted; attempt=3\/3; requestId=graph-request-3; clientRequestId=.*; resource=.*; at=/
+    );
+    await vi.runAllTimersAsync();
+
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 
