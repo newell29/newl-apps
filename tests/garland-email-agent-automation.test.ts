@@ -138,6 +138,34 @@ describe("Garland email attachment processing queue", () => {
     );
   });
 
+  it("processes only the explicitly selected tenant attachments and bypasses the scheduled retry delay", async () => {
+    await processGarlandEmailAgentReadyAttachments(context, {
+      attachmentIds: [" attachment-1 ", "attachment-1"],
+      maxAttachments: 25
+    });
+
+    expect(prismaMock.garlandSourceAttachment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId: "tenant-1",
+          id: { in: ["attachment-1"] },
+          OR: [
+            {
+              intakeStatus: {
+                in: [
+                  "PDF_METADATA_READY",
+                  ...Array.from({ length: 12 }, (_, index) => `TEAMSHIP_BATCH_RETRY_PENDING_${index + 1}`)
+                ]
+              }
+            }
+          ],
+          sourceEmail: expect.any(Object)
+        },
+        take: 1
+      })
+    );
+  });
+
   it("defers a newly received batch when every PDF order is missing from Teamship", async () => {
     prismaMock.garlandSourceAttachment.findMany.mockResolvedValue([buildAttachment("PDF_METADATA_READY")]);
 

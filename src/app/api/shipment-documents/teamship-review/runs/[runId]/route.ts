@@ -14,6 +14,7 @@ import { requireAdmin, requireModule, requireMutationAccess } from "@/server/aut
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ runId: string }> }) {
   try {
