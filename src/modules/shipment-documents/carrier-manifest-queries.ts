@@ -34,6 +34,7 @@ type CarrierManifestRunRecord = {
   suretrackWorkbookBytes: Uint8Array | null;
   clarkeWorkbookBytes: Uint8Array | null;
   guilbaultWorkbookBytes: Uint8Array | null;
+  rosedaleWorkbookBytes: Uint8Array | null;
   signedCopyFileName: string | null;
   signedCopyUploadedAt: Date | null;
   attachments: Array<{
@@ -76,6 +77,7 @@ export async function getGarlandCarrierManifestHistory(
         suretrackWorkbookBytes: true,
         clarkeWorkbookBytes: true,
         guilbaultWorkbookBytes: true,
+        rosedaleWorkbookBytes: true,
         signedCopyFileName: true,
         signedCopyUploadedAt: true,
         attachments: {
@@ -135,6 +137,7 @@ function mapGarlandCarrierManifestRunSummary(record: CarrierManifestRunRecord): 
     hasSuretrackWorkbook: Boolean(record.suretrackWorkbookBytes),
     hasClarkeWorkbook: Boolean(record.clarkeWorkbookBytes),
     hasGuilbaultWorkbook: Boolean(record.guilbaultWorkbookBytes),
+    hasRosedaleWorkbook: Boolean(record.rosedaleWorkbookBytes),
     signedCopyFileName: record.signedCopyFileName,
     signedCopyUploadedAt: record.signedCopyUploadedAt?.toISOString() ?? null,
     attachments
@@ -147,7 +150,8 @@ function readCarrierCounts(value: unknown): Record<GarlandCarrierKey, number> {
     SPEEDY: 0,
     SURETRACK: 0,
     CLARKE: 0,
-    GUILBAULT: 0
+    GUILBAULT: 0,
+    ROSEDALE: 0
   };
 
   if (!value || typeof value !== "object") {

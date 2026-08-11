@@ -38,13 +38,15 @@ describe("Garland carrier manifest history queries", () => {
           MIDLAND: 2,
           SPEEDY: 1,
           CLARKE: 1,
-          GUILBAULT: 1
+          GUILBAULT: 1,
+          ROSEDALE: 1
         },
         midlandWorkbookBytes: new Uint8Array([1]),
         speedyWorkbookBytes: null,
         suretrackWorkbookBytes: new Uint8Array([2]),
         clarkeWorkbookBytes: new Uint8Array([3]),
         guilbaultWorkbookBytes: new Uint8Array([4]),
+        rosedaleWorkbookBytes: new Uint8Array([5]),
         signedCopyFileName: "signed.pdf",
         signedCopyUploadedAt: new Date("2026-07-23T17:30:00.000Z"),
         attachments: [
@@ -83,6 +85,7 @@ describe("Garland carrier manifest history queries", () => {
         suretrackWorkbookBytes: true,
         clarkeWorkbookBytes: true,
         guilbaultWorkbookBytes: true,
+        rosedaleWorkbookBytes: true,
         attachments: expect.any(Object)
       })
     });
@@ -103,7 +106,8 @@ describe("Garland carrier manifest history queries", () => {
         SPEEDY: 1,
         SURETRACK: 0,
         CLARKE: 1,
-        GUILBAULT: 1
+        GUILBAULT: 1,
+        ROSEDALE: 1
       },
       createdAt: "2026-07-23T16:00:00.000Z",
       createdByName: "CSR User",
@@ -112,6 +116,7 @@ describe("Garland carrier manifest history queries", () => {
       hasSuretrackWorkbook: true,
       hasClarkeWorkbook: true,
       hasGuilbaultWorkbook: true,
+      hasRosedaleWorkbook: true,
       signedCopyFileName: "signed.pdf",
       signedCopyUploadedAt: "2026-07-23T17:30:00.000Z",
       attachments: [
