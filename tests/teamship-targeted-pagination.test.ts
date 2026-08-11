@@ -112,6 +112,15 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
+      if (url.endsWith("/ship-inventories")) {
+        expect(init?.headers).toMatchObject({
+          cookie: "teamship_session=after-login"
+        });
+        return new Response('<meta name="csrf-token" content="csrf-authenticated">', {
+          headers: { "set-cookie": "dashboard_session=authenticated; Path=/" }
+        });
+      }
+
       if (url.endsWith("/api/ship-inventories/dashboard")) {
         const requestBody = readTeamshipDashboardRequestBody(init);
         if (requestBody.statusSearch === "requested") {
@@ -132,8 +141,8 @@ describe("targeted Teamship pagination", () => {
         expect(init?.headers).toMatchObject({
           accept: "application/json",
           "content-type": "application/json",
-          cookie: "teamship_session=after-login",
-          "x-csrf-token": "csrf-synthetic"
+          cookie: "teamship_session=after-login; dashboard_session=authenticated",
+          "x-csrf-token": "csrf-authenticated"
         });
 
         return Response.json({
@@ -182,7 +191,7 @@ describe("targeted Teamship pagination", () => {
     ]);
   });
 
-  it("uses Teamship's server-side active Garland search instead of scanning the full active API", async () => {
+  it("uses Teamship's authenticated CSRF token for the server-side active Garland search", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
     process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
@@ -210,6 +219,15 @@ describe("targeted Teamship pagination", () => {
         });
       }
 
+      if (url.endsWith("/ship-inventories")) {
+        expect(init?.headers).toMatchObject({
+          cookie: "teamship_session=after-login"
+        });
+        return new Response('<meta name="csrf-token" content="csrf-authenticated">', {
+          headers: { "set-cookie": "dashboard_session=authenticated; Path=/" }
+        });
+      }
+
       if (url.endsWith("/api/ship-inventories/dashboard")) {
         const requestBody = readTeamshipDashboardRequestBody(init);
         dashboardStatuses.push(requestBody.statusSearch);
@@ -228,6 +246,10 @@ describe("targeted Teamship pagination", () => {
             ignoreCase: true
           }
         ]);
+        expect(init?.headers).toMatchObject({
+          cookie: "teamship_session=after-login; dashboard_session=authenticated",
+          "x-csrf-token": "csrf-authenticated"
+        });
         return Response.json({
           result: [{ id: 61, record_no: "PS123456", shipment_id: "SR812345", status: "Open" }],
           count: 1
