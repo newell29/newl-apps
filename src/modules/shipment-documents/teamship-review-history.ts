@@ -422,6 +422,40 @@ export async function updateTeamshipReviewRunReview(input: UpdateTeamshipReviewR
   });
 }
 
+export async function reconcileRecheckedTeamshipReviewWorkflowStatuses({
+  context,
+  runId,
+  review
+}: {
+  context: AuthenticatedContext;
+  runId: string;
+  review: GarlandTeamshipReviewResponse;
+}) {
+  const client = prisma as TeamshipReviewRunQueryClient;
+
+  for (const orderReview of review.reviews) {
+    await client.teamshipReviewOrder.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        runId,
+        psNumber: orderReview.psNumber,
+        srNumber: orderReview.srNumber,
+        workflowStatus: { in: ["NEEDS_REVIEW", "NEEDS_SETUP"] },
+        bolPrintedAt: null,
+        orderCompletedAt: null,
+        run: {
+          tenantId: context.tenantId,
+          workflowKey: WORKFLOW_KEY,
+          deletedAt: null
+        }
+      },
+      data: {
+        workflowStatus: getInitialWorkflowStatus(orderReview)
+      }
+    });
+  }
+}
+
 export async function getTeamshipReviewRunWorkspace(
   context: AuthenticatedContext,
   runId: string

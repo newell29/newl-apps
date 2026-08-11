@@ -22,6 +22,7 @@ vi.mock("@/server/db", () => ({
 import {
   getReviewedTeamshipSrNumbers,
   getTeamshipReviewHistory,
+  reconcileRecheckedTeamshipReviewWorkflowStatuses,
   updateTeamshipReviewRunReview
 } from "@/modules/shipment-documents/teamship-review-history";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
@@ -208,6 +209,31 @@ describe("Teamship review history", () => {
       widthIn: 22,
       heightIn: 48,
       weightLb: 187
+    });
+  });
+
+  it("reclassifies only unstarted rows after an all-missing batch is rechecked", async () => {
+    const review = sampleReview();
+    review.reviews[0]!.status = "PASS";
+
+    await reconcileRecheckedTeamshipReviewWorkflowStatuses({ context, runId: "run-1", review });
+
+    expect(prismaMock.teamshipReviewOrder.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        tenantId: "tenant-1",
+        runId: "run-1",
+        psNumber: review.reviews[0]!.psNumber,
+        srNumber: review.reviews[0]!.srNumber,
+        workflowStatus: { in: ["NEEDS_REVIEW", "NEEDS_SETUP"] },
+        bolPrintedAt: null,
+        orderCompletedAt: null,
+        run: {
+          tenantId: "tenant-1",
+          workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+          deletedAt: null
+        }
+      }),
+      data: { workflowStatus: "NEEDS_SETUP" }
     });
   });
 });

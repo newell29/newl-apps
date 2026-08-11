@@ -8,6 +8,7 @@ import {
   updateTeamshipReviewOrderWorkflow,
   updateTeamshipReviewRunReview
 } from "@/modules/shipment-documents/teamship-review-history";
+import { recheckCompletelyMissingTeamshipReviewRun } from "@/modules/shipment-documents/teamship-review-recheck";
 import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 import { requireAdmin, requireModule, requireMutationAccess } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -59,6 +60,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ru
     const { runId } = await params;
     const body = (await request.json().catch(() => null)) as { action?: string; orderId?: string; review?: unknown } | null;
     const action = body?.action;
+
+    if (action === "recheckTeamship") {
+      const review = await recheckCompletelyMissingTeamshipReviewRun(context, runId);
+
+      return NextResponse.json({ review });
+    }
 
     if (action === "updateReview") {
       const review = readReviewResponse(body?.review);

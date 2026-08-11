@@ -109,11 +109,7 @@ describe("Garland email attachment processing queue", () => {
             { intakeStatus: { in: ["PDF_METADATA_READY"] } },
             expect.objectContaining({
               intakeStatus: {
-                in: [
-                  "TEAMSHIP_BATCH_RETRY_PENDING_1",
-                  "TEAMSHIP_BATCH_RETRY_PENDING_2",
-                  "TEAMSHIP_BATCH_RETRY_PENDING_3"
-                ]
+                in: Array.from({ length: 12 }, (_, index) => `TEAMSHIP_BATCH_RETRY_PENDING_${index + 1}`)
               },
               updatedAt: { lte: new Date("2026-08-11T12:25:00.000Z") }
             })
@@ -149,7 +145,7 @@ describe("Garland email attachment processing queue", () => {
 
     expect(result.deferredAllMissingAttachmentCount).toBe(1);
     expect(result.skippedReasons).toContain(
-      "4 ORDERS 6 PAGES - PS123456 - PS123459.pdf: all 4 PDF orders were missing in Teamship; retry 1 of 3 is deferred for 5 minutes."
+      "4 ORDERS 6 PAGES - PS123456 - PS123459.pdf: all 4 PDF orders were missing in Teamship; retry 1 of 12 is deferred for 5 minutes."
     );
     expect(saveTeamshipReviewRunMock).not.toHaveBeenCalled();
     expect(prismaMock.garlandSourceAttachment.update).toHaveBeenLastCalledWith(
@@ -175,9 +171,9 @@ describe("Garland email attachment processing queue", () => {
     );
   });
 
-  it("finalizes a completely missing batch after the third delayed retry", async () => {
+  it("finalizes a completely missing batch after the twelfth delayed retry", async () => {
     prismaMock.garlandSourceAttachment.findMany.mockResolvedValue([
-      buildAttachment("TEAMSHIP_BATCH_RETRY_PENDING_3")
+      buildAttachment("TEAMSHIP_BATCH_RETRY_PENDING_12")
     ]);
 
     const result = await processGarlandEmailAgentReadyAttachments(context, { maxAttachments: 8 });
