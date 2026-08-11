@@ -50,6 +50,7 @@ type QuickBooksConnection = {
 
 const QUICKBOOKS_HOME_CURRENCY = "CAD";
 const QUICKBOOKS_FX_SOURCE = "QUICKBOOKS_POSTED_TRANSACTION";
+const INVOICE_AUTOMATION_QUICKBOOKS_LEGAL_ENTITY = "NEWL_WORLDWIDE";
 
 export async function POST(request: Request) {
   try {
@@ -624,6 +625,7 @@ async function getQuickBooksConnectionForInvoice({
   if (!config.realmId) {
     throw new QuickBooksPostingMappingError(`${credential.name} is missing a QuickBooks realm ID.`);
   }
+  assertInvoiceAutomationQuickBooksLegalEntity(credential, config);
 
   const cached = connectionByRealm.get(config.realmId);
   if (cached) {
@@ -654,6 +656,37 @@ function resolveQuickBooksCredential(credentials: QuickBooksCredentialRecord[], 
   }
 
   throw new QuickBooksPostingMappingError("The selected QuickBooks entity is missing its realm. Re-select the customer/vendor from the QuickBooks dropdown.");
+}
+
+function assertInvoiceAutomationQuickBooksLegalEntity(
+  credential: QuickBooksCredentialRecord,
+  config: ReturnType<typeof readQuickBooksPublicConfig>
+) {
+  const legalEntity = config.legalEntity ?? inferQuickBooksLegalEntityFromCredentialName(credential.name);
+  if (legalEntity === INVOICE_AUTOMATION_QUICKBOOKS_LEGAL_ENTITY) {
+    return;
+  }
+
+  if (legalEntity === "NEWL_USA") {
+    throw new QuickBooksPostingMappingError(
+      "Invoice automation currently posts only to Newl Worldwide. Re-select a Newl Worldwide QuickBooks customer/vendor before posting."
+    );
+  }
+
+  throw new QuickBooksPostingMappingError(
+    "Invoice automation could not confirm this QuickBooks connection is Newl Worldwide. Reconnect or re-select a Newl Worldwide QuickBooks customer/vendor before posting."
+  );
+}
+
+function inferQuickBooksLegalEntityFromCredentialName(name: string) {
+  const normalizedName = name.toLowerCase();
+  if (normalizedName.includes("worldwide")) {
+    return "NEWL_WORLDWIDE";
+  }
+  if (normalizedName.includes("usa")) {
+    return "NEWL_USA";
+  }
+  return null;
 }
 
 async function getMappingsForRealm(
@@ -756,6 +789,7 @@ function readQuickBooksPublicConfig(value: Prisma.JsonValue) {
   return {
     raw,
     realmId: typeof raw.realmId === "string" ? raw.realmId : null,
+    legalEntity: typeof raw.legalEntity === "string" ? raw.legalEntity : null,
     accessTokenExpiresAt: typeof raw.accessTokenExpiresAt === "string" ? raw.accessTokenExpiresAt : null
   };
 }

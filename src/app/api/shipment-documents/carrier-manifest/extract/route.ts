@@ -6,7 +6,10 @@ import {
   resolveManifestSkids,
   type ManifestSkidEvidence
 } from "@/modules/shipment-documents/carrier-manifest-extraction";
-import type { GarlandCarrierKey, GarlandCarrierManifestRow } from "@/modules/shipment-documents/carrier-manifest-types";
+import {
+  normalizeGarlandCarrier,
+  type GarlandCarrierManifestRow
+} from "@/modules/shipment-documents/carrier-manifest-types";
 import { extractPsNumberFromText, normalizePsNumber } from "@/modules/shipment-documents/ps-number";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -169,7 +172,7 @@ function buildPrompt(pageNumbers: number[]) {
     "Return exactly one OCR entry per attached image. Do not skip non-target carriers. Do not decide whether the app needs the row.",
     "Set isNewBolPage true only when the Header overview shows a new BILL OF LADING header with printed CARRIER, REFERENCES, and SHIPMENT ID fields.",
     "Set isNewBolPage false for continuation/footer pages, signature pages, or pages that only show lower BOL sections. A handwritten carrier name in a signature area is not a new BOL.",
-    "Read carrier as the literal value under the Carrier box label, for example SURETRACK STANDARD, SPEEDY, MIDLAND, DAY & ROSS, or blank.",
+    "Read carrier as the literal value under the Carrier box label, for example SURETRACK STANDARD, SPEEDY, MIDLAND, CLARKE, GUILBAULT TRANSPORT, DAY & ROSS, or blank.",
     "Read psNumber from References and shipment id. The PS value is before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
     "Read srNumber from Shipment ID in References and shipment id. Use digits only, for example 810664 from SR810664.",
     "Read cityProvince from Consignee city/province. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",
@@ -285,7 +288,7 @@ function normalizeRows(value: unknown, pageNumbers: number[]): NormalizedManifes
     const isNewBolPage = readBooleanLike(
       readFirstValue(record, ["isNewBolPage", "isNewBol", "newBol", "newBolPage", "headerPresent", "newBillOfLading"])
     );
-    const carrier = normalizeCarrier(
+    const carrier = normalizeGarlandCarrier(
       readFirstValue(record, [
         "carrier",
         "carrierName",
@@ -412,7 +415,7 @@ function needsAuthoritativeSkidFallback(entry: unknown) {
   const isNewBolPage = readBooleanLike(
     readFirstValue(record, ["isNewBolPage", "isNewBol", "newBol", "newBolPage", "headerPresent", "newBillOfLading"])
   );
-  const carrier = normalizeCarrier(
+  const carrier = normalizeGarlandCarrier(
     readFirstValue(record, ["carrier", "carrierName", "carrierText", "carrierRaw", "carrierBox", "carrierValue"])
   );
   const skidResolution = resolveManifestSkids(record);
@@ -514,7 +517,7 @@ function buildRowDiagnostics(rows: unknown[]) {
 
     return {
       keys: Object.keys(record).slice(0, 12),
-      carrier: normalizeCarrier(
+      carrier: normalizeGarlandCarrier(
         readFirstValue(record, ["carrier", "carrierName", "carrierText", "carrierRaw", "carrierBox", "carrierValue"])
       ),
       isNewBolPage,
@@ -599,28 +602,6 @@ function readBooleanLike(value: unknown) {
 function normalizeManifestPsNumber(value: unknown) {
   const text = normalizeNullableText(value);
   return normalizePsNumber(text) ?? extractPsNumberFromText(text);
-}
-
-function normalizeCarrier(value: unknown): GarlandCarrierKey | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.replace(/\s+/g, "").toUpperCase();
-
-  if (normalized.includes("MIDLAND")) {
-    return "MIDLAND";
-  }
-
-  if (normalized.includes("SPEEDY")) {
-    return "SPEEDY";
-  }
-
-  if (normalized.includes("SURETRACK") || normalized.includes("SURETRAK")) {
-    return "SURETRACK";
-  }
-
-  return null;
 }
 
 function normalizePageNumber(value: unknown) {

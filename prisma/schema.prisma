@@ -30,6 +30,7 @@ enum ModuleKey {
   WEBSITE_INBOUND
   WEBSITE_GROWTH
   OCEAN_FREIGHT_PRICING
+  CUSTOMER_INTELLIGENCE
 }
 
 enum WebsiteInboundStatus {
@@ -114,6 +115,26 @@ enum WebsiteGrowthBacklinkStatus {
   BLOCKED
   REJECTED
   ARCHIVED
+}
+
+enum WebsiteGrowthDirectoryAccountState {
+  NOT_REQUIRED
+  NEEDS_ACCOUNT
+  CREDENTIAL_READY
+  EMAIL_VERIFICATION_PENDING
+  HUMAN_ACTION_REQUIRED
+  ACTIVE
+  FAILED
+}
+
+enum WebsiteGrowthDirectoryChallengeType {
+  CAPTCHA
+  MFA
+  PHONE_VERIFICATION
+  EMAIL_VERIFICATION
+  PASSWORD_POLICY
+  TERMS
+  OTHER
 }
 
 enum WebsiteGrowthOutreachConsentBasis {
@@ -212,6 +233,54 @@ enum ContactTier {
   TIER_3
 }
 
+enum HunterAutomationMode {
+  OFF
+  DRY_RUN
+  ASSISTED
+  AUTOMATIC
+}
+
+enum HunterServiceLine {
+  WAREHOUSING
+  OCEAN_AIR
+  TRUCKING
+}
+
+enum HunterSignalType {
+  TRADEMINING
+  EXPANSION
+  FACILITY_OPENING
+  RETAIL_ROLLOUT
+  HIRING
+  LEADERSHIP_CHANGE
+  LEASE_OR_CONSTRUCTION
+  FUNDING_OR_ACQUISITION
+  NEWS
+  REFERRAL
+  MANUAL
+  OTHER
+}
+
+enum HunterSignalStatus {
+  NEW
+  ACTIVE
+  DISMISSED
+  EXPIRED
+}
+
+enum HunterDecisionStatus {
+  WOULD_PURSUE
+  NEEDS_RESEARCH
+  BLOCKED
+}
+
+enum HunterSuppressionScope {
+  COMPANY
+  CONTACT
+  EMAIL
+  DOMAIN
+}
+
 enum ApolloStatus {
   NOT_STARTED
   ENRICHED
@@ -254,10 +323,31 @@ enum ContactOutreachDraftStatus {
 }
 
 enum ContactOutreachDraftSource {
+  OPENAI
   MOCK_AI
   MANUAL
   TEMPLATE
   UNKNOWN
+}
+
+enum OutreachPlanStatus {
+  DRAFT
+  QA_FAILED
+  QA_PASSED
+  APPROVED
+  ARCHIVED
+}
+
+enum OutreachQaStatus {
+  PENDING
+  FAILED
+  PASSED
+}
+
+enum OutreachChannel {
+  EMAIL
+  LINKEDIN_TASK
+  CALL_TASK
 }
 
 enum OceanRateSourceType {
@@ -532,9 +622,15 @@ model Tenant {
   tradeMiningScoringConfig                       TradeMiningScoringConfig?
   leadScoreSnapshots                             LeadScoreSnapshot[]
   leadOutcomeEvents                              LeadOutcomeEvent[]
+  hunterAutomationPolicy                  HunterAutomationPolicy?
+  hunterOpportunitySignals                HunterOpportunitySignal[]
+  hunterProspectingDecisions              HunterProspectingDecision[]
+  hunterOutreachSuppressions              HunterOutreachSuppression[]
   contacts                                       Contact[]
   leads                                          Lead[]
   contactOutreachDrafts                          ContactOutreachDraft[]
+  outreachPlans                           OutreachPlan[]
+  outreachSequenceSteps                   OutreachSequenceStep[]
   apolloCompanyMatches                           ApolloCompanyMatch[]
   ltlBatchQuoteLanes                             LtlBatchQuoteLane[]
   assistantThreads                               AssistantChatThread[]
@@ -556,6 +652,17 @@ model Tenant {
   websiteGrowthSuppressions                      WebsiteGrowthOutreachSuppression[]
   creditChecks                                   CreditCheck[]
   assistantRuns                                  AssistantRun[]
+  operatingCompanies                      OperatingCompany[]
+  companyOperatingRelationships           CompanyOperatingRelationship[]
+  customerSourceAccounts                  CustomerSourceAccount[]
+  contactPoints                           ContactPoint[]
+  contactEvidence                         ContactEvidence[]
+  customerIdentityMatches                 CustomerIdentityMatch[]
+  quickBooksServiceMappingRules           QuickBooksServiceMappingRule[]
+  customerFxRates                         CustomerFxRate[]
+  customerRevenueLines                    CustomerRevenueLine[]
+  customerMonthlyFinancials               CustomerMonthlyFinancial[]
+  customerIntelligenceEnablements         CustomerIntelligenceEnablement[]
   assistantRetrievedSources                      AssistantRetrievedSource[]
   assistantKnowledgeDocuments                    AssistantKnowledgeDocument[]
   assistantKnowledgeChunks                       AssistantKnowledgeChunk[]
@@ -568,6 +675,7 @@ model Tenant {
   operationalFeedback                            OperationalFeedback[]
   approvedOperationalLessons                     ApprovedOperationalLesson[]
   developmentSuggestions                         DevelopmentSuggestion[]
+  codexReviewRuns                         CodexReviewRun[]
   shipmentDocumentRuns                           ShipmentDocumentRun[]
   shipmentCarrierManifestRuns                    ShipmentCarrierManifestRun[]
   shipmentCarrierManifestAttachments             ShipmentCarrierManifestAttachment[]
@@ -578,6 +686,7 @@ model Tenant {
   teamshipUpdateJobs                             TeamshipUpdateJob[]
   teamshipUpdateOrders                           TeamshipUpdateOrder[]
   teamshipBrowserReadJobs                        TeamshipBrowserReadJob[]
+  teamshipPrintBatches                    TeamshipPrintBatch[]
   teamshipPrintJobs                              TeamshipPrintJob[]
   openClawUnresolvedTurns                        OpenClawUnresolvedTurn[]
   garlandProductDimensionObservations            GarlandProductDimensionObservation[]
@@ -629,30 +738,22 @@ model User {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  memberships                                           Membership[]
-  accounts                                              Account[]
-  sessions                                              Session[]
-  assistantThreads                                      AssistantChatThread[]
-  assistantRuns                                         AssistantRun[]
-  assistantAutomations                                  AssistantAutomation[]
-  assistantAutomationRuns                               AssistantAutomationRun[]
-  openClawUnresolvedTurns                               OpenClawUnresolvedTurn[]
-  shipmentDocumentRuns                                  ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns                           ShipmentCarrierManifestRun[]
-  shipmentCarrierManifestAttachments                    ShipmentCarrierManifestAttachment[]
-  teamshipReviewRuns                                    TeamshipReviewRun[]
-  teamshipUpdateJobsCreated                             TeamshipUpdateJob[]                             @relation("TeamshipUpdateJobCreatedBy")
-  teamshipUpdateJobsApproved                            TeamshipUpdateJob[]                             @relation("TeamshipUpdateJobApprovedBy")
-  teamshipPrintJobsRequested                            TeamshipPrintJob[]                              @relation("TeamshipPrintJobRequestedBy")
-  teamshipPrintJobsApproved                             TeamshipPrintJob[]                              @relation("TeamshipPrintJobApprovedBy")
-  supplyChainDesignProjectsCreated                      SupplyChainDesignProject[]                      @relation("SupplyChainDesignProjectCreatedBy")
-  supplyChainDesignFilesUploaded                        SupplyChainDesignProjectFile[]                  @relation("SupplyChainDesignProjectFileUploadedBy")
-  supplyChainDesignMappingsCreated                      SupplyChainDesignFileMapping[]                  @relation("SupplyChainDesignFileMappingCreatedBy")
-  supplyChainDesignModelRunsCreated                     SupplyChainDesignModelRun[]                     @relation("SupplyChainDesignModelRunCreatedBy")
-  supplyChainDesignScenariosCreated                     SupplyChainDesignScenario[]                     @relation("SupplyChainDesignScenarioCreatedBy")
-  supplyChainDesignScreeningRunsCreated                 SupplyChainDesignScreeningRun[]                 @relation("SupplyChainDesignScreeningRunCreatedBy")
-  supplyChainDesignLtlRatePreparationRunsCreated        SupplyChainDesignLtlRatePreparationRun[]        @relation("SupplyChainDesignLtlRatePreparationRunCreatedBy")
-  supplyChainDesignNetworkScenarioComparisonRunsCreated SupplyChainDesignNetworkScenarioComparisonRun[] @relation("SupplyChainDesignNetworkScenarioComparisonRunCreatedBy")
+  memberships                        Membership[]
+  accounts                           Account[]
+  sessions                           Session[]
+  assistantThreads                   AssistantChatThread[]
+  assistantRuns                      AssistantRun[]
+  assistantAutomations               AssistantAutomation[]
+  assistantAutomationRuns            AssistantAutomationRun[]
+  openClawUnresolvedTurns            OpenClawUnresolvedTurn[]
+  shipmentDocumentRuns               ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns        ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments ShipmentCarrierManifestAttachment[]
+  teamshipReviewRuns                 TeamshipReviewRun[]
+  teamshipUpdateJobsCreated          TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobCreatedBy")
+  teamshipUpdateJobsApproved         TeamshipUpdateJob[]                 @relation("TeamshipUpdateJobApprovedBy")
+  teamshipPrintJobsRequested         TeamshipPrintJob[]                  @relation("TeamshipPrintJobRequestedBy")
+  teamshipPrintJobsApproved          TeamshipPrintJob[]                  @relation("TeamshipPrintJobApprovedBy")
 
   @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }
@@ -1101,54 +1202,62 @@ model WebsiteGrowthMetric {
 }
 
 model WebsiteGrowthBacklinkOpportunity {
-  id                   String                             @id @default(cuid())
-  tenantId             String
-  dedupeKey            String
-  createdAt            DateTime                           @default(now())
-  updatedAt            DateTime                           @updatedAt
-  firstSeenAt          DateTime                           @default(now())
-  lastSeenAt           DateTime                           @default(now())
-  status               WebsiteGrowthBacklinkStatus        @default(NEEDS_REVIEW)
-  category             WebsiteGrowthBacklinkCategory
-  title                String
-  sourceDomain         String
-  sourceUrl            String?
-  contactPage          String?
-  targetPage           String
-  rationale            String
-  outreachAngle        String
-  authorityScore       Float?
-  relevanceScore       Int
-  qualityScore         Int
-  spamRisk             String
-  estimatedCostAmount  Float?
-  currency             String?
-  requiresContent      Boolean                            @default(false)
-  evidence             Json?
-  notes                String?
-  approvedByUserId     String?
-  approvedAt           DateTime?
-  claimedAt            DateTime?
-  submittedAt          DateTime?
-  contactedAt          DateTime?
-  recipientName        String?
-  recipientEmail       String?
-  recipientCountry     String?
-  contactSourceUrl     String?
-  consentBasis         WebsiteGrowthOutreachConsentBasis?
-  nextFollowUpAt       DateTime?
-  followUpCount        Int                                @default(0)
-  lastReplyAt          DateTime?
-  replySummary         String?
-  unsubscribedAt       DateTime?
-  directoryLoginUrl    String?
-  directoryUsername    String?
-  acceptedTermsUrl     String?
-  acceptedTermsSummary String?
-  liveUrl              String?
-  verifiedAt           DateTime?
-  lastVerifiedAt       DateTime?
-  archivedAt           DateTime?
+  id                          String                               @id @default(cuid())
+  tenantId                    String
+  dedupeKey                   String
+  createdAt                   DateTime                             @default(now())
+  updatedAt                   DateTime                             @updatedAt
+  firstSeenAt                 DateTime                             @default(now())
+  lastSeenAt                  DateTime                             @default(now())
+  status                      WebsiteGrowthBacklinkStatus          @default(NEEDS_REVIEW)
+  category                    WebsiteGrowthBacklinkCategory
+  title                       String
+  sourceDomain                String
+  sourceUrl                   String?
+  contactPage                 String?
+  targetPage                  String
+  rationale                   String
+  outreachAngle               String
+  authorityScore              Float?
+  relevanceScore              Int
+  qualityScore                Int
+  spamRisk                    String
+  estimatedCostAmount         Float?
+  currency                    String?
+  requiresContent             Boolean                              @default(false)
+  evidence                    Json?
+  notes                       String?
+  approvedByUserId            String?
+  approvedAt                  DateTime?
+  claimedAt                   DateTime?
+  submittedAt                 DateTime?
+  contactedAt                 DateTime?
+  recipientName               String?
+  recipientEmail              String?
+  recipientCountry            String?
+  contactSourceUrl            String?
+  consentBasis                WebsiteGrowthOutreachConsentBasis?
+  nextFollowUpAt              DateTime?
+  followUpCount               Int                                  @default(0)
+  lastReplyAt                 DateTime?
+  replySummary                String?
+  unsubscribedAt              DateTime?
+  directoryLoginUrl           String?
+  directoryUsername           String?
+  directoryCredentialRef      String?
+  directoryCredentialVersion  Int?
+  directoryAccountState       WebsiteGrowthDirectoryAccountState   @default(NOT_REQUIRED)
+  directoryAccountRequestedAt DateTime?
+  directoryAccountVerifiedAt  DateTime?
+  directoryChallengeType      WebsiteGrowthDirectoryChallengeType?
+  directoryChallengeDetail    String?
+  directoryChallengeAt        DateTime?
+  acceptedTermsUrl            String?
+  acceptedTermsSummary        String?
+  liveUrl                     String?
+  verifiedAt                  DateTime?
+  lastVerifiedAt              DateTime?
+  archivedAt                  DateTime?
 
   tenant   Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages WebsiteGrowthOutreachMessage[]
@@ -1159,6 +1268,7 @@ model WebsiteGrowthBacklinkOpportunity {
   @@index([tenantId, sourceDomain])
   @@index([tenantId, lastSeenAt])
   @@index([tenantId, nextFollowUpAt])
+  @@index([tenantId, directoryAccountState])
 }
 
 model WebsiteGrowthOutreachMessage {
@@ -1281,6 +1391,10 @@ model ShipmentCarrierManifestRun {
   speedyWorkbookBytes    Bytes?
   suretrackFileName      String?
   suretrackWorkbookBytes Bytes?
+  clarkeFileName         String?
+  clarkeWorkbookBytes    Bytes?
+  guilbaultFileName      String?
+  guilbaultWorkbookBytes Bytes?
   signedCopyFileName     String?
   signedCopyContentType  String?
   signedCopyBytes        Bytes?
@@ -1344,9 +1458,10 @@ model TeamshipReviewRun {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  tenant    Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy User?                 @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
-  orders    TeamshipReviewOrder[]
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy    User?                 @relation(fields: [createdByUserId], references: [id], onDelete: NoAction)
+  orders       TeamshipReviewOrder[]
+  printBatches TeamshipPrintBatch[]
 
   @@index([tenantId, workflowKey, shipmentDate])
   @@index([tenantId, createdAt])
@@ -1684,17 +1799,53 @@ model TeamshipPrintJob {
   result              Json?
   errorCode           String?
   errorMessage        String?
+  batchId             String?
+  batchPosition       Int?
+  reviewOrderId       String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  requestedBy User   @relation("TeamshipPrintJobRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
-  approvedBy  User?  @relation("TeamshipPrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requestedBy User                @relation("TeamshipPrintJobRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
+  approvedBy  User?               @relation("TeamshipPrintJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  batch       TeamshipPrintBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, idempotencyKey])
   @@unique([tenantId, activeOrderKey])
   @@index([tenantId, status, createdAt])
   @@index([tenantId, shippingOrderNumber, createdAt])
+  @@index([tenantId, requestedByUserId, createdAt])
+  @@index([tenantId, batchId, batchPosition])
+  @@index([expiresAt])
+}
+
+model TeamshipPrintBatch {
+  id                String    @id @default(cuid())
+  tenantId          String
+  reviewRunId       String?
+  status            String    @default("PLANNING")
+  summary           Json
+  idempotencyKey    String
+  requestedByUserId String
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  expiresAt         DateTime
+  completedAt       DateTime?
+  failedAt          DateTime?
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  reviewRun   TeamshipReviewRun? @relation(fields: [reviewRunId], references: [id], onDelete: SetNull)
+  requestedBy User               @relation("TeamshipPrintBatchRequestedBy", fields: [requestedByUserId], references: [id], onDelete: NoAction)
+  approvedBy  User?              @relation("TeamshipPrintBatchApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  jobs        TeamshipPrintJob[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, reviewRunId, createdAt])
   @@index([tenantId, requestedByUserId, createdAt])
   @@index([expiresAt])
 }
@@ -1779,9 +1930,12 @@ model AutomationJobRun {
   errorMessage String?
   createdAt    DateTime  @default(now())
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  ltlBatchQuoteLanes LtlBatchQuoteLane[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ltlBatchQuoteLanes         LtlBatchQuoteLane[]
+  hunterProspectingDecisions HunterProspectingDecision[]
+  codexReviewRuns            CodexReviewRun[]
 
+  @@unique([tenantId, id])
   @@index([tenantId, jobType, startedAt])
   @@index([tenantId, status])
 }
@@ -1833,16 +1987,28 @@ model Company {
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 
-  tenant                  Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  importRecords           TradeMiningImportRecord[]
-  contacts                Contact[]
-  leads                   Lead[]
-  contactOutreachDrafts   ContactOutreachDraft[]
-  apolloCompanyMatches    ApolloCompanyMatch[]
-  leadScoreSnapshots      LeadScoreSnapshot[]
-  leadOutcomeEvents       LeadOutcomeEvent[]
-  cashflowCustomers       CashflowCustomer[]
-  cashflowCustomerAliases CashflowCustomerAlias[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  importRecords              TradeMiningImportRecord[]
+  contacts                   Contact[]
+  leads                      Lead[]
+  contactOutreachDrafts      ContactOutreachDraft[]
+  outreachPlans              OutreachPlan[]
+  apolloCompanyMatches       ApolloCompanyMatch[]
+  leadScoreSnapshots         LeadScoreSnapshot[]
+  leadOutcomeEvents          LeadOutcomeEvent[]
+  cashflowCustomers          CashflowCustomer[]
+  cashflowCustomerAliases    CashflowCustomerAlias[]
+  hunterOpportunitySignals   HunterOpportunitySignal[]
+  hunterProspectingDecisions HunterProspectingDecision[]
+  hunterOutreachSuppressions HunterOutreachSuppression[]
+  operatingRelationships     CompanyOperatingRelationship[]
+  customerSourceAccounts     CustomerSourceAccount[]
+  contactPoints              ContactPoint[]
+  contactEvidence            ContactEvidence[]
+  customerRevenueLines       CustomerRevenueLine[]
+  customerMonthlyFinancials  CustomerMonthlyFinancial[]
+  canonicalIdentityMatches   CustomerIdentityMatch[] @relation("CustomerIdentityMatchCanonicalCompany")
+  candidateIdentityMatches   CustomerIdentityMatch[] @relation("CustomerIdentityMatchCandidateCompany")
 
   @@unique([tenantId, id])
   @@unique([tenantId, normalizedName])
@@ -2050,8 +2216,11 @@ model Contact {
   company                      Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
   leads                        Lead[]
   outreachDrafts               ContactOutreachDraft[]
+  outreachPlans                OutreachPlan[]
   salesCashflowCustomers       CashflowCustomer[]     @relation("CashflowSalesContact")
   collectionsCashflowCustomers CashflowCustomer[]     @relation("CashflowCollectionsContact")
+  contactPoints                ContactPoint[]
+  contactEvidence              ContactEvidence[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, companyId, id])
@@ -2107,6 +2276,76 @@ model ContactOutreachDraft {
   @@index([tenantId, status])
   @@index([tenantId, source])
   @@index([tenantId, sequenceId])
+}
+
+model OutreachPlan {
+  id                    String             @id @default(cuid())
+  tenantId              String
+  companyId             String
+  contactId             String
+  version               Int                @default(1)
+  status                OutreachPlanStatus @default(DRAFT)
+  qaStatus              OutreachQaStatus   @default(PENDING)
+  serviceLine           HunterServiceLine
+  opportunityType       String
+  objective             String
+  triggerSummary        String
+  buyerHypothesis       String
+  valueProposition      String
+  likelyObjection       String
+  callToAction          String
+  channelStrategy       Json
+  senderRecommendation  String?
+  sequenceName          String
+  sequenceId            String?
+  confidence            Int
+  evidence              Json
+  evidenceFingerprint   String
+  strategyModel         String
+  draftingModel         String
+  qaModel               String?
+  promptVersion         String
+  qaIssues              Json?
+  generatedAt           DateTime           @default(now())
+  qaCheckedAt           DateTime?
+  approvedAt            DateTime?
+  approvedByUserId      String?
+  archivedAt            DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  tenant  Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company                @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  contact Contact                @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: Cascade)
+  steps   OutreachSequenceStep[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, contactId, version])
+  @@index([tenantId, companyId, status])
+  @@index([tenantId, contactId, createdAt])
+  @@index([tenantId, qaStatus, status])
+}
+
+model OutreachSequenceStep {
+  id             String          @id @default(cuid())
+  tenantId       String
+  outreachPlanId String
+  stepNumber     Int
+  channel        OutreachChannel
+  delayDays      Int
+  subject        String?
+  body           String
+  angle          String
+  evidenceRefs   Json
+  qaIssues       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   OutreachPlan @relation(fields: [tenantId, outreachPlanId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, outreachPlanId, stepNumber])
+  @@index([tenantId, outreachPlanId])
 }
 
 model Lead {
@@ -2187,6 +2426,115 @@ model LeadOutcomeEvent {
   @@index([tenantId, leadId, occurredAt])
   @@index([tenantId, outcomeType, occurredAt])
   @@index([tenantId, scoreSnapshotId])
+}
+
+model HunterAutomationPolicy {
+  id                      String               @id @default(cuid())
+  tenantId                String               @unique
+  mode                    HunterAutomationMode @default(DRY_RUN)
+  killSwitch              Boolean              @default(false)
+  dailyCompanyLimit       Int                  @default(20)
+  maxContactsPerCompany   Int                  @default(2)
+  warehousingPercent      Int                  @default(60)
+  oceanAirPercent         Int                  @default(30)
+  truckingPercent         Int                  @default(10)
+  minimumPriorityScore    Int                  @default(35)
+  minimumSignalConfidence Int                  @default(50)
+  allowedJurisdictions    Json?
+  scheduleTimezone        String               @default("America/Toronto")
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model HunterOpportunitySignal {
+  id                    String             @id @default(cuid())
+  tenantId              String
+  companyId             String?
+  companyName           String
+  normalizedCompanyName String
+  signalType            HunterSignalType
+  serviceLine           HunterServiceLine
+  status                HunterSignalStatus @default(NEW)
+  title                 String
+  summary               String
+  geography             String?
+  sourceName            String?
+  sourceUrl             String?
+  sourcePublishedAt     DateTime?
+  observedAt            DateTime           @default(now())
+  expiresAt             DateTime?
+  confidence            Int                @default(50)
+  dedupeKey             String
+  evidence              Json?
+  rawJson               Json?
+  createdByUserId       String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, status, serviceLine])
+  @@index([tenantId, normalizedCompanyName])
+  @@index([tenantId, observedAt])
+}
+
+model HunterProspectingDecision {
+  id                 String               @id @default(cuid())
+  tenantId           String
+  jobRunId           String
+  companyId          String?
+  companyKey         String
+  companyName        String
+  serviceLine        HunterServiceLine
+  status             HunterDecisionStatus
+  rank               Int
+  priorityScore      Int
+  confidence         Int
+  opportunityType    String
+  rationale          String
+  recommendedPersona String?
+  recommendedSender  String?
+  recommendedCadence String?
+  sourceTypes        Json
+  evidence           Json
+  blockers           Json?
+  configSnapshot     Json
+  createdAt          DateTime             @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jobRun  AutomationJobRun @relation(fields: [tenantId, jobRunId], references: [tenantId, id], onDelete: Cascade)
+  company Company?         @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, jobRunId, companyKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, serviceLine, createdAt])
+  @@index([tenantId, companyId, createdAt])
+}
+
+model HunterOutreachSuppression {
+  id              String                 @id @default(cuid())
+  tenantId        String
+  companyId       String?
+  scope           HunterSuppressionScope
+  value           String
+  reason          String
+  source          String
+  active          Boolean                @default(true)
+  expiresAt       DateTime?
+  createdByUserId String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, scope, value])
+  @@index([tenantId, active, scope])
+  @@index([tenantId, companyId])
 }
 
 model CashflowCustomer {
@@ -3378,9 +3726,481 @@ model DevelopmentSuggestion {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  codexReviewRuns CodexReviewRun[]
 
   @@unique([tenantId, id])
   @@index([tenantId, status, generatedAt])
   @@index([tenantId, workflowKey, generatedAt])
+}
+
+model CodexReviewRun {
+  id                      String   @id @default(cuid())
+  tenantId                String
+  developmentSuggestionId String
+  developmentJobId        String
+  commitSha               String
+  attempt                 Int
+  status                  String
+  verdict                 String
+  riskLevel               String
+  summary                 String
+  findings                Json
+  ticketCoverage          Json
+  checks                  Json
+  tests                   Json
+  businessQuestions       Json
+  reviewerModel           String
+  reviewerReasoningEffort String
+  startedAt               DateTime
+  finishedAt              DateTime
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  developmentSuggestion DevelopmentSuggestion @relation(fields: [tenantId, developmentSuggestionId], references: [tenantId, id], onDelete: Cascade)
+  developmentJob        AutomationJobRun      @relation(fields: [tenantId, developmentJobId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, developmentJobId, commitSha, attempt])
+  @@index([tenantId, developmentSuggestionId, createdAt])
+  @@index([tenantId, verdict, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Customer Intelligence foundation
+//
+// Additive tenant-scoped records for the leadership-only Customer Intelligence
+// Hub. These models extend the existing canonical Company identity; they do not
+// replace or rewrite CashflowCustomer / CashflowLegalEntity. Mapping from the
+// legacy finance enum onto OperatingCompany is documented in
+// docs/modules/customer-intelligence/data-model.md.
+// ---------------------------------------------------------------------------
+
+enum CustomerIntelligenceServiceLine {
+  OCEAN
+  AIR
+  TRUCKING_DRAYAGE
+  LOCAL_TRUCKING
+  WAREHOUSING_FULFILLMENT
+  CUSTOMS_BROKERAGE
+  OTHER
+}
+
+enum CustomerLifecycle {
+  PROSPECT
+  ACTIVE_CUSTOMER
+  DORMANT_CUSTOMER
+  FORMER_CUSTOMER
+}
+
+enum CompanyOperatingRelationshipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CustomerSourceAccountStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ContactPointType {
+  EMAIL
+  PHONE
+  WEBSITE
+  ADDRESS
+  OTHER
+}
+
+enum ContactPointVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum ContactEvidenceSourceType {
+  EMAIL_SIGNATURE
+  QUICKBOOKS
+  MANUAL
+  APOLLO
+  WEBSITE
+  OTHER
+}
+
+enum ContactEvidenceReviewStatus {
+  UNREVIEWED
+  ACCEPTED
+  REJECTED
+  CONFLICT
+}
+
+enum CustomerIdentityMatchKind {
+  QUICKBOOKS_ACCOUNT
+  EMAIL_DOMAIN
+  COMPANY_ALIAS
+  CONTACT
+}
+
+enum CustomerIdentityMatchStatus {
+  PROPOSED
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum QuickBooksServiceMappingDimension {
+  ITEM
+  CLASS
+  DEPARTMENT
+  INCOME_ACCOUNT
+  FILE_PREFIX
+  OTHER
+}
+
+enum CustomerFxRateStatus {
+  PROVISIONAL
+  FINAL
+}
+
+enum CustomerFinancialPeriodStatus {
+  RECONCILED
+  INCOMPLETE
+  UNRECONCILED
+}
+
+model OperatingCompany {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  slug                     String
+  displayName              String
+  legalName                String?
+  homeCurrency             String    @default("CAD")
+  active                   Boolean   @default(true)
+  quickBooksRealmId        String?
+  quickBooksCredentialId   String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  tenant             Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relationships      CompanyOperatingRelationship[]
+  sourceAccounts     CustomerSourceAccount[]
+  serviceMappingRules QuickBooksServiceMappingRule[]
+  revenueLines       CustomerRevenueLine[]
+  monthlyFinancials  CustomerMonthlyFinancial[]
+  identityMatches    CustomerIdentityMatch[]
+  enablements        CustomerIntelligenceEnablement[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, slug])
+  @@index([tenantId, active])
+}
+
+model CompanyOperatingRelationship {
+  id                  String                          @id @default(cuid())
+  tenantId            String
+  companyId           String
+  operatingCompanyId  String
+  lifecycle           CustomerLifecycle                @default(PROSPECT)
+  status              CompanyOperatingRelationshipStatus @default(ACTIVE)
+  firstRevenueDate    DateTime?
+  lastRevenueDate     DateTime?
+  assignedOwnerUserId String?
+  notes               String?
+  createdAt           DateTime                         @default(now())
+  updatedAt           DateTime                         @updatedAt
+
+  tenant             Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company            Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany   OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+  sourceAccounts     CustomerSourceAccount[]
+  monthlyFinancials  CustomerMonthlyFinancial[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, companyId, operatingCompanyId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, lifecycle])
+  @@index([tenantId, status])
+}
+
+model CustomerSourceAccount {
+  id                             String                       @id @default(cuid())
+  tenantId                       String
+  realmId                        String
+  quickBooksCustomerId           String
+  companyId                      String
+  operatingCompanyId             String
+  companyOperatingRelationshipId String
+  currency                       String                       @default("CAD")
+  displayName                    String
+  active                         Boolean                      @default(true)
+  status                         CustomerSourceAccountStatus   @default(ACTIVE)
+  email                          String?
+  phone                          String?
+  billingAddress                 Json?
+  shippingAddress                Json?
+  parentQuickBooksCustomerId     String?
+  contactDetails                 Json?
+  lastSyncedAt                   DateTime?
+  createdAt                      DateTime                     @default(now())
+  updatedAt                      DateTime                     @updatedAt
+
+  tenant            Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company           Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany  OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+  relationship      CompanyOperatingRelationship  @relation(fields: [tenantId, companyOperatingRelationshipId], references: [tenantId, id], onDelete: Cascade)
+  revenueLines      CustomerRevenueLine[]
+  monthlyFinancials CustomerMonthlyFinancial[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, realmId, quickBooksCustomerId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, companyOperatingRelationshipId])
+  @@index([tenantId, active])
+  @@index([tenantId, currency])
+}
+
+model ContactPoint {
+  id                 String                          @id @default(cuid())
+  tenantId           String
+  contactId          String
+  companyId          String
+  type               ContactPointType
+  value              String
+  displayValue       String?
+  label              String?
+  primary            Boolean                         @default(false)
+  verificationStatus ContactPointVerificationStatus  @default(UNVERIFIED)
+  firstSeenAt        DateTime?
+  lastSeenAt         DateTime?
+  source             String?
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, contactId, type, value])
+  @@index([tenantId, companyId])
+  @@index([tenantId, contactId])
+  @@index([tenantId, type])
+  @@index([tenantId, primary])
+  @@index([tenantId, verificationStatus])
+}
+
+model ContactEvidence {
+  id               String                      @id @default(cuid())
+  tenantId         String
+  contactId        String
+  companyId        String
+  sourceType       ContactEvidenceSourceType
+  sourceRecordKey  String
+  fieldName        String
+  fieldValue       String
+  confidence       Int                         @default(0)
+  parserVersion    String?
+  observedAt       DateTime
+  reviewStatus     ContactEvidenceReviewStatus @default(UNREVIEWED)
+  evidenceFragment String?
+  conflictingValue String?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [tenantId, companyId, contactId], references: [tenantId, companyId, id], onDelete: Cascade)
+  company Company @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, contactId, sourceRecordKey, fieldName])
+  @@index([tenantId, contactId])
+  @@index([tenantId, companyId])
+  @@index([tenantId, sourceType])
+  @@index([tenantId, reviewStatus])
+  @@index([tenantId, observedAt])
+}
+
+model CustomerIdentityMatch {
+  id                  String                        @id @default(cuid())
+  tenantId            String
+  kind                CustomerIdentityMatchKind
+  companyId           String?
+  operatingCompanyId  String?
+  sourceRecordKey     String?
+  sourceLabel         String?
+  candidateCompanyId  String?
+  score               Int                           @default(0)
+  status              CustomerIdentityMatchStatus   @default(PROPOSED)
+  evidence            Json?
+  reviewerUserId      String?
+  reviewedAt          DateTime?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operatingCompany  OperatingCompany? @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: NoAction)
+  company           Company?          @relation("CustomerIdentityMatchCanonicalCompany", fields: [tenantId, companyId], references: [tenantId, id], onDelete: NoAction)
+  candidateCompany  Company?          @relation("CustomerIdentityMatchCandidateCompany", fields: [tenantId, candidateCompanyId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, kind, companyId, sourceRecordKey])
+  @@index([tenantId, status])
+  @@index([tenantId, kind])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, score])
+}
+
+model QuickBooksServiceMappingRule {
+  id                  String                              @id @default(cuid())
+  tenantId            String
+  operatingCompanyId  String
+  dimension           QuickBooksServiceMappingDimension
+  matchValue          String
+  serviceLine         CustomerIntelligenceServiceLine
+  priority            Int                                 @default(0)
+  active              Boolean                             @default(true)
+  reviewerUserId      String?
+  notes               String?
+  createdAt           DateTime                            @default(now())
+  updatedAt           DateTime                            @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operatingCompany  OperatingCompany @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, operatingCompanyId, dimension, matchValue])
+  @@index([tenantId, operatingCompanyId, active])
+  @@index([tenantId, serviceLine])
+}
+
+model CustomerFxRate {
+  id         String                  @id @default(cuid())
+  tenantId   String
+  currency   String
+  monthKey   String
+  rateToCad  Decimal                 @db.Decimal(12, 6)
+  status     CustomerFxRateStatus    @default(PROVISIONAL)
+  source     String?
+  fetchedAt  DateTime?
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, currency, monthKey])
+  @@index([tenantId, currency])
+  @@index([tenantId, status])
+}
+
+model CustomerRevenueLine {
+  id                  String                             @id @default(cuid())
+  tenantId            String
+  realmId             String
+  sourceKey           String
+  sourceAccountId     String?
+  companyId           String
+  operatingCompanyId  String
+  transactionDate     DateTime
+  transactionType     String
+  transactionNumber   String?
+  accountRef          String?
+  classRef            String?
+  itemRef             String?
+  fileRef             String?
+  serviceLine         CustomerIntelligenceServiceLine
+  nativeAmount        Decimal                            @db.Decimal(14, 2)
+  nativeCurrency      String
+  homeAmount          Decimal                            @db.Decimal(14, 2)
+  homeCurrency        String
+  cadAmount           Decimal?                           @db.Decimal(14, 2)
+  fxSource            String?
+  syncMetadata        Json?
+  createdAt           DateTime                           @default(now())
+
+  tenant            Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceAccount     CustomerSourceAccount?         @relation(fields: [tenantId, sourceAccountId], references: [tenantId, id], onDelete: NoAction)
+  company           Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany  OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sourceKey])
+  @@index([tenantId, companyId])
+  @@index([tenantId, sourceAccountId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, transactionDate])
+  @@index([tenantId, serviceLine])
+}
+
+model CustomerMonthlyFinancial {
+  id                       String                          @id @default(cuid())
+  tenantId                 String
+  monthKey                 String
+  companyId                String
+  operatingCompanyId       String
+  companyOperatingRelationshipId String
+  sourceAccountId          String?
+  sourceAccountKey         String                          @default("ALL")
+  serviceLine              CustomerIntelligenceServiceLine
+  currency                 String
+  nativeRevenue            Decimal                         @db.Decimal(14, 2)
+  nativeCost               Decimal                         @db.Decimal(14, 2) @default(0)
+  nativeGrossProfit        Decimal                         @db.Decimal(14, 2) @default(0)
+  cadRevenue               Decimal?                        @db.Decimal(14, 2)
+  nativeOpenAr             Decimal                         @db.Decimal(14, 2) @default(0)
+  cadOpenAr                Decimal?                        @db.Decimal(14, 2)
+  reconciliationStatus     CustomerFinancialPeriodStatus   @default(UNRECONCILED)
+  createdAt                DateTime                        @default(now())
+  updatedAt                DateTime                        @updatedAt
+
+  tenant            Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company           Company                       @relation(fields: [tenantId, companyId], references: [tenantId, id], onDelete: Cascade)
+  operatingCompany  OperatingCompany              @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+  relationship      CompanyOperatingRelationship  @relation(fields: [tenantId, companyOperatingRelationshipId], references: [tenantId, id], onDelete: Cascade)
+  sourceAccount     CustomerSourceAccount?        @relation(fields: [tenantId, sourceAccountId], references: [tenantId, id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, companyOperatingRelationshipId, sourceAccountKey, serviceLine, currency, monthKey])
+  @@index([tenantId, companyId])
+  @@index([tenantId, operatingCompanyId])
+  @@index([tenantId, sourceAccountId])
+  @@index([tenantId, monthKey])
+  @@index([tenantId, serviceLine])
+}
+
+/// Owner-controlled activation of live QuickBooks synchronization
+/// (CP-PHASE-02B-8, owner decision CP-02B-8-Q1 `FEATURE_ENABLEMENT_RECORD`).
+///
+/// One tenant-scoped, operating-company-scoped record gates live sync. It
+/// defaults to disabled (`enabled = false`) for every operating company;
+/// connecting a QuickBooks company never auto-enables live sync. Enabling
+/// requires explicit owner approval whose evidence is recorded on the row
+/// (`approvedByUserId` / `approvedAt` / `approvalNote`) and audited. The
+/// database CHECK constraint makes an enabled row without approval evidence
+/// impossible, so a live sync gate can always trust the recorded approval.
+model CustomerIntelligenceEnablement {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  operatingCompanyId String
+  enabled            Boolean  @default(false)
+  // Explicit owner approval evidence (CP-02B-8-Q1). Cleared on disable so a
+  // later enable always requires a fresh recorded approval.
+  approvedByUserId   String?
+  approvedAt         DateTime?
+  approvalNote       String?
+  updatedByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  operatingCompany  OperatingCompany @relation(fields: [tenantId, operatingCompanyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, operatingCompanyId])
+  @@index([tenantId, enabled])
 }

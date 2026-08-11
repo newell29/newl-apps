@@ -22,6 +22,8 @@ This file is the high-level product direction for Newl Apps so future Codex PRs 
 - OpenClaw acts as a replaceable data collector/worker.
 - n8n may schedule or orchestrate jobs.
 - Newl Apps is the source of truth for configuration, scoring, candidate review, pipeline, approvals, and audit history.
+- Hunter should develop beyond TradeMining into a source-agnostic opportunity engine. Expansion announcements, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and relevant news may all become evidence-backed prospecting signals.
+- Owner-approved opportunity allocation is 60% warehousing, 30% ocean/air, and 10% trucking. Quality thresholds take precedence over filling a quota.
 
 ## 4. Data Flow
 
@@ -78,6 +80,28 @@ Lead score should consider:
 - For the Company Assistant, the long-term model strategy is to run the AI bot on a local model hosted on Newl-controlled server/network infrastructure.
 - Until the local model is proven and reliable, use a cost-effective OpenAI model behind a provider abstraction so model providers can be swapped without rewriting assistant workflows.
 - Assistant prompts, retrieved sources, memory updates, and tool calls must stay tenant-scoped and auditable regardless of whether the active model provider is OpenAI or a local server-hosted model.
+- For Hunter, deterministic code must first deduplicate, suppress, score, and constrain the candidate set. A lower-cost hosted model or local Qwen model may later summarize large evidence sets and propose hypotheses, but model output must remain auditable and cannot independently authorize outreach.
+
+## 9A. Hunter automation phases
+
+- Phase 1 is a dry-run control plane: combine TradeMining and external signals, produce the daily 60/30/10 prospecting plan, preserve evidence and recommendations, and perform no Apollo or communication writes.
+- Phase 2 may add an opt-in Mac-mini signal scout that discovers a bounded recent public-news set and classifies public headline metadata locally. It must retain source/model/prompt evidence, fail closed, remain disabled until the exact sources are approved, and perform no Apollo or communication writes.
+- Phase 3 may add opt-in, evidence-first company research over the tenant's bounded daily Hunter queue. Research must cover identity/parent, fresh events, first-party careers, and distribution footprint; preserve every query/source/excerpt; use local Qwen for synthesis, deterministic code for hard gates, and a low-cost hosted model for scoring. It remains a shadow workflow with no Apollo, pipeline-stage, cadence, or communication writes.
+- Later phases may add contact research, personalized draft generation, human approval queues, controlled Apollo handoff, result synchronization, and learning from outcomes.
+- The approved target architecture is one coordinated Hunter sales system with bounded strategy, writing/QA, and
+  results-analysis roles. Deterministic services, not models, own suppression, approval, sender limits, Apollo writes,
+  retries, and audit state.
+- Phase 4 starts with tenant-scoped, versioned Outreach Plans: freeze the Hunter/TradeMining evidence packet, create a
+  company/contact strategy, generate a complete five-touch email/manual sequence, require deterministic plus model
+  grounding QA, and require explicit human approval. Plan generation and approval do not send or enroll.
+- The intended model routing is GPT-5.6 Luna for authoritative research synthesis, Kimi K2.6/K3 for independent opportunity scoring/validation,
+  GPT-5.6 Terra for outreach strategy, GPT-5.6 Luna for sequence drafting and QA, and deterministic metrics before a
+  later Terra results-analysis review. Model names stay configurable and every plan records the actual model/prompt.
+- Owner-approved cutover: GPT-5.6 Luna is primary over the exact saved company-research evidence. Brave runs once,
+  Luna continues into Kimi and deterministic eligibility, and Luna has no browser, Apollo, or communication tools.
+  Local Qwen remains a non-blocking shadow for three comparable production runs, after which it should be disabled
+  unless it demonstrates a material quality or resilience benefit.
+- Automation mode and a tenant kill switch must remain explicit. Transitioning from dry run to assisted or automatic outreach requires a reviewed code change and owner approval.
 
 ## 10. What Not To Build Yet
 

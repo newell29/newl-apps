@@ -1,8 +1,26 @@
 import { ApolloCompanyMatchClassification, ReplyStatus, SequenceStatus } from "@prisma/client";
 
 const DEFAULT_BASE_URL = "https://api.apollo.io";
+export const MANUAL_APOLLO_COMPANY_MAPPING_REASON =
+  "manually confirmed from Apollo company URL";
 const DEFAULT_PAGE_SIZE = 100;
-const APOLLO_CONTACT_PAGE_SIZE = 25;
+const APOLLO_SAVED_CONTACT_MAX_PAGES = 20;
+const APOLLO_SAVED_CONTACT_RECOVERY_LIMIT = 10;
+const APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT = 3;
+const APOLLO_EQUIVALENT_ACCOUNT_LIMIT = 5;
+const APOLLO_EQUIVALENT_ACCOUNT_QUERY_LIMIT = 4;
+const APOLLO_DELIVERY_FAILURE_MAX_PAGES = 10;
+const APOLLO_PAUSE_EVIDENCE_MAX_PAGES = 10;
+const APOLLO_KEYWORD_MAX_LENGTH = 200;
+const INTERNAL_SEQUENCE_KEYS = new Set([
+  "hunter-email-only",
+  "hunter-executive-referral",
+  "houston-import-decision-maker",
+  "charlotte-warehouse-decision-maker",
+  "standard-logistics-outreach",
+  "warehouse-capacity-outreach",
+  "general-newl-group-intro"
+]);
 const APOLLO_PRIMARY_ROLE_KEYWORDS = [
   "logistics",
   "supply chain",
@@ -11,6 +29,8 @@ const APOLLO_PRIMARY_ROLE_KEYWORDS = [
   "fulfillment",
   "transportation",
   "distribution",
+  "shipping",
+  "receiving",
   "import",
   "procurement",
   "purchasing",
@@ -75,13 +95,31 @@ export type ApolloCompanyLookupInput = {
   companyName: string;
   domain?: string | null;
   apolloOrganizationId?: string | null;
+  apolloAccountId?: string | null;
+  reviewerConfirmedApolloOrganizationId?: string | null;
+  verifiedIdentityContext?: string | null;
+};
+
+export type ApolloOrganizationMappingResult = {
+  organizationId: string;
+  companyName: string;
+  domain: string | null;
+  linkedinUrl: string | null;
+  match: ApolloCompanyLookupMatch;
+};
+
+export type ApolloCompanyReference = {
+  id: string;
+  resourceType: "ACCOUNT" | "ORGANIZATION";
 };
 
 export type ApolloContactRecord = {
+  recordSource: "SAVED_CONTACT" | "PEOPLE_SEARCH";
   apolloContactId: string | null;
   apolloPersonId: string | null;
   firstName: string | null;
   lastName: string | null;
+  lastNameObfuscated: string | null;
   fullName: string;
   title: string | null;
   department: string | null;
@@ -89,6 +127,9 @@ export type ApolloContactRecord = {
   email: string | null;
   phone: string | null;
   linkedinUrl: string | null;
+  hasEmailAvailable: boolean;
+  hasPhoneAvailable: boolean;
+  hasLinkedinAvailable: boolean;
   city: string | null;
   state: string | null;
   country: string | null;
@@ -103,6 +144,36 @@ export type ApolloContactRecord = {
   rawPayload: Record<string, unknown>;
 };
 
+export type ApolloDeliveryFailureKind =
+  | "BOUNCE"
+  | "INVALID_MX"
+  | "BAD_DATA"
+  | "RECIPIENT_DOMAIN"
+  | "SPAM_BLOCKED"
+  | "OTHER_PERMANENT";
+
+export type ApolloSequenceDeliveryFailure = {
+  apolloContactId: string | null;
+  email: string | null;
+  kind: ApolloDeliveryFailureKind;
+  reason: string;
+  rawPayload: Record<string, unknown>;
+};
+
+export type ApolloPauseEvidenceKind =
+  | "OUT_OF_OFFICE"
+  | "NO_LONGER_EMPLOYED";
+
+export type ApolloSequencePauseEvidence = {
+  apolloContactId: string | null;
+  email: string | null;
+  kind: ApolloPauseEvidenceKind;
+  reason: string;
+  occurredAt: Date | null;
+  resumeAt: Date | null;
+  rawPayload: Record<string, unknown>;
+};
+
 export type ApolloContactLookupResult = {
   organizationId: string | null;
   companyName: string | null;
@@ -110,6 +181,31 @@ export type ApolloContactLookupResult = {
   linkedinUrl: string | null;
   match: ApolloCompanyLookupMatch;
   contacts: ApolloContactRecord[];
+  contactRecovery: {
+    savedContactPagesRead: number;
+    maskedPeopleChecked: number;
+    savedContactsRecovered: number;
+    relatedAccountsChecked: number;
+    relatedOrganizationScopesChecked: number;
+    confirmedAccountScopesChecked: number;
+    peopleSearchRawRecords: number;
+    peopleSearchAcceptedRecords: number;
+    vettedParentAccountsChecked: number;
+    companyKeywordSearches: number;
+    paidEmailEnrichmentsAttempted: number;
+    paidEmailsRecovered: number;
+  };
+};
+
+export type ApolloContactCreateInput = {
+  firstName: string | null;
+  lastName: string | null;
+  fullName: string;
+  title: string | null;
+  email: string;
+  phone: string | null;
+  companyName: string;
+  companyDomain: string | null;
 };
 
 export class ApolloRateLimitError extends Error {
@@ -145,6 +241,15 @@ export type ApolloSequencePushResult = {
   acceptedContactIds: string[];
   message: string | null;
   rawPayload: Record<string, unknown>;
+};
+
+export type ApolloSequenceRemovalInput = {
+  sequenceIds: string[];
+  apolloContactIds: string[];
+};
+
+export type ApolloSequenceTransitionInput = ApolloSequencePushInput & {
+  previousSequenceByContactId: Record<string, string | null>;
 };
 
 export type ApolloActivityKind = "CALL" | "CONNECTED_CALL" | "EMAIL_SENT" | "REPLY" | "LEAD_CREATED" | "OTHER";
@@ -202,7 +307,7 @@ export type ApolloCallActivitySummaryInput = {
 
 export type ApolloCallActivitySummary = ApolloActivitySummary;
 
-type ApolloOrganizationCandidate = {
+export type ApolloOrganizationCandidate = {
   id: string | null;
   name: string | null;
   domain: string | null;
@@ -217,6 +322,13 @@ type ApolloOrganizationCandidate = {
   matchReason: string;
   query: Record<string, unknown>;
   rawPayload: Record<string, unknown>;
+};
+
+type ApolloVerifiedIdentityHints = {
+  aliases: string[];
+  searchAliases: string[];
+  domains: string[];
+  logisticsProvider: boolean | null;
 };
 
 export type ApolloCompanyLookupMatch = {
@@ -474,34 +586,500 @@ export async function fetchApolloContactsForCompany(
   options?: {
     allowPeopleSearchFallback?: boolean;
     keywordSearchLimit?: number;
+    authorizePaidEmailEnrichment?: boolean;
+    explicitApolloPersonIds?: string[];
   }
 ): Promise<ApolloContactLookupResult> {
   const apiKey = readApolloSearchApiKey();
   const allowPeopleSearchFallback = options?.allowPeopleSearchFallback ?? true;
   const keywordSearchLimit = options?.keywordSearchLimit ?? APOLLO_PRIMARY_ROLE_KEYWORDS.length + APOLLO_FALLBACK_ROLE_KEYWORDS.length;
+  const contactRecovery = {
+    savedContactPagesRead: 0,
+    maskedPeopleChecked: 0,
+    savedContactsRecovered: 0,
+    relatedAccountsChecked: 0,
+    relatedOrganizationScopesChecked: 0,
+    confirmedAccountScopesChecked: 0,
+    peopleSearchRawRecords: 0,
+    peopleSearchAcceptedRecords: 0,
+    vettedParentAccountsChecked: 0,
+    companyKeywordSearches: 0,
+    paidEmailEnrichmentsAttempted: 0,
+    paidEmailsRecovered: 0
+  };
   const providedOrganizationId =
     input.apolloOrganizationId?.trim() && input.apolloOrganizationId !== "null"
       ? input.apolloOrganizationId.trim()
       : null;
-  const matchedOrganization = await findApolloOrganization(input, apiKey);
+  const providedAccountId =
+    input.apolloAccountId?.trim() && input.apolloAccountId !== "null"
+      ? input.apolloAccountId.trim()
+      : null;
+  const providedOrganization = providedOrganizationId
+    ? buildTrustedProvidedApolloOrganization(input, providedOrganizationId)
+    : null;
+  const confirmedSavedAccount = providedAccountId
+    ? await findApolloSavedAccountOrganization(
+        input,
+        apiKey,
+        providedAccountId,
+        { reviewerConfirmed: true }
+      )
+    : null;
+  // A reviewer-confirmed /accounts/{id} URL is authoritative. Apollo People
+  // Search accepts the exact account's linked organization ID, not the saved
+  // account ID itself. Resolve only that account and never substitute a parent,
+  // sibling, same-domain, or similarly named company.
+  const discoveredOrganization = confirmedSavedAccount || providedAccountId
+    ? null
+    : await findApolloOrganization(input, apiKey);
+  const canonicalDiscoveredOrganization =
+    providedOrganizationId &&
+    discoveredOrganization?.id &&
+    discoveredOrganization.id !== providedOrganizationId &&
+    isSafeCanonicalApolloOrganizationResolution(discoveredOrganization, input)
+      ? {
+          ...discoveredOrganization,
+          matchReason:
+            `${discoveredOrganization.matchReason}; resolved the saved Apollo account ID ` +
+            `to Apollo's canonical organization ID before employee search`
+        }
+      : null;
+  const matchedOrganization =
+    confirmedSavedAccount ??
+    canonicalDiscoveredOrganization ??
+    providedOrganization ??
+    discoveredOrganization;
   let effectiveMatchOrganization = matchedOrganization;
   let trustedMatchedOrganization = isDirectApolloCompanyMatch(matchedOrganization) ? matchedOrganization : null;
-  const organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
+  let organizationIdForSearch = trustedMatchedOrganization?.id ?? providedOrganizationId ?? null;
+  let companyNameForSearch = trustedMatchedOrganization?.name ?? input.companyName;
+  let domainForSearch = trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
+  const confirmedSavedContactCompanyName =
+    trustedMatchedOrganization?.name ?? input.companyName;
+  const confirmedSavedContactDomain =
+    trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain);
+  const providedReviewerConfirmedOrganizationId =
+    input.reviewerConfirmedApolloOrganizationId?.trim() &&
+    input.reviewerConfirmedApolloOrganizationId !== "null"
+      ? input.reviewerConfirmedApolloOrganizationId.trim()
+      : null;
+  const trustReviewerConfirmedPeopleScope = Boolean(
+    providedOrganizationId &&
+    (
+      (
+        providedAccountId &&
+        confirmedSavedAccount
+      ) ||
+      providedReviewerConfirmedOrganizationId === providedOrganizationId
+    )
+  );
+  const rawSavedContactsForProvidedOrganization = providedOrganizationId
+    ? ((await searchApolloContacts({
+        apiKey,
+        companyName: confirmedSavedContactCompanyName,
+        domain: confirmedSavedContactDomain,
+        organizationId: null,
+        queryKeywords: null,
+        enforceExpectedOrganization: false,
+        contactRecovery
+      })) ?? [])
+    : null;
+  const savedContactsForProvidedOrganization =
+    rawSavedContactsForProvidedOrganization
+      ? filterApolloSavedContactsForConfirmedMapping(
+          rawSavedContactsForProvidedOrganization,
+          {
+            companyNames: [
+              confirmedSavedContactCompanyName,
+              input.companyName
+            ],
+            normalizedDomain: confirmedSavedContactDomain,
+            organizationIds: [
+              providedAccountId,
+              trustedMatchedOrganization?.id
+            ]
+          }
+        )
+      : null;
+
+  if (providedAccountId) {
+    contactRecovery.confirmedAccountScopesChecked = 1;
+  }
 
   let contactsFromApollo =
     organizationIdForSearch || input.domain
       ? ((await searchApolloRelevantPeople({
           apiKey,
-          companyName: input.companyName,
-          domain: input.domain,
+          companyName: companyNameForSearch,
+          domain: organizationIdForSearch ? null : domainForSearch,
+          expectedOrganizationDomain: domainForSearch,
           organizationId: organizationIdForSearch,
           allowPeopleSearchFallback,
-          keywordSearchLimit
+          keywordSearchLimit,
+          enforceExpectedOrganization: true,
+          trustExactOrganizationScope: trustReviewerConfirmedPeopleScope,
+          savedContacts: savedContactsForProvidedOrganization,
+          contactRecovery
         })) ??
         [])
       : [];
 
-  if (contactsFromApollo.length === 0) {
+  const organizationScopedContactCount = contactsFromApollo.length;
+
+  if (
+    providedAccountId &&
+    providedOrganization &&
+    providedOrganizationId !== organizationIdForSearch &&
+    contactsFromApollo.length === 0
+  ) {
+    // Apollo Account View can return a saved-account shell without embedding
+    // its linked global organization. In that response shape the parsed
+    // candidate ID is the account ID, while Newl already retains the global
+    // organization ID resolved when the reviewer mapped the exact account URL.
+    // Retry only that immutable stored ID. This remains inside the reviewer-
+    // confirmed account identity and never substitutes a parent, sibling,
+    // same-domain account, or keyword match.
+    contactRecovery.confirmedAccountScopesChecked += 1;
+    const linkedOrganizationContacts =
+      (await searchApolloRelevantPeople({
+        apiKey,
+        companyName: confirmedSavedAccount?.name ?? input.companyName,
+        domain: null,
+        expectedOrganizationDomain:
+          confirmedSavedAccount?.domain ?? domainForSearch,
+        organizationId: providedOrganizationId,
+        allowPeopleSearchFallback,
+        keywordSearchLimit,
+        enforceExpectedOrganization: true,
+        trustExactOrganizationScope: trustReviewerConfirmedPeopleScope,
+        savedContacts: savedContactsForProvidedOrganization,
+        contactRecovery
+      })) ?? [];
+
+    if (linkedOrganizationContacts.length > 0) {
+      organizationIdForSearch = providedOrganizationId;
+      companyNameForSearch =
+        confirmedSavedAccount?.name ?? input.companyName;
+      trustedMatchedOrganization = {
+        ...(confirmedSavedAccount ?? providedOrganization),
+        id: providedOrganizationId
+      };
+      effectiveMatchOrganization = {
+        ...trustedMatchedOrganization,
+        matchReason:
+          `${trustedMatchedOrganization.matchReason}; recovered employees through the ` +
+          `stored global organization ID linked to the reviewer-confirmed Apollo account`
+      };
+      contactsFromApollo = linkedOrganizationContacts;
+    }
+  }
+
+  if (
+    providedAccountId &&
+    providedOrganizationId &&
+    contactsFromApollo.length === 0
+  ) {
+    // Apollo can retain more than one saved Account row for the same global
+    // organization. The reviewer-confirmed row may be an empty legal-name
+    // shell while saved contacts live under a short operating-brand Account
+    // such as "CGT". Preserve the reviewer's mapping, but recover contacts
+    // from another saved Account only when Apollo explicitly links that
+    // Account to the exact same immutable global organization ID.
+    const equivalentAccounts =
+      await findApolloEquivalentSavedAccountsForOrganization({
+        input,
+        apiKey,
+        providedAccountId,
+        providedOrganizationId,
+        confirmedSavedAccount
+      });
+    const supportingAccountIds: string[] = [];
+
+    for (const equivalentAccount of equivalentAccounts) {
+      contactRecovery.relatedAccountsChecked += 1;
+      supportingAccountIds.push(equivalentAccount.accountId);
+      const rawEquivalentContacts =
+        (await searchApolloContacts({
+          apiKey,
+          companyName: equivalentAccount.accountName,
+          domain:
+            equivalentAccount.organization.domain ??
+            confirmedSavedContactDomain,
+          organizationId: null,
+          queryKeywords: null,
+          enforceExpectedOrganization: false,
+          contactRecovery
+        })) ?? [];
+      const equivalentContacts =
+        filterApolloSavedContactsForConfirmedMapping(
+          rawEquivalentContacts,
+          {
+            companyNames: [
+              equivalentAccount.accountName,
+              equivalentAccount.organization.name ?? "",
+              confirmedSavedContactCompanyName,
+              input.companyName
+            ],
+            normalizedDomain:
+              equivalentAccount.organization.domain ??
+              confirmedSavedContactDomain,
+            organizationIds: [
+              equivalentAccount.accountId,
+              providedAccountId,
+              providedOrganizationId
+            ]
+          }
+        );
+      contactsFromApollo = dedupeApolloContacts([
+        ...contactsFromApollo,
+        ...equivalentContacts
+      ]);
+
+      if (contactsFromApollo.length > 0) {
+        break;
+      }
+    }
+
+    if (
+      supportingAccountIds.length > 0 &&
+      effectiveMatchOrganization
+    ) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; checked ` +
+          `${supportingAccountIds.length} equivalent saved Apollo account` +
+          `${supportingAccountIds.length === 1 ? "" : "s"} linked to the same global organization` +
+          `${contactsFromApollo.length > 0 ? " and recovered saved contacts" : ""}`,
+        query: {
+          ...effectiveMatchOrganization.query,
+          equivalent_saved_account_ids: supportingAccountIds
+        },
+        rawPayload: {
+          ...effectiveMatchOrganization.rawPayload,
+          newlEquivalentSavedAccountIds: supportingAccountIds
+        }
+      };
+    }
+  }
+
+  if (
+    !providedAccountId &&
+    !canonicalDiscoveredOrganization &&
+    providedOrganizationId &&
+    contactsFromApollo.length <= 1
+  ) {
+    const savedAccountOrganization =
+      confirmedSavedAccount ??
+      await findApolloSavedAccountOrganization(
+        input,
+        apiKey,
+        providedOrganizationId
+      );
+    const savedAccountId = readApolloString(savedAccountOrganization?.rawPayload ?? {}, ["id"]);
+    const recoveredOrganizationId =
+      savedAccountOrganization?.id &&
+      savedAccountOrganization.id !== savedAccountId
+        ? savedAccountOrganization.id
+        : null;
+    const recoveredDomain = savedAccountOrganization?.domain ?? domainForSearch;
+    const recoveryChangesScope =
+      Boolean(recoveredOrganizationId && recoveredOrganizationId !== organizationIdForSearch) ||
+      Boolean(
+        !recoveredOrganizationId &&
+        recoveredDomain &&
+        (
+          recoveredDomain !== domainForSearch ||
+          organizationIdForSearch === providedOrganizationId
+        )
+      );
+
+    if (savedAccountOrganization && recoveryChangesScope) {
+      trustedMatchedOrganization = savedAccountOrganization;
+      effectiveMatchOrganization = {
+        ...savedAccountOrganization,
+        matchReason:
+          `${savedAccountOrganization.matchReason}; recovered from Apollo's saved-account directory ` +
+          `after the original employee search returned ${contactsFromApollo.length} result(s)`
+      };
+      organizationIdForSearch = recoveredOrganizationId;
+      companyNameForSearch = savedAccountOrganization.name ?? input.companyName;
+      domainForSearch = recoveredDomain;
+      contactsFromApollo =
+        (await searchApolloRelevantPeople({
+          apiKey,
+          companyName: companyNameForSearch,
+          domain: organizationIdForSearch ? null : domainForSearch,
+          expectedOrganizationDomain: domainForSearch,
+          organizationId: organizationIdForSearch,
+          allowPeopleSearchFallback,
+          keywordSearchLimit,
+          enforceExpectedOrganization: true,
+          savedContacts: savedContactsForProvidedOrganization,
+          contactRecovery
+        })) ?? [];
+    }
+  }
+
+  const confirmedAccountDomain =
+    confirmedSavedAccount?.domain ??
+    trustedMatchedOrganization?.domain ??
+    domainForSearch ??
+    normalizeDomain(input.domain);
+  if (
+    !providedAccountId &&
+    providedOrganizationId &&
+    organizationIdForSearch &&
+    confirmedAccountDomain &&
+    contactsFromApollo.length === 0
+  ) {
+    const domainContacts =
+      (await searchApolloRelevantPeople({
+        apiKey,
+        companyName: confirmedSavedAccount?.name ?? companyNameForSearch,
+        domain: confirmedAccountDomain,
+        expectedOrganizationDomain: confirmedAccountDomain,
+        organizationId: null,
+        allowPeopleSearchFallback,
+        keywordSearchLimit,
+        enforceExpectedOrganization: true,
+        savedContacts: savedContactsForProvidedOrganization,
+        contactRecovery
+      })) ?? [];
+    contactsFromApollo = dedupeApolloContacts([
+      ...contactsFromApollo,
+      ...domainContacts
+    ]);
+    domainForSearch = confirmedAccountDomain;
+    if (effectiveMatchOrganization && domainContacts.length > 0) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        domain: effectiveMatchOrganization.domain ?? confirmedAccountDomain,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered employees through the ` +
+          `confirmed Apollo ${providedAccountId ? "account" : "company"} domain after the organization-scoped search returned ` +
+          `${organizationScopedContactCount} result(s)`
+      };
+    }
+  }
+
+  if (
+    !providedAccountId &&
+    providedOrganizationId &&
+    contactsFromApollo.length <= 1 &&
+    savedContactsForProvidedOrganization &&
+    savedContactsForProvidedOrganization.length > 0
+  ) {
+    const trustedContactDomain = inferTrustedApolloDomainFromContacts(
+      savedContactsForProvidedOrganization,
+      input.companyName
+    );
+    if (
+      trustedContactDomain &&
+      (
+        trustedContactDomain !== domainForSearch ||
+        organizationIdForSearch === providedOrganizationId
+      )
+    ) {
+      const domainContacts =
+        (await searchApolloRelevantPeople({
+          apiKey,
+          companyName: input.companyName,
+          domain: trustedContactDomain,
+          expectedOrganizationDomain: trustedContactDomain,
+          organizationId: null,
+          allowPeopleSearchFallback,
+          keywordSearchLimit,
+          enforceExpectedOrganization: true,
+          savedContacts: savedContactsForProvidedOrganization,
+          contactRecovery
+        })) ?? [];
+      contactsFromApollo = dedupeApolloContacts([
+        ...contactsFromApollo,
+        ...domainContacts
+      ]);
+      domainForSearch = trustedContactDomain;
+      if (effectiveMatchOrganization) {
+        effectiveMatchOrganization = {
+          ...effectiveMatchOrganization,
+          domain: effectiveMatchOrganization.domain ?? trustedContactDomain,
+          matchReason:
+            `${effectiveMatchOrganization.matchReason}; expanded the partial employee result ` +
+            `through the confirmed account's trusted saved-contact domain`
+        };
+      }
+    }
+  }
+
+  let blockedByRecoveryAmbiguity = false;
+  if (
+    !providedAccountId &&
+    !canonicalDiscoveredOrganization &&
+    providedOrganizationId &&
+    organizationIdForSearch &&
+    rawSavedContactsForProvidedOrganization &&
+    rawSavedContactsForProvidedOrganization.length > 0
+  ) {
+    const recoveredOrganization = inferApolloOrganizationFromContacts(
+      rawSavedContactsForProvidedOrganization,
+      input.companyName,
+      normalizeDomain(input.domain)
+    );
+    const returnedOrganization = inferApolloOrganizationFromContacts(
+      contactsFromApollo,
+      input.companyName,
+      normalizeDomain(input.domain)
+    );
+    const providedIdentifierLooksStale =
+      contactsFromApollo.length === 0 ||
+      (
+        recoveredOrganization?.id &&
+        recoveredOrganization.id !== providedOrganizationId &&
+        returnedOrganization?.id === recoveredOrganization.id
+      );
+    if (
+      providedIdentifierLooksStale &&
+      recoveredOrganization?.id &&
+      recoveredOrganization.id !== providedOrganizationId &&
+      isDirectApolloCompanyMatch(recoveredOrganization)
+    ) {
+      trustedMatchedOrganization = recoveredOrganization;
+      effectiveMatchOrganization = {
+        ...recoveredOrganization!,
+        matchReason:
+          `${recoveredOrganization!.matchReason}; recovered Apollo's global organization ID ` +
+          `after the configured ID returned no employees`
+      };
+      organizationIdForSearch = recoveredOrganization.id;
+      companyNameForSearch = recoveredOrganization.name ?? input.companyName;
+      domainForSearch = recoveredOrganization.domain ?? domainForSearch;
+      contactsFromApollo =
+        (await searchApolloRelevantPeople({
+          apiKey,
+          companyName: companyNameForSearch,
+          domain: null,
+          expectedOrganizationDomain: domainForSearch,
+          organizationId: organizationIdForSearch,
+          allowPeopleSearchFallback,
+          keywordSearchLimit,
+          enforceExpectedOrganization: true,
+          savedContacts: savedContactsForProvidedOrganization,
+          contactRecovery
+        })) ?? [];
+    } else if (
+      providedIdentifierLooksStale &&
+      recoveredOrganization?.id &&
+      recoveredOrganization.id !== providedOrganizationId
+    ) {
+      trustedMatchedOrganization = null;
+      effectiveMatchOrganization = recoveredOrganization;
+      contactsFromApollo = [];
+      blockedByRecoveryAmbiguity = true;
+    }
+  }
+
+  if (contactsFromApollo.length === 0 && !trustedMatchedOrganization && !blockedByRecoveryAmbiguity) {
     contactsFromApollo =
       (await searchApolloRelevantPeople({
         apiKey,
@@ -509,9 +1087,57 @@ export async function fetchApolloContactsForCompany(
         domain: input.domain,
         organizationId: null,
         allowPeopleSearchFallback,
-        keywordSearchLimit
+        keywordSearchLimit,
+        enforceExpectedOrganization: false,
+        savedContacts: null,
+        contactRecovery
       })) ??
       [];
+  }
+
+  if (allowPeopleSearchFallback && contactsFromApollo.length > 0) {
+    contactsFromApollo = await recoverConcreteApolloEmails({
+      apiKey,
+      contacts: contactsFromApollo,
+      companyName: companyNameForSearch,
+      domain: domainForSearch,
+      organizationId: organizationIdForSearch,
+      enforceExpectedOrganization: Boolean(
+        trustedMatchedOrganization || organizationIdForSearch || domainForSearch
+      ),
+      authorizePaidEmailEnrichment:
+        options?.authorizePaidEmailEnrichment === true,
+      contactRecovery
+    });
+  }
+
+  const explicitApolloPersonIds = dedupeApolloPersonIds(
+    options?.explicitApolloPersonIds ?? []
+  );
+  if (explicitApolloPersonIds.length > 0) {
+    if (options?.authorizePaidEmailEnrichment !== true) {
+      throw new Error(
+        "Authorize email-only Apollo enrichment before resolving explicit person URLs."
+      );
+    }
+    const explicitContacts = await enrichExplicitApolloPeople({
+      personIds: explicitApolloPersonIds,
+      companyName: confirmedSavedAccount?.name ?? companyNameForSearch,
+      trustedDomain: confirmedAccountDomain ?? domainForSearch,
+      contactRecovery
+    });
+    contactsFromApollo = dedupeApolloContacts([
+      ...contactsFromApollo,
+      ...explicitContacts
+    ]);
+    if (explicitContacts.length > 0 && effectiveMatchOrganization) {
+      effectiveMatchOrganization = {
+        ...effectiveMatchOrganization,
+        matchReason:
+          `${effectiveMatchOrganization.matchReason}; recovered reviewer-selected employees through ` +
+          `explicit Apollo person URLs after the account roster was unavailable through the public search API`
+      };
+    }
   }
 
   if (!trustedMatchedOrganization && contactsFromApollo.length > 0) {
@@ -523,15 +1149,371 @@ export async function fetchApolloContactsForCompany(
     }
   }
 
+  const match = toApolloCompanyLookupMatch(
+    effectiveMatchOrganization,
+    input.companyName,
+    normalizeDomain(input.domain)
+  );
   return {
     organizationId: trustedMatchedOrganization?.id ?? null,
     companyName: trustedMatchedOrganization?.name ?? input.companyName,
     domain: trustedMatchedOrganization?.domain ?? normalizeDomain(input.domain),
     linkedinUrl: trustedMatchedOrganization?.linkedinUrl ?? null,
-    match: toApolloCompanyLookupMatch(effectiveMatchOrganization, input.companyName, normalizeDomain(input.domain)),
-    contacts: dedupeApolloContacts(contactsFromApollo)
+    match: providedAccountId
+      ? {
+          ...match,
+          query: {
+            ...match.query,
+            apollo_account_id: providedAccountId
+          }
+        }
+      : match,
+    contacts: dedupeApolloContacts(contactsFromApollo),
+    contactRecovery
   };
 }
+
+export function readApolloAccountIdFromMatchQuery(value: unknown) {
+  const query = asRecord(value);
+  if (!query) return null;
+
+  const explicitAccountId = readApolloString(query, [
+    "apollo_account_id",
+    "account_id"
+  ]);
+  const resourceType = readApolloString(query, ["resource_type"])?.toUpperCase();
+  const suppliedAccountId =
+    resourceType === "ACCOUNT"
+      ? readApolloString(query, ["supplied_id"])
+      : null;
+  const accountId = explicitAccountId ?? suppliedAccountId;
+
+  return accountId && /^[a-f0-9]{24}$/iu.test(accountId)
+    ? accountId
+    : null;
+}
+
+export function readReviewerConfirmedApolloOrganizationIdFromMatchQuery(
+  value: unknown
+) {
+  const query = asRecord(value);
+  if (!query) return null;
+
+  const source = readApolloString(query, ["source"])?.toLowerCase();
+  const resourceType = readApolloString(query, ["resource_type"])?.toUpperCase();
+  if (source !== "manual-apollo-url" || resourceType !== "ORGANIZATION") {
+    return null;
+  }
+
+  const suppliedOrganizationId = readApolloString(query, ["supplied_id"]);
+  return suppliedOrganizationId &&
+    /^[a-f0-9]{24}$/iu.test(suppliedOrganizationId)
+    ? suppliedOrganizationId
+    : null;
+}
+
+export function parseApolloCompanyReference(value: string): ApolloCompanyReference {
+  const trimmed = value.trim();
+  if (/^[a-f0-9]{24}$/iu.test(trimmed)) {
+    return {
+      id: trimmed,
+      resourceType: "ORGANIZATION"
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Enter a valid Apollo company URL or 24-character Apollo organization ID.");
+  }
+
+  if (parsed.hostname !== "apollo.io" && !parsed.hostname.endsWith(".apollo.io")) {
+    throw new Error("The company mapping URL must be an Apollo URL.");
+  }
+
+  const candidates = [parsed.pathname, parsed.hash, ...parsed.searchParams.values()];
+  for (const candidate of candidates) {
+    const typedMatch = candidate.match(
+      /\/(accounts|organizations)\/([a-f0-9]{24})(?:\/|$)/iu
+    );
+    if (typedMatch) {
+      return {
+        id: typedMatch[2],
+        resourceType: typedMatch[1].toLowerCase() === "accounts" ? "ACCOUNT" : "ORGANIZATION"
+      };
+    }
+  }
+
+  for (const candidate of candidates) {
+    const untypedMatch = candidate.match(/[a-f0-9]{24}/iu);
+    if (untypedMatch) {
+      return {
+        id: untypedMatch[0],
+        resourceType: "ORGANIZATION"
+      };
+    }
+  }
+
+  throw new Error("The Apollo company URL does not contain an organization ID.");
+}
+
+export function parseApolloOrganizationId(value: string) {
+  return parseApolloCompanyReference(value).id;
+}
+
+export function parseApolloPersonIds(value: string) {
+  const entries = value
+    .split(/[\n,]+/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const personIds = dedupeApolloPersonIds(entries.map(parseApolloPersonId));
+  if (personIds.length > APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT) {
+    throw new Error(
+      `Paste no more than ${APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT} Apollo person URLs.`
+    );
+  }
+
+  return personIds;
+}
+
+function parseApolloPersonId(value: string) {
+  if (/^[a-f0-9]{24}$/iu.test(value)) {
+    return value;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Each Apollo person entry must be a full Apollo person URL.");
+  }
+  if (url.protocol !== "https:" || url.hostname !== "app.apollo.io") {
+    throw new Error("Apollo person URLs must use https://app.apollo.io.");
+  }
+  const match = url.hash.match(/^#\/people\/([a-f0-9]{24})(?:[/?]|$)/iu);
+  if (!match?.[1]) {
+    throw new Error("The Apollo person URL does not contain a valid person ID.");
+  }
+  return match[1];
+}
+
+export async function fetchApolloOrganizationForMapping({
+  companyName,
+  apolloOrganizationId,
+  resourceType = "ORGANIZATION",
+  reviewerConfirmed = false
+}: {
+  companyName: string;
+  apolloOrganizationId: string;
+  resourceType?: ApolloCompanyReference["resourceType"];
+  reviewerConfirmed?: boolean;
+}): Promise<ApolloOrganizationMappingResult> {
+  const apiKey = readApolloMasterApiKey();
+  let canonicalOrganizationId = apolloOrganizationId;
+  let accountPayload: Record<string, unknown> | null = null;
+  let mappingPayload: Record<string, unknown> | null = null;
+
+  if (resourceType === "ACCOUNT") {
+    accountPayload = await getApolloJson(
+      `/api/v1/accounts/${encodeURIComponent(apolloOrganizationId)}`,
+      apiKey
+    );
+    const account =
+      asRecord(accountPayload.account) ??
+      asRecord(accountPayload.data) ??
+      accountPayload;
+    const nestedOrganization = asRecord(account.organization);
+    canonicalOrganizationId =
+      readApolloString(account, ["organization_id", "apollo_organization_id"]) ??
+      readApolloString(nestedOrganization ?? {}, [
+        "id",
+        "organization_id",
+        "apollo_organization_id"
+      ]) ??
+      "";
+
+    if (canonicalOrganizationId) {
+      const json = await getApolloJson(
+        `/api/v1/organizations/${encodeURIComponent(canonicalOrganizationId)}`,
+        apiKey
+      );
+      const organization =
+        asRecord(json.organization) ??
+        asRecord(json.account) ??
+        asRecord(json.company) ??
+        asRecord(json.data) ??
+        json;
+      mappingPayload = { organizations: [organization] };
+    } else {
+      // Some valid Apollo account pages are sparse CRM shells and do not expose a
+      // global organization ID. The authenticated reviewer's exact account URL
+      // remains the authoritative mapping; downstream contact recovery can use
+      // the persisted account ID plus verified Hunter identity evidence.
+      canonicalOrganizationId = apolloOrganizationId;
+      mappingPayload = { accounts: [account] };
+    }
+  } else {
+    const json = await getApolloJson(
+      `/api/v1/organizations/${encodeURIComponent(canonicalOrganizationId)}`,
+      apiKey
+    );
+    const organization =
+      asRecord(json.organization) ??
+      asRecord(json.account) ??
+      asRecord(json.company) ??
+      asRecord(json.data) ??
+      json;
+    mappingPayload = { organizations: [organization] };
+  }
+
+  const [candidate] = parseApolloOrganizations(mappingPayload ?? {});
+
+  if (!candidate?.id || !candidate.name) {
+    throw new Error("Apollo did not return a usable company for that URL.");
+  }
+
+  let scored = scoreApolloOrganizationCandidate(candidate, companyName, null, {
+    source: "manual-apollo-url",
+    resource_type: resourceType,
+    supplied_id: apolloOrganizationId,
+    organization_ids: [canonicalOrganizationId]
+  });
+
+  if (
+    scored.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    resourceType === "ACCOUNT" &&
+    accountPayload &&
+    isSafeManualApolloAccountParentMapping({
+      companyName,
+      candidate,
+      canonicalOrganizationId,
+      accountPayload
+    })
+  ) {
+    scored = {
+      ...scored,
+      score: Math.max(scored.score, 12),
+      strongBaseNameMatch: true,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      matchReason:
+        `direct company; manually confirmed Apollo account resolved to its canonical ` +
+        `operating parent/brand "${candidate.name}"`
+    };
+  }
+
+  if (
+    scored.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    reviewerConfirmed
+  ) {
+    scored = {
+      ...scored,
+      classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+      matchReason:
+        `direct company; authenticated reviewer explicitly confirmed the authoritative Apollo URL mapping from ` +
+        `"${companyName}" to "${candidate.name}"`,
+      query: {
+        ...scored.query,
+        reviewer_confirmed_identity_override: true,
+        reviewer_confirmed_name_override: true
+      }
+    };
+  }
+
+  if (scored.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY) {
+    if (scored.logisticsProviderMatch) {
+      throw new Error(
+        `Apollo URL resolved to logistics provider "${candidate.name}". Confirm the exact Apollo company URL to override automated identity matching; prospect safety is evaluated separately.`
+      );
+    }
+    throw new Error(
+      `Apollo URL resolved to "${candidate.name}", but it is not a strong enough match for "${companyName}".`
+    );
+  }
+
+  return {
+    organizationId: candidate.id,
+    companyName: candidate.name,
+    domain: candidate.domain,
+    linkedinUrl: candidate.linkedinUrl,
+    match: toApolloCompanyLookupMatch(scored, companyName, null)
+  };
+}
+
+function isSafeManualApolloAccountParentMapping({
+  companyName,
+  candidate,
+  canonicalOrganizationId,
+  accountPayload
+}: {
+  companyName: string;
+  candidate: {
+    id: string | null;
+    name: string | null;
+    domain: string | null;
+    linkedinUrl: string | null;
+    rawPayload: Record<string, unknown>;
+  };
+  canonicalOrganizationId: string;
+  accountPayload: Record<string, unknown>;
+}) {
+  const account =
+    asRecord(accountPayload.account) ??
+    asRecord(accountPayload.data) ??
+    accountPayload;
+  const nestedOrganization = asRecord(account.organization);
+  const relatedOrganizationId =
+    readApolloString(account, ["organization_id", "apollo_organization_id"]) ??
+    readApolloString(nestedOrganization ?? {}, [
+      "id",
+      "organization_id",
+      "apollo_organization_id"
+    ]);
+  if (
+    !candidate.id ||
+    !candidate.name ||
+    relatedOrganizationId !== canonicalOrganizationId ||
+    candidate.id !== canonicalOrganizationId
+  ) {
+    return false;
+  }
+
+  const inputTokens = new Set(
+    buildCompanyNameAliases(companyName).flatMap((alias) =>
+      alias.split(/\s+/u).filter(Boolean)
+    )
+  );
+  const candidateCoreTokens = buildCompanyNameAliases(candidate.name)
+    .flatMap((alias) => alias.split(/\s+/u))
+    .filter(
+      (token, index, values) =>
+        token.length >= 5 &&
+        !MANUAL_PARENT_BRAND_DESCRIPTOR_TOKENS.has(token) &&
+        values.indexOf(token) === index
+    );
+  return (
+    candidateCoreTokens.length > 0 &&
+    candidateCoreTokens.every((token) => inputTokens.has(token))
+  );
+}
+
+const MANUAL_PARENT_BRAND_DESCRIPTOR_TOKENS = new Set([
+  "company",
+  "corporation",
+  "enterprises",
+  "group",
+  "holding",
+  "holdings",
+  "industries",
+  "industry",
+  "international",
+  "manufacturing",
+  "products"
+]);
 
 export async function fetchApolloContactById(apolloContactId: string): Promise<ApolloContactRecord> {
   const contactId = apolloContactId.trim();
@@ -563,12 +1545,572 @@ export async function fetchApolloContactById(apolloContactId: string): Promise<A
   }
 
   const record = asRecord(json.contact) ?? asRecord(json.data) ?? json;
-  const contact = parseApolloContacts({ contacts: [record] })[0];
+  let contact = parseApolloContacts({ contacts: [record] }, "SAVED_CONTACT")[0];
   if (!contact) {
     throw new Error("Apollo returned a contact response without a usable contact record.");
   }
 
+  // Apollo's single-contact response can omit `contact_campaign_statuses` even
+  // when the same saved contact is actively enrolled. Recover the richer saved
+  // contact record and merge it only when Apollo returns the exact same contact
+  // ID. This keeps status sync zero-credit and prevents an incomplete detail
+  // response from shadowing confirmed cadence membership.
+  const organization = readApolloOrganizationFromContact(contact);
+  if (
+    contact.sequenceStatus === SequenceStatus.NOT_STARTED &&
+    organization
+  ) {
+    const savedSearch = await postApolloJson("/api/v1/contacts/search", apiKey, {
+      page: 1,
+      per_page: DEFAULT_PAGE_SIZE,
+      q_keywords: contact.fullName
+    });
+    const exactSavedContact = parseApolloContacts(savedSearch, "SAVED_CONTACT")
+      .find((candidate) => candidate.apolloContactId === contactId);
+    if (exactSavedContact) {
+      contact = mergeApolloContactRecords(contact, exactSavedContact);
+    }
+  }
+
   return contact;
+}
+
+export async function fetchApolloSequenceDeliveryFailures(
+  sequenceIdInput: string
+): Promise<ApolloSequenceDeliveryFailure[]> {
+  const sequenceId = sequenceIdInput.trim();
+  if (!sequenceId) {
+    throw new Error("Apollo delivery-failure reconciliation requires a sequence ID.");
+  }
+  if (INTERNAL_SEQUENCE_KEYS.has(sequenceId)) {
+    throw new Error(
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID.`
+    );
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const contacts = new Map<string, ApolloSequenceDeliveryFailure>();
+  const searches = [
+    {
+      key: "message-status",
+      messageStats: ["bounced", "failed_other", "spam_blocked"],
+      notSentReasons: []
+    },
+    {
+      key: "not-sent-reason",
+      messageStats: [],
+      notSentReasons: [
+        "email_format_invalid",
+        "email_service_provider_delivery_failure",
+        "sendgrid_dropped_email",
+        "mailgun_dropped_email",
+        "not_valid_hard_bounce_detected",
+        "email_on_global_bounce_list"
+      ]
+    }
+  ] as const;
+
+  for (const search of searches) {
+    for (let page = 1; page <= APOLLO_DELIVERY_FAILURE_MAX_PAGES; page += 1) {
+      const params = new URLSearchParams({
+        page: String(page),
+        per_page: String(DEFAULT_PAGE_SIZE)
+      });
+      params.append("emailer_campaign_ids[]", sequenceId);
+      search.messageStats.forEach((value) => params.append("emailer_message_stats[]", value));
+      search.notSentReasons.forEach((value) => params.append("not_sent_reason_cds[]", value));
+
+      const response = await fetch(
+        `${DEFAULT_BASE_URL}/api/v1/emailer_messages/search?${params.toString()}`,
+        {
+          method: "GET",
+          headers: buildApolloHeaders(apiKey),
+          cache: "no-store"
+        }
+      );
+      const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+      if (!response.ok) {
+        const message =
+          extractApolloError(json) ??
+          `Apollo delivery-failure reconciliation failed with status ${response.status}.`;
+        if (response.status === 429 || isApolloRateLimitMessage(message)) {
+          throw new ApolloRateLimitError(
+            message,
+            parseRetryAfterMs(response.headers.get("retry-after"))
+          );
+        }
+        if (response.status >= 500) {
+          throw new ApolloTransientError(message, response.status);
+        }
+        throw new Error(message);
+      }
+
+      if (!json) {
+        throw new ApolloTransientError(
+          "Apollo returned an unreadable delivery-failure response.",
+          502
+        );
+      }
+
+      const entries = readApolloActivityEntries(json)
+        .map((entry) => asRecord(entry))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+      for (const entry of entries) {
+        const failure = classifyApolloDeliveryFailure(entry);
+        if (!failure) {
+          continue;
+        }
+        const nestedContact =
+          asRecord(entry.contact) ??
+          asRecord(entry.recipient) ??
+          asRecord(entry.person) ??
+          asRecord(entry.prospect);
+        const apolloContactId =
+          readApolloString(entry, [
+            "contact_id",
+            "apollo_contact_id",
+            "recipient_contact_id",
+            "prospect_id"
+          ]) ?? readApolloString(nestedContact ?? {}, ["contact_id", "apollo_contact_id", "id"]);
+        const email =
+          readApolloString(entry, ["to_email", "recipient_email", "email"]) ??
+          readApolloString(nestedContact ?? {}, ["email"]);
+        const key = apolloContactId ?? email?.trim().toLowerCase() ?? null;
+
+        if (key && !contacts.has(key)) {
+          contacts.set(key, {
+            apolloContactId,
+            email,
+            ...failure,
+            rawPayload: entry
+          });
+        }
+      }
+
+      if (entries.length < DEFAULT_PAGE_SIZE) {
+        break;
+      }
+    }
+  }
+
+  return [...contacts.values()];
+}
+
+export async function fetchApolloSequencePauseEvidence(
+  sequenceIdInput: string
+): Promise<ApolloSequencePauseEvidence[]> {
+  const sequenceId = sequenceIdInput.trim();
+  if (!sequenceId) {
+    throw new Error("Apollo pause reconciliation requires a sequence ID.");
+  }
+  if (INTERNAL_SEQUENCE_KEYS.has(sequenceId)) {
+    throw new Error(
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID.`
+    );
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const evidenceByContact = new Map<string, ApolloSequencePauseEvidence>();
+
+  for (let page = 1; page <= APOLLO_PAUSE_EVIDENCE_MAX_PAGES; page += 1) {
+    const params = new URLSearchParams({
+      page: String(page),
+      per_page: String(DEFAULT_PAGE_SIZE)
+    });
+    params.append("emailer_campaign_ids[]", sequenceId);
+    params.append("emailer_message_reply_classes[]", "out_of_office");
+    params.append(
+      "emailer_message_reply_classes[]",
+      "already_left_company_or_not_right_person"
+    );
+
+    const response = await fetch(
+      `${DEFAULT_BASE_URL}/api/v1/emailer_messages/search?${params.toString()}`,
+      {
+        method: "GET",
+        headers: buildApolloHeaders(apiKey),
+        cache: "no-store"
+      }
+    );
+    const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+    if (!response.ok) {
+      const message =
+        extractApolloError(json) ??
+        `Apollo pause reconciliation failed with status ${response.status}.`;
+      if (response.status === 429 || isApolloRateLimitMessage(message)) {
+        throw new ApolloRateLimitError(
+          message,
+          parseRetryAfterMs(response.headers.get("retry-after"))
+        );
+      }
+      if (response.status >= 500) {
+        throw new ApolloTransientError(message, response.status);
+      }
+      throw new Error(message);
+    }
+
+    if (!json) {
+      throw new ApolloTransientError(
+        "Apollo returned an unreadable pause-evidence response.",
+        502
+      );
+    }
+
+    const entries = readApolloActivityEntries(json)
+      .map((entry) => asRecord(entry))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+    for (const entry of entries) {
+      const pauseEvidence = classifyApolloPauseEvidence(entry);
+      if (!pauseEvidence) {
+        continue;
+      }
+      const nestedContact =
+        asRecord(entry.contact) ??
+        asRecord(entry.recipient) ??
+        asRecord(entry.person) ??
+        asRecord(entry.prospect);
+      const apolloContactId =
+        readApolloString(entry, [
+          "contact_id",
+          "apollo_contact_id",
+          "recipient_contact_id",
+          "prospect_id"
+        ]) ?? readApolloString(nestedContact ?? {}, ["contact_id", "apollo_contact_id", "id"]);
+      const email =
+        readApolloString(entry, ["to_email", "recipient_email", "email"]) ??
+        readApolloString(nestedContact ?? {}, ["email"]);
+      const key = apolloContactId ?? email?.trim().toLowerCase() ?? null;
+      if (!key) {
+        continue;
+      }
+
+      const existing = evidenceByContact.get(key);
+      if (
+        !existing ||
+        pauseEvidence.kind === "NO_LONGER_EMPLOYED" ||
+        (pauseEvidence.occurredAt?.getTime() ?? 0) >
+          (existing.occurredAt?.getTime() ?? 0)
+      ) {
+        evidenceByContact.set(key, {
+          apolloContactId,
+          email,
+          ...pauseEvidence,
+          rawPayload: entry
+        });
+      }
+    }
+
+    if (entries.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return [...evidenceByContact.values()];
+}
+
+export function reconcileApolloContactWithPauseEvidence({
+  contact,
+  selectedSequenceId,
+  apolloContactId,
+  email,
+  pauseEvidence
+}: {
+  contact: ApolloContactRecord;
+  selectedSequenceId: string | null;
+  apolloContactId: string;
+  email: string | null;
+  pauseEvidence: ApolloSequencePauseEvidence[];
+}): ApolloContactRecord {
+  if (!selectedSequenceId || contact.sequenceStatus !== SequenceStatus.PAUSED) {
+    return contact;
+  }
+
+  const normalizedEmail = email?.trim().toLowerCase() ?? null;
+  const evidence = pauseEvidence.find(
+    (candidate) =>
+      candidate.apolloContactId === apolloContactId ||
+      (normalizedEmail && candidate.email?.trim().toLowerCase() === normalizedEmail)
+  );
+  if (!evidence) {
+    return contact;
+  }
+
+  return {
+    ...contact,
+    sequenceStatus:
+      evidence.kind === "NO_LONGER_EMPLOYED"
+        ? SequenceStatus.FINISHED
+        : SequenceStatus.PAUSED,
+    replyStatus:
+      evidence.kind === "OUT_OF_OFFICE"
+        ? ReplyStatus.OUT_OF_OFFICE
+        : ReplyStatus.NO_REPLY,
+    sequenceId: selectedSequenceId,
+    lastReplyAt: evidence.occurredAt ?? contact.lastReplyAt,
+    rawPayload: {
+      ...contact.rawPayload,
+      newlPauseReconciliation: {
+        source: "APOLLO_OUTREACH_EMAIL_SEARCH",
+        sequenceId: selectedSequenceId,
+        kind: evidence.kind,
+        reason: evidence.reason,
+        occurredAt: evidence.occurredAt?.toISOString() ?? null,
+        resumeAt: evidence.resumeAt?.toISOString() ?? null,
+        record: evidence.rawPayload
+      }
+    }
+  };
+}
+
+export function classifyApolloPauseEvidence(
+  value: Record<string, unknown>
+): Omit<ApolloSequencePauseEvidence, "apolloContactId" | "email" | "rawPayload"> | null {
+  if (!hasApolloReplyEvidence(value)) {
+    return null;
+  }
+  const text = collectApolloText(value);
+  const replyClass = readApolloString(value, [
+    "reply_class",
+    "reply_status",
+    "response_status"
+  ])?.trim().toLowerCase().replace(/[\s-]+/gu, "_") ?? null;
+  const reason =
+    readApolloEvidenceReason(value) ??
+    (replyClass ? `Apollo reply class: ${replyClass}.` : summarizeApolloEvidenceReason(text));
+  if (!text && !replyClass) {
+    return null;
+  }
+  const occurredAt = parseApolloDate(
+    readApolloString(value, [
+      "replied_at",
+      "last_reply_at",
+      "completed_at",
+      "sent_at",
+      "updated_at",
+      "created_at"
+    ])
+  );
+
+  if (
+    replyClass === "already_left_company_or_not_right_person" ||
+    /\b(no longer (?:works?|working|employed|with)|has left|left (?:the )?company|not employed|departed (?:from )?|former employee)\b/iu.test(
+      text
+    )
+  ) {
+    return {
+      kind: "NO_LONGER_EMPLOYED",
+      reason,
+      occurredAt,
+      resumeAt: null
+    };
+  }
+
+  if (
+    replyClass === "out_of_office" ||
+    /\b(out[ -]?of[ -]?office|automatic reply|auto(?:matic)?[ -]?reply|vacation|away from (?:the )?office)\b/iu.test(
+      text
+    )
+  ) {
+    return {
+      kind: "OUT_OF_OFFICE",
+      reason,
+      occurredAt,
+      resumeAt: readApolloResumeAt(value, text, occurredAt)
+    };
+  }
+
+  return null;
+}
+
+function hasApolloReplyEvidence(value: Record<string, unknown>) {
+  const direction = readApolloString(value, ["direction", "message_direction"]);
+  return (
+    readApolloBoolean(value, ["replied", "has_replied"], false) ||
+    Boolean(readApolloString(value, ["reply_class", "reply_status", "response_status"])) ||
+    Boolean(readApolloString(value, ["replied_at", "last_reply_at", "responded_at"])) ||
+    direction?.toLowerCase() === "inbound"
+  );
+}
+
+export function reconcileApolloContactWithDeliveryFailureEvidence({
+  contact,
+  selectedSequenceId,
+  apolloContactId,
+  email,
+  deliveryFailures
+}: {
+  contact: ApolloContactRecord;
+  selectedSequenceId: string | null;
+  apolloContactId: string;
+  email: string | null;
+  deliveryFailures: ApolloSequenceDeliveryFailure[];
+}): ApolloContactRecord {
+  if (!selectedSequenceId) {
+    return contact;
+  }
+
+  const normalizedEmail = email?.trim().toLowerCase() ?? null;
+  const failure = deliveryFailures.find(
+    (candidate) =>
+      candidate.apolloContactId === apolloContactId ||
+      (normalizedEmail && candidate.email?.trim().toLowerCase() === normalizedEmail)
+  );
+  if (!failure) {
+    return contact;
+  }
+
+  return {
+    ...contact,
+    sequenceStatus: SequenceStatus.BOUNCED,
+    sequenceId: selectedSequenceId,
+    rawPayload: {
+      ...contact.rawPayload,
+      newlDeliveryFailureReconciliation: {
+        source: "APOLLO_OUTREACH_EMAIL_SEARCH",
+        sequenceId: selectedSequenceId,
+        kind: failure.kind,
+        reason: failure.reason,
+        record: failure.rawPayload
+      }
+    }
+  };
+}
+
+export function classifyApolloDeliveryFailure(
+  value: Record<string, unknown>
+): { kind: ApolloDeliveryFailureKind; reason: string } | null {
+  const records = [
+    value,
+    asRecord(value.delivery),
+    asRecord(value.emailer_message),
+    asRecord(value.message)
+  ].filter((record): record is Record<string, unknown> => Boolean(record));
+  const reason =
+    records
+      .map((record) =>
+        readApolloString(record, [
+          "failure_reason",
+          "not_sent_reason",
+          "not_sent_reason_cd",
+          "delivery_failure_reason",
+          "status_reason",
+          "error_message",
+          "message"
+        ])
+      )
+      .find(Boolean) ??
+    records
+      .map((record) =>
+        readApolloString(record, [
+          "emailer_message_stat",
+          "emailer_message_status",
+          "email_status",
+          "email_delivery_status",
+          "status",
+          "state"
+        ])
+      )
+      .find(Boolean) ??
+    "";
+  const searchable = records
+    .flatMap((record) =>
+      [
+        "failure_reason",
+        "not_sent_reason",
+        "not_sent_reason_cd",
+        "delivery_failure_reason",
+        "status_reason",
+        "error_message",
+        "message",
+        "emailer_message_stat",
+        "emailer_message_status",
+        "email_status",
+        "email_delivery_status",
+        "status",
+        "state"
+      ].map((key) => readApolloString(record, [key]))
+    )
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+
+  if (!searchable) {
+    return null;
+  }
+  if (/invalid[-_ ]?mx|mx record|no mx|domain.*mx/.test(searchable)) {
+    return { kind: "INVALID_MX", reason: reason || "Invalid MX record detected for the recipient domain." };
+  }
+  if (/recipient[-_ ]?domain|invalid domain|domain does not exist|email domain/.test(searchable)) {
+    return { kind: "RECIPIENT_DOMAIN", reason: reason || "Recipient-domain delivery failure." };
+  }
+  if (/bad data|email[-_ ]?format[-_ ]?invalid|invalid email|email unverified/.test(searchable)) {
+    return { kind: "BAD_DATA", reason: reason || "Apollo marked the recipient as bad data." };
+  }
+  if (/spam[-_ ]?blocked/.test(searchable)) {
+    return { kind: "SPAM_BLOCKED", reason: reason || "Apollo blocked the message as spam." };
+  }
+  if (/bounc|hard[-_ ]?bounce|global[-_ ]?bounce/.test(searchable)) {
+    return { kind: "BOUNCE", reason: reason || "Apollo reported a bounced message." };
+  }
+  if (
+    /failed_other|delivery failure|delivery_failure|dropped_email|dropped email|email_service_provider_delivery_failure/.test(
+      searchable
+    )
+  ) {
+    return { kind: "OTHER_PERMANENT", reason: reason || "Apollo reported a permanent delivery failure." };
+  }
+
+  return null;
+}
+
+export async function createApolloContactForEnrollment(
+  input: ApolloContactCreateInput
+): Promise<ApolloContactRecord> {
+  const email = input.email.trim().toLowerCase();
+  if (!email) {
+    throw new Error("Apollo contact creation requires a concrete email address.");
+  }
+
+  const apiKey = readApolloMasterApiKey();
+  const firstName = safeApolloContactNamePart(input.firstName);
+  const lastName = safeApolloContactNamePart(input.lastName);
+  const websiteUrl = buildApolloContactWebsiteUrl(input.companyDomain);
+  const json = await postApolloJson("/api/v1/contacts", apiKey, {
+    first_name: firstName ?? undefined,
+    last_name: lastName ?? undefined,
+    organization_name: input.companyName.trim(),
+    title: input.title?.trim() || undefined,
+    email,
+    website_url: websiteUrl ?? undefined,
+    direct_phone: input.phone?.trim() || undefined,
+    run_dedupe: true
+  });
+  const record =
+    asRecord(json.contact) ??
+    asRecord(json.data) ??
+    json;
+  const contact = parseApolloContacts({ contacts: [record] }, "SAVED_CONTACT")[0];
+
+  if (!contact?.apolloContactId) {
+    throw new Error("Apollo created or matched the contact but did not return a usable contact ID.");
+  }
+
+  const returnedEmail = contact.email?.trim().toLowerCase() ?? null;
+  if (returnedEmail && returnedEmail !== email) {
+    throw new Error(
+      "Apollo deduplication returned a different email address. Review the contact in Apollo before enrollment."
+    );
+  }
+
+  return {
+    ...contact,
+    email: contact.email ?? email,
+    fullName: contact.fullName || input.fullName
+  };
 }
 
 export async function pushApolloContactsToSequence(
@@ -588,6 +2130,12 @@ export async function pushApolloContactsToSequence(
   if (!sequenceId) {
     throw new Error("Apollo sequence push requires a sequence ID.");
   }
+  if (INTERNAL_SEQUENCE_KEYS.has(sequenceId)) {
+    throw new Error(
+      `${sequenceId} is an internal Newl Apps cadence key, not an Apollo sequence ID. ` +
+        "Resolve the live Apollo cadence before enrollment."
+    );
+  }
 
   if (!sequenceOwnerUserId) {
     throw new Error("Apollo sequence push requires a mapped Apollo owner user ID.");
@@ -598,21 +2146,32 @@ export async function pushApolloContactsToSequence(
   }
 
   const initialStatus = input.initialStatus ?? "active";
-  const payload = {
+  const params = new URLSearchParams({
     emailer_campaign_id: sequenceId,
-    apollo_sequence_id: sequenceId,
-    contact_ids: acceptedContactIds,
-    sequence_owner_user_id: sequenceOwnerUserId,
     send_email_from_email_account_id: sendFromEmailAccountId,
-    sequence_send_from_email_account_id: sendFromEmailAccountId,
-    sequence_push_initial_status: initialStatus,
-    allow_no_email: false,
-    allow_unverified_email: false,
-    allow_contacts_with_same_company: true,
-    allow_contacts_owned_by_other_users: true
-  } satisfies Record<string, unknown>;
+    sequence_no_email: "false",
+    sequence_unverified_email: "false",
+    sequence_job_change: "false",
+    sequence_active_in_other_campaigns: "true",
+    sequence_finished_in_other_campaigns: "true",
+    sequence_same_company_in_same_campaign: "true",
+    contacts_without_ownership_permission: "true",
+    add_if_in_queue: "true",
+    contact_verification_skipped: "false",
+    user_id: sequenceOwnerUserId,
+    status: initialStatus
+  });
+  acceptedContactIds.forEach((contactId) => params.append("contact_ids[]", contactId));
 
-  const rawPayload = await postApolloJson(`/api/v1/emailer_campaigns/${sequenceId}/add_contact_ids`, apiKey, payload);
+  const rawPayload = await postApolloJson(
+    `/api/v1/emailer_campaigns/${sequenceId}/add_contact_ids?${params.toString()}`,
+    apiKey,
+    {}
+  );
+  const responseError = extractApolloSequencePushError(rawPayload);
+  if (responseError) {
+    throw new Error(responseError);
+  }
 
   return {
     sequenceId,
@@ -620,6 +2179,117 @@ export async function pushApolloContactsToSequence(
     message: extractApolloError(rawPayload) ?? null,
     rawPayload
   };
+}
+
+function extractApolloSequencePushError(payload: Record<string, unknown>) {
+  const success = payload.success;
+  const explicitError = readApolloString(payload, ["error", "detail"]);
+  if (explicitError) {
+    return explicitError;
+  }
+
+  if (payload.errors && typeof payload.errors === "object") {
+    const nestedMessage = readApolloString(payload.errors as Record<string, unknown>, [
+      "message",
+      "base",
+      "detail"
+    ]);
+    if (nestedMessage) {
+      return nestedMessage;
+    }
+  }
+
+  return success === false ? readApolloString(payload, ["message"]) ?? "Apollo rejected the sequence enrollment." : null;
+}
+
+function safeApolloContactNamePart(value: string | null) {
+  const normalized = value?.trim() ?? "";
+  if (!normalized || /[*•●]/u.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function buildApolloContactWebsiteUrl(domain: string | null) {
+  const normalizedDomain = normalizeDomain(domain);
+  return normalizedDomain ? `https://${normalizedDomain}` : null;
+}
+
+export async function removeApolloContactsFromSequences(
+  input: ApolloSequenceRemovalInput
+) {
+  const apiKey = readApolloMasterApiKey();
+  const sequenceIds = [...new Set(input.sequenceIds.map((value) => value.trim()).filter(Boolean))];
+  const contactIds = [...new Set(input.apolloContactIds.map((value) => value.trim()).filter(Boolean))];
+  if (sequenceIds.length === 0 || contactIds.length === 0) {
+    throw new Error("Apollo sequence removal requires sequence and contact IDs.");
+  }
+
+  const params = new URLSearchParams({ mode: "remove" });
+  sequenceIds.forEach((value) => params.append("emailer_campaign_ids[]", value));
+  contactIds.forEach((value) => params.append("contact_ids[]", value));
+  const response = await fetch(
+    `${DEFAULT_BASE_URL}/api/v1/emailer_campaigns/remove_or_stop_contact_ids?${params.toString()}`,
+    {
+      method: "POST",
+      headers: buildApolloHeaders(apiKey),
+      cache: "no-store"
+    }
+  );
+  const text = await response.text().catch(() => "");
+  let payload: Record<string, unknown> = {};
+  if (text.trim()) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      payload =
+        parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : { response: text };
+    } catch {
+      payload = { response: text };
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      extractApolloError(payload) ??
+      text.trim() ??
+      `Apollo request failed with status ${response.status}.`;
+    if (response.status === 429 || isApolloRateLimitMessage(message)) {
+      throw new ApolloRateLimitError(message);
+    }
+    throw new Error(message);
+  }
+
+  return {
+    sequenceIds,
+    apolloContactIds: contactIds,
+    rawPayload: payload
+  };
+}
+
+export async function transitionApolloContactsToSequence(
+  input: ApolloSequenceTransitionInput
+) {
+  const transitions = new Map<string, string[]>();
+  for (const apolloContactId of input.apolloContactIds) {
+    const previousSequenceId =
+      input.previousSequenceByContactId[apolloContactId] ?? null;
+    if (!previousSequenceId) continue;
+    transitions.set(previousSequenceId, [
+      ...(transitions.get(previousSequenceId) ?? []),
+      apolloContactId
+    ]);
+  }
+
+  for (const [previousSequenceId, apolloContactIds] of transitions) {
+    await removeApolloContactsFromSequences({
+      sequenceIds: [previousSequenceId],
+      apolloContactIds
+    });
+  }
+
+  return pushApolloContactsToSequence(input);
 }
 
 export async function fetchApolloCallActivitySummary(
@@ -853,6 +2523,12 @@ async function fetchApolloPagedCollection(path: string, apiKey: string, basePayl
   return fetchApolloActivityPages(path, apiKey, basePayload);
 }
 
+export async function resolveApolloOrganizationForCompany(
+  input: ApolloCompanyLookupInput
+): Promise<ApolloOrganizationCandidate | null> {
+  return findApolloOrganization(input, readApolloSearchApiKey());
+}
+
 function readApolloMasterApiKey() {
   const value = process.env.APOLLO_MASTER_API?.trim();
   if (!value || value === "APOLLO_MASTER_API_PLACEHOLDER") {
@@ -885,29 +2561,23 @@ function buildApolloHeaders(apiKey: string) {
 }
 
 async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: string): Promise<ApolloOrganizationCandidate | null> {
-  const normalizedDomain = normalizeDomain(input.domain);
-  const searchQueries = buildApolloOrganizationSearchQueries(input.companyName);
+  const identityHints = readApolloVerifiedIdentityHints(input);
+  const searchBodies = buildApolloOrganizationSearchBodies(input, identityHints);
   const scoredCandidates: ApolloOrganizationCandidate[] = [];
+  const completedSearches: Record<string, unknown>[] = [];
 
-  for (const searchCompanyName of searchQueries) {
-    const body = {
-      page: 1,
-      per_page: 10,
-      q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-      best_company_name: searchCompanyName,
-      company_match_name: searchCompanyName,
-      company_identity_key: buildCompanyIdentityKey(searchCompanyName, normalizedDomain),
-      original_company_name: input.companyName
-    };
-
+  for (const body of searchBodies) {
     const json = await postApolloJson("/api/v1/mixed_companies/search", apiKey, body);
     const candidates = parseApolloOrganizations(json);
+    completedSearches.push(body);
 
     scoredCandidates.push(
-      ...candidates.map((candidate) => scoreApolloOrganizationCandidate(candidate, input.companyName, normalizedDomain, body))
+      ...candidates.map((candidate) =>
+        scoreApolloOrganizationCandidateAgainstIdentity(candidate, input, identityHints, body)
+      )
     );
 
-    if (scoredCandidates.some((candidate) => candidate.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY)) {
+    if (hasUniqueHighConfidenceApolloCandidate(scoredCandidates)) {
       break;
     }
   }
@@ -916,7 +2586,577 @@ async function findApolloOrganization(input: ApolloCompanyLookupInput, apiKey: s
     return null;
   }
 
-  return scoredCandidates.sort((left, right) => right.score - left.score)[0] ?? null;
+  return selectResolvedApolloOrganizationCandidate({
+    candidates: scoredCandidates,
+    completedSearches,
+    identityHints
+  });
+}
+
+function buildApolloOrganizationSearchBodies(
+  input: ApolloCompanyLookupInput,
+  identityHints: ApolloVerifiedIdentityHints
+) {
+  const bodies: Record<string, unknown>[] = [];
+  const domains = [normalizeDomain(input.domain), ...identityHints.domains]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, 2);
+
+  for (const domain of domains) {
+    bodies.push({
+      page: 1,
+      per_page: 10,
+      q_organization_domains_list: [domain]
+    });
+  }
+
+  // Public identity research exists specifically to recover an operating brand
+  // from noisy legal/facility names. Search those aliases before the original
+  // TradeMining label so the bounded query budget cannot be exhausted by two
+  // variants of the same malformed source name.
+  const nameQueries = [
+    ...identityHints.aliases,
+    ...identityHints.searchAliases,
+    input.companyName
+  ]
+    .flatMap((value) => buildApolloOrganizationSearchQueries(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const maximumSearches = domains.length > 0 ? 3 : 2;
+  for (const companyName of nameQueries) {
+    if (bodies.length >= maximumSearches) break;
+    bodies.push({
+      page: 1,
+      per_page: 10,
+      q_organization_name: companyName
+    });
+  }
+
+  return bodies;
+}
+
+function readApolloVerifiedIdentityHints(
+  input: ApolloCompanyLookupInput
+): ApolloVerifiedIdentityHints {
+  const aliases = new Set<string>();
+  const searchAliases = new Set<string>();
+  const domains = new Set<string>();
+  let logisticsProvider: boolean | null = null;
+
+  const context = input.verifiedIdentityContext?.trim();
+  if (!context?.startsWith("{")) {
+    return { aliases: [], searchAliases: [], domains: [], logisticsProvider };
+  }
+
+  try {
+    const root = asRecord(JSON.parse(context));
+    const identityResolution = asRecord(root?.identityResolution);
+    const identityConfidence =
+      typeof identityResolution?.confidence === "number"
+        ? identityResolution.confidence
+        : 0;
+    const identityDisposition = readApolloString(identityResolution ?? {}, [
+      "disposition"
+    ]);
+    const identityEvidenceIndices = Array.isArray(identityResolution?.evidenceIndices)
+      ? identityResolution.evidenceIndices.filter(
+          (value): value is number => Number.isInteger(value) && value >= 0
+        )
+      : [];
+    const verifiedResolution = Boolean(
+      identityConfidence >= 85 &&
+      identityEvidenceIndices.length > 0 &&
+      (
+        identityDisposition === "EXACT_OPERATING_COMPANY" ||
+        identityDisposition === "VERIFIED_PARENT_OR_BRAND"
+      )
+    );
+    const identityAliases = [
+      readApolloString(identityResolution ?? {}, ["operatingName"]),
+      readApolloString(identityResolution ?? {}, ["legalName"]),
+      readApolloString(identityResolution ?? {}, ["parentName"]),
+      ...(Array.isArray(identityResolution?.aliases)
+        ? identityResolution.aliases.filter(
+            (value): value is string => typeof value === "string" && Boolean(value.trim())
+          )
+        : [])
+    ];
+    const usableResolutionForSearch = Boolean(
+      identityConfidence >= 60 &&
+      identityEvidenceIndices.length > 0 &&
+      (
+        identityDisposition === "EXACT_OPERATING_COMPANY" ||
+        identityDisposition === "VERIFIED_PARENT_OR_BRAND"
+      )
+    );
+    if (usableResolutionForSearch) {
+      for (const alias of identityAliases) {
+        if (alias?.trim()) searchAliases.add(alias.trim());
+      }
+    }
+    if (verifiedResolution) {
+      for (const alias of identityAliases) {
+        if (alias?.trim()) aliases.add(alias.trim());
+      }
+      const officialDomain = normalizeIdentityEvidenceDomain(
+        readApolloString(identityResolution ?? {}, ["officialDomain"])
+      );
+      if (officialDomain) domains.add(officialDomain);
+    }
+    const researchEvidence = asRecord(root?.researchEvidence);
+    const research = asRecord(researchEvidence?.research) ?? researchEvidence;
+    const synthesis = asRecord(research?.synthesis);
+    const divisionName = readApolloString(synthesis ?? {}, ["usDivisionName"]);
+    if (divisionName) {
+      aliases.add(divisionName);
+      searchAliases.add(divisionName);
+    }
+    if (typeof synthesis?.logisticsProvider === "boolean") {
+      logisticsProvider = synthesis.logisticsProvider;
+    }
+
+    for (const item of Array.isArray(research?.evidence) ? research.evidence : []) {
+      const evidence = asRecord(item);
+      if (!evidence || evidence.firstParty !== true) continue;
+      const sourceType = readApolloString(evidence, ["sourceType"]);
+      if (sourceType && sourceType !== "FIRST_PARTY" && sourceType !== "CAREERS") continue;
+      const sourceDomain = normalizeIdentityEvidenceDomain(
+        readApolloString(evidence, ["sourceDomain"])
+      );
+      if (sourceDomain) domains.add(sourceDomain);
+      const evidenceUrl = readApolloString(evidence, ["url"]);
+      if (evidenceUrl) {
+        try {
+          const urlDomain = normalizeIdentityEvidenceDomain(new URL(evidenceUrl).hostname);
+          if (urlDomain) domains.add(urlDomain);
+        } catch {
+          // Invalid evidence URLs are already rejected by company-research validation.
+        }
+      }
+    }
+  } catch {
+    return { aliases: [], searchAliases: [], domains: [], logisticsProvider: null };
+  }
+
+  return {
+    aliases: [...aliases].slice(0, 3),
+    searchAliases: [...searchAliases].slice(0, 4),
+    domains: [...domains].slice(0, 3),
+    logisticsProvider
+  };
+}
+
+function normalizeIdentityEvidenceDomain(value: string | null | undefined) {
+  const domain = normalizeDomain(value);
+  if (!domain) return null;
+  const normalized = domain.replace(/^(?:about|careers|corporate|investors|jobs)\./u, "");
+  return APOLLO_SHARED_IDENTITY_DOMAINS.some(
+    (sharedDomain) =>
+      normalized === sharedDomain || normalized.endsWith(`.${sharedDomain}`)
+  )
+    ? null
+    : normalized;
+}
+
+function scoreApolloOrganizationCandidateAgainstIdentity(
+  candidate: {
+    id: string | null;
+    name: string | null;
+    domain: string | null;
+    linkedinUrl: string | null;
+    rawPayload: Record<string, unknown>;
+  },
+  input: ApolloCompanyLookupInput,
+  identityHints: ApolloVerifiedIdentityHints,
+  query: Record<string, unknown>
+) {
+  const aliases = [input.companyName, ...identityHints.aliases]
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const domains = [normalizeDomain(input.domain), ...identityHints.domains]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const domainCandidates: Array<string | null> = domains.length > 0 ? domains : [null];
+  let best: ApolloOrganizationCandidate | null = null;
+
+  for (const alias of aliases) {
+    for (const domain of domainCandidates) {
+      const scored = scoreApolloOrganizationCandidate(
+        candidate,
+        alias,
+        domain,
+        {
+          ...query,
+          matched_identity_alias: alias,
+          matched_identity_domain: domain
+        },
+        identityHints.logisticsProvider
+      );
+      if (!best || scored.score > best.score) best = scored;
+    }
+  }
+
+  return best ?? scoreApolloOrganizationCandidate(
+    candidate,
+    input.companyName,
+    normalizeDomain(input.domain),
+    query,
+    identityHints.logisticsProvider
+  );
+}
+
+function hasUniqueHighConfidenceApolloCandidate(candidates: ApolloOrganizationCandidate[]) {
+  const ranked = dedupeAndRankApolloOrganizationCandidates(candidates);
+  const best = ranked[0];
+  const runnerUp = ranked[1];
+  return Boolean(
+    best?.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    (
+      !runnerUp ||
+      runnerUp.classification !== ApolloCompanyMatchClassification.DIRECT_COMPANY ||
+      best.score - runnerUp.score >= 4
+    )
+  );
+}
+
+function selectResolvedApolloOrganizationCandidate({
+  candidates,
+  completedSearches,
+  identityHints
+}: {
+  candidates: ApolloOrganizationCandidate[];
+  completedSearches: Record<string, unknown>[];
+  identityHints: ApolloVerifiedIdentityHints;
+}) {
+  const ranked = dedupeAndRankApolloOrganizationCandidates(candidates);
+  const best = ranked[0] ?? null;
+  if (!best) return null;
+  const runnerUp = ranked[1] ?? null;
+  const ambiguousDirectMatch = Boolean(
+    best.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    runnerUp?.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    best.score - runnerUp.score < 4
+  );
+  const classification = ambiguousDirectMatch
+    ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+    : best.classification;
+  const confidenceBand = classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+    ? "AUTO_MATCH"
+    : classification === ApolloCompanyMatchClassification.NO_MATCH ||
+        classification === ApolloCompanyMatchClassification.LOGISTICS_PROVIDER
+      ? "REJECT"
+      : "MANUAL_REVIEW";
+  const candidateLedger = ranked.slice(0, 10).map((candidate) => ({
+    organizationId: candidate.id,
+    companyName: candidate.name,
+    domain: candidate.domain,
+    score: candidate.score,
+    classification: candidate.classification,
+    nameMatchType: candidate.nameMatchType,
+    domainMatch: candidate.domainMatch,
+    strongBaseNameMatch: candidate.strongBaseNameMatch
+  }));
+
+  return {
+    ...best,
+    classification,
+    matchReason: ambiguousDirectMatch
+      ? `${best.matchReason}; manual review required because another direct Apollo candidate was within three points`
+      : best.matchReason,
+    query: {
+      ...best.query,
+      identity_resolver: {
+        version: 1,
+        confidence_band: confidenceBand,
+        candidate_count: ranked.length,
+        score_margin:
+          runnerUp?.classification === best.classification
+            ? best.score - runnerUp.score
+            : null,
+        searches_completed: completedSearches,
+        verified_alias_count: identityHints.aliases.length,
+        verified_domain_count: identityHints.domains.length,
+        candidates: candidateLedger
+      }
+    }
+  } satisfies ApolloOrganizationCandidate;
+}
+
+function dedupeAndRankApolloOrganizationCandidates(candidates: ApolloOrganizationCandidate[]) {
+  const deduped = new Map<string, ApolloOrganizationCandidate>();
+  for (const candidate of candidates) {
+    const key = candidate.id ?? [candidate.name?.toLowerCase() ?? "", candidate.domain ?? ""].join("|");
+    const existing = deduped.get(key);
+    if (!existing || candidate.score > existing.score) deduped.set(key, candidate);
+  }
+  return [...deduped.values()].sort((left, right) =>
+    apolloMatchClassificationRank(right.classification) -
+      apolloMatchClassificationRank(left.classification) ||
+    right.score - left.score ||
+    (left.name ?? "").localeCompare(right.name ?? "")
+  );
+}
+
+function apolloMatchClassificationRank(
+  classification: ApolloCompanyMatchClassification
+) {
+  switch (classification) {
+    case ApolloCompanyMatchClassification.DIRECT_COMPANY:
+      return 4;
+    case ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW:
+      return 3;
+    case ApolloCompanyMatchClassification.LOGISTICS_PROVIDER:
+      return 2;
+    case ApolloCompanyMatchClassification.NO_MATCH:
+      return 1;
+  }
+}
+
+async function findApolloSavedAccountOrganization(
+  input: ApolloCompanyLookupInput,
+  apiKey: string,
+  providedAccountId: string,
+  options?: {
+    reviewerConfirmed?: boolean;
+  }
+): Promise<ApolloOrganizationCandidate | null> {
+  if (options?.reviewerConfirmed === true) {
+    try {
+      const exactAccount = await viewApolloSavedAccountOrganization(
+        input,
+        apiKey,
+        providedAccountId,
+        options
+      );
+      if (exactAccount) return exactAccount;
+    } catch (error) {
+      if (error instanceof ApolloRateLimitError) throw error;
+      // Some Apollo plans do not expose Account View. The saved-account
+      // directory below is a zero-credit fallback, still constrained to the
+      // immutable account ID supplied by the reviewer.
+    }
+  }
+
+  for (const accountName of buildApolloOrganizationSearchQueries(input.companyName)) {
+    const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
+      page: 1,
+      per_page: 10,
+      q_organization_name: accountName
+    });
+    const exactAccount = parseApolloOrganizations(json).find(
+      (candidate) => readApolloString(candidate.rawPayload, ["id"]) === providedAccountId
+    );
+    if (!exactAccount) {
+      continue;
+    }
+
+    const trusted = trustExactApolloSavedAccount(
+      input,
+      exactAccount,
+      providedAccountId,
+      "saved-account-search",
+      options
+    );
+    if (trusted) return trusted;
+  }
+
+  // Account Search is name-dependent and can omit a saved account when the
+  // TradeMining legal name differs from Apollo's display name. The confirmed
+  // account ID is immutable, so retrieve that exact saved account directly
+  // before declaring that Apollo has no employees. Apollo documents this
+  // endpoint as zero-credit.
+  if (options?.reviewerConfirmed !== true) {
+    try {
+      return await viewApolloSavedAccountOrganization(
+        input,
+        apiKey,
+        providedAccountId,
+        options
+      );
+    } catch (error) {
+      if (error instanceof ApolloRateLimitError) throw error;
+      // Older Apollo plans may not expose Account View. Preserve the existing
+      // fail-closed result when the exact record cannot be read.
+    }
+  }
+
+  return null;
+}
+
+async function findApolloEquivalentSavedAccountsForOrganization({
+  input,
+  apiKey,
+  providedAccountId,
+  providedOrganizationId,
+  confirmedSavedAccount
+}: {
+  input: ApolloCompanyLookupInput;
+  apiKey: string;
+  providedAccountId: string;
+  providedOrganizationId: string;
+  confirmedSavedAccount: ApolloOrganizationCandidate | null;
+}) {
+  const accounts = new Map<
+    string,
+    {
+      accountId: string;
+      accountName: string;
+      organization: ApolloOrganizationCandidate;
+    }
+  >();
+  const confirmedAccountName = readApolloString(
+    confirmedSavedAccount?.rawPayload ?? {},
+    ["name", "company_name", "organization_name"]
+  );
+  const searchQueries = buildApolloEquivalentAccountSearchQueries([
+    input.companyName,
+    confirmedAccountName,
+    confirmedSavedAccount?.name
+  ]);
+
+  for (const accountName of searchQueries) {
+    const json = await postApolloJson("/api/v1/accounts/search", apiKey, {
+      page: 1,
+      per_page: 25,
+      q_organization_name: accountName
+    });
+
+    for (const candidate of parseApolloOrganizations(json)) {
+      const accountId = readApolloString(candidate.rawPayload, ["id"]);
+      const nestedOrganization = asRecord(
+        candidate.rawPayload.organization
+      );
+      const nestedOrganizationId = readApolloString(
+        nestedOrganization ?? {},
+        ["id", "organization_id", "apollo_organization_id"]
+      );
+      const savedAccountName = readApolloString(candidate.rawPayload, [
+        "name",
+        "company_name",
+        "organization_name"
+      ]);
+
+      if (
+        !accountId ||
+        accountId === providedAccountId ||
+        !savedAccountName ||
+        nestedOrganizationId !== providedOrganizationId ||
+        accounts.has(accountId)
+      ) {
+        continue;
+      }
+
+      accounts.set(accountId, {
+        accountId,
+        accountName: savedAccountName,
+        organization: scoreApolloOrganizationCandidate(
+          candidate,
+          input.companyName,
+          normalizeDomain(input.domain),
+          {
+            source: "same-global-organization-saved-account",
+            account_id: accountId,
+            organization_id: providedOrganizationId
+          }
+        )
+      });
+
+      if (accounts.size >= APOLLO_EQUIVALENT_ACCOUNT_LIMIT) {
+        break;
+      }
+    }
+
+    if (accounts.size >= APOLLO_EQUIVALENT_ACCOUNT_LIMIT) {
+      break;
+    }
+  }
+
+  return [...accounts.values()];
+}
+
+async function viewApolloSavedAccountOrganization(
+  input: ApolloCompanyLookupInput,
+  apiKey: string,
+  accountId: string,
+  options?: {
+    reviewerConfirmed?: boolean;
+  }
+) {
+  const json = await getApolloJson(
+    `/api/v1/accounts/${encodeURIComponent(accountId)}`,
+    apiKey
+  );
+  const account =
+    asRecord(json.account) ??
+    asRecord(json.data) ??
+    asRecord(json.company) ??
+    null;
+  const exactAccount = account
+    ? parseApolloOrganizations({ accounts: [account] }).find(
+        (candidate) =>
+          readApolloString(candidate.rawPayload, ["id"]) === accountId
+      ) ?? null
+    : null;
+
+  return exactAccount
+    ? trustExactApolloSavedAccount(
+        input,
+        exactAccount,
+        accountId,
+        "saved-account-view",
+        options
+      )
+    : null;
+}
+
+function trustExactApolloSavedAccount(
+  input: ApolloCompanyLookupInput,
+  exactAccount: {
+    id: string | null;
+    name: string | null;
+    domain: string | null;
+    linkedinUrl: string | null;
+    rawPayload: Record<string, unknown>;
+  },
+  providedAccountId: string,
+  source: "saved-account-search" | "saved-account-view",
+  options?: {
+    reviewerConfirmed?: boolean;
+  }
+) {
+  const inputAliases = buildCompanyNameAliases(input.companyName);
+  const accountNameFromApollo = readApolloString(exactAccount.rawPayload, [
+    "name",
+    "company_name",
+    "organization_name"
+  ]);
+  const accountAliases = buildCompanyNameAliases(accountNameFromApollo ?? "");
+  const safeAccountIdentity =
+    options?.reviewerConfirmed === true ||
+    hasExactAliasMatch(inputAliases, accountAliases) ||
+    hasStrongBaseNameMatch(inputAliases, accountAliases) ||
+    hasSafeRegionalBrandAlias(inputAliases, accountAliases);
+  if (!safeAccountIdentity) {
+    return null;
+  }
+
+  const scored = scoreApolloOrganizationCandidate(
+    exactAccount,
+    input.companyName,
+    normalizeDomain(input.domain),
+    {
+      source,
+      account_id: providedAccountId
+    }
+  );
+  return {
+    ...scored,
+    score: Math.max(scored.score, 12),
+    strongBaseNameMatch: true,
+    classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+    matchReason:
+      `direct company; ${options?.reviewerConfirmed ? "reviewer-confirmed " : ""}exact saved Apollo account mapping; ` +
+      `resolved through Apollo's zero-credit saved-account directory`
+  };
 }
 
 async function searchApolloContacts({
@@ -924,26 +3164,103 @@ async function searchApolloContacts({
   companyName,
   domain,
   organizationId,
-  queryKeywords
+  queryKeywords,
+  enforceExpectedOrganization,
+  contactRecovery
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
   queryKeywords?: string | null;
+  enforceExpectedOrganization: boolean;
+  contactRecovery?: ApolloContactLookupResult["contactRecovery"];
 }) {
   const normalizedDomain = normalizeDomain(domain);
-  const body = {
-    page: 1,
-    per_page: APOLLO_CONTACT_PAGE_SIZE,
-    organization_ids: organizationId ? [organizationId] : undefined,
-    q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
-  };
-
-  const json = await postApolloJson("/api/v1/contacts/search", apiKey, body);
-  const contacts = parseApolloContacts(json);
+  const contacts: ApolloContactRecord[] = [];
+  for (let page = 1; page <= APOLLO_SAVED_CONTACT_MAX_PAGES; page += 1) {
+    const json = await postApolloJson("/api/v1/contacts/search", apiKey, {
+      page,
+      per_page: DEFAULT_PAGE_SIZE,
+      q_keywords:
+        buildApolloPeopleSearchKeywords(companyName, queryKeywords, false) ||
+        companyName
+    });
+    if (contactRecovery) {
+      contactRecovery.savedContactPagesRead += 1;
+    }
+    const pageContacts = parseApolloContacts(json, "SAVED_CONTACT")
+      .map((contact) =>
+        attachExpectedApolloOrganization(contact, {
+          companyName,
+          normalizedDomain,
+          organizationId
+        })
+      );
+    const filtered = enforceExpectedOrganization
+      ? filterApolloContactsForExpectedOrganization(pageContacts, {
+          companyName,
+          normalizedDomain,
+          organizationId
+        })
+      : pageContacts;
+    contacts.push(...filtered);
+    if (pageContacts.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+  }
   return contacts.length > 0 ? contacts : null;
+}
+
+function filterApolloSavedContactsForConfirmedMapping(
+  contacts: ApolloContactRecord[],
+  {
+    companyNames,
+    normalizedDomain,
+    organizationIds
+  }: {
+    companyNames: string[];
+    normalizedDomain: string | null;
+    organizationIds: Array<string | null | undefined>;
+  }
+) {
+  const trustedOrganizationIds = new Set(
+    organizationIds.filter((value): value is string => Boolean(value))
+  );
+
+  return contacts.filter((contact) => {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization) {
+      return false;
+    }
+
+    if (
+      organization.id &&
+      trustedOrganizationIds.has(organization.id)
+    ) {
+      return true;
+    }
+
+    if (organization.id) {
+      return false;
+    }
+
+    if (
+      normalizedDomain &&
+      organization.domain === normalizedDomain
+    ) {
+      return true;
+    }
+
+    return companyNames.some((companyName) =>
+      hasStrictApolloOrganizationIdentityMatch({
+        companyName,
+        candidateName: organization.name,
+        normalizedDomain,
+        candidateDomain: organization.domain
+      })
+    );
+  });
 }
 
 async function searchApolloPeople({
@@ -951,95 +3268,504 @@ async function searchApolloPeople({
   companyName,
   domain,
   organizationId,
-  queryKeywords
+  queryKeywords,
+  personTitles
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
   organizationId: string | null;
   queryKeywords?: string | null;
+  personTitles?: readonly string[];
 }) {
   const normalizedDomain = normalizeDomain(domain);
-  const body = {
-    page: 1,
-    per_page: APOLLO_CONTACT_PAGE_SIZE,
+  const contacts: ApolloContactRecord[] = [];
+  const baseBody = {
     organization_ids: organizationId ? [organizationId] : undefined,
-    q_organization_domains: normalizedDomain ? [normalizedDomain] : undefined,
-    q_keywords: buildApolloPeopleSearchKeywords(companyName, queryKeywords, Boolean(organizationId || normalizedDomain))
+    q_organization_domains_list: normalizedDomain ? [normalizedDomain] : undefined,
+    q_keywords: buildApolloPeopleSearchKeywords(
+      companyName,
+      queryKeywords,
+      Boolean(organizationId || normalizedDomain)
+    ),
+    person_titles: personTitles && personTitles.length > 0 ? [...personTitles] : undefined,
+    include_similar_titles: personTitles && personTitles.length > 0 ? true : undefined
   };
 
-  const json = await postApolloJson("/api/v1/mixed_people/api_search", apiKey, body);
-  return parseApolloContacts(json);
+  // Apollo documents People Search as a paged, zero-credit endpoint. Read a
+  // bounded complete roster instead of silently treating the first 100 people
+  // as the whole company. The title-scoped second pass remains separate.
+  for (let page = 1; page <= 5; page += 1) {
+    const body = {
+      ...baseBody,
+      page,
+      per_page: DEFAULT_PAGE_SIZE
+    };
+    const json = await postApolloJson(
+      buildApolloPeopleSearchPath(body),
+      apiKey,
+      body
+    );
+    const pageContacts = parseApolloContacts(json, "PEOPLE_SEARCH");
+    contacts.push(...pageContacts);
+    if (pageContacts.length < DEFAULT_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return dedupeApolloContacts(contacts);
+}
+
+function buildApolloPeopleSearchPath({
+  page,
+  per_page: perPage,
+  organization_ids: organizationIds,
+  q_organization_domains_list: organizationDomains,
+  q_keywords: queryKeywords,
+  person_titles: personTitles,
+  include_similar_titles: includeSimilarTitles
+}: {
+  page: number;
+  per_page: number;
+  organization_ids?: string[];
+  q_organization_domains_list?: string[];
+  q_keywords?: string;
+  person_titles?: string[];
+  include_similar_titles?: boolean;
+}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage)
+  });
+
+  for (const organizationId of organizationIds ?? []) {
+    params.append("organization_ids[]", organizationId);
+  }
+  for (const organizationDomain of organizationDomains ?? []) {
+    params.append("q_organization_domains_list[]", organizationDomain);
+  }
+  for (const personTitle of personTitles ?? []) {
+    params.append("person_titles[]", personTitle);
+  }
+  if (queryKeywords) {
+    params.set("q_keywords", queryKeywords);
+  }
+  if (includeSimilarTitles !== undefined) {
+    params.set("include_similar_titles", String(includeSimilarTitles));
+  }
+
+  return `/api/v1/mixed_people/api_search?${params.toString()}`;
 }
 
 async function searchApolloRelevantPeople({
   apiKey,
   companyName,
   domain,
+  expectedOrganizationDomain,
   organizationId,
   allowPeopleSearchFallback,
-  keywordSearchLimit
+  keywordSearchLimit,
+  enforceExpectedOrganization,
+  trustExactOrganizationScope = false,
+  savedContacts,
+  contactRecovery
 }: {
   apiKey: string;
   companyName: string;
   domain?: string | null;
+  expectedOrganizationDomain?: string | null;
   organizationId: string | null;
   allowPeopleSearchFallback: boolean;
   keywordSearchLimit: number;
+  enforceExpectedOrganization: boolean;
+  trustExactOrganizationScope?: boolean;
+  savedContacts: ApolloContactRecord[] | null;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
 }) {
   const collected: ApolloContactRecord[] = [];
+  const normalizedExpectedDomain = normalizeDomain(expectedOrganizationDomain ?? domain);
 
-  const contactsWithoutKeyword =
-    (await searchApolloContacts({
-      apiKey,
-      companyName,
-      domain,
-      organizationId,
-      queryKeywords: null
-    })) ?? [];
+  const contactsWithoutKeyword = savedContacts !== null
+    ? savedContacts
+    : ((await searchApolloContacts({
+        apiKey,
+        companyName,
+        domain,
+        organizationId,
+        queryKeywords: null,
+        enforceExpectedOrganization,
+        contactRecovery
+      })) ?? []);
   collected.push(...contactsWithoutKeyword);
-
-  const relevantContactsWithoutKeyword = rankApolloRelevantContacts(collected);
-  if (relevantContactsWithoutKeyword.length > 0) {
-    return relevantContactsWithoutKeyword;
-  }
 
   if (!allowPeopleSearchFallback) {
     return dedupeApolloContacts(collected);
   }
 
-  const peopleWithoutKeyword = await searchApolloPeople({
-    apiKey,
-    companyName,
-    domain,
-    organizationId,
-    queryKeywords: null
-  });
-  collected.push(...peopleWithoutKeyword);
-
-  const relevantPeopleWithoutKeyword = rankApolloRelevantContacts(collected);
-  if (relevantPeopleWithoutKeyword.length > 0) {
-    return relevantPeopleWithoutKeyword;
-  }
-
-  const keywordQueries = [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS].slice(
-    0,
-    Math.max(0, keywordSearchLimit)
-  );
-
-  for (const keyword of keywordQueries) {
-    const people = await searchApolloPeople({
+  const peopleWithoutKeywordRaw = await searchApolloPeople({
       apiKey,
       companyName,
       domain,
       organizationId,
-      queryKeywords: keyword
+      queryKeywords: null
     });
-    collected.push(...people);
+  contactRecovery.peopleSearchRawRecords +=
+    peopleWithoutKeywordRaw.length;
+  const peopleWithoutKeyword = enforceExpectedOrganization
+    ? filterApolloContactsForExpectedOrganization(peopleWithoutKeywordRaw, {
+        companyName,
+        normalizedDomain: normalizedExpectedDomain,
+        organizationId,
+        trustExactOrganizationScope
+      })
+    : peopleWithoutKeywordRaw;
+  contactRecovery.peopleSearchAcceptedRecords +=
+    peopleWithoutKeyword.length;
+  collected.push(...peopleWithoutKeyword);
+
+  const roleTitles = [...APOLLO_PRIMARY_ROLE_KEYWORDS, ...APOLLO_FALLBACK_ROLE_KEYWORDS].slice(
+    0,
+    Math.max(0, keywordSearchLimit)
+  );
+
+  if (roleTitles.length > 0) {
+    const rolePeopleRaw = await searchApolloPeople({
+        apiKey,
+        companyName,
+        domain,
+        organizationId,
+        queryKeywords: null,
+        personTitles: roleTitles
+      });
+    contactRecovery.peopleSearchRawRecords += rolePeopleRaw.length;
+    const rolePeople = enforceExpectedOrganization
+      ? filterApolloContactsForExpectedOrganization(rolePeopleRaw, {
+          companyName,
+          normalizedDomain: normalizedExpectedDomain,
+          organizationId,
+          trustExactOrganizationScope
+        })
+      : rolePeopleRaw;
+    contactRecovery.peopleSearchAcceptedRecords += rolePeople.length;
+    collected.push(...rolePeople);
   }
 
   const ranked = rankApolloRelevantContacts(collected);
   return ranked.length > 0 ? ranked : dedupeApolloContacts(collected);
+}
+
+async function recoverConcreteApolloEmails({
+  apiKey,
+  contacts,
+  companyName,
+  domain,
+  organizationId,
+  enforceExpectedOrganization,
+  authorizePaidEmailEnrichment,
+  contactRecovery
+}: {
+  apiKey: string;
+  contacts: ApolloContactRecord[];
+  companyName: string;
+  domain: string | null;
+  organizationId: string | null;
+  enforceExpectedOrganization: boolean;
+  authorizePaidEmailEnrichment: boolean;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
+}) {
+  let recovered = dedupeApolloContacts(contacts);
+  const maskedPeople = rankApolloRelevantContacts(recovered)
+    .filter((contact) => !hasConcreteApolloEmail(contact) && contact.hasEmailAvailable)
+    .slice(0, APOLLO_SAVED_CONTACT_RECOVERY_LIMIT);
+
+  for (const person of maskedPeople) {
+    contactRecovery.maskedPeopleChecked += 1;
+    const queryKeywords = [
+      person.firstName ?? person.fullName,
+      person.title
+    ].filter(Boolean).join(" ");
+    const savedMatches =
+      (await searchApolloContacts({
+        apiKey,
+        companyName,
+        domain,
+        organizationId,
+        queryKeywords,
+        enforceExpectedOrganization,
+        contactRecovery
+      })) ?? [];
+    const concreteSavedMatches = savedMatches.filter(hasConcreteApolloEmail);
+    if (concreteSavedMatches.length > 0) {
+      contactRecovery.savedContactsRecovered += concreteSavedMatches.length;
+      recovered = dedupeApolloContacts([...recovered, ...concreteSavedMatches]);
+    }
+  }
+
+  if (!authorizePaidEmailEnrichment) {
+    return recovered;
+  }
+
+  const stillMasked = rankApolloRelevantContacts(recovered)
+    .filter(
+      (contact) =>
+        !hasConcreteApolloEmail(contact) &&
+        Boolean(contact.apolloPersonId)
+    )
+    .slice(0, APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT);
+  if (stillMasked.length === 0) {
+    return recovered;
+  }
+
+  const enrichmentApiKey = readApolloMasterApiKey();
+  for (const person of stillMasked) {
+    contactRecovery.paidEmailEnrichmentsAttempted += 1;
+    const enriched = await enrichApolloPersonEmail({
+      apiKey: enrichmentApiKey,
+      person,
+      companyName,
+      domain,
+      organizationId
+    });
+    if (enriched && hasConcreteApolloEmail(enriched)) {
+      contactRecovery.paidEmailsRecovered += 1;
+      recovered = dedupeApolloContacts([...recovered, enriched]);
+    }
+  }
+
+  return recovered;
+}
+
+async function enrichApolloPersonEmail({
+  apiKey,
+  person,
+  companyName,
+  domain,
+  organizationId
+}: {
+  apiKey: string;
+  person: ApolloContactRecord;
+  companyName: string;
+  domain: string | null;
+  organizationId: string | null;
+}) {
+  const params = new URLSearchParams({
+    id: person.apolloPersonId ?? "",
+    organization_name: companyName,
+    reveal_personal_emails: "false",
+    reveal_phone_number: "false",
+    run_waterfall_email: "false",
+    run_waterfall_phone: "false"
+  });
+  if (domain) {
+    params.set("domain", domain);
+  }
+  const json = await postApolloJson(
+    `/api/v1/people/match?${params.toString()}`,
+    apiKey,
+    {}
+  );
+  const record =
+    asRecord(json.person) ??
+    asRecord(json.contact) ??
+    asRecord(json.data);
+  if (!record) {
+    return null;
+  }
+  const [parsed] = parseApolloContacts({ people: [record] }, "PEOPLE_SEARCH");
+  return parsed
+    ? attachExpectedApolloOrganization(parsed, {
+        companyName,
+        normalizedDomain: normalizeDomain(domain),
+        organizationId
+      })
+    : null;
+}
+
+async function enrichExplicitApolloPeople({
+  personIds,
+  companyName,
+  trustedDomain,
+  contactRecovery
+}: {
+  personIds: string[];
+  companyName: string;
+  trustedDomain: string | null;
+  contactRecovery: ApolloContactLookupResult["contactRecovery"];
+}) {
+  const enrichmentApiKey = readApolloMasterApiKey();
+  const recovered: ApolloContactRecord[] = [];
+
+  for (const personId of personIds.slice(0, APOLLO_PAID_EMAIL_ENRICHMENT_LIMIT)) {
+    // Apollo's /people/<id> UI route can contain either a global person ID or
+    // an already-saved workspace contact ID. Resolve the zero-credit saved
+    // contact shape first so a valid pasted URL is not incorrectly sent only
+    // to People Enrichment and reported as "0 contacts found."
+    const savedContact = await fetchExplicitApolloSavedContact({
+      apiKey: enrichmentApiKey,
+      contactId: personId,
+      companyName,
+      trustedDomain
+    });
+    if (savedContact) {
+      contactRecovery.savedContactsRecovered += 1;
+      recovered.push(savedContact);
+      continue;
+    }
+
+    contactRecovery.paidEmailEnrichmentsAttempted += 1;
+    const enriched = await enrichApolloPersonEmail({
+      apiKey: enrichmentApiKey,
+      person: {
+        recordSource: "PEOPLE_SEARCH",
+        apolloContactId: null,
+        apolloPersonId: personId,
+        firstName: null,
+        lastName: null,
+        lastNameObfuscated: null,
+        fullName: personId,
+        title: null,
+        department: null,
+        seniority: null,
+        email: null,
+        phone: null,
+        linkedinUrl: null,
+        hasEmailAvailable: false,
+        hasPhoneAvailable: false,
+        hasLinkedinAvailable: false,
+        city: null,
+        state: null,
+        country: null,
+        sequenceStatus: SequenceStatus.NOT_STARTED,
+        replyStatus: ReplyStatus.NO_REPLY,
+        sequenceId: null,
+        sequenceName: null,
+        sequenceOwnerName: null,
+        sequenceOwnerUserId: null,
+        lastTouchAt: null,
+        lastReplyAt: null,
+        rawPayload: {}
+      },
+      companyName,
+      domain: trustedDomain,
+      organizationId: null
+    });
+    if (
+      !enriched ||
+      !hasConcreteApolloEmail(enriched) ||
+      !isExplicitApolloPersonCompanyMatch({
+        contact: enriched,
+        companyName,
+        trustedDomain
+      })
+    ) {
+      continue;
+    }
+
+    contactRecovery.paidEmailsRecovered += 1;
+    recovered.push(enriched);
+  }
+
+  return dedupeApolloContacts(recovered);
+}
+
+async function fetchExplicitApolloSavedContact({
+  apiKey,
+  contactId,
+  companyName,
+  trustedDomain
+}: {
+  apiKey: string;
+  contactId: string;
+  companyName: string;
+  trustedDomain: string | null;
+}) {
+  try {
+    const json = await getApolloJson(
+      `/api/v1/contacts/${encodeURIComponent(contactId)}`,
+      apiKey
+    );
+    const record =
+      asRecord(json.contact) ??
+      asRecord(json.data) ??
+      json;
+    const [contact] = parseApolloContacts(
+      { contacts: [record] },
+      "SAVED_CONTACT"
+    );
+    if (
+      !contact ||
+      !hasConcreteApolloEmail(contact) ||
+      !isExplicitApolloPersonCompanyMatch({
+        contact,
+        companyName,
+        trustedDomain
+      })
+    ) {
+      return null;
+    }
+    return contact;
+  } catch (error) {
+    if (error instanceof ApolloRateLimitError) {
+      throw error;
+    }
+    // A global person ID is expected to miss Contact View. Continue to the
+    // separately authorized People Enrichment request for that identifier.
+    return null;
+  }
+}
+
+function isExplicitApolloPersonCompanyMatch({
+  contact,
+  companyName,
+  trustedDomain
+}: {
+  contact: ApolloContactRecord;
+  companyName: string;
+  trustedDomain: string | null;
+}) {
+  const organization = readApolloOrganizationFromContact(contact);
+  if (!organization?.name) {
+    return false;
+  }
+
+  return filterTrustedApolloAccountNameFallback({
+    contacts: [contact],
+    companyName,
+    trustedDomain
+  }).length === 1;
+}
+
+function hasConcreteApolloEmail(contact: ApolloContactRecord) {
+  const email = contact.email?.trim() ?? "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function attachExpectedApolloOrganization(
+  contact: ApolloContactRecord,
+  {
+    companyName,
+    normalizedDomain,
+    organizationId
+  }: {
+    companyName: string;
+    normalizedDomain: string | null;
+    organizationId: string | null;
+  }
+) {
+  if (readApolloOrganizationFromContact(contact)) {
+    return contact;
+  }
+  return {
+    ...contact,
+    rawPayload: {
+      ...contact.rawPayload,
+      organization: {
+        id: organizationId,
+        name: companyName,
+        primary_domain: normalizedDomain
+      }
+    }
+  };
 }
 
 async function postApolloJson(path: string, apiKey: string, body: Record<string, unknown>) {
@@ -1048,6 +3774,29 @@ async function postApolloJson(path: string, apiKey: string, body: Record<string,
     headers: buildApolloHeaders(apiKey),
     cache: "no-store",
     body: JSON.stringify(body)
+  });
+  const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+
+  if (!response.ok) {
+    const message = extractApolloError(json) ?? `Apollo request failed with status ${response.status}.`;
+    if (response.status === 429 || isApolloRateLimitMessage(message)) {
+      throw new ApolloRateLimitError(message);
+    }
+    throw new Error(message);
+  }
+
+  if (!json) {
+    throw new Error("Apollo returned an unreadable response body.");
+  }
+
+  return json;
+}
+
+async function getApolloJson(path: string, apiKey: string) {
+  const response = await fetch(`${DEFAULT_BASE_URL}${path}`, {
+    method: "GET",
+    headers: buildApolloHeaders(apiKey),
+    cache: "no-store"
   });
   const json = (await response.json().catch(() => null)) as Record<string, unknown> | null;
 
@@ -1300,18 +4049,38 @@ function parseApolloOrganizations(payload: Record<string, unknown>) {
       continue;
     }
 
-    const id = readApolloString(record, ["id", "organization_id", "apollo_organization_id"]);
-    const name = readApolloString(record, ["name", "company_name", "organization_name"]);
+    const nestedOrganization = asRecord(record.organization);
+    const id =
+      readApolloString(record, ["organization_id", "apollo_organization_id"]) ??
+      readApolloString(nestedOrganization ?? {}, ["id", "organization_id", "apollo_organization_id"]) ??
+      readApolloString(record, ["id"]);
+    const name =
+      readApolloString(nestedOrganization ?? {}, ["name", "company_name", "organization_name"]) ??
+      readApolloString(record, ["name", "company_name", "organization_name"]);
     const domain = normalizeDomain(
-      readApolloString(record, ["primary_domain", "website_url", "domain", "apollo_domain"])
+      readApolloString(nestedOrganization ?? {}, [
+        "primary_domain",
+        "website_url",
+        "domain",
+        "apollo_domain"
+      ]) ??
+        readApolloString(record, ["primary_domain", "website_url", "domain", "apollo_domain"])
     );
-    const linkedinUrl = readApolloString(record, [
-      "linkedin_url",
-      "organization_linkedin_url",
-      "company_linkedin_url",
-      "linkedin",
-      "linkedin_profile_url"
-    ]);
+    const linkedinUrl =
+      readApolloString(nestedOrganization ?? {}, [
+        "linkedin_url",
+        "organization_linkedin_url",
+        "company_linkedin_url",
+        "linkedin",
+        "linkedin_profile_url"
+      ]) ??
+      readApolloString(record, [
+        "linkedin_url",
+        "organization_linkedin_url",
+        "company_linkedin_url",
+        "linkedin",
+        "linkedin_profile_url"
+      ]);
 
     if (!id && !name && !domain && !linkedinUrl) {
       continue;
@@ -1326,7 +4095,10 @@ function parseApolloOrganizations(payload: Record<string, unknown>) {
   return [...deduped.values()];
 }
 
-function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRecord[] {
+function parseApolloContacts(
+  payload: Record<string, unknown>,
+  recordSource: ApolloContactRecord["recordSource"]
+): ApolloContactRecord[] {
   const candidates = [
     ...readApolloArray(payload, ["contacts"]),
     ...readApolloArray(payload, ["people"]),
@@ -1342,9 +4114,10 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
 
     const firstName = readApolloString(record, ["first_name"]);
     const lastName = readApolloString(record, ["last_name"]);
+    const lastNameObfuscated = readApolloString(record, ["last_name_obfuscated"]);
     const fullName =
       readApolloString(record, ["full_name", "name"]) ??
-      buildName(firstName, lastName);
+      buildName(firstName, lastName ?? lastNameObfuscated);
 
     if (!fullName) {
       return [];
@@ -1356,7 +4129,7 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
       asRecord(record.cadence) ??
       asRecord(record.enrollment) ??
       selectCurrentApolloCampaignStatus(record);
-    const sequenceStatus = parseSequenceStatus(
+    const campaignSequenceStatus = parseSequenceStatus(
       readApolloString(record, [
         "apollo_sequence_status",
         "sequence_status",
@@ -1364,6 +4137,10 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         "emailer_campaign_status"
       ]) ?? readApolloString(sequenceDetails ?? {}, ["status", "state"])
     );
+    const deliveryFailure =
+      classifyApolloDeliveryFailure(record) ??
+      (sequenceDetails ? classifyApolloDeliveryFailure(sequenceDetails) : null);
+    const sequenceStatus = deliveryFailure ? SequenceStatus.BOUNCED : campaignSequenceStatus;
     const explicitReplyStatus = parseReplyStatus(
       readApolloString(record, ["reply_status", "response_status", "last_response_type"])
     );
@@ -1377,19 +4154,43 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         ? parseApolloDate(readApolloString(sequenceDetails ?? {}, ["replied_at", "responded_at", "updated_at"]))
         : null);
 
+    const email = readApolloString(record, ["email"]);
+    const phone = readApolloString(record, ["phone", "phone_number", "mobile_phone"]);
+    const linkedinUrl = readApolloString(record, ["linkedin_url"]);
+
     return [
       {
-        apolloContactId: readApolloString(record, ["contact_id", "apollo_contact_id", "id"]),
-        apolloPersonId: readApolloString(record, ["person_id", "apollo_person_id"]),
+        recordSource,
+        apolloContactId:
+          recordSource === "SAVED_CONTACT"
+            ? readApolloString(record, ["contact_id", "apollo_contact_id", "id"])
+            : null,
+        apolloPersonId:
+          recordSource === "PEOPLE_SEARCH"
+            ? readApolloString(record, ["person_id", "apollo_person_id", "id"])
+            : readApolloString(record, ["person_id", "apollo_person_id"]),
         firstName,
         lastName,
+        lastNameObfuscated,
         fullName,
         title: readApolloString(record, ["title", "job_title"]),
         department: readApolloString(record, ["department", "department_name", "function"]),
         seniority: readApolloString(record, ["seniority", "seniority_level"]),
-        email: readApolloString(record, ["email"]),
-        phone: readApolloString(record, ["phone", "phone_number", "mobile_phone"]),
-        linkedinUrl: readApolloString(record, ["linkedin_url"]),
+        email,
+        phone,
+        linkedinUrl,
+        hasEmailAvailable:
+          Boolean(email) || readApolloBoolean(record, ["has_email"], false),
+        hasPhoneAvailable:
+          Boolean(phone) ||
+          readApolloBoolean(
+            record,
+            ["has_phone", "has_direct_phone", "has_mobile_phone"],
+            false
+          ),
+        hasLinkedinAvailable:
+          Boolean(linkedinUrl) ||
+          readApolloBoolean(record, ["has_linkedin", "has_linkedin_url"], false),
         city: readApolloString(record, ["city"]),
         state: readApolloString(record, ["state", "region"]),
         country: readApolloString(record, ["country"]),
@@ -1414,7 +4215,17 @@ function parseApolloContacts(payload: Record<string, unknown>): ApolloContactRec
         rawPayload: {
           ...record,
           organization,
-          sequence: sequenceDetails
+          sequence: sequenceDetails,
+          ...(deliveryFailure
+            ? {
+                newlDeliveryFailureReconciliation: {
+                  source: "APOLLO_CONTACT_RECORD",
+                  kind: deliveryFailure.kind,
+                  reason: deliveryFailure.reason,
+                  record
+                }
+              }
+            : {})
         }
       }
     ];
@@ -1448,19 +4259,19 @@ function apolloCampaignStatusRank(value: string | null) {
 
   switch (status) {
     case SequenceStatus.REPLIED:
+      return 7;
+    case SequenceStatus.BOUNCED:
       return 6;
     case SequenceStatus.ENROLLED:
       return 5;
     case SequenceStatus.PAUSED:
       return 4;
-    case SequenceStatus.BOUNCED:
-      return 3;
     case SequenceStatus.FINISHED:
-      return 2;
+      return 3;
     case SequenceStatus.READY:
-      return 1;
+      return 2;
     case SequenceStatus.NOT_STARTED:
-      return 0;
+      return 1;
   }
 }
 
@@ -1512,7 +4323,19 @@ function inferApolloOrganizationFromContacts(
     };
   });
 
-  const best = scored.sort((left, right) => right.score - left.score)[0] ?? null;
+  const sorted = scored.sort((left, right) => right.score - left.score);
+  const safeMatches = sorted.filter((candidate) =>
+    hasStrictApolloOrganizationIdentityMatch({
+      companyName,
+      candidateName: candidate.name,
+      normalizedDomain,
+      candidateDomain: candidate.domain
+    })
+  );
+  const safeOrganizationIds = new Set(
+    safeMatches.map((candidate) => candidate.id).filter((id): id is string => Boolean(id))
+  );
+  const best = safeMatches[0] ?? sorted[0] ?? null;
   if (!best) {
     return null;
   }
@@ -1520,14 +4343,17 @@ function inferApolloOrganizationFromContacts(
   const bestAliases = buildCompanyNameAliases(best.name ?? "");
   const exactPeopleBackedNameMatch = hasExactAliasMatch(inputAliases, bestAliases);
   const strongPeopleBackedNameMatch = hasStrongBaseNameMatch(inputAliases, bestAliases);
+  const safeIdentityMatch = safeMatches.includes(best);
   const peopleEvidenceCount = candidates.get(
     [best.id ?? "", best.name?.toLowerCase() ?? "", best.domain ?? ""].join("|")
   )?.appearances ?? 0;
 
   const promotedClassification =
-    (exactPeopleBackedNameMatch || strongPeopleBackedNameMatch) && peopleEvidenceCount >= 1
+    safeOrganizationIds.size > 1
+      ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+      : safeIdentityMatch && peopleEvidenceCount >= 1
       ? ApolloCompanyMatchClassification.DIRECT_COMPANY
-      : classifyApolloOrganizationCandidate({
+      : downgradeUnsafeInferredDirectMatch(classifyApolloOrganizationCandidate({
           id: best.id,
           score: best.score,
           nameMatchType: best.nameMatchType,
@@ -1536,17 +4362,47 @@ function inferApolloOrganizationFromContacts(
           branchLocationMatch: best.branchLocationMatch,
           strongBaseNameMatch: best.strongBaseNameMatch,
           tokenSimilarity: calculateBestTokenSimilarity(inputAliases, bestAliases)
-        });
+        }));
 
   return {
     ...best,
     classification: promotedClassification,
     matchReason:
-      promotedClassification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
-      (exactPeopleBackedNameMatch || strongPeopleBackedNameMatch)
-        ? `${best.matchReason}; promoted from matching people-search organization evidence`
+      safeOrganizationIds.size > 1
+        ? `${best.matchReason}; multiple exact Apollo organizations matched the expected company identity`
+        : promotedClassification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+            (exactPeopleBackedNameMatch || strongPeopleBackedNameMatch || best.domainMatch)
+          ? `${best.matchReason}; promoted from exact saved-contact/people organization evidence`
+          : best.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+            ? `${best.matchReason}; downgraded because the Apollo organization identity could be a parent or sibling company`
         : best.matchReason
   };
+}
+
+function inferTrustedApolloDomainFromContacts(
+  contacts: ApolloContactRecord[],
+  companyName: string
+) {
+  const expectedAliases = buildCompanyNameAliases(companyName);
+  const domains = new Set<string>();
+
+  for (const contact of contacts) {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization?.domain || !organization.name) {
+      continue;
+    }
+    const candidateAliases = buildCompanyNameAliases(organization.name);
+    if (
+      hasExactAliasMatch(expectedAliases, candidateAliases) ||
+      hasStrongBaseNameMatch(expectedAliases, candidateAliases) ||
+      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases) ||
+      hasSafeScopedOrganizationAcronymMatch(expectedAliases, candidateAliases)
+    ) {
+      domains.add(organization.domain);
+    }
+  }
+
+  return domains.size === 1 ? [...domains][0] ?? null : null;
 }
 
 function readApolloOrganizationFromContact(contact: ApolloContactRecord) {
@@ -1575,21 +4431,175 @@ function filterApolloContactsByOrganizationMatch(
   companyName: string,
   organization: ApolloOrganizationCandidate
 ) {
-  const inputAliases = buildCompanyNameAliases(companyName);
-  const organizationAliases = buildCompanyNameAliases(organization.name ?? "");
-
   return contacts.filter((contact) => {
     const candidateOrganization = readApolloOrganizationFromContact(contact);
-    if (!candidateOrganization?.name) {
+    if (!candidateOrganization) {
       return false;
     }
 
-    const contactAliases = buildCompanyNameAliases(candidateOrganization.name);
+    if (organization.id && candidateOrganization.id !== organization.id) {
+      return false;
+    }
+
+    return hasStrictApolloOrganizationIdentityMatch({
+      companyName,
+      candidateName: candidateOrganization.name,
+      normalizedDomain: organization.domain,
+      candidateDomain: candidateOrganization.domain
+    });
+  });
+}
+
+function filterApolloContactsForExpectedOrganization(
+  contacts: ApolloContactRecord[],
+  {
+    companyName,
+    normalizedDomain,
+    organizationId,
+    trustExactOrganizationScope = false
+  }: {
+    companyName: string;
+    normalizedDomain: string | null;
+    organizationId: string | null;
+    trustExactOrganizationScope?: boolean;
+  }
+) {
+  const expectedAliases = buildCompanyNameAliases(companyName);
+
+  return contacts.filter((contact) => {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization) {
+      // Apollo may omit organization details from a response that was already
+      // scoped by organization_ids/domain. Reject explicit mismatches below.
+      return true;
+    }
+
+    if (organizationId) {
+      if (
+        trustExactOrganizationScope &&
+        contact.recordSource === "PEOPLE_SEARCH"
+      ) {
+        // A reviewer-confirmed Apollo account URL is authoritative. Apollo's
+        // organization_ids[] query scopes the returned roster to the exact
+        // global organization resolved from that URL, but individual people
+        // can embed a different saved Account ID and operating-brand label
+        // (for example CGT under Canadian General Tower). Those identifiers
+        // are different namespaces, not evidence that Apollo returned another
+        // employer. Trust the exact query scope instead of discarding the
+        // complete roster after Apollo has already applied it.
+        return true;
+      }
+
+      if (organization.id && organization.id !== organizationId) {
+        return false;
+      }
+
+      if (organization.id === organizationId) {
+        return true;
+      }
+
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        !organization.id &&
+        !organization.domain &&
+        hasSafeScopedLeadingBrandExpansion(
+          companyName,
+          organization.name
+        )
+      ) {
+        // Apollo sometimes returns only its marketing/brand label on people
+        // retrieved through an exact organization_ids[] query. The query scope
+        // is the authoritative employer identity in that response; rejecting
+        // the record because the embedded label differs would discard valid
+        // people such as YAT USA's "YAT - Your Advanced Technology" roster.
+        return true;
+      }
+
+      if (!organization.name && !organization.domain) {
+        return true;
+      }
+
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        normalizedDomain &&
+        organization.domain === normalizedDomain
+      ) {
+        return true;
+      }
+
+      // People API Search is already constrained by organization_ids, but its
+      // response normally omits organization.id. Validate the returned company
+      // name/domain when present instead of discarding every scoped employee.
+      return (
+        hasStrictApolloOrganizationIdentityMatch({
+          companyName,
+          candidateName: organization.name,
+          normalizedDomain,
+          candidateDomain: organization.domain
+        }) ||
+        hasSafeScopedOrganizationAcronymMatch(
+          buildCompanyNameAliases(companyName),
+          buildCompanyNameAliases(organization.name ?? "")
+        )
+      );
+    }
+
+    if (normalizedDomain) {
+      if (
+        contact.recordSource === "PEOPLE_SEARCH" &&
+        !organization.domain &&
+        hasSafeScopedLeadingBrandExpansion(
+          companyName,
+          organization.name
+        )
+      ) {
+        // The same Apollo response-shape gap occurs on exact
+        // q_organization_domains_list[] searches. Trust the documented query
+        // scope when the returned person does not contradict it with a domain.
+        return true;
+      }
+      return organization.domain === normalizedDomain;
+    }
+
+    const candidateAliases = buildCompanyNameAliases(organization.name ?? "");
     return (
-      hasExactAliasMatch(inputAliases, contactAliases) ||
-      hasStrongBaseNameMatch(inputAliases, contactAliases) ||
-      hasExactAliasMatch(organizationAliases, contactAliases) ||
-      calculateBestTokenSimilarity(organizationAliases, contactAliases) >= 0.85
+      hasExactAliasMatch(expectedAliases, candidateAliases) ||
+      hasStrongBaseNameMatch(expectedAliases, candidateAliases)
+    );
+  });
+}
+
+function filterTrustedApolloAccountNameFallback({
+  contacts,
+  companyName,
+  trustedDomain
+}: {
+  contacts: ApolloContactRecord[];
+  companyName: string;
+  trustedDomain: string | null;
+}) {
+  const expectedAliases = buildCompanyNameAliases(companyName);
+
+  return contacts.filter((contact) => {
+    const organization = readApolloOrganizationFromContact(contact);
+    if (!organization?.name) {
+      return false;
+    }
+
+    const candidateAliases = buildCompanyNameAliases(organization.name);
+    const exactCompanyName =
+      hasExactAliasMatch(expectedAliases, candidateAliases) ||
+      hasStrongBaseNameMatch(expectedAliases, candidateAliases) ||
+      hasSafeRegionalBrandAlias(expectedAliases, candidateAliases) ||
+      hasSafeScopedLeadingBrandExpansion(companyName, organization.name);
+    if (!exactCompanyName) {
+      return false;
+    }
+
+    return (
+      !trustedDomain ||
+      !organization.domain ||
+      organization.domain === trustedDomain
     );
   });
 }
@@ -1607,22 +4617,219 @@ function dedupeApolloUsers(entries: ApolloRepDirectoryEntry[]) {
 }
 
 function dedupeApolloContacts(entries: ApolloContactRecord[]) {
-  const deduped = new Map<string, ApolloContactRecord>();
+  const deduped: ApolloContactRecord[] = [];
 
   for (const entry of entries) {
-    const key =
-      entry.apolloContactId ??
-      entry.apolloPersonId ??
-      entry.email?.toLowerCase() ??
-      `${entry.fullName.toLowerCase()}|${entry.title?.toLowerCase() ?? ""}`;
-
-    const existing = deduped.get(key);
-    if (!existing || scoreApolloContactEntry(entry) > scoreApolloContactEntry(existing)) {
-      deduped.set(key, entry);
+    const existingIndex = deduped.findIndex((candidate) =>
+      isSameApolloPerson(candidate, entry)
+    );
+    if (existingIndex < 0) {
+      deduped.push(entry);
+      continue;
     }
+
+    deduped[existingIndex] = mergeApolloContactRecords(
+      deduped[existingIndex]!,
+      entry
+    );
   }
 
-  return [...deduped.values()];
+  return deduped;
+}
+
+function dedupeApolloPersonIds(entries: string[]) {
+  return [
+    ...new Set(
+      entries
+        .map((entry) => entry.trim().toLowerCase())
+        .filter((entry) => /^[a-f0-9]{24}$/u.test(entry))
+    )
+  ];
+}
+
+function isSameApolloPerson(
+  left: ApolloContactRecord,
+  right: ApolloContactRecord
+) {
+  if (
+    (left.apolloPersonId &&
+      right.apolloPersonId &&
+      left.apolloPersonId === right.apolloPersonId) ||
+    (left.apolloContactId &&
+      right.apolloContactId &&
+      left.apolloContactId === right.apolloContactId)
+  ) {
+    return true;
+  }
+
+  const leftLinkedin = normalizeApolloIdentityValue(left.linkedinUrl);
+  const rightLinkedin = normalizeApolloIdentityValue(right.linkedinUrl);
+  if (leftLinkedin && rightLinkedin && leftLinkedin === rightLinkedin) {
+    return true;
+  }
+  const leftEmail = normalizeApolloIdentityValue(left.email);
+  const rightEmail = normalizeApolloIdentityValue(right.email);
+  if (leftEmail && rightEmail && leftEmail === rightEmail) {
+    return true;
+  }
+
+  const leftFirstName = normalizeApolloIdentityValue(
+    left.firstName ?? left.fullName.split(/\s+/u)[0] ?? null
+  );
+  const rightFirstName = normalizeApolloIdentityValue(
+    right.firstName ?? right.fullName.split(/\s+/u)[0] ?? null
+  );
+  const leftTitle = normalizeApolloIdentityValue(left.title);
+  const rightTitle = normalizeApolloIdentityValue(right.title);
+  return Boolean(
+    leftFirstName &&
+    rightFirstName &&
+    leftFirstName === rightFirstName &&
+    leftTitle &&
+    rightTitle &&
+    leftTitle === rightTitle &&
+    haveStrictApolloContactCompanyIdentity(left, right)
+  );
+}
+
+function haveStrictApolloContactCompanyIdentity(
+  left: ApolloContactRecord,
+  right: ApolloContactRecord
+) {
+  const leftOrganization = readApolloOrganizationFromContact(left);
+  const rightOrganization = readApolloOrganizationFromContact(right);
+  if (!leftOrganization || !rightOrganization) {
+    return false;
+  }
+  if (leftOrganization.id && rightOrganization.id) {
+    return leftOrganization.id === rightOrganization.id;
+  }
+  if (leftOrganization.domain && rightOrganization.domain) {
+    return leftOrganization.domain === rightOrganization.domain;
+  }
+  if (!leftOrganization.name || !rightOrganization.name) {
+    return false;
+  }
+  const leftAliases = buildCompanyNameAliases(leftOrganization.name);
+  const rightAliases = buildCompanyNameAliases(rightOrganization.name);
+  return (
+    hasExactAliasMatch(leftAliases, rightAliases) ||
+    hasStrongBaseNameMatch(leftAliases, rightAliases) ||
+    hasSafeRegionalBrandAlias(leftAliases, rightAliases)
+  );
+}
+
+function normalizeApolloIdentityValue(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || null;
+}
+
+function mergeApolloContactRecords(
+  left: ApolloContactRecord,
+  right: ApolloContactRecord
+): ApolloContactRecord {
+  const preferred =
+    left.recordSource === "SAVED_CONTACT" && right.recordSource !== "SAVED_CONTACT"
+      ? left
+      : right.recordSource === "SAVED_CONTACT" && left.recordSource !== "SAVED_CONTACT"
+        ? right
+        : scoreApolloContactEntry(right) > scoreApolloContactEntry(left)
+          ? right
+          : left;
+  const fallback = preferred === left ? right : left;
+  const sequencePreferred = selectPreferredApolloSequenceRecord(left, right);
+  const sequenceFallback = sequencePreferred === left ? right : left;
+
+  return {
+    ...fallback,
+    ...preferred,
+    apolloContactId: preferred.apolloContactId ?? fallback.apolloContactId,
+    apolloPersonId: preferred.apolloPersonId ?? fallback.apolloPersonId,
+    firstName: preferred.firstName ?? fallback.firstName,
+    lastName: preferred.lastName ?? fallback.lastName,
+    lastNameObfuscated:
+      preferred.lastNameObfuscated ?? fallback.lastNameObfuscated,
+    title: preferred.title ?? fallback.title,
+    department: preferred.department ?? fallback.department,
+    seniority: preferred.seniority ?? fallback.seniority,
+    email: preferred.email ?? fallback.email,
+    phone: preferred.phone ?? fallback.phone,
+    linkedinUrl: preferred.linkedinUrl ?? fallback.linkedinUrl,
+    city: preferred.city ?? fallback.city,
+    state: preferred.state ?? fallback.state,
+    country: preferred.country ?? fallback.country,
+    hasEmailAvailable:
+      preferred.hasEmailAvailable || fallback.hasEmailAvailable,
+    hasPhoneAvailable:
+      preferred.hasPhoneAvailable || fallback.hasPhoneAvailable,
+    hasLinkedinAvailable:
+      preferred.hasLinkedinAvailable || fallback.hasLinkedinAvailable,
+    sequenceStatus: sequencePreferred.sequenceStatus,
+    replyStatus:
+      sequencePreferred.replyStatus === ReplyStatus.REPLIED ||
+      sequenceFallback.replyStatus !== ReplyStatus.REPLIED
+        ? sequencePreferred.replyStatus
+        : sequenceFallback.replyStatus,
+    sequenceId:
+      sequencePreferred.sequenceId ?? sequenceFallback.sequenceId,
+    sequenceName:
+      sequencePreferred.sequenceName ?? sequenceFallback.sequenceName,
+    sequenceOwnerName:
+      sequencePreferred.sequenceOwnerName ?? sequenceFallback.sequenceOwnerName,
+    sequenceOwnerUserId:
+      sequencePreferred.sequenceOwnerUserId ?? sequenceFallback.sequenceOwnerUserId,
+    lastTouchAt:
+      laterApolloDate(sequencePreferred.lastTouchAt, sequenceFallback.lastTouchAt),
+    lastReplyAt:
+      laterApolloDate(sequencePreferred.lastReplyAt, sequenceFallback.lastReplyAt),
+    rawPayload: {
+      ...fallback.rawPayload,
+      ...preferred.rawPayload,
+      organization:
+        preferred.rawPayload.organization ?? fallback.rawPayload.organization,
+      apolloSources: [...new Set([left.recordSource, right.recordSource])]
+    }
+  };
+}
+
+function selectPreferredApolloSequenceRecord(
+  left: ApolloContactRecord,
+  right: ApolloContactRecord
+) {
+  const leftRank = apolloSequenceStatusRank(left.sequenceStatus);
+  const rightRank = apolloSequenceStatusRank(right.sequenceStatus);
+  if (leftRank !== rightRank) {
+    return leftRank > rightRank ? left : right;
+  }
+
+  return (right.lastTouchAt?.getTime() ?? 0) >
+    (left.lastTouchAt?.getTime() ?? 0)
+    ? right
+    : left;
+}
+
+function apolloSequenceStatusRank(status: SequenceStatus) {
+  switch (status) {
+    case SequenceStatus.REPLIED:
+      return 7;
+    case SequenceStatus.BOUNCED:
+      return 6;
+    case SequenceStatus.ENROLLED:
+      return 5;
+    case SequenceStatus.PAUSED:
+      return 4;
+    case SequenceStatus.FINISHED:
+      return 3;
+    case SequenceStatus.READY:
+      return 2;
+    case SequenceStatus.NOT_STARTED:
+      return 1;
+  }
+}
+
+function laterApolloDate(left: Date | null, right: Date | null) {
+  if (!left) return right;
+  if (!right) return left;
+  return left.getTime() >= right.getTime() ? left : right;
 }
 
 function dedupeApolloSequences(entries: ApolloSequenceDirectoryEntry[]) {
@@ -1653,22 +4860,50 @@ function scoreApolloOrganizationCandidate(
   },
   companyName: string,
   normalizedDomain: string | null,
-  query: Record<string, unknown>
+  query: Record<string, unknown>,
+  verifiedLogisticsProvider: boolean | null = null
 ): ApolloOrganizationCandidate {
   let score = 0;
   let nameMatchType: ApolloOrganizationCandidate["nameMatchType"] = "NONE";
   const inputAliases = buildCompanyNameAliases(companyName);
   const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
+  const accountRecordName = readApolloString(candidate.rawPayload, [
+    "name",
+    "company_name",
+    "organization_name"
+  ]);
+  const accountAliases = buildCompanyNameAliases(accountRecordName ?? "");
+  const nestedOrganization = asRecord(candidate.rawPayload.organization);
+  const nestedOrganizationId = readApolloString(nestedOrganization ?? {}, [
+    "id",
+    "organization_id",
+    "apollo_organization_id"
+  ]);
   const tokenSimilarity = calculateBestTokenSimilarity(inputAliases, candidateAliases);
-  const logisticsProviderMatch = isLogisticsProviderName(candidate.name ?? "") || isLogisticsProviderName(companyName);
-  const strongBaseNameMatch = hasStrongBaseNameMatch(inputAliases, candidateAliases);
+  const accountBackedCanonicalMatch = Boolean(
+    nestedOrganizationId &&
+    candidate.id === nestedOrganizationId &&
+    accountAliases.length > 0 &&
+    hasStrongBaseNameMatch(inputAliases, accountAliases)
+  );
+  const strongBaseNameMatch =
+    hasStrongBaseNameMatch(inputAliases, candidateAliases) ||
+    hasSafeRegionalBrandAlias(inputAliases, candidateAliases) ||
+    accountBackedCanonicalMatch;
+  const domainMatch = Boolean(normalizedDomain && candidate.domain === normalizedDomain);
+  const identityMatch =
+    domainMatch ||
+    hasExactAliasMatch(inputAliases, candidateAliases) ||
+    strongBaseNameMatch;
+  const logisticsProviderMatch =
+    verifiedLogisticsProvider === true ||
+    (isLogisticsProviderName(candidate.name ?? "") && !identityMatch);
   const branchLocationMatch = isBranchLocationMatch(candidate.name ?? "", companyName) && !strongBaseNameMatch;
 
   if (candidate.id) {
     score += 4;
   }
 
-  const domainMatch = Boolean(normalizedDomain && candidate.domain === normalizedDomain);
   if (domainMatch) {
     score += 10;
   }
@@ -1704,7 +4939,7 @@ function scoreApolloOrganizationCandidate(
     score -= 4;
   }
 
-  const classification = classifyApolloOrganizationCandidate({
+  const scoredClassification = classifyApolloOrganizationCandidate({
     id: candidate.id,
     score,
     nameMatchType,
@@ -1714,6 +4949,14 @@ function scoreApolloOrganizationCandidate(
     strongBaseNameMatch,
     tokenSimilarity
   });
+  const emptyNameOnlyShell = Boolean(
+    scoredClassification === ApolloCompanyMatchClassification.DIRECT_COMPANY &&
+    !domainMatch &&
+    !hasSubstantiveApolloOrganizationIdentity(candidate)
+  );
+  const classification = emptyNameOnlyShell
+    ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+    : scoredClassification;
 
   return {
     ...candidate,
@@ -1724,7 +4967,7 @@ function scoreApolloOrganizationCandidate(
     branchLocationMatch,
     strongBaseNameMatch,
     classification,
-    matchReason: buildApolloMatchReason({
+    matchReason: [buildApolloMatchReason({
       classification,
       score,
       nameMatchType,
@@ -1733,8 +4976,66 @@ function scoreApolloOrganizationCandidate(
       branchLocationMatch,
       strongBaseNameMatch,
       tokenSimilarity
-    }),
+    }), emptyNameOnlyShell
+      ? "name-only Apollo result had no domain, LinkedIn identity, or positive employee count"
+      : null]
+      .filter(Boolean)
+      .join("; "),
     query
+  };
+}
+
+function hasSubstantiveApolloOrganizationIdentity(candidate: {
+  domain: string | null;
+  linkedinUrl: string | null;
+  rawPayload: Record<string, unknown>;
+}) {
+  if (candidate.domain || candidate.linkedinUrl) return true;
+  const nestedOrganization = asRecord(candidate.rawPayload.organization);
+  const employeeCount =
+    readApolloNumber(candidate.rawPayload, [
+      "estimated_num_employees",
+      "employee_count",
+      "employees",
+      "num_employees"
+    ]) ??
+    (nestedOrganization
+      ? readApolloNumber(nestedOrganization, [
+          "estimated_num_employees",
+          "employee_count",
+          "employees",
+          "num_employees"
+        ])
+      : null);
+  return Boolean(employeeCount && employeeCount > 0);
+}
+
+function buildTrustedProvidedApolloOrganization(
+  input: ApolloCompanyLookupInput,
+  organizationId: string
+): ApolloOrganizationCandidate {
+  const domain = normalizeDomain(input.domain);
+  return {
+    id: organizationId,
+    name: input.companyName,
+    domain,
+    linkedinUrl: null,
+    score: 100,
+    nameMatchType: "EXACT",
+    domainMatch: Boolean(domain),
+    logisticsProviderMatch: false,
+    branchLocationMatch: false,
+    strongBaseNameMatch: true,
+    classification: ApolloCompanyMatchClassification.DIRECT_COMPANY,
+    matchReason: "direct company; manually confirmed Apollo organization mapping",
+    query: {
+      source: "confirmed-apollo-organization-id",
+      organization_ids: [organizationId]
+    },
+    rawPayload: {
+      source: "confirmed-apollo-organization-id",
+      organization_id: organizationId
+    }
   };
 }
 
@@ -1744,6 +5045,44 @@ function isDirectApolloCompanyMatch(candidate: ApolloOrganizationCandidate | nul
   }
 
   return candidate.classification === ApolloCompanyMatchClassification.DIRECT_COMPANY;
+}
+
+function isSafeCanonicalApolloOrganizationResolution(
+  candidate: ApolloOrganizationCandidate,
+  input: ApolloCompanyLookupInput
+) {
+  if (!isDirectApolloCompanyMatch(candidate)) {
+    return false;
+  }
+
+  const inputAliases = buildCompanyNameAliases(input.companyName);
+  const candidateAliases = buildCompanyNameAliases(candidate.name ?? "");
+  const normalizedDomain = normalizeDomain(input.domain);
+  const nestedOrganization = asRecord(candidate.rawPayload.organization);
+  const nestedOrganizationId = readApolloString(nestedOrganization ?? {}, [
+    "id",
+    "organization_id",
+    "apollo_organization_id"
+  ]);
+  const accountName = readApolloString(candidate.rawPayload, [
+    "name",
+    "company_name",
+    "organization_name"
+  ]);
+  const accountAliases = buildCompanyNameAliases(accountName ?? "");
+  const accountBackedCanonicalMatch = Boolean(
+    nestedOrganizationId &&
+    candidate.id === nestedOrganizationId &&
+    accountAliases.length > 0 &&
+    hasStrongBaseNameMatch(inputAliases, accountAliases)
+  );
+
+  return (
+    Boolean(normalizedDomain && candidate.domain === normalizedDomain) ||
+    hasExactAliasMatch(inputAliases, candidateAliases) ||
+    hasSafeRegionalBrandAlias(inputAliases, candidateAliases) ||
+    accountBackedCanonicalMatch
+  );
 }
 
 function toApolloCompanyLookupMatch(
@@ -1893,9 +5232,10 @@ function scoreApolloContactEntry(entry: ApolloContactRecord) {
   let score = 0;
   const roleFit = scoreApolloRoleFit(entry);
   score += roleFit.score;
-  if (entry.email) score += 4;
+  if (hasConcreteApolloEmail(entry)) score += 12;
+  if (entry.hasEmailAvailable) score += 4;
   if (entry.title) score += 2;
-  if (entry.linkedinUrl) score += 2;
+  if (entry.hasLinkedinAvailable) score += 2;
   if (entry.sequenceStatus !== SequenceStatus.NOT_STARTED) score += 1;
   return score;
 }
@@ -1904,10 +5244,24 @@ function buildApolloPeopleSearchKeywords(companyName: string, queryKeywords: str
   const trimmedKeyword = queryKeywords?.trim() ?? "";
 
   if (!trimmedKeyword) {
-    return constrainedToOrganization ? undefined : companyName;
+    return constrainedToOrganization
+      ? undefined
+      : boundApolloKeywordText(companyName);
   }
 
-  return constrainedToOrganization ? trimmedKeyword : `${companyName} ${trimmedKeyword}`.trim();
+  return boundApolloKeywordText(
+    constrainedToOrganization
+      ? trimmedKeyword
+      : `${companyName} ${trimmedKeyword}`
+  );
+}
+
+function boundApolloKeywordText(value: string) {
+  return value
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, APOLLO_KEYWORD_MAX_LENGTH)
+    .trim();
 }
 
 function rankApolloRelevantContacts(entries: ApolloContactRecord[]) {
@@ -1976,7 +5330,11 @@ function scoreApolloRoleFit(entry: ApolloContactRecord) {
     score += 11;
   }
 
-  if (/(operations|supply chain|logistics|procurement|purchasing|distribution)/.test(roleText)) {
+  if (
+    /(operations|supply chain|logistics|procurement|purchasing|distribution|shipping|receiving)/.test(
+      roleText
+    )
+  ) {
     score += 15;
   } else if (fallbackHit) {
     score += 8;
@@ -2344,6 +5702,122 @@ function toApolloEmailActivities(record: Record<string, unknown>): ApolloActivit
   return activities;
 }
 
+function collectApolloText(value: unknown, depth = 0): string {
+  if (depth > 4 || value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => collectApolloText(item, depth + 1))
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (typeof value !== "object") {
+    return "";
+  }
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !/(token|secret|password|api[_-]?key|authorization)/iu.test(key))
+    .map(([, item]) => collectApolloText(item, depth + 1))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function summarizeApolloEvidenceReason(value: string) {
+  return value.replace(/\s+/gu, " ").trim().slice(0, 500);
+}
+
+function readApolloEvidenceReason(value: unknown, depth = 0): string | null {
+  if (depth > 4 || !value || typeof value !== "object") {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const reason = readApolloEvidenceReason(item, depth + 1);
+      if (reason) return reason;
+    }
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const preferredKeys = [
+    "reply_body",
+    "body_preview",
+    "preview_text",
+    "snippet",
+    "body",
+    "text",
+    "message",
+    "subject"
+  ];
+  for (const key of preferredKeys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return summarizeApolloEvidenceReason(candidate);
+    }
+  }
+  for (const candidate of Object.values(record)) {
+    const reason = readApolloEvidenceReason(candidate, depth + 1);
+    if (reason) return reason;
+  }
+  return null;
+}
+
+function readApolloResumeAt(
+  record: Record<string, unknown>,
+  text: string,
+  occurredAt: Date | null
+) {
+  const structured = parseApolloDate(
+    readApolloString(record, [
+      "resume_at",
+      "resumes_at",
+      "auto_unpause_at",
+      "auto_resume_at",
+      "auto_resumes_at",
+      "paused_until",
+      "pause_until",
+      "out_of_office_until"
+    ])
+  );
+  if (structured) {
+    return structured;
+  }
+
+  const monthMatch = text.match(
+    /\b(?:return(?:ing|s)?|back|resume(?:s|d)?)\s+(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?[,]?\s*(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:[,]?\s+(\d{4}))?/iu
+  );
+  if (!monthMatch) {
+    return null;
+  }
+
+  const monthIndex = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december"
+  ].indexOf(monthMatch[1].toLowerCase());
+  const day = Number(monthMatch[2]);
+  let year = Number(monthMatch[3] ?? occurredAt?.getUTCFullYear() ?? new Date().getUTCFullYear());
+  let parsed = new Date(Date.UTC(year, monthIndex, day, 12));
+  if (!monthMatch[3] && occurredAt && parsed.getTime() < occurredAt.getTime() - 24 * 60 * 60 * 1_000) {
+    year += 1;
+    parsed = new Date(Date.UTC(year, monthIndex, day, 12));
+  }
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function mergeApolloPayload(target: Record<string, unknown>, buckets: Map<string, unknown[]>, pagePayload: Record<string, unknown>) {
   for (const [key, value] of Object.entries(pagePayload)) {
     if (Array.isArray(value)) {
@@ -2479,20 +5953,14 @@ function normalizeDomain(value: string | null | undefined) {
     .toLowerCase();
 }
 
-function buildCompanyIdentityKey(companyName: string, domain: string | null) {
-  return [buildApolloSearchCompanyName(companyName), domain ?? ""].filter(Boolean).join("|");
-}
-
 export function normalizeCompanyName(value: string) {
   return value
+    .replace(/[’']s\b/giu, "s")
+    .replace(/\b(INC|LLC|LTD|CORP|Inc|Llc|Ltd|Corp)(?=[A-Z])/gu, "$1 ")
     .toLowerCase()
     .replace(/\b(incorporated|inc|llc|ltd|limited|corp|corporation|co|company|sa|s\.a|plc|gmbh)\b/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function buildApolloSearchCompanyName(value: string) {
-  return simplifyCompanySearchName(value) || normalizeCompanyName(value);
 }
 
 function simplifyCompanySearchName(value: string) {
@@ -2526,7 +5994,27 @@ function buildCompanyNameAliases(value: string) {
     aliases.add(simplified);
   }
 
+  for (const segment of buildCompanyIdentitySegments(value)) {
+    const normalizedSegment = normalizeCompanyName(segment);
+    if (normalizedSegment) aliases.add(normalizedSegment);
+  }
+
   return [...aliases];
+}
+
+function buildCompanyIdentitySegments(value: string) {
+  const segments = new Set<string>();
+  const prefix = value.split(/[(:|]/u)[0]?.trim();
+  if (prefix && prefix.length >= 4) segments.add(prefix);
+  for (const match of value.matchAll(/\(([^)]+)\)/gu)) {
+    const segment = match[1]?.trim();
+    if (segment && segment.length >= 4) segments.add(segment);
+  }
+  const firstCommaSegment = value.split(",")[0]?.trim();
+  if (firstCommaSegment && firstCommaSegment.length >= 4) {
+    segments.add(firstCommaSegment);
+  }
+  return [...segments].slice(0, 3);
 }
 
 function buildApolloOrganizationSearchQueries(value: string) {
@@ -2534,7 +6022,47 @@ function buildApolloOrganizationSearchQueries(value: string) {
     .filter((query): query is string => Boolean(query && query.trim().length > 0))
     .filter((query, index, array) => array.indexOf(query) === index);
 
-  return queries;
+  return queries.slice(0, 2);
+}
+
+function buildApolloEquivalentAccountSearchQueries(
+  values: Array<string | null | undefined>
+) {
+  const queries = new Set<string>();
+
+  for (const value of values) {
+    if (!value?.trim()) {
+      continue;
+    }
+
+    for (const query of buildApolloOrganizationSearchQueries(value)) {
+      queries.add(query);
+    }
+
+    const acronym = buildApolloCompanyAcronym(value);
+    if (acronym) {
+      queries.add(acronym);
+    }
+  }
+
+  return [...queries].slice(
+    0,
+    APOLLO_EQUIVALENT_ACCOUNT_QUERY_LIMIT
+  );
+}
+
+function buildApolloCompanyAcronym(value: string) {
+  const tokens = tokenizeCompanyName(value).filter(
+    (token) => !APOLLO_REGIONAL_IDENTITY_TOKENS.has(token)
+  );
+  if (tokens.length < 2) {
+    return null;
+  }
+
+  const acronym = tokens.map((token) => token[0]).join("").toUpperCase();
+  return acronym.length >= 2 && acronym.length <= 8
+    ? acronym
+    : null;
 }
 
 function hasExactAliasMatch(leftAliases: string[], rightAliases: string[]) {
@@ -2557,8 +6085,176 @@ function hasStrongBaseNameMatch(leftAliases: string[], rightAliases: string[]) {
   return (
     hasExactAliasMatch(leftAliases, rightAliases) ||
     hasContainedLeadingTokenMatch(leftAliases, rightAliases) ||
+    hasSharedDistinctiveBrandPrefix(leftAliases, rightAliases) ||
     calculateBestTokenSimilarity(leftAliases, rightAliases) >= 0.85
   );
+}
+
+function hasSharedDistinctiveBrandPrefix(leftAliases: string[], rightAliases: string[]) {
+  return leftAliases.some((leftAlias) =>
+    rightAliases.some((rightAlias) => {
+      const leftTokens = tokenizeCompanyName(leftAlias);
+      const rightTokens = tokenizeCompanyName(rightAlias);
+      if (leftTokens.length < 2 || rightTokens.length < 2) return false;
+      return (
+        leftTokens[0] === rightTokens[0] &&
+        leftTokens[1] === rightTokens[1] &&
+        (leftTokens[0]?.length ?? 0) >= 4
+      );
+    })
+  );
+}
+
+function hasStrictApolloOrganizationIdentityMatch({
+  companyName,
+  candidateName,
+  normalizedDomain,
+  candidateDomain
+}: {
+  companyName: string;
+  candidateName: string | null;
+  normalizedDomain: string | null;
+  candidateDomain: string | null;
+}) {
+  const expectedIdentity = normalizeStrictApolloOrganizationName(companyName);
+  const candidateIdentity = normalizeStrictApolloOrganizationName(candidateName ?? "");
+  if (expectedIdentity && candidateIdentity && expectedIdentity === candidateIdentity) {
+    return true;
+  }
+
+  if (!normalizedDomain || candidateDomain !== normalizedDomain || !candidateName) {
+    return false;
+  }
+
+  const expectedAliases = buildCompanyNameAliases(companyName);
+  const candidateAliases = buildCompanyNameAliases(candidateName);
+  return (
+    hasExactAliasMatch(expectedAliases, candidateAliases) ||
+    hasSafeRegionalBrandAlias(expectedAliases, candidateAliases) ||
+    hasSafeScopedOrganizationAcronymMatch(expectedAliases, candidateAliases)
+  );
+}
+
+function hasSafeRegionalBrandAlias(
+  expectedAliases: string[],
+  candidateAliases: string[]
+) {
+  return expectedAliases.some((expectedAlias) =>
+    candidateAliases.some((candidateAlias) => {
+      const expectedTokens = tokenizeCompanyName(expectedAlias);
+      const candidateTokens = tokenizeCompanyName(candidateAlias);
+      const shorter =
+        expectedTokens.length <= candidateTokens.length
+          ? expectedTokens
+          : candidateTokens;
+      const longer =
+        expectedTokens.length <= candidateTokens.length
+          ? candidateTokens
+          : expectedTokens;
+
+      if (
+        shorter.length === 0 ||
+        shorter[0]!.length < 4 ||
+        shorter.length >= longer.length
+      ) {
+        return false;
+      }
+
+      return (
+        shorter.every((token, index) => token === longer[index]) &&
+        longer
+          .slice(shorter.length)
+          .every((token) => APOLLO_REGIONAL_IDENTITY_TOKENS.has(token))
+      );
+    })
+  );
+}
+
+function hasSafeScopedOrganizationAcronymMatch(
+  expectedAliases: string[],
+  candidateAliases: string[]
+) {
+  return expectedAliases.some((expectedAlias) =>
+    candidateAliases.some((candidateAlias) => {
+      const expectedTokens = tokenizeCompanyName(expectedAlias).filter(
+        (token) => !APOLLO_REGIONAL_IDENTITY_TOKENS.has(token)
+      );
+      const candidateTokens = tokenizeCompanyName(candidateAlias).filter(
+        (token) => !APOLLO_REGIONAL_IDENTITY_TOKENS.has(token)
+      );
+
+      if (
+        expectedTokens.length < 2 ||
+        candidateTokens.length < 2 ||
+        expectedTokens[0] !== candidateTokens[0] ||
+        expectedTokens[0]!.length < 4
+      ) {
+        return false;
+      }
+
+      const expectedRemainder = expectedTokens.slice(1);
+      const candidateRemainder = candidateTokens.slice(1);
+      const expectedAcronym = expectedRemainder.length === 1
+        ? expectedRemainder[0]
+        : null;
+      const candidateAcronym = candidateRemainder.length === 1
+        ? candidateRemainder[0]
+        : null;
+      const expectedInitials = expectedRemainder.map((token) => token[0]).join("");
+      const candidateInitials = candidateRemainder.map((token) => token[0]).join("");
+
+      return (
+        Boolean(
+          expectedAcronym &&
+          expectedAcronym.length >= 2 &&
+          expectedAcronym.length <= 6 &&
+          candidateRemainder.length >= 2 &&
+          expectedAcronym === candidateInitials
+        ) ||
+        Boolean(
+          candidateAcronym &&
+          candidateAcronym.length >= 2 &&
+          candidateAcronym.length <= 6 &&
+          expectedRemainder.length >= 2 &&
+          candidateAcronym === expectedInitials
+        )
+      );
+    })
+  );
+}
+
+function hasSafeScopedLeadingBrandExpansion(
+  companyName: string,
+  candidateName: string | null
+) {
+  if (!candidateName || !/\s[-|]\s/u.test(candidateName)) {
+    return false;
+  }
+
+  const expectedTokens = tokenizeCompanyName(companyName);
+  const candidateTokens = tokenizeCompanyName(candidateName);
+  const expectedFirstToken = companyName.trim().match(/^([A-Z0-9]{2,6})\b/u)?.[1];
+
+  return Boolean(
+    expectedFirstToken &&
+    expectedTokens.length === 1 &&
+    candidateTokens.length >= 3 &&
+    candidateTokens[0] === expectedTokens[0]
+  );
+}
+
+function normalizeStrictApolloOrganizationName(value: string) {
+  const simplified = simplifyCompanySearchName(value);
+  return normalizeCompanyName(simplified)
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function downgradeUnsafeInferredDirectMatch(classification: ApolloCompanyMatchClassification) {
+  return classification === ApolloCompanyMatchClassification.DIRECT_COMPANY
+    ? ApolloCompanyMatchClassification.MATCH_QUALITY_REVIEW
+    : classification;
 }
 
 function tokenizeCompanyName(value: string) {
@@ -2609,6 +6305,25 @@ function isLeadingTokenBaseMatch(leftAlias: string, rightAlias: string) {
 }
 
 const COMPANY_STOP_WORDS = new Set(["the", "and", "of", "for", "usa", "us", "intl", "international", "group"]);
+const APOLLO_REGIONAL_IDENTITY_TOKENS = new Set([
+  "america",
+  "north",
+  "canada",
+  "united",
+  "states"
+]);
+
+const APOLLO_SHARED_IDENTITY_DOMAINS = [
+  "apollo.io",
+  "facebook.com",
+  "glassdoor.com",
+  "greenhouse.io",
+  "indeed.com",
+  "lever.co",
+  "linkedin.com",
+  "myworkdayjobs.com",
+  "youtube.com"
+];
 
 const LOGISTICS_PROVIDER_PATTERN =
   /\b(3pl|broker|carrier|customs|distribution|drayage|forwarder|freight|fulfillment|logistic|logistics|shipping|steamship|transport|trucking|warehouse|warehousing)\b/i;

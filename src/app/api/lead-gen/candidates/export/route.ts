@@ -1,5 +1,6 @@
 import { ModuleKey } from "@prisma/client";
 import { NextResponse } from "next/server";
+import { CANDIDATE_REVIEW_QUEUE_LIMIT } from "@/modules/lead-gen/candidate-pagination";
 import { getCandidateFeed, type CandidateFeedSort } from "@/modules/lead-gen/queries";
 import { requireModule } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
@@ -27,7 +28,8 @@ export async function GET(request: Request) {
       minScore,
       maxScore,
       minShipmentCount,
-      sort
+      sort,
+      limit: CANDIDATE_REVIEW_QUEUE_LIMIT
     });
 
     const csv = toCsv([

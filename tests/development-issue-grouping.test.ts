@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getDevelopmentContextPaths,
   groupDevelopmentFeedback,
+  isNonActionableDevelopmentFeedback,
   type DevelopmentFeedbackCandidate
 } from "@/modules/assistant/development-issue-grouping";
 
@@ -74,6 +75,79 @@ describe("development issue grouping", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].issueKey).toBe("GARLAND_ORDER_STATUS_RESPONSE");
     expect(groups[0].items).toHaveLength(2);
+  });
+
+  it("assigns stable Garland issue families to ship-to and comparison regressions", () => {
+    const groups = groupDevelopmentFeedback([
+      {
+        ...base,
+        id: "ship-name",
+        reporterStatement: "The Ship to name should use the complete First Name value."
+      },
+      {
+        ...base,
+        id: "ship-location",
+        reporterStatement: "The Ship to city, province, and postal code are missing."
+      },
+      {
+        ...base,
+        id: "false-mismatch",
+        reporterStatement: "The Commodity field currently displays: SKU: EXAMPLE QTY: 1 It should display: SKU: EXAMPLE QTY: 1",
+        observedOutcome: "MISSING",
+        expectedOutcome: "PASS"
+      }
+    ]);
+
+    expect(groups.map((group) => group.issueKey)).toEqual([
+      "GARLAND_SHIP_TO_NAME",
+      "GARLAND_SHIP_TO_LOCATION",
+      "GARLAND_COMPARISON_FALSE_MISMATCH"
+    ]);
+  });
+
+  it("keeps specific Garland field failures out of the generic false-mismatch family", () => {
+    const groups = groupDevelopmentFeedback([
+      {
+        ...base,
+        id: "serial-specific",
+        reporterStatement:
+          "The Commodity field currently displays: SKU: EXAMPLE QTY: 1 It should display: SKU: EXAMPLE SN: SERIAL123",
+        observedOutcome: "MISSING",
+        expectedOutcome: "PASS"
+      },
+      {
+        ...base,
+        id: "location-specific",
+        reporterStatement:
+          "The Ship-to city and province currently display: MISSISSAUGA ON It should display: SOURCE CITY QC",
+        observedOutcome: "MISSING",
+        expectedOutcome: "PASS"
+      }
+    ]);
+
+    expect(groups.map((group) => group.issueKey)).toEqual([
+      "GARLAND_LOT_SERIAL_COMMODITY",
+      "GARLAND_SHIP_TO_LOCATION"
+    ]);
+  });
+
+  it("screens an exact no-change report only when its observed and expected outcomes also match", () => {
+    const statement = "The Commodity field currently displays: SKU: EXAMPLE QTY: 1 It should display: SKU: EXAMPLE QTY: 1";
+
+    expect(isNonActionableDevelopmentFeedback({
+      ...base,
+      id: "no-change",
+      reporterStatement: statement,
+      observedOutcome: "PASS",
+      expectedOutcome: "PASS"
+    })).toBe(true);
+    expect(isNonActionableDevelopmentFeedback({
+      ...base,
+      id: "false-mismatch",
+      reporterStatement: statement,
+      observedOutcome: "MISSING",
+      expectedOutcome: "PASS"
+    })).toBe(false);
   });
 
   it("requires the full Garland workflow context before Codex development", () => {

@@ -27,6 +27,15 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
 
+For non-UPS Garland orders, SKU prefixes have these fixed pallet dimension and weight rules:
+
+- `SUME-100`: `45 x 55 x 42` inches at `510 lbs`.
+- `SUMG-100`: `44 x 55 x 42` inches at `515 lbs`.
+
+The rule applies to every SKU beginning with the prefix, not only the exact SKU examples in the static Garland dimension sheet. It takes precedence over Teamship pallet observations, learned dimensions, and exact-sheet rows. The existing Garland UPS rule remains the higher-priority exception and uses `1 x 1 x 1` at `1 lb` regardless of SKU.
+
+The approved exact reference for Frymaster SKU `UHCTHD6T00004` is `33 x 58 x 36` inches at `396 lbs`.
+
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.

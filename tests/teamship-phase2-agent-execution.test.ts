@@ -23,7 +23,7 @@ describe("Teamship Phase 2 agent execution", () => {
         width: 40,
         height: 50,
         weight: 500,
-        commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+        commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
       }),
       expect.objectContaining({
         quantity: 4,
@@ -34,6 +34,44 @@ describe("Teamship Phase 2 agent execution", () => {
         commodity: "SKU: 8030445 QTY: 4"
       })
     ]);
+  });
+
+  it("maps the approved full Garland ship-to name to Teamship First Name", () => {
+    const review = sampleReview();
+    review.pdfOrders[0]!.psNumber = "PS999910";
+    review.pdfOrders[0]!.shipToName = "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE";
+    review.reviews[0]!.psNumber = "PS999910";
+    review.reviews[0]!.fields = [
+      {
+        key: "ship_to_name",
+        label: "Ship-to name",
+        status: "DISCREPANCY",
+        pdfValue: "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE",
+        teamshipValue: "SYNTHETIC GARLAND CUSTOMER",
+        message: "PDF and Teamship values do not match.",
+        botActionEnabled: true
+      }
+    ];
+
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+    const payload = buildTeamshipUpdatePayload(plan.orders[0]!);
+    const evidence = buildDryRunEvidence({
+      job: { id: "job_1" },
+      plan,
+      agentId: "agent"
+    });
+
+    expect(payload).toMatchObject({
+      ship_first_name: "SYNTHETIC GARLAND CUSTOMER DISTRIBUTION CENTRE"
+    });
+    expect(payload).not.toHaveProperty("ship_last_name");
+    expect(evidence.orders[0]?.fieldActions[0]?.browserInstruction).toMatchObject({
+      fieldLabel: "First Name",
+      primaryLocator: {
+        strategy: "LABEL_OR_NAME",
+        label: "First Name"
+      }
+    });
   });
 
   it("compacts Garland special instructions before planning bot updates", () => {
@@ -106,7 +144,7 @@ PROPER NAME: UN1814`;
           height: 50,
           weight: 500,
           weight_unit: "lbs",
-          commodity: "SKU: E1SGHMV6XHU3US SN: 2604816191908"
+          commodity: "SKU: E1SGHMV6XHU3US, SN: 2604816191908"
         }),
         apiInstruction: expect.objectContaining({
           preferredExecution: "TEAMSHIP_API",
@@ -306,6 +344,45 @@ PROPER NAME: UN1814`;
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("blocks a previously saved live plan containing Garland item-detail instructions", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    plan.orders[0]!.plannedFieldUpdates = [
+      {
+        reviewFieldKey: "shipping_instructions",
+        label: "Shipping instructions",
+        teamshipField: "edi_field_4",
+        currentValue: null,
+        proposedValue:
+          "FOR PICKUP PLEASE CONTACT TEST RECEIVING Top Section 2 Two Open Burners End of Comments ITEM: 24",
+        reason: "Previously saved plan."
+      }
+    ];
+    const fetchImpl = vi.fn();
+
+    await expect(
+      executeTeamshipPhase2Job({
+        job: {
+          id: "job_1",
+          agentMode: "LIVE_API",
+          dryRun: false
+        },
+        plan,
+        credentials: {
+          email: "teamship@example.com",
+          password: "secret",
+          apiBaseUrl: "https://teamship.example/api"
+        },
+        options: {
+          agentId: "agent",
+          allowLiveUpdates: true,
+          liveAllowlistSrNumbers: ["SR808478"],
+          fetchImpl: fetchImpl as unknown as typeof fetch
+        }
+      })
+    ).rejects.toThrow("Special Instructions contain probable Garland item-detail text");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("allows live jobs when the VM allowlist is explicitly opened for all SRs", async () => {
     const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
     const fetchImpl = vi
@@ -380,6 +457,65 @@ PROPER NAME: UN1814`;
         body: expect.stringContaining("\"edi_field_3\":\"PPADD-CD\"")
       })
     );
+  });
+
+  it("retries one transient Teamship login failure before submitting any update", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    plan.orders[0]!.srNumber = "SR812345";
+    plan.orders[0]!.psNumber = "PS123456";
+    plan.orders[0]!.teamshipOrderId = "12345";
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "temporarily unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ data: { token: "synthetic-token" } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { id: 12345 } }, 200));
+
+    const result = await executeTeamshipPhase2Job({
+      job: { id: "job_1", agentMode: "LIVE_API", dryRun: false },
+      plan,
+      credentials: {
+        email: "user@example.com",
+        password: "synthetic-password",
+        apiBaseUrl: "https://teamship.example/api"
+      },
+      options: {
+        agentId: "agent",
+        allowLiveUpdates: true,
+        liveAllowlistSrNumbers: ["SR812345"],
+        fetchImpl: fetchImpl as unknown as typeof fetch
+      }
+    });
+
+    expect(result.hasFailures).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, "https://teamship.example/api/v1/login", expect.objectContaining({ method: "POST" }));
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, "https://teamship.example/api/v1/login", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("does not retry a rejected Teamship login", async () => {
+    const plan = buildTeamshipPhase2DryRunPlan(sampleReview());
+    plan.orders[0]!.srNumber = "SR812345";
+    const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({ error: "unauthorized" }, 401));
+
+    await expect(
+      executeTeamshipPhase2Job({
+        job: { id: "job_1", agentMode: "LIVE_API", dryRun: false },
+        plan,
+        credentials: {
+          email: "user@example.com",
+          password: "synthetic-password",
+          apiBaseUrl: "https://teamship.example/api"
+        },
+        options: {
+          agentId: "agent",
+          allowLiveUpdates: true,
+          liveAllowlistSrNumbers: ["SR812345"],
+          fetchImpl: fetchImpl as unknown as typeof fetch
+        }
+      })
+    ).rejects.toThrow("Teamship login failed with status 401");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("preserves per-order evidence when a live Teamship update fails", async () => {

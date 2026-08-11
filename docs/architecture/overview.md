@@ -47,7 +47,11 @@ flowchart TB
 
 ## Module map
 
-Confirmed module keys: `ASSISTANT`, `LEAD_GEN`, `UPS_TOOLS`, `LTL_RATE_PORTAL`, `TRANSIT_LOOKUP`, `SHIPMENT_DOCUMENTS`, `INVOICE_VERIFICATION`, `QUICKBOOKS_POSTING`, `CUSTOMER_CASHFLOW`, `WEBSITE_INBOUND`, `WEBSITE_GROWTH`, and `OCEAN_FREIGHT_PRICING` in `prisma/schema.prisma`.
+Confirmed module keys: `ASSISTANT`, `LEAD_GEN`, `UPS_TOOLS`, `LTL_RATE_PORTAL`, `TRANSIT_LOOKUP`, `SHIPMENT_DOCUMENTS`, `INVOICE_VERIFICATION`, `QUICKBOOKS_POSTING`, `CUSTOMER_CASHFLOW`, `WEBSITE_INBOUND`, `WEBSITE_GROWTH`, `OCEAN_FREIGHT_PRICING`, and `CUSTOMER_INTELLIGENCE` in `prisma/schema.prisma`.
+
+## Customer Intelligence
+
+The `CUSTOMER_INTELLIGENCE` module is a leadership-only foundation (see `docs/modules/customer-intelligence/overview.md`). It adds tenant-scoped `OperatingCompany`, `CompanyOperatingRelationship`, `CustomerSourceAccount`, `ContactPoint`, `ContactEvidence`, `CustomerIdentityMatch`, `QuickBooksServiceMappingRule`, `CustomerFxRate`, `CustomerRevenueLine`, `CustomerMonthlyFinancial`, and `CustomerIntelligenceEnablement` (CP-PHASE-02B-8 live-sync enablement) records around the canonical `Company`. It is additive: the legacy `CashflowLegalEntity` / `CashflowCustomer` finance records are preserved and resolved through operating-company relationships in later phases. The `20260805150000_customer_intelligence_corrections` migration bootstraps the module record, the `newl-group` entitlement, and the three Newl operating companies so the module is deployable through `prisma migrate deploy` without the development seed; `20260805160000_customer_intelligence_identity_integrity` adds tenant-scoped company foreign keys and approved-state CHECK constraints on identity matches; `20260808090000_customer_intelligence_enablement` adds the default-off, approval-carrying live-sync enablement gate.
 
 ## Major security boundaries
 

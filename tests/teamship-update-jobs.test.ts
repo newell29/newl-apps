@@ -52,6 +52,7 @@ vi.mock("@/modules/shipment-documents/teamship-csr-agent-report", () => ({
 }));
 
 import { completeTeamshipUpdateJobFromAgent, createTeamshipUpdateJob } from "@/modules/shipment-documents/teamship-update-jobs";
+import type { GarlandTeamshipReviewResponse } from "@/modules/shipment-documents/teamship-review-types";
 
 describe("Teamship update jobs", () => {
   beforeEach(() => {
@@ -96,7 +97,7 @@ describe("Teamship update jobs", () => {
     prismaMock.teamshipUpdateOrder.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await completeTeamshipUpdateJobFromAgent({
-      context: { tenantId: "tenant-1" },
+      context: { tenantId: "tenant-1", tenantSlug: "newl", tenantName: "Newl" },
       jobId: "job-1",
       status: "NEEDS_REVIEW",
       agentResult: {
@@ -111,7 +112,7 @@ describe("Teamship update jobs", () => {
       expect.objectContaining({
         tenantId: "tenant-1",
         shipmentDate: "2026-07-11",
-        srNumbers: ["SR808478"]
+        orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }]
       })
     );
     expect(prismaMock.teamshipUpdateJob.update).toHaveBeenCalledWith(
@@ -201,6 +202,144 @@ describe("Teamship update jobs", () => {
     expect(sendGarlandCsrAgentReportEmailMock).not.toHaveBeenCalled();
     expect(prismaMock.teamshipUpdateOrder.updateMany).not.toHaveBeenCalled();
     expect(result.status).toBe("SUCCESS");
+  });
+
+  it("stores and displays the exact safe worker-stage failure when no order ran", async () => {
+    const job = sampleJob();
+    prismaMock.teamshipUpdateJob.findFirst.mockResolvedValue(job);
+    prismaMock.teamshipUpdateJob.update.mockImplementation(async ({ data }) => ({
+      ...job,
+      ...data,
+      errorMessage: data.errorMessage ?? null,
+      agentResult: data.agentResult ?? null,
+      orders: job.orders.map((order) => ({
+        ...order,
+        status: "FAILED",
+        errorMessage: "Worker stopped before this order returned order-level evidence: Teamship login failed with status 503."
+      }))
+    }));
+    prismaMock.teamshipUpdateOrder.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await completeTeamshipUpdateJobFromAgent({
+      context: { tenantId: "tenant-1", tenantSlug: "newl", tenantName: "Newl" },
+      jobId: "job-1",
+      status: "FAILED",
+      agentResult: {
+        failureStage: "TEAMSHIP_LOGIN",
+        error: "Teamship login failed with status 503. token=do-not-store"
+      }
+    });
+
+    expect(fetchTeamshipShippingOrdersForReviewMock).not.toHaveBeenCalled();
+    expect(prismaMock.teamshipUpdateOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ tenantId: "tenant-1", jobId: "job-1" }),
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorMessage: expect.stringContaining("Teamship login failed with status 503. token=[redacted]")
+        })
+      })
+    );
+    expect(prismaMock.teamshipUpdateJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+          errorMessage: "Teamship login failed with status 503. token=[redacted]",
+          agentResult: expect.objectContaining({ error: "Teamship login failed with status 503. token=[redacted]" })
+        })
+      })
+    );
+    expect(result).toMatchObject({
+      status: "FAILED",
+      failureStage: "TEAMSHIP_LOGIN",
+      errorMessage: "Teamship login failed with status 503. token=[redacted]"
+    });
+  });
+
+  it("preserves successful order evidence and rescans after a later batch failure", async () => {
+    const job = sampleJob();
+    prismaMock.teamshipUpdateJob.findFirst.mockResolvedValue(job);
+    prismaMock.teamshipUpdateJob.update.mockImplementation(async ({ data }) => ({
+      ...job,
+      ...data,
+      errorMessage: data.errorMessage ?? null,
+      lastVerificationAt: data.lastVerificationAt ?? null,
+      agentResult: data.agentResult ?? null,
+      orders: job.orders.map((order) => ({ ...order, status: "SUCCESS" }))
+    }));
+    prismaMock.teamshipUpdateOrder.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await completeTeamshipUpdateJobFromAgent({
+      context: { tenantId: "tenant-1", tenantSlug: "newl", tenantName: "Newl" },
+      jobId: "job-1",
+      status: "FAILED",
+      agentResult: {
+        failureStage: "BOL_CLEANUP",
+        error: "Browser closed after the first order.",
+        orders: [
+          {
+            srNumber: "SR808478",
+            status: "UPDATED",
+            responseStatus: 200,
+            fieldActions: [{ teamshipField: "edi_field_3" }],
+            palletActions: []
+          }
+        ]
+      }
+    });
+
+    expect(fetchTeamshipShippingOrdersForReviewMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.teamshipUpdateOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "SUCCESS",
+          agentResult: expect.objectContaining({
+            status: "UPDATED",
+            responseStatus: 200,
+            fieldActions: [{ teamshipField: "edi_field_3" }]
+          })
+        })
+      })
+    );
+    expect(result.status).toBe("NEEDS_REVIEW");
+  });
+
+  it("distinguishes a successful API update with incomplete BOL cleanup from an untouched failed order", async () => {
+    const job = sampleJob();
+    prismaMock.teamshipUpdateJob.findFirst.mockResolvedValue(job);
+    prismaMock.teamshipUpdateJob.update.mockImplementation(async ({ data }) => ({
+      ...job,
+      ...data,
+      errorMessage: data.errorMessage ?? null,
+      lastVerificationAt: data.lastVerificationAt ?? null,
+      agentResult: data.agentResult ?? null,
+      orders: job.orders.map((order) => ({ ...order, status: "NEEDS_REVIEW" }))
+    }));
+    prismaMock.teamshipUpdateOrder.updateMany.mockResolvedValue({ count: 1 });
+
+    await completeTeamshipUpdateJobFromAgent({
+      context: { tenantId: "tenant-1", tenantSlug: "newl", tenantName: "Newl" },
+      jobId: "job-1",
+      status: "NEEDS_REVIEW",
+      agentResult: {
+        orders: [
+          {
+            srNumber: "SR808478",
+            status: "FAILED",
+            responseStatus: 200,
+            fieldActions: [{ teamshipField: "edi_field_3" }],
+            palletActions: [],
+            error: "Teamship API update succeeded, but BOL weight cleanup failed: browser page closed."
+          }
+        ]
+      }
+    });
+
+    expect(prismaMock.teamshipUpdateOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "NEEDS_REVIEW" })
+      })
+    );
   });
 
   it("defaults new update drafts to live Teamship mode when no mode is provided", async () => {
@@ -356,7 +495,7 @@ function sampleCreatedJob() {
   };
 }
 
-function sampleReviewWithCsrOverride() {
+function sampleReviewWithCsrOverride(): GarlandTeamshipReviewResponse {
   return {
     summary: {
       pdfOrderCount: 1,

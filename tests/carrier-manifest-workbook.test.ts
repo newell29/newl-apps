@@ -46,10 +46,15 @@ describe("Garland carrier manifest workbook", () => {
 
     expect(html.match(/class="manifest-row/g)).toHaveLength(16);
     expect(html).toContain('<col class="sr-col"/>');
+    expect(html).toContain('<col class="time-in-col"/>');
+    expect(html).toContain('<col class="time-out-col"/>');
     expect(html).toContain("font-size:11pt");
     expect(html).toContain("Driver signature");
+    expect(html).toContain("Driver&#039;s time in");
+    expect(html).toContain("Driver&#039;s time out");
     expect(html).toContain("Manifest date");
     expect(html).toContain('<td class="skids">13</td>');
+    expect(html.match(/<td class="time-entry"><\/td>/g)).toHaveLength(34);
   });
 
   it("preserves identifiers as text and escapes labels safely", () => {
@@ -66,5 +71,55 @@ describe("Garland carrier manifest workbook", () => {
     expect(html).toContain('mso-number-format:"\\@"');
     expect(html).toContain(">806507</td>");
     expect(html).toContain(">210245</td>");
+  });
+
+  it("builds the same editable manifest layout for Clarke rows", () => {
+    const html = buildCarrierManifestWorkbookHtml({
+      carrierLabel: "Clarke",
+      documentLabel: "July 30, 2026",
+      shipmentDate: "2026-07-30",
+      rows: [
+        {
+          ...manifestRows[0],
+          carrier: "CLARKE",
+          srNumber: "812345",
+          psNumber: "PS123456",
+          cityProvince: "EDMONTON, AB",
+          skids: 1
+        }
+      ],
+      rowCount: 16,
+      palletCount: 1
+    });
+
+    expect(html).toContain("Clarke Manifest July 30, 2026");
+    expect(html).toContain(">812345</td>");
+    expect(html).toContain(">123456</td>");
+    expect(html).toContain('<td class="skids">1</td>');
+  });
+
+  it("builds the same editable manifest layout for Guilbault rows", () => {
+    const html = buildCarrierManifestWorkbookHtml({
+      carrierLabel: "Guilbault Transport",
+      documentLabel: "August 4, 2026",
+      shipmentDate: "2026-08-04",
+      rows: [
+        {
+          ...manifestRows[0],
+          carrier: "GUILBAULT",
+          srNumber: "812345",
+          psNumber: "PS123456",
+          cityProvince: "MONTREAL, QC",
+          skids: 2
+        }
+      ],
+      rowCount: 16,
+      palletCount: 2
+    });
+
+    expect(html).toContain("Guilbault Transport Manifest August 4, 2026");
+    expect(html).toContain(">812345</td>");
+    expect(html).toContain(">123456</td>");
+    expect(html).toContain('<td class="skids">2</td>');
   });
 });

@@ -304,6 +304,7 @@ Apollo endpoints used:
 POST https://api.apollo.io/api/v1/mixed_companies/search
 POST https://api.apollo.io/api/v1/mixed_people/api_search
 POST https://api.apollo.io/api/v1/people/match
+GET https://api.apollo.io/api/v1/organizations/{APOLLO_ORGANIZATION_ID}
 GET/PATCH/POST https://api.apollo.io/api/v1/contacts
 POST https://api.apollo.io/api/v1/contacts/search
 GET https://api.apollo.io/api/v1/typed_custom_fields
@@ -320,18 +321,28 @@ x-api-key: APOLLO_API_KEY or APOLLO_MASTER_API
 
 Company search:
 
-- Uses domain when available: `q_organization_domains`.
-- Also searches by `best_company_name`, `company_match_name`, and `company_identity_key`.
+- The Newl Apps implementation uses domain when available through Apollo's documented `q_organization_domains_list`.
+- Without a domain, Newl Apps sends at most two deterministic name variants through Apollo's documented `q_organization_name`.
+- Legacy Python artifacts may still refer to `best_company_name`, `company_match_name`, and `company_identity_key`; those are internal identity fields and must not be sent as Apollo request filters.
 - Collects `accounts`, `organizations`, and `companies` response arrays.
 - Dedupes organizations by organization ID, name, and domain.
 - Scores by token name similarity, domain presence, organization ID presence, logistics-provider penalty, and branch/location penalty.
 - Classifies matches as `direct_company`, `match_quality_review`, `logistics_provider`, or `no_match`.
+- Non-direct results enter the Newl Apps Apollo Match Review queue and are protected from repeat bulk searches.
+- A rep-provided Apollo company URL is validated through the exact organization endpoint, audited, and reused as
+  `organization_ids` for scoped people search. Explicit reviewer confirmation is authoritative over weak automated
+  name similarity for facility, legal-entity, regional-brand, and canonical-parent differences; invalid Apollo
+  organizations and logistics providers remain blocked.
 
 People search:
 
 - Primary search by organization/domain plus supply-chain/logistics titles.
 - If no primary contacts, fallback search by executive/operations leadership titles.
-- Enriches each search result with `people/match`.
+- A reviewer-confirmed saved Apollo account that returns zero people through both its canonical organization ID and
+  trusted domain may run one final zero-credit exact-company-name search. Returned employer identity must match the
+  confirmed Apollo account name and any returned domain must match the trusted account domain.
+- Calls `people/match` only for a bounded selected person when the operator separately authorizes paid email
+  enrichment; zero-credit search results remain masked until then.
 - Rejects enriched people whose current organization no longer matches the expected Apollo organization.
 - Requires first and last name or a full name with at least two tokens.
 - Dedupes people by LinkedIn URL, Apollo ID, or name/title.
@@ -611,7 +622,7 @@ This dry-run did not write to Sheets and should be treated as design reference, 
 Search flow:
 
 1. Search Apollo company/org by domain if present.
-2. Search by `best_company_name`, `company_match_name`, and `company_identity_key`.
+2. Otherwise search by at most two company-name variants through `q_organization_name`.
 3. Score/select best organization.
 4. Search people by domain and/or organization ID with primary title keywords.
 5. If no primary results, search fallback executive/ops titles.
@@ -622,6 +633,8 @@ Search flow:
 10. For sequence push, find existing Apollo contact or create/update contact.
 11. Apply NEWL typed custom fields.
 12. Enroll approved contact into the mapped Apollo sequence.
+
+If step 3 does not produce a direct-company match, Newl Apps stops before contact import and places the company in Apollo Match Review. Bulk enrichment skips it until a rep maps an exact Apollo company URL, deliberately retries, or confirms no match. Manual company mapping does not imply approval for step 12.
 
 Email handling:
 
@@ -1631,3 +1644,69 @@ Phase 6: Decommission/cleanup
 - What performance metrics can Apollo expose for the weekly cadence review through API versus manual export?
 - Should sequence push default status be `active` or `paused` in production?
 - What are the target SLAs for daily import completion, Apollo batch size, and sequence push retry behavior?
+
+## 28. Newl Apps Assisted Outreach Addendum (2026-07-26)
+
+The approved next architecture keeps Hunter as the acquisition/research agent and introduces one coordinated outreach
+workflow rather than independent autonomous agents. A strategy role, sequence writer/critic, and later results analyst
+operate behind deterministic Newl Apps state and approval rules.
+
+The first implemented slice creates tenant-scoped, versioned `OutreachPlan` and `OutreachSequenceStep` records. It
+combines bounded Hunter and TradeMining evidence, generates a company/contact strategy and five-touch email/manual
+sequence, records evidence citations and model/prompt versions, and requires deterministic plus model grounding QA.
+Generation never approves, enrolls, sends, calls, or performs LinkedIn activity. Human approval remains separate from
+the existing Apollo push action, and a current unapproved plan blocks that push.
+
+## 29. Qwen/Luna Company-Research Trial Addendum (2026-07-28)
+
+The owner approved a side-by-side trial during the normal company-research run. Brave retrieval occurs once.
+Local Qwen remains the authoritative synthesis consumed by Kimi and the deterministic eligibility path.
+After the bounded Qwen stage completes, the Mac worker submits the same bounded public-evidence packet to a
+tenant-scoped Newl Apps endpoint in batches of at most four. Newl Apps uses its existing server-only
+`OPENAI_API_KEY` to call `gpt-5.6-luna` with low reasoning, strict Structured Outputs, `store: false`, and no tools.
+Evidence packets are also submitted for Qwen omissions. Qwen output is retained only for server-side comparison
+and is removed from the Luna model input so the hosted model cannot copy the local assessment.
+
+Luna output is audit-only. It cannot change the company tier or score, create a signal/decision/contact,
+search or map Apollo, create or approve an outreach plan, enroll a cadence, or communicate with a prospect.
+The existing run ledger records provider/model/prompt version, successful batch fingerprints, usage,
+first-pass schema-valid coverage, Qwen/Luna categorical agreement, trigger-evidence overlap, and bounded
+failure state. A Luna failure never repeats Brave retrieval or prevents the normal Qwen/Kimi completion.
+Promotion of Luna to primary or fallback synthesis is not approved by this trial and requires later review.
+
+## 30. Consolidated Hunter Research and Rivet Safeguards (2026-07-29)
+
+The owner approved one consolidated correction after closing overlapping Rivet PRs. Company research prompt
+`hunter-company-research-v18` retains the bounded customs/import-record pass while changing model authority.
+Same-identity TradeMining importer,
+consignee, and shipper names may be used only to construct search queries; raw party names are not included in
+Qwen, Kimi, or Luna model packets. Hunter reserves one page-fetch slot for customs evidence and deduplicates
+source URLs across passes.
+
+A fresh trigger requires both a publication date and the material event itself inside the trailing 18 months.
+A recent article about an explicitly historical event is current or stale, not fresh, and separate clauses about
+an existing facility and a planned facility cannot be combined. Active government registration plus independent,
+recent, exact-company customs evidence may establish current identity only. An inactive registration, a similar
+holding/parent identity, a customs row alone, or a notify-party mention cannot establish identity, freshness,
+provider incumbency, exclusivity, or displacement.
+
+The Hunter quality audit consolidates related reproducible findings by workflow into one Rivet packet. A queued,
+running, or review-blocked Rivet scope refuses sibling jobs. Rivet prepares and pushes one isolated branch, runs
+the independent exact-commit review, and opens a draft PR only after a zero-finding `PASS`. A blocked review keeps
+the branch and review record, reports through the protected Teams target, and creates no PR. Merge, deployment,
+production writes, retries, permission changes, and customer communication remain prohibited.
+
+## 31. Luna-Primary Company-Research Cutover (2026-07-29)
+
+The owner approved replacing local Qwen as the authoritative company-research synthesizer. Brave retrieval still
+runs once. The Mac worker sends each bounded evidence packet to the tenant-scoped Newl Apps synthesis endpoint,
+where GPT-5.6 Luna uses low reasoning, strict Structured Outputs, `store: false`, and no tools. Luna synthesis is
+the only model output passed to Kimi K2.6 scoring and deterministic classification. Missing, malformed, disabled,
+or unavailable Luna output fails the run closed; Qwen must never become an implicit fallback.
+
+Kimi K2.6 remains an independent cross-provider scorer and Kimi K3 remains the bounded validator for at most five
+fresh-event leaders. Local Qwen may run over the same evidence as a non-blocking shadow for three comparable
+production runs. Qwen rows are withheld from Luna, retained only for agreement/coverage telemetry, and cannot
+change identity recovery, follow-up retrieval, classification, planning, Apollo, or outreach. After the three-run
+benchmark, set `HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=false` unless the recorded evidence demonstrates a material
+quality or resilience benefit. This section supersedes the authority assignment in section 29.

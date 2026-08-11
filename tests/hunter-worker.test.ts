@@ -159,6 +159,74 @@ describe("Hunter daily profile worker", () => {
     expect(result.stdout).toContain("not enabled");
   });
 
+  it("restarts transient ingestion against the same checkpointed command", () => {
+    const python = [
+      "import importlib.util, json, os, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls=[]",
+      "sleeps=[]",
+      "class Result:",
+      " def __init__(self, returncode, stdout='', stderr=''): self.returncode=returncode; self.stdout=stdout; self.stderr=stderr",
+      "def run(command, **_kwargs):",
+      " calls.append(command)",
+      " if len(calls)==1: return Result(1, stderr='Newl Apps request failed with HTTP 500: connection pool exhausted')",
+      " return Result(0, stdout='{\"jobRunId\":\"job-1\"}')",
+      "module.subprocess.run=run",
+      "module.time.sleep=lambda seconds: sleeps.append(seconds)",
+      "os.environ['HUNTER_INGESTION_PROCESS_ATTEMPTS']='2'",
+      "os.environ['HUNTER_INGESTION_RECOVERY_DELAY_SECONDS']='7'",
+      "command=['python3','hunter_ingest.py','--job-run-id','job-1','--canonical-csv','canonical.csv']",
+      "result=module.run_ingestion_with_recovery(command)",
+      "print(json.dumps({'calls':calls,'sleeps':sleeps,'returncode':result.returncode}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      calls: [
+        ["python3", "hunter_ingest.py", "--job-run-id", "job-1", "--canonical-csv", "canonical.csv"],
+        ["python3", "hunter_ingest.py", "--job-run-id", "job-1", "--canonical-csv", "canonical.csv"]
+      ],
+      sleeps: [7],
+      returncode: 0
+    });
+  });
+
+  it("does not retry non-transient ingestion failures", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls=[]",
+      "class Result:",
+      " returncode=1; stdout=''; stderr='Newl Apps request failed with HTTP 400: invalid profile'",
+      "module.subprocess.run=lambda command, **_kwargs: calls.append(command) or Result()",
+      "try:",
+      " module.run_ingestion_with_recovery(['python3','hunter_ingest.py'])",
+      "except RuntimeError as error:",
+      " message=str(error)",
+      "else:",
+      " raise RuntimeError('non-transient failure unexpectedly succeeded')",
+      "print(json.dumps({'callCount':len(calls),'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      callCount: 1,
+      message: "Newl Apps request failed with HTTP 400: invalid profile"
+    });
+  });
+
   it("resolves common U.S. port aliases to canonical TradeMining ports", () => {
     const python = [
       "import importlib.util, json, pathlib, sys",
@@ -278,6 +346,241 @@ describe("Hunter daily profile worker", () => {
     expect(JSON.parse(result.stdout)).toEqual({
       calls: ["created", "failed"],
       error: "TradeMining port IDs are not configured for: Toronto"
+    });
+  });
+
+  it("builds one daily Teams summary with coverage for every attempted profile", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_daily_trade_mining_message([{",
+      "  'profileName': 'GTA Leads',",
+      "  'matchedRecords': 184,",
+      "  'exportedRecords': 180,",
+      "  'recordsProcessed': 180,",
+      "  'qualifyingCompanies': 24,",
+      "  'queryCount': 3,",
+      "  'retrievalComplete': True,",
+      "}], [{'profileName': 'Charlotte Leads'}])",
+      "print(json.dumps({'message': message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Hunter TradeMining daily run finished: 1/2 profiles completed successfully."
+    );
+    expect(JSON.parse(result.stdout).message).toContain(
+      "GTA Leads: 184 matches, 180 exported, 180 processed, 24 qualifying companies, 3 queries, retrieval complete."
+    );
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Charlotte Leads: failed. Review Admin & Quality → Health & Logs."
+    );
+  });
+
+  it("sends an immediate failure alert and one final digest while continuing other due profiles", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "profiles = [",
+      "  {'id': 'failed', 'name': 'Failed profile'},",
+      "  {'id': 'ok', 'name': 'Healthy profile'},",
+      "]",
+      "module.load_profiles = lambda *_args: profiles",
+      "module.load_run_requests = lambda *_args: []",
+      "module.is_profile_due = lambda _profile: True",
+      "def run_profile(_base_url, _token, profile, _trigger):",
+      "  if profile['id'] == 'failed': raise RuntimeError('secret external detail')",
+      "  return {'profileName': profile['name'], 'matchedRecords': 10, 'exportedRecords': 10, 'recordsProcessed': 10, 'qualifyingCompanies': 2, 'queryCount': 1, 'retrievalComplete': True}",
+      "module.run_profile = run_profile",
+      "messages = []",
+      "module.send_teams_message = lambda message: messages.append(message) or True",
+      "attempted = module.process_once('https://example.com', 'token', None, None)",
+      "print(json.dumps({'attempted': attempted, 'messages': messages}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    const output = JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "{}");
+    expect(output.attempted).toBe(true);
+    expect(output.messages).toHaveLength(2);
+    expect(output.messages[0]).toContain('profile "Failed profile" failed');
+    expect(output.messages[0]).not.toContain("secret external detail");
+    expect(output.messages[1]).toContain("1/2 profiles completed successfully");
+    expect(output.messages[1]).toContain("Healthy profile");
+  });
+
+  it("builds a safe company-research Teams completion summary", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_company_research_message({'researchedCount':29,'acceptedCount':8,'blockedCount':4,'missingCompanyCount':1})",
+      "print(json.dumps({'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toBe(
+      "Hunter company research completed: 29 companies reached Luna and Kimi, 8 qualified for planning, 4 blocked, and 1 omitted after bounded model-output repair. Review Sales → Hunter Control Tower and Admin & Quality → Health & Logs."
+    );
+  });
+
+  it("adds Luna primary and Qwen shadow coverage to the company-research Teams summary", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_company_research_message({'researchedCount':30,'acceptedCount':9,'blockedCount':3,'missingCompanyCount':0,'lunaComparison':{'status':'SUCCESS','evaluatedCompanyCount':30,'expectedCompanyCount':30,'firstPassSchemaValidCompanyCount':30,'qwenSynthesisCompanyCount':29,'qwenMissingCompanyCount':1,'categoricalAgreementPercent':86.7}})",
+      "print(json.dumps({'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Luna primary: SUCCESS, 30/30 evaluated, 30 schema-valid on first pass, Qwen shadow returned 29 rows with 1 omissions; 86.7% categorical agreement with Qwen."
+    );
+  });
+
+  it("reports new, refreshed, and suppressed company-research cohorts in Teams", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "message = module.build_company_research_message({'researchedCount':30,'acceptedCount':9,'blockedCount':3,'missingCompanyCount':0,'selection':{'cooldownDays':90,'selectedCompanyCount':30,'newCompanyCount':27,'scheduledRefreshSelectedCount':1,'materialRefreshSelectedCount':2,'recentResearchSuppressedCount':44,'activeOutreachSuppressedCount':6}})",
+      "print(json.dumps({'message':message}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).message).toContain(
+      "Cohort selection: 27/30 new companies, 1 scheduled refreshes, 2 new-trigger refreshes; 44 recent repeats and 6 active-outreach companies suppressed under the 90-day cooldown."
+    );
+  });
+
+  it("sends a sanitized company-research failure alert", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "messages=[]",
+      "module.send_teams_message=lambda message: messages.append(message) or True",
+      "module.required_env=lambda name: 'redacted'",
+      "module.report_failure=lambda *_args, **_kwargs: None",
+      "module.run_company_research=lambda **_kwargs: (_ for _ in ()).throw(module.HunterCompanyResearchRunError(RuntimeError('invalid schema secret provider response'),'run-1','RETRIEVAL_COMPLETE'))",
+      "try:",
+      " module.run_company_research_with_notification()",
+      "except module.HunterCompanyResearchRunError:",
+      " pass",
+      "print(json.dumps({'messages':messages}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+    const messages = (JSON.parse(result.stdout) as { messages: string[] }).messages;
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("bounded checkpoint recovery");
+    expect(messages[0]).not.toContain("secret provider response");
+  });
+
+  it("retries transient company research against the exact failed run", () => {
+    const python = [
+      "import importlib.util, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "calls=[]",
+      "failures=[]",
+      "messages=[]",
+      "module.required_env=lambda name: 'redacted'",
+      "module.time.sleep=lambda seconds: None",
+      "module.send_teams_message=lambda message: messages.append(message) or True",
+      "module.report_failure=lambda *_args, **kwargs: failures.append(kwargs)",
+      "def research(**kwargs):",
+      " calls.append(kwargs)",
+      " if len(calls)==1: raise module.HunterCompanyResearchRunError(RuntimeError('database connection pool unavailable'),'run-1','RETRIEVAL_COMPLETE')",
+      " return {'runId':'run-2','researchedCount':30,'acceptedCount':8,'blockedCount':3,'missingCompanyCount':0}",
+      "module.run_company_research=research",
+      "result=module.run_company_research_with_notification()",
+      "print(json.dumps({'calls':calls,'failures':failures,'messages':messages,'result':result}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+    const payload = JSON.parse(result.stdout) as {
+      calls: Array<Record<string, unknown>>;
+      failures: Array<Record<string, unknown>>;
+      messages: string[];
+      result: Record<string, unknown>;
+    };
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(payload.calls).toHaveLength(2);
+    expect(payload.calls[1].recovery_of_run_id).toBe("run-1");
+    expect(payload.failures[0]).toMatchObject({
+      retryable: true,
+      retry_scheduled: true,
+      checkpoint_stage: "RETRIEVAL_COMPLETE"
+    });
+    expect(payload.result.automaticRecovery).toEqual({ recovered: true, attempt: 2 });
+    expect(payload.messages.some((message) => message.includes("attempt 2/3"))).toBe(true);
+  });
+
+  it("can explicitly recover the exact cohort from a failed research run", () => {
+    const python = [
+      "import contextlib, importlib.util, io, json, pathlib, sys",
+      "worker_path = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(worker_path.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', worker_path)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "captured=[]",
+      "module.required_env=lambda name: 'redacted'",
+      "module.run_company_research_with_notification=lambda **kwargs: captured.append(kwargs) or {'state':'recovered'}",
+      "sys.argv=[str(worker_path),'--company-research-recovery-run-id','run-50']",
+      "with contextlib.redirect_stdout(io.StringIO()): status=module.main()",
+      "print(json.dumps({'status':status,'captured':captured}))"
+    ].join("\n");
+
+    const result = runWorkerProbe(python);
+    expect(result.status, result.stderr).toBe(0);
+    const lines = result.stdout.trim().split("\n");
+    const payload = JSON.parse(lines.at(-1) ?? "{}") as {
+      status: number;
+      captured: Array<Record<string, unknown>>;
+    };
+    expect(payload.status).toBe(0);
+    expect(payload.captured).toHaveLength(1);
+    expect(payload.captured[0]).toMatchObject({
+      force: true,
+      recovery_of_run_id: "run-50"
     });
   });
 });

@@ -99,11 +99,40 @@ const GARLAND_ISSUES: Array<{
       /\bdid not receive\b.*\bemail\b/.test(text)
   },
   {
+    key: "GARLAND_SHIP_TO_NAME",
+    title: "Garland ship-to name comparison",
+    matches: (text) =>
+      /\b(?:ship[\s-]*to name|first name)\b/.test(text)
+  },
+  {
+    key: "GARLAND_SHIP_TO_LOCATION",
+    title: "Garland ship-to address and location comparison",
+    matches: (text) =>
+      /\bship[\s-]*to\b/.test(text) &&
+      /\b(?:address|city|state|province|postal|zip)\b/.test(text)
+  },
+  {
+    key: "GARLAND_PALLET_DIMENSIONS",
+    title: "Garland pallet dimensions and weights",
+    matches: (text) =>
+      /\b(?:pallet|dims?|dimensions?|weight|lbs?)\b/.test(text) &&
+      /\bsku\b/.test(text)
+  },
+  {
     key: "GARLAND_ORDER_STATUS_RESPONSE",
     title: "Garland order-status responses",
     matches: (text) =>
       /\border status\b/.test(text) ||
       /\bstatus of (?:ps|sr)\b/.test(text)
+  },
+  {
+    key: "GARLAND_COMPARISON_FALSE_MISMATCH",
+    title: "Garland comparison false mismatch",
+    matches: (text) =>
+      /\bcurrently displays?\b/.test(text) &&
+      /\bit should display\b/.test(text) &&
+      /\b(?:observed|reported)\b.*\b(?:missing|fail|pending)\b/.test(text) &&
+      /\bexpected\b.*\bpass\b/.test(text)
   }
 ];
 
@@ -158,6 +187,8 @@ export function describeDevelopmentIssue(
 ): IssueDescriptor {
   const normalized = normalizeIssueText([
     item.reporterStatement,
+    `Observed ${item.observedOutcome ?? ""}`,
+    `Expected ${item.expectedOutcome ?? ""}`,
     item.expectedOutcome,
     item.observedOutcome
   ].filter(Boolean).join(" "));
@@ -183,6 +214,16 @@ export function describeDevelopmentIssue(
   };
 }
 
+export function isNonActionableDevelopmentFeedback(item: DevelopmentFeedbackCandidate) {
+  const observed = normalizeOutcome(item.observedOutcome);
+  const expected = normalizeOutcome(item.expectedOutcome);
+  if (!observed || !expected || observed !== expected) return false;
+
+  const displayValues = extractComparedDisplayValues(item.reporterStatement);
+  if (!displayValues) return false;
+  return normalizeComparedValue(displayValues.current) === normalizeComparedValue(displayValues.expected);
+}
+
 export function getDevelopmentContextPaths(workflowKey: string) {
   const common = [
     "AGENTS.md",
@@ -193,6 +234,41 @@ export function getDevelopmentContextPaths(workflowKey: string) {
     "docs/ai/openclaw-integration.md",
     "reference/CODEX_PR_WORKFLOW.md"
   ];
+  if (workflowKey === "WEBSITE_GROWTH_BACKLINK_OUTREACH") {
+    return [
+      ...common,
+      "docs/modules/website-growth/overview.md",
+      "docs/modules/website-growth/workflow.md",
+      "docs/modules/website-growth/failure-modes.md",
+      "docs/modules/website-growth/integrations.md",
+      "docs/modules/website-growth/testing.md",
+      "src/modules/website-growth/backlink-executor.ts",
+      "src/modules/website-growth/backlink-outreach.ts",
+      "ops/openclaw/install-website-growth-backlink-executor.sh",
+      "ops/openclaw/prompts/website-growth-backlink-executor.md",
+      "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md"
+    ];
+  }
+  if (
+    workflowKey === "HUNTER_COMPANY_RESEARCH_QUALITY" ||
+    workflowKey === "HUNTER_TRADEMINING_PROFILE_QUALITY"
+  ) {
+    return [
+      ...common,
+      "docs/modules/lead-generation/overview.md",
+      "docs/modules/lead-generation/workflow.md",
+      "docs/modules/lead-generation/business-rules.md",
+      "docs/modules/lead-generation/permissions.md",
+      "docs/modules/lead-generation/failure-modes.md",
+      "docs/modules/lead-generation/testing.md",
+      "reference/PRODUCT_OPERATING_BRIEF.md",
+      "reference/OPENCLAW_LEAD_GEN_SPEC.md",
+      "src/modules/lead-gen/hunter-company-research.ts",
+      "src/modules/trademining/ingestion.ts",
+      "ops/openclaw/hunter/hunter_company_research.py",
+      "ops/openclaw/hunter/hunter_worker.py"
+    ];
+  }
   if (workflowKey !== GARLAND_WORKFLOW_KEY) return common;
   return [
     ...common,
@@ -243,6 +319,28 @@ function normalizeIssueText(value: string) {
     .toLowerCase()
     .replace(/\b(?:ps|sr)\d+\b/g, " order-reference ")
     .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeOutcome(value: string | null | undefined) {
+  return value?.trim().toUpperCase() || null;
+}
+
+function extractComparedDisplayValues(value: string) {
+  const match = value.match(
+    /\b(?:it\s+)?(?:is\s+)?currently displays?\s*:\s*([\s\S]+?)\s+\bit should display\s*:\s*([\s\S]+)$/i
+  );
+  if (!match) return null;
+  return {
+    current: match[1],
+    expected: match[2]
+  };
+}
+
+function normalizeComparedValue(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
 

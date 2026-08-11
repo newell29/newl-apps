@@ -7,18 +7,23 @@ const teamshipPrintJob = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   updateMany: vi.fn(),
-  findUniqueOrThrow: vi.fn()
+  findUniqueOrThrow: vi.fn(),
+  findMany: vi.fn()
 }));
 const auditLog = vi.hoisted(() => ({ create: vi.fn() }));
 const tenant = vi.hoisted(() => ({ findUnique: vi.fn() }));
+const teamshipPrintBatch = vi.hoisted(() => ({ updateMany: vi.fn(), findFirst: vi.fn(), update: vi.fn() }));
+const teamshipReviewOrder = vi.hoisted(() => ({ updateMany: vi.fn() }));
 const resolveCredentials = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({
   prisma: {
     teamshipPrintJob,
+    teamshipPrintBatch,
+    teamshipReviewOrder,
     auditLog,
     tenant,
-    $transaction: (callback: (tx: unknown) => unknown) => callback({ teamshipPrintJob, auditLog })
+    $transaction: (callback: (tx: unknown) => unknown) => callback({ teamshipPrintJob, teamshipPrintBatch, teamshipReviewOrder, auditLog })
   }
 }));
 vi.mock("@/server/auth/authorization", () => ({
@@ -32,7 +37,9 @@ vi.mock("@/server/integrations/teamship-settings", () => ({
 import {
   approveTeamshipPrintPlan,
   calculateTeamshipPalletCount,
+  completeTeamshipPrintJob,
   createTeamshipPrintPlan,
+  failTeamshipPrintJob,
   getTeamshipPrinterPlan
 } from "@/modules/teamship/print-jobs";
 
@@ -50,6 +57,7 @@ describe("Teamship print jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     teamshipPrintJob.findUnique.mockResolvedValue(null);
+    teamshipPrintJob.findMany.mockResolvedValue([]);
     auditLog.create.mockResolvedValue({ id: "audit-1" });
   });
 
@@ -111,6 +119,65 @@ describe("Teamship print jobs", () => {
     expect(teamshipPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ approvedPalletCount: 1 })
     }));
+  });
+
+  it("resolves a saved review PS/SR and internal page ID to the display shipping-order number", async () => {
+    teamshipPrintJob.create.mockResolvedValue(storedJob());
+    const preflightPalletCount = vi.fn().mockResolvedValue(2);
+    const findOrders = vi.fn().mockResolvedValue([{
+      id: 30666,
+      record_no: "PS123456",
+      shipment_id: "SR812345",
+      teamship_internal_id: 31064,
+      url: "https://members.fulfillit.io/ship-inventories/31064",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem"
+    }]);
+
+    const result = await createTeamshipPrintPlan(context, {
+      reviewReference: {
+        psNumber: "PS123456",
+        srNumber: "SR812345",
+        teamshipOrderId: "31064",
+        teamshipUrl: "https://members.fulfillit.io/ship-inventories/31064"
+      },
+      requestKey: "f".repeat(64)
+    }, { findOrders, preflightPalletCount });
+
+    expect(findOrders).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      orderIdentifier: "PS123456"
+    });
+    expect(result.shippingOrderNumber).toBe("30666");
+    expect(teamshipPrintJob.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        shippingOrderNumber: "30666",
+        teamshipOrderId: "31064"
+      })
+    }));
+  });
+
+  it("fails closed when a saved review reference resolves to a different internal page", async () => {
+    const findOrders = vi.fn().mockResolvedValue([{
+      id: 30666,
+      record_no: "PS123456",
+      shipment_id: "SR812345",
+      teamship_internal_id: 31065,
+      url: "https://members.fulfillit.io/ship-inventories/31065",
+      customer: { company: "Garland Canada Distribution" },
+      warehouse_name: "Annagem"
+    }]);
+
+    await expect(createTeamshipPrintPlan(context, {
+      reviewReference: {
+        psNumber: "PS123456",
+        srNumber: "SR812345",
+        teamshipOrderId: "31064",
+        teamshipUrl: "https://members.fulfillit.io/ship-inventories/31064"
+      },
+      requestKey: "0".repeat(64)
+    }, { findOrders })).rejects.toMatchObject({ status: 404 });
+    expect(teamshipPrintJob.create).not.toHaveBeenCalled();
   });
 
   it("does not create an approval request when the local page preflight fails", async () => {
@@ -179,6 +246,90 @@ describe("Teamship print jobs", () => {
     await expect(approveTeamshipPrintPlan(context, "cmprintjob12345", true)).rejects.toMatchObject({ status: 403 });
     await expect(approveTeamshipPrintPlan(context, "cmprintjob12345", false)).rejects.toThrow(/explicit/i);
     expect(teamshipPrintJob.update).not.toHaveBeenCalled();
+  });
+
+  it("promotes only the next batch order after the current order completes", async () => {
+    tenant.findUnique.mockResolvedValue({ id: "tenant-1" });
+    teamshipPrintJob.findFirst
+      .mockResolvedValueOnce(storedJob({
+        id: "cmjobfirst1234",
+        status: "CLAIMED",
+        workerId: "worker-1",
+        batchId: "cmbatch123456",
+        batchPosition: 0,
+        reviewOrderId: "cmreview123456"
+      }))
+      .mockResolvedValueOnce(storedJob({
+        id: "cmjobsecond123",
+        status: "WAITING_BATCH",
+        batchId: "cmbatch123456",
+        batchPosition: 1
+      }));
+    teamshipPrintJob.updateMany.mockResolvedValue({ count: 1 });
+    teamshipPrintJob.update.mockResolvedValue({});
+    teamshipPrintBatch.findFirst.mockResolvedValue({
+      id: "cmbatch123456",
+      reviewRunId: "cmrun123456",
+      approvedByUserId: "user-1"
+    });
+    teamshipReviewOrder.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await completeTeamshipPrintJob(
+      "cmjobfirst1234",
+      "worker-1",
+      "newl-group",
+      {
+        status: "COMPLETED",
+        observedPalletCount: 2,
+        completedAt: "2026-07-29T14:05:00.000Z",
+        documents: [
+          { kind: "PICKING_LIST", status: "COMPLETED", printer: "_192_168_1_28", copies: 1 },
+          { kind: "BOL", status: "SUBMITTED", printer: "KONICA MINOLTA bizhub C3350i PCL (192.168.1.28) UPD", copies: 1 },
+          { kind: "OUTBOUND_LABELS", status: "SUBMITTED", printer: "BIXOLON SRP-770III", copies: 2 }
+        ]
+      }
+    );
+
+    expect(result).toBe(true);
+    expect(teamshipReviewOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "cmreview123456", tenantId: "tenant-1" }),
+      data: expect.objectContaining({ workflowStatus: "BOL_PRINTED" })
+    }));
+    expect(teamshipPrintJob.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "cmjobsecond123" },
+      data: expect.objectContaining({ status: "APPROVED" })
+    }));
+  });
+
+  it("blocks all remaining batch orders after an uncertain failure", async () => {
+    tenant.findUnique.mockResolvedValue({ id: "tenant-1" });
+    teamshipPrintJob.findFirst.mockResolvedValue(storedJob({
+      id: "cmjobfirst1234",
+      status: "CLAIMED",
+      workerId: "worker-1",
+      batchId: "cmbatch123456"
+    }));
+    teamshipPrintJob.updateMany.mockResolvedValue({ count: 1 });
+    teamshipPrintBatch.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await failTeamshipPrintJob(
+      "cmjobfirst1234",
+      "worker-1",
+      "newl-group",
+      {
+        errorCode: "PRINTER_UNCERTAIN",
+        errorMessage: "The printer result was uncertain."
+      }
+    );
+
+    expect(result).toBe(true);
+    expect(teamshipPrintJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ batchId: "cmbatch123456", status: "WAITING_BATCH" }),
+      data: expect.objectContaining({ status: "BLOCKED", errorCode: "BATCH_STOPPED" })
+    }));
+    expect(teamshipPrintBatch.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "PARTIAL_FAILED" })
+    }));
   });
 });
 

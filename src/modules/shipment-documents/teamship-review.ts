@@ -81,10 +81,12 @@ export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShi
 
   for (const page of pages) {
     const parsedPage = parseGarlandShippingOrderPage(page);
+    const leadingContinuationSerialNumbers = extractLeadingItemContinuationSerialNumbers(page.text);
 
     if (!parsedPage) {
       const previous = orders.at(-1);
       if (previous) {
+        appendContinuationSerialNumbers(previous, leadingContinuationSerialNumbers);
         previous.pageNumbers.push(page.pageNumber);
         previous.rawText = [previous.rawText, page.text].filter(Boolean).join("\n\n");
       }
@@ -94,6 +96,7 @@ export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShi
     const existingOrder = findExistingOrder(orders, parsedPage);
 
     if (existingOrder) {
+      appendContinuationSerialNumbers(existingOrder, leadingContinuationSerialNumbers);
       existingOrder.pageNumbers.push(page.pageNumber);
       existingOrder.rawText = [existingOrder.rawText, page.text].filter(Boolean).join("\n\n");
       existingOrder.instructions = mergeText(existingOrder.instructions, parsedPage.instructions);
@@ -107,6 +110,40 @@ export function parseGarlandShippingOrderPages(pages: TextPage[]): GarlandPdfShi
   }
 
   return orders;
+}
+
+function extractLeadingItemContinuationSerialNumbers(text: string) {
+  const lines = normalizePageLines(text);
+  const itemHeaderIndex = lines.findIndex((line) => /^Ln\s+Item Number\b/i.test(line));
+  if (itemHeaderIndex < 0) {
+    return [];
+  }
+
+  const firstItemIndex = lines.findIndex(
+    (line, index) => index > itemHeaderIndex && Boolean(matchGarlandItemStart(line))
+  );
+  const continuationEndIndex = firstItemIndex > itemHeaderIndex ? firstItemIndex : lines.length;
+  const serialCandidateLines = lines
+    .slice(itemHeaderIndex + 1, continuationEndIndex)
+    .filter((line) => !isItemTableHeaderFragment(line))
+    .filter(isGarlandSerialCandidateLine);
+
+  return extractSerialNumbers(serialCandidateLines);
+}
+
+function appendContinuationSerialNumbers(
+  order: GarlandPdfShippingOrder,
+  serialNumbers: string[]
+) {
+  const previousItem = order.items.at(-1);
+  if (!previousItem || serialNumbers.length === 0) {
+    return;
+  }
+
+  previousItem.serialNumbers = uniqueStrings([
+    ...previousItem.serialNumbers,
+    ...serialNumbers
+  ]);
 }
 
 function parseGarlandShippingOrderPage(page: TextPage): GarlandPdfShippingOrder | null {
@@ -214,7 +251,9 @@ function extractAddressLines(lines: string[]) {
 
 function parseCityStatePostal(lines: string[]) {
   for (const line of lines) {
-    const match = line.match(/^(.+?),\s*([A-Z]{2})\s+([A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)$/i);
+    const match = line.match(
+      /^(.+?)[,\s]+([A-Z]{2})[,\s]+([A-Z]\d[A-Z]\s?\d[A-Z]\d|\d{5}(?:-\d{4})?)$/i
+    );
     if (match) {
       return {
         city: match[1]?.trim() ?? null,
@@ -284,12 +323,25 @@ function extractInstructions(lines: string[], itemHeaderIndex: number) {
   }
 
   const instructionLines = removeTrailingItemHeaderLines(lines.slice(startIndex + 1, endIndex));
-  const wrappedContinuationLines = extractWrappedInstructionContinuation(lines, endIndex);
+  const wrappedContinuationLines = extractWrappedInstructionContinuation(
+    lines,
+    endIndex,
+    instructionLines
+  );
   return uniqueStrings([...instructionLines, ...wrappedContinuationLines]).join("\n").trim();
 }
 
-function extractWrappedInstructionContinuation(lines: string[], headerStartIndex: number) {
-  if (headerStartIndex < 0 || !isItemTableHeaderCluster(lines, headerStartIndex)) {
+function extractWrappedInstructionContinuation(
+  lines: string[],
+  headerStartIndex: number,
+  instructionLines: string[]
+) {
+  const precedingInstruction = instructionLines.at(-1)?.trim() ?? "";
+  if (
+    headerStartIndex < 0 ||
+    !isItemTableHeaderCluster(lines, headerStartIndex) ||
+    !/:\s*$/.test(precedingInstruction)
+  ) {
     return [];
   }
 
@@ -300,10 +352,28 @@ function extractWrappedInstructionContinuation(lines: string[], headerStartIndex
     return [];
   }
 
-  return lines
+  const candidates = lines
     .slice(headerStartIndex, firstItemIndex)
     .filter((line) => !isItemTableHeaderFragment(line))
     .filter((line) => !/^\d{1,2}\/\d{1,2}\/\d{4}\b/.test(line));
+
+  if (instructionLines.some(isDangerousGoodsInstructionLine)) {
+    const dangerousGoodsContinuations = candidates.filter(isDangerousGoodsContinuationLine);
+    if (dangerousGoodsContinuations.length > 0) {
+      return dangerousGoodsContinuations.slice(0, 2);
+    }
+  }
+
+  return candidates.slice(0, 1);
+}
+
+function isDangerousGoodsInstructionLine(line: string) {
+  return /\bDANGEROUS GOODS\b|\b24 HOUR DG NUMBER\b/i.test(line);
+}
+
+function isDangerousGoodsContinuationLine(line: string) {
+  const normalized = line.trim();
+  return /^CHEMTREC\b.*\d/i.test(normalized) || /^QUANTITY\s*:\s*\d+(?:\.\d+)?\b/i.test(normalized);
 }
 
 function findInstructionEndIndex(lines: string[], startIndex: number, itemHeaderIndex: number) {
@@ -445,11 +515,18 @@ function isGarlandSerialCandidateLine(line: string) {
     return true;
   }
 
-  if (/^\d{10,16}$/.test(trimmed)) {
+  if (/^\d{8,16}$/.test(trimmed)) {
     return true;
   }
 
-  return extractSerialNumbers([trimmed]).length > 0 && /\b\d+(?:\.\d+)?\s*\(/.test(trimmed);
+  const serialNumbers = extractSerialNumbers([trimmed]);
+
+  if (serialNumbers.length > 0 && /\b\d+(?:\.\d+)?\s*\(/.test(trimmed)) {
+    return true;
+  }
+
+  const tokens = trimmed.split(/[\s,;/]+/).filter(Boolean);
+  return serialNumbers.length > 1 && tokens.every(isGarlandLotSerialToken);
 }
 
 function extractSerialNumbers(lines: string[]) {

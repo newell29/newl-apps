@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   paginateCandidates,
+  CANDIDATE_REVIEW_QUEUE_LIMIT,
   parseCandidatePage,
   parseCandidatePageSize
 } from "@/modules/lead-gen/candidate-pagination";
 
 describe("Found Companies pagination", () => {
+  it("caps the human review queue at 100 companies", () => {
+    expect(CANDIDATE_REVIEW_QUEUE_LIMIT).toBe(100);
+  });
+
   it("uses 25 rows by default and accepts only the supported sizes", () => {
     expect(parseCandidatePageSize(undefined)).toBe(25);
     expect(parseCandidatePageSize("50")).toBe(50);
@@ -14,9 +19,9 @@ describe("Found Companies pagination", () => {
     expect(parseCandidatePageSize("500")).toBe(25);
   });
 
-  it("returns only the selected page and reports the full result count", () => {
+  it("returns only the selected page and reports the bounded queue count", () => {
     const result = paginateCandidates(
-      Array.from({ length: 184 }, (_, index) => index + 1),
+      Array.from({ length: 100 }, (_, index) => index + 1),
       3,
       25
     );
@@ -24,8 +29,8 @@ describe("Found Companies pagination", () => {
     expect(result).toMatchObject({
       page: 3,
       pageSize: 25,
-      totalItems: 184,
-      totalPages: 8,
+      totalItems: 100,
+      totalPages: 4,
       firstItem: 51,
       lastItem: 75
     });

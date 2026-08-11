@@ -12,8 +12,20 @@ type TeamshipFetchOptions = {
   tenantId?: string | null;
   shipmentDate?: string | null;
   srNumbers?: string[];
+  orderReferences?: TeamshipOrderReference[];
   credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
+};
+
+type TeamshipOrderReference = {
+  srNumber?: string | null;
+  psNumber?: string | null;
+};
+
+type NormalizedTeamshipOrderReference = {
+  key: string;
+  srNumber: string;
+  psNumber: string;
 };
 
 type TeamshipShippingOrderSearchOptions = {
@@ -122,6 +134,7 @@ export async function fetchTeamshipShippingOrdersForReview({
   tenantId,
   shipmentDate,
   srNumbers = [],
+  orderReferences = [],
   credentials = null,
   fetchImpl = fetch
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
@@ -129,8 +142,9 @@ export async function fetchTeamshipShippingOrdersForReview({
   const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
   const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
   const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
-  const targetSrNumbers = new Set(srNumbers.map(normalizeIdentifier).filter(Boolean));
-  const shouldEnrichFromUiPage = targetSrNumbers.size > 0;
+  const targetOrderReferences = normalizeTeamshipOrderReferences(orderReferences, srNumbers);
+  const shouldEnrichFromUiPage = targetOrderReferences.length > 0;
+  const matchedTargetReferenceKeys = new Set<string>();
   let webCookieHeader: string | null | undefined;
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
@@ -141,12 +155,18 @@ export async function fetchTeamshipShippingOrdersForReview({
     const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
 
     for (const row of rows) {
-      const shipmentId = normalizeTeamshipShipmentId(row);
-      const shouldFetchBySr = targetSrNumbers.size > 0 && targetSrNumbers.has(shipmentId);
+      const matchingTargetReferences = targetOrderReferences.filter(
+        (reference) =>
+          !matchedTargetReferenceKeys.has(reference.key) &&
+          teamshipOrderMatchesReference(row, reference)
+      );
+      const shouldFetchByReference = matchingTargetReferences.length > 0;
       const shouldFetchByDailyGarland =
-        targetSrNumbers.size === 0 && isGarlandOrder(row) && (!shipmentDate || hasMatchingDate(row, shipmentDate));
+        targetOrderReferences.length === 0 &&
+        isGarlandOrder(row) &&
+        (!shipmentDate || hasMatchingDate(row, shipmentDate));
 
-      if (!shouldFetchBySr && !shouldFetchByDailyGarland) {
+      if (!shouldFetchByReference && !shouldFetchByDailyGarland) {
         continue;
       }
 
@@ -163,7 +183,23 @@ export async function fetchTeamshipShippingOrdersForReview({
         url: buildTeamshipOrderUrl(webBaseUrl, String(orderId))
       };
 
-      if (shouldEnrichFromUiPage && !hasTeamshipSerialEvidence(mergedDetail)) {
+      const confirmedTargetReferenceCandidates = shouldFetchByReference
+        ? matchingTargetReferences.filter((reference) =>
+            teamshipOrderMatchesReference(mergedDetail, reference)
+          )
+        : [];
+      const confirmedTargetReferences =
+        confirmedTargetReferenceCandidates.length === 1
+          ? confirmedTargetReferenceCandidates
+          : [];
+      if (shouldFetchByReference && confirmedTargetReferences.length === 0) {
+        continue;
+      }
+
+      if (
+        shouldEnrichFromUiPage &&
+        (!hasTeamshipSerialEvidence(mergedDetail) || hasIncompleteTeamshipShipToEvidence(mergedDetail))
+      ) {
         if (webCookieHeader === undefined) {
           webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
         }
@@ -183,10 +219,18 @@ export async function fetchTeamshipShippingOrdersForReview({
       }
 
       const detailShipmentId = normalizeTeamshipShipmentId(mergedDetail);
-      details.set(detailShipmentId || String(orderId), mergedDetail);
+      const detailKey =
+        confirmedTargetReferences[0]?.key || detailShipmentId || String(orderId);
+      details.set(detailKey, mergedDetail);
+      for (const reference of confirmedTargetReferences) {
+        matchedTargetReferenceKeys.add(reference.key);
+      }
     }
 
-    if (targetSrNumbers.size > 0 && Array.from(targetSrNumbers).every((srNumber) => details.has(srNumber))) {
+    if (
+      targetOrderReferences.length > 0 &&
+      matchedTargetReferenceKeys.size === targetOrderReferences.length
+    ) {
       break;
     }
 
@@ -413,6 +457,14 @@ function hasTeamshipSerialEvidence(value: unknown) {
   return visit(value);
 }
 
+function hasIncompleteTeamshipShipToEvidence(order: TeamshipShippingOrderDetail) {
+  const city = firstString([order.ship_to_city, order.ship_city]);
+  const state = firstString([order.ship_to_state, order.ship_state]);
+  const postalCode = firstString([order.ship_to_zip, order.ship_zip]);
+
+  return !(city && state && postalCode);
+}
+
 function isSerialEvidenceKey(key: string) {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
 
@@ -431,10 +483,19 @@ export function parseTeamshipShippingOrderUiPage(html: string): Partial<Teamship
     .map(readTeamshipUiInventoryItem)
     .filter((item): item is NonNullable<ReturnType<typeof readTeamshipUiInventoryItem>> => Boolean(item));
   const pallets = readTeamshipUiPallets(html);
+  const shipCity = readTeamshipUiFormValue(html, "ship_city");
+  const shipState = readTeamshipUiFormValue(html, "ship_state");
+  const shipZip = readTeamshipUiFormValue(html, "ship_zip");
 
   return {
     items,
-    pallet_dims: pallets
+    pallet_dims: pallets,
+    ship_to_city: shipCity,
+    ship_city: shipCity,
+    ship_to_state: shipState,
+    ship_state: shipState,
+    ship_to_zip: shipZip,
+    ship_zip: shipZip
   };
 }
 
@@ -628,6 +689,12 @@ function mergeTeamshipUiDetail(
 ): TeamshipShippingOrderDetail {
   return {
     ...detail,
+    ship_to_city: uiDetail.ship_to_city ?? detail.ship_to_city,
+    ship_city: uiDetail.ship_city ?? detail.ship_city,
+    ship_to_state: uiDetail.ship_to_state ?? detail.ship_to_state,
+    ship_state: uiDetail.ship_state ?? detail.ship_state,
+    ship_to_zip: uiDetail.ship_to_zip ?? detail.ship_to_zip,
+    ship_zip: uiDetail.ship_zip ?? detail.ship_zip,
     items: mergeArrayValues(detail.items, uiDetail.items),
     pallet_dims: mergeArrayValues(detail.pallet_dims, uiDetail.pallet_dims),
     url: uiDetail.url ?? detail.url
@@ -723,6 +790,63 @@ function normalizeIdentifier(value: unknown) {
 
 function normalizeTeamshipShipmentId(order: TeamshipShippingOrderSummary) {
   return normalizeIdentifier(order.shipment_id ?? order.amazon_shipment_id1 ?? order.edi_field_1);
+}
+
+function normalizeTeamshipPsNumber(order: TeamshipShippingOrderSummary) {
+  const candidates = [order.record_no, order.edi_field_2, order.order_number, order.display_id];
+
+  for (const candidate of candidates) {
+    const match = String(candidate ?? "").match(/\bPS\d{6}\b/i);
+    if (match?.[0]) {
+      return normalizeIdentifier(match[0]);
+    }
+  }
+
+  return "";
+}
+
+function normalizeTeamshipOrderReferences(
+  orderReferences: TeamshipOrderReference[],
+  legacySrNumbers: string[]
+) {
+  const references =
+    orderReferences.length > 0
+      ? orderReferences
+      : legacySrNumbers.map((srNumber) => ({ srNumber, psNumber: null }));
+  const normalized = new Map<string, NormalizedTeamshipOrderReference>();
+
+  for (const reference of references) {
+    const srNumber = normalizeIdentifier(reference.srNumber);
+    const psNumber = normalizeExactTeamshipPsNumber(reference.psNumber);
+    if (!srNumber && !psNumber) {
+      continue;
+    }
+
+    const key = psNumber ? `PS:${psNumber}` : `SR:${srNumber}`;
+    if (!normalized.has(key)) {
+      normalized.set(key, { key, srNumber, psNumber });
+    }
+  }
+
+  return Array.from(normalized.values());
+}
+
+function normalizeExactTeamshipPsNumber(value: unknown) {
+  const match = String(value ?? "").trim().match(/^PS\d{6}$/i);
+  return match?.[0] ? normalizeIdentifier(match[0]) : "";
+}
+
+function teamshipOrderMatchesReference(
+  order: TeamshipShippingOrderSummary,
+  reference: NormalizedTeamshipOrderReference
+) {
+  const orderPsNumber = normalizeTeamshipPsNumber(order);
+  if (reference.psNumber && orderPsNumber) {
+    return reference.psNumber === orderPsNumber;
+  }
+
+  const orderSrNumber = normalizeTeamshipShipmentId(order);
+  return Boolean(reference.srNumber && orderSrNumber === reference.srNumber);
 }
 
 function normalizeText(value: unknown) {
@@ -896,6 +1020,10 @@ function readHtmlFormValueById(html: string, id: string) {
 
 function readHtmlFormValueByName(html: string, name: string) {
   return readHtmlFormValue(html, "name", name);
+}
+
+function readTeamshipUiFormValue(html: string, field: string) {
+  return readHtmlFormValueByName(html, field) ?? readHtmlFormValueById(html, field);
 }
 
 function readHtmlFormValue(html: string, attributeName: "id" | "name", expectedValue: string) {

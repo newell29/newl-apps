@@ -1,4 +1,5 @@
 import {
+  ApolloCompanyMatchClassification,
   ApolloStatus,
   CandidateStatus,
   ContactSource,
@@ -8,6 +9,7 @@ import {
   IntegrationProvider,
   JobStatus,
   LeadPipelineStage,
+  OutreachPlanStatus,
   Prisma,
   ReplyStatus,
   SequenceStatus
@@ -17,10 +19,31 @@ import { tenantWhere } from "@/server/tenant-query";
 import type { TenantContext } from "@/server/tenant-context";
 import { getContactApolloAssignmentBlockReason, scoreContact } from "@/modules/lead-gen/contact-scoring";
 import {
+  isActiveCadenceContact,
+  isDeliveryFailureContact,
+  isOutreachQueueContact,
+  resolveSalesOpportunityStage
+} from "@/modules/lead-gen/automation-workflow";
+import {
   classifyTradeMiningIndustryFromRecords,
   INDUSTRY_OPTIONS,
   type IndustryClassification
 } from "@/modules/lead-gen/industry-classification";
+import {
+  evaluateHunterOutreachEligibility,
+  getHunterOutreachResearchMaxAgeDays
+} from "@/modules/lead-gen/hunter-outreach-eligibility";
+import {
+  isMappedApolloZeroEmployeeState,
+  requiresApolloMatchReview
+} from "@/modules/lead-gen/apollo-contact-discovery-review";
+import {
+  classifyOutreachQaIssues,
+  getOutreachRegenerationBlockReason,
+  isCurrentOutreachDraft,
+  type OutreachEvidenceRecord,
+  VISIBLE_OUTREACH_PLAN_VERSION_WHERE
+} from "@/modules/lead-gen/outreach-plan";
 import {
   matchesTradeMiningIndustryLabels,
   matchesTradeMiningIndustrySignals,
@@ -30,7 +53,10 @@ import {
   type TradeMiningIndustryPackId
 } from "@/modules/lead-gen/industry-packs";
 import { defaultTradeMiningCompanyIdentityRoles } from "@/modules/lead-gen/search-profile-validation";
-import { recommendSequenceForContact } from "@/modules/lead-gen/sequence-catalog";
+import {
+  recommendSequenceForContact,
+  shouldUseHunterSequenceRecommendation
+} from "@/modules/lead-gen/sequence-catalog";
 import {
   DEFAULT_TRADEMINING_SCORING_SETTINGS,
   type TradeMiningScoringSettings
@@ -45,6 +71,7 @@ import {
   resolveApolloSequenceMappings
 } from "@/modules/settings/apollo-sequence-mapping";
 import { isOpenAiDraftGenerationConfigured } from "@/server/integrations/openai";
+import { readApolloAccountIdFromMatchQuery } from "@/server/integrations/apollo";
 
 type SearchProfileDelegate = typeof prisma.tradeMiningSearchProfile;
 
@@ -56,6 +83,39 @@ type LeadPipelineFilterRepOption = {
   value: string;
   label: string;
 };
+
+type HunterOutreachEligibilityInput = Parameters<typeof evaluateHunterOutreachEligibility>[0];
+
+export function evaluateCurrentHunterApolloException({
+  classification,
+  mappedZeroEmployees = false,
+  researchSignal,
+  prospectingDecision,
+  now,
+  maxResearchAgeDays = getHunterOutreachResearchMaxAgeDays()
+}: {
+  classification: ApolloCompanyMatchClassification;
+  mappedZeroEmployees?: boolean;
+  researchSignal: HunterOutreachEligibilityInput["researchSignal"];
+  prospectingDecision: HunterOutreachEligibilityInput["prospectingDecision"];
+  now?: Date;
+  maxResearchAgeDays?: number;
+}) {
+  if (
+    !requiresApolloMatchReview(classification) &&
+    !mappedZeroEmployees
+  ) {
+    return null;
+  }
+
+  const eligibility = evaluateHunterOutreachEligibility({
+    researchSignal,
+    prospectingDecision,
+    now,
+    maxResearchAgeDays
+  });
+  return eligibility.status === "ELIGIBLE" ? eligibility : null;
+}
 
 type TradeMiningScoringQueryClient = typeof prisma & {
   tradeMiningScoringConfig?: {
@@ -120,6 +180,7 @@ export type CandidateFeedFilters = {
   maxScore?: number;
   minShipmentCount?: number;
   sort?: CandidateFeedSort;
+  limit?: number;
 };
 
 export type LeadPipelineSort = "score_desc" | "updated_desc" | "approved_desc" | "company_name_asc";
@@ -151,6 +212,7 @@ export type LeadPipelineSequenceStatusFilter =
   | "REPLIED";
 
 export type LeadPipelineFilters = {
+  scope?: "ALL" | "SALES_OPPORTUNITIES";
   companyId?: string;
   stage?: LeadPipelineStage | "ALL";
   ownerUserId?: string | "ALL" | "UNASSIGNED";
@@ -233,32 +295,7 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
     tenant,
     resolveEvidenceLookbackDays(scoringConfig, searchProfiles)
   );
-  const companies = await prisma.company.findMany({
-    where: tenantWhere(tenant, buildCandidateWhere(filters, evidenceWhere)),
-    include: {
-      importRecords: {
-        where: evidenceWhere,
-        orderBy: [
-          {
-            arrivalDate: "desc"
-          },
-          {
-            createdAt: "desc"
-          }
-        ]
-      },
-      leads: {
-        where: tenantWhere(tenant),
-        orderBy: {
-          updatedAt: "desc"
-        },
-        take: 1
-      }
-    },
-    orderBy: {
-      updatedAt: "desc"
-    }
-  });
+  const companies = await loadCandidateCompanies(tenant, filters, evidenceWhere);
 
   const candidates = companies
     .map((company) => {
@@ -327,7 +364,91 @@ export async function getCandidateFeed(tenant: TenantContext, filters: Candidate
     .filter((candidate) => filters.minShipmentCount === undefined || candidate.shipmentCount >= filters.minShipmentCount)
     .filter((candidate) => matchesFoundCompanyQuery(candidate, filters.query));
 
-  return sortCandidates(candidates, filters.sort ?? "score_desc");
+  const sorted = sortCandidates(candidates, filters.sort ?? "score_desc");
+  return filters.limit === undefined ? sorted : sorted.slice(0, normalizeCandidateLimit(filters.limit));
+}
+
+async function loadCandidateCompanies(
+  tenant: TenantContext,
+  filters: CandidateFeedFilters,
+  evidenceWhere: ReturnType<typeof buildTradeMiningEvidenceWhere>
+) {
+  const take = filters.limit === undefined ? 200 : normalizeCandidateLimit(filters.limit);
+  const rows: Awaited<ReturnType<typeof queryCandidateCompanyBatch>> = [];
+  let cursor: string | undefined;
+
+  do {
+    const batch = await queryCandidateCompanyBatch({
+      tenant,
+      filters,
+      evidenceWhere,
+      take,
+      cursor
+    });
+    rows.push(...batch);
+    if (filters.limit !== undefined || batch.length < take) {
+      break;
+    }
+    cursor = batch[batch.length - 1]?.id;
+  } while (cursor);
+
+  return rows;
+}
+
+function queryCandidateCompanyBatch({
+  tenant,
+  filters,
+  evidenceWhere,
+  take,
+  cursor
+}: {
+  tenant: TenantContext;
+  filters: CandidateFeedFilters;
+  evidenceWhere: ReturnType<typeof buildTradeMiningEvidenceWhere>;
+  take: number;
+  cursor?: string;
+}) {
+  return prisma.company.findMany({
+    where: tenantWhere(tenant, buildCandidateWhere(filters, evidenceWhere)),
+    include: {
+      importRecords: {
+        where: evidenceWhere,
+        orderBy: [
+          {
+            arrivalDate: "desc"
+          },
+          {
+            createdAt: "desc"
+          }
+        ]
+      },
+      leads: {
+        where: tenantWhere(tenant),
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 1
+      }
+    },
+    orderBy: [
+      {
+        priorityScore: "desc"
+      },
+      {
+        updatedAt: "desc"
+      },
+      {
+        id: "asc"
+      }
+    ],
+    take,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {})
+  });
+}
+
+function normalizeCandidateLimit(limit: number) {
+  if (!Number.isFinite(limit)) return 100;
+  return Math.min(100, Math.max(1, Math.floor(limit)));
 }
 
 export async function calculateLeadPipelineScoreForCompany(
@@ -739,6 +860,13 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       industrySource: lead.company.industrySource,
       importRecords: lead.company.importRecords
     });
+    const salesOpportunityStage = resolveSalesOpportunityStage({
+      leadStage: lead.stage,
+      replyStatuses: [
+        ...(lead.contact ? [lead.contact.replyStatus] : []),
+        ...contacts.map((contact) => contact.replyStatus)
+      ]
+    });
     const nextStep = getPipelineNextStep({
       stage: lead.stage,
       contactCount,
@@ -762,6 +890,7 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
       companyLinkedinUrl: lead.company.linkedinUrl ?? selectedOrFirstContact?.linkedinUrl ?? null,
       contactName: lead.contact?.fullName,
       stage: lead.stage,
+      salesOpportunityStage,
       candidateStatus: lead.company.candidateStatus,
       score: scoring.score,
       companyScore: lead.company.priorityScore,
@@ -803,6 +932,13 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
   });
 
   const filteredPipelineLeads = pipelineLeads
+    .filter((lead) => filters.scope !== "SALES_OPPORTUNITIES" || Boolean(lead.salesOpportunityStage))
+    .filter((lead) =>
+      filters.scope !== "SALES_OPPORTUNITIES" ||
+      !filters.stage ||
+      filters.stage === "ALL" ||
+      lead.salesOpportunityStage === filters.stage
+    )
     .filter((lead) => matchesLeadPipelineCandidateStatus(lead.candidateStatus, filters.candidateStatus))
     .filter((lead) => matchesLeadPipelineContactStatus(lead.contactStatus, filters.contactStatus))
     .filter((lead) => matchesLeadPipelineApolloStatus(lead.apolloStatus, filters.apolloStatus))
@@ -828,6 +964,329 @@ export async function getLeadPipeline(tenant: TenantContext, filters: LeadPipeli
   }
 
   return filteredPipelineLeads;
+}
+
+export async function getApolloMatchReviewQueue(
+  tenant: TenantContext,
+  filters: { companyId?: string } = {}
+) {
+  const repDirectory = await getLeadPipelineRepDirectory(tenant);
+  const companies = await prisma.company.findMany({
+    where: tenantWhere(tenant, {
+      id: filters.companyId,
+      doNotProspect: false,
+      candidateStatus: {
+        notIn: [CandidateStatus.REJECTED, CandidateStatus.DISQUALIFIED]
+      },
+      apolloCompanyMatches: {
+        some: {}
+      }
+    }),
+    select: {
+      id: true,
+      name: true,
+      normalizedName: true,
+      domain: true,
+      linkedinUrl: true,
+      apolloOrganizationId: true,
+      leads: {
+        orderBy: {
+          updatedAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          ownerUserId: true
+        }
+      },
+      apolloCompanyMatches: {
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 25,
+        select: {
+          id: true,
+          apolloOrganizationId: true,
+          apolloCompanyName: true,
+          apolloDomain: true,
+          score: true,
+          classification: true,
+          matchReason: true,
+          reviewedAt: true,
+          reviewedByUserId: true,
+          createdAt: true,
+          queryJson: true
+        }
+      },
+      hunterOpportunitySignals: {
+        where: {
+          sourceName: "Hunter company research"
+        },
+        orderBy: {
+          observedAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          sourceName: true,
+          serviceLine: true,
+          observedAt: true,
+          evidence: true
+        }
+      },
+      hunterProspectingDecisions: {
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 1,
+        select: {
+          id: true,
+          status: true,
+          serviceLine: true,
+          opportunityType: true,
+          rationale: true,
+          recommendedPersona: true,
+          recommendedSender: true,
+          recommendedCadence: true,
+          createdAt: true
+        }
+      }
+    }
+  });
+
+  return companies
+    .flatMap((company) => {
+      const match = company.apolloCompanyMatches[0] ?? null;
+      const confirmedAccountId =
+        company.apolloCompanyMatches
+          .map((candidate) =>
+            readApolloAccountIdFromMatchQuery(candidate.queryJson)
+          )
+          .find((accountId): accountId is string => Boolean(accountId)) ??
+        null;
+      const reviewStatus = resolveApolloReviewQueueStatus({
+        apolloOrganizationId: company.apolloOrganizationId,
+        classification: match?.classification ?? null,
+        matchReason: match?.matchReason ?? null,
+        reviewedAt: match?.reviewedAt ?? null
+      });
+      if (
+        !match ||
+        !reviewStatus
+      ) {
+        return [];
+      }
+
+      const eligibility = evaluateCurrentHunterApolloException({
+        classification: match.classification,
+        mappedZeroEmployees: isMappedApolloZeroEmployeeState({
+          apolloOrganizationId: company.apolloOrganizationId,
+          matchReason: match.matchReason
+        }),
+        researchSignal: company.hunterOpportunitySignals[0] ?? null,
+        prospectingDecision: company.hunterProspectingDecisions[0] ?? null,
+        maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+      });
+      if (!eligibility) {
+        return [];
+      }
+
+      const lead = company.leads[0] ?? null;
+      return [
+        {
+          leadId: lead?.id ?? null,
+          companyId: company.id,
+          companyName: company.name,
+          normalizedName: company.normalizedName,
+          companyDomain: company.domain,
+          companyLinkedinUrl: company.linkedinUrl,
+          confirmedApolloAccountId: confirmedAccountId,
+          confirmedApolloAccountUrl: confirmedAccountId
+            ? `https://app.apollo.io/#/accounts/${confirmedAccountId}`
+            : null,
+          resolvedApolloOrganizationUrl: company.apolloOrganizationId
+            ? `https://app.apollo.io/#/organizations/${company.apolloOrganizationId}`
+            : null,
+          assignedRep:
+            (lead?.ownerUserId ? repDirectory.get(lead.ownerUserId) : null) ??
+            lead?.ownerUserId ??
+            "Hunter automation",
+          hunterQualification: eligibility.label,
+          researchRetrievedAt: eligibility.researchRetrievedAt,
+          status: reviewStatus,
+          latestMatch: {
+            id: match.id,
+            organizationId: match.apolloOrganizationId,
+            companyName: match.apolloCompanyName,
+            domain: match.apolloDomain,
+            score: match.score,
+            classification: match.classification,
+            reason: match.matchReason,
+            attemptedAt: match.createdAt,
+            reviewedAt: match.reviewedAt,
+            reviewedByUserId: match.reviewedByUserId
+          },
+          resolverReview: readApolloResolverReview(match.queryJson)
+        }
+      ];
+    })
+    .sort((left, right) => {
+      if (left.status !== right.status) {
+        const order = {
+          NEEDS_REVIEW: 0,
+          MAPPED_NO_EMPLOYEES: 1,
+          CONFIRMED_NO_MATCH: 2
+        };
+        return order[left.status] - order[right.status];
+      }
+      return right.latestMatch.attemptedAt.getTime() - left.latestMatch.attemptedAt.getTime();
+    });
+}
+
+export async function getApolloIdentityResolutionMetrics(
+  tenant: TenantContext,
+  now = new Date()
+) {
+  const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const matches = await prisma.apolloCompanyMatch.findMany({
+    where: tenantWhere(tenant, {
+      createdAt: { gte: since }
+    }),
+    orderBy: { createdAt: "desc" },
+    take: 1_000,
+    select: {
+      companyId: true,
+      queryJson: true
+    }
+  });
+  const latestByCompany = new Map<string, Prisma.JsonValue | null>();
+  for (const match of matches) {
+    if (!latestByCompany.has(match.companyId)) {
+      latestByCompany.set(match.companyId, match.queryJson);
+    }
+  }
+  return summarizeApolloIdentityResolutionMetrics([...latestByCompany.values()]);
+}
+
+export function summarizeApolloIdentityResolutionMetrics(
+  queryValues: Array<Prisma.JsonValue | null>
+) {
+  const counts = {
+    evaluated: 0,
+    autoMatched: 0,
+    manualReview: 0,
+    rejected: 0
+  };
+  for (const value of queryValues) {
+    const query = isJsonRecord(value) ? value : null;
+    const resolver = isJsonRecord(query?.identity_resolver)
+      ? query.identity_resolver
+      : null;
+    if (resolver?.version !== 1) continue;
+    const band = resolver.confidence_band;
+    if (band !== "AUTO_MATCH" && band !== "MANUAL_REVIEW" && band !== "REJECT") {
+      continue;
+    }
+    counts.evaluated += 1;
+    if (band === "AUTO_MATCH") counts.autoMatched += 1;
+    if (band === "MANUAL_REVIEW") counts.manualReview += 1;
+    if (band === "REJECT") counts.rejected += 1;
+  }
+  return {
+    ...counts,
+    autoMatchRate:
+      counts.evaluated > 0
+        ? Math.round((counts.autoMatched / counts.evaluated) * 100)
+        : null,
+    manualReviewRate:
+      counts.evaluated > 0
+        ? Math.round((counts.manualReview / counts.evaluated) * 100)
+        : null
+  };
+}
+
+export function readApolloResolverReview(value: unknown) {
+  const query = isJsonRecord(value) ? value : null;
+  const resolver = isJsonRecord(query?.identity_resolver)
+    ? query.identity_resolver
+    : null;
+  const autopilot = isJsonRecord(query?.exception_autopilot)
+    ? query.exception_autopilot
+    : null;
+  const candidates = Array.isArray(resolver?.candidates)
+    ? resolver.candidates
+        .map((candidate) => {
+          const row = isJsonRecord(candidate) ? candidate : null;
+          const organizationId = readOptionalJsonString(row?.organizationId);
+          const companyName = readOptionalJsonString(row?.companyName);
+          if (!organizationId || !companyName) return null;
+          return {
+            organizationId,
+            companyName,
+            domain: readOptionalJsonString(row?.domain),
+            score:
+              typeof row?.score === "number" && Number.isFinite(row.score)
+                ? Math.round(row.score)
+                : 0,
+            classification: readOptionalJsonString(row?.classification) ?? "UNKNOWN",
+            domainMatch: row?.domainMatch === true
+          };
+        })
+        .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
+        .slice(0, 3)
+    : [];
+  const sources = Array.isArray(autopilot?.public_evidence)
+    ? autopilot.public_evidence
+        .map((item) => {
+          const row = isJsonRecord(item) ? item : null;
+          const url = readOptionalJsonString(row?.url);
+          if (!url?.startsWith("https://")) return null;
+          return {
+            title: readOptionalJsonString(row?.title) ?? url,
+            url,
+            sourceDomain: readOptionalJsonString(row?.sourceDomain)
+          };
+        })
+        .filter((source): source is NonNullable<typeof source> => Boolean(source))
+        .slice(0, 5)
+    : [];
+  return {
+    state: readOptionalJsonString(autopilot?.state),
+    reason: readOptionalJsonString(autopilot?.reason),
+    candidates,
+    sources
+  };
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readOptionalJsonString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function resolveApolloReviewQueueStatus({
+  apolloOrganizationId,
+  classification,
+  matchReason,
+  reviewedAt
+}: {
+  apolloOrganizationId: string | null;
+  classification: ApolloCompanyMatchClassification | null;
+  matchReason: string | null;
+  reviewedAt: Date | null;
+}) {
+  if (!classification) return null;
+  if (isMappedApolloZeroEmployeeState({ apolloOrganizationId, matchReason })) {
+    return reviewedAt
+      ? ("CONFIRMED_NO_MATCH" as const)
+      : ("MAPPED_NO_EMPLOYEES" as const);
+  }
+  if (!requiresApolloMatchReview(classification)) return null;
+  return reviewedAt
+    ? ("CONFIRMED_NO_MATCH" as const)
+    : ("NEEDS_REVIEW" as const);
 }
 
 export async function getLeadPipelineFilters(tenant: TenantContext) {
@@ -989,6 +1448,40 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
               score: true
             },
             take: 1
+          },
+          hunterOpportunitySignals: {
+            where: tenantWhere(tenant, {
+              sourceName: "Hunter company research"
+            }),
+            orderBy: {
+              observedAt: "desc"
+            },
+            take: 1,
+            select: {
+              id: true,
+              sourceName: true,
+              serviceLine: true,
+              observedAt: true,
+              evidence: true
+            }
+          },
+          hunterProspectingDecisions: {
+            where: tenantWhere(tenant),
+            orderBy: {
+              createdAt: "desc"
+            },
+            take: 1,
+            select: {
+              id: true,
+              status: true,
+              serviceLine: true,
+              opportunityType: true,
+              rationale: true,
+              recommendedPersona: true,
+              recommendedSender: true,
+              recommendedCadence: true,
+              createdAt: true
+            }
           }
         }
       },
@@ -1005,6 +1498,25 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
           updatedAt: "desc"
         },
         take: 1
+      },
+      outreachPlans: {
+        where: tenantWhere(tenant, {
+          status: {
+            not: OutreachPlanStatus.ARCHIVED
+          },
+          ...VISIBLE_OUTREACH_PLAN_VERSION_WHERE
+        }),
+        orderBy: {
+          version: "desc"
+        },
+        take: 1,
+        include: {
+          steps: {
+            orderBy: {
+              stepNumber: "asc"
+            }
+          }
+        }
       }
     },
     orderBy: buildContactDirectoryOrder(filters.sort ?? "score_desc")
@@ -1031,17 +1543,39 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         : apolloSequenceMapping,
       directory: apolloSequenceDirectory
     });
+    const hunterEligibility = evaluateHunterOutreachEligibility({
+      researchSignal: contact.company.hunterOpportunitySignals[0] ?? null,
+      prospectingDecision: contact.company.hunterProspectingDecisions[0] ?? null,
+      maxResearchAgeDays: getHunterOutreachResearchMaxAgeDays()
+    });
     const recommendation = recommendSequenceForContact({
       contactTier: scoring.tier,
       title: contact.title,
       department: contact.department,
       companyName: contact.company.name,
       sequenceMappings: effectiveSequenceMappings,
-      sequenceDirectory: apolloSequenceDirectory
+      sequenceDirectory: apolloSequenceDirectory,
+      hunterManaged: hunterEligibility.status === "ELIGIBLE"
     });
-    const draft = contact.outreachDrafts[0] ?? null;
+    const draftRecord = contact.outreachDrafts[0] ?? null;
+    const outreachPlan = contact.outreachPlans[0] ?? null;
+    const draftPlanId = readString(asObject(draftRecord?.rawJson), "outreachPlanId");
+    const draft =
+      draftRecord &&
+      isCurrentOutreachDraft({
+        aiGenerated: draftRecord.aiGenerated,
+        linkedPlanId: draftPlanId,
+        currentPlanId: outreachPlan?.id ?? null
+      })
+        ? draftRecord
+        : null;
     const tierMapping = effectiveSequenceMappings.find((entry) => entry.tier === scoring.tier) ?? null;
-    const requiresAiDraft = tierMapping?.requiresAiDraft ?? false;
+    const requiresAiDraft = hunterEligibility.status === "ELIGIBLE" || (tierMapping?.requiresAiDraft ?? false);
+    const useHunterRecommendation = shouldUseHunterSequenceRecommendation({
+      hunterEligible: hunterEligibility.status === "ELIGIBLE",
+      sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
+      selectedSequenceName: contact.selectedSequenceName
+    });
     const openAiRuntimeReady = isOpenAiDraftGenerationConfigured();
     const draftGenerationConfigured = openAiRuntimeReady && scoringConfig.aiClassificationEnabled;
     const draftGenerationDisabledReason = draftGenerationConfigured
@@ -1051,6 +1585,8 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
         : ("LEAD_GEN_AI_DISABLED" satisfies ContactDraftGenerationDisabledReason);
     const rawJson = asObject(contact.rawJson);
     const apolloJson = asObject(rawJson.apollo);
+    const deliveryFailure = asObject(apolloJson.deliveryFailure);
+    const pauseReconciliation = asObject(apolloJson.pauseReconciliation);
     const pushBlocker = asObject(apolloJson.pushBlocker);
     const pendingSequenceConfirmation = asObject(apolloJson.pendingSequenceConfirmation);
     const effectiveSequenceStatus: ContactSequenceStatusFilter =
@@ -1059,6 +1595,26 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       contact.sequenceStatus !== SequenceStatus.ENROLLED
         ? "PUSH_BLOCKED"
         : contact.sequenceStatus;
+    const outreachQaIssues = outreachPlan
+      ? readOutreachQaIssues(outreachPlan.qaIssues)
+      : [];
+    const outreachEvidence = outreachPlan
+      ? readOutreachEvidence(outreachPlan.evidence)
+      : [];
+    const outreachSequence = outreachPlan
+      ? {
+          sequenceName: outreachPlan.sequenceName,
+          steps: outreachPlan.steps.map((step) => ({
+            stepNumber: step.stepNumber,
+            channel: step.channel,
+            delayDays: step.delayDays,
+            subject: step.subject,
+            body: step.body,
+            angle: step.angle,
+            evidenceRefs: asStringArray(step.evidenceRefs)
+          }))
+        }
+      : undefined;
 
     return {
       id: contact.id,
@@ -1085,16 +1641,32 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
       sequenceStatus: contact.sequenceStatus,
       apolloPushBlockedReason: readString(pushBlocker, "reason"),
       apolloPushBlockedAt: readString(pushBlocker, "blockedAt"),
+      apolloDeliveryFailureKind: readString(deliveryFailure, "kind"),
+      apolloDeliveryFailureReason: readString(deliveryFailure, "reason"),
+      apolloDeliveryFailureDetectedAt: readString(deliveryFailure, "detectedAt"),
+      apolloPauseKind: readString(pauseReconciliation, "kind"),
+      apolloPauseReason: readString(pauseReconciliation, "reason"),
+      apolloPauseResumeAt: readString(pauseReconciliation, "resumeAt"),
       effectiveSequenceStatus,
       replyStatus: contact.replyStatus,
-      recommendedSequenceId: contact.recommendedSequenceId ?? recommendation.id,
-      recommendedSequenceName: contact.recommendedSequenceName ?? recommendation.name,
-      selectedSequenceId: contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id,
-      selectedSequenceName: contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name,
-      sequenceRecommendationReason: contact.sequenceRecommendationReason ?? recommendation.reason,
+      recommendedSequenceId: useHunterRecommendation ? recommendation.id : contact.recommendedSequenceId ?? recommendation.id,
+      recommendedSequenceName: useHunterRecommendation ? recommendation.name : contact.recommendedSequenceName ?? recommendation.name,
+      selectedSequenceId: useHunterRecommendation ? recommendation.id : contact.selectedSequenceId ?? contact.recommendedSequenceId ?? recommendation.id,
+      selectedSequenceName: useHunterRecommendation ? recommendation.name : contact.selectedSequenceName ?? contact.recommendedSequenceName ?? recommendation.name,
+      sequenceRecommendationReason: useHunterRecommendation ? recommendation.reason : contact.sequenceRecommendationReason ?? recommendation.reason,
       sequenceOverrideReason: contact.sequenceOverrideReason,
       sequenceManuallyOverridden: contact.sequenceManuallyOverridden,
       requiresAiDraft,
+      canGenerateOutreachPlan:
+        scoring.tier !== ContactTier.UNRANKED && hunterEligibility.status === "ELIGIBLE",
+      hunterEligibility: {
+        status: hunterEligibility.status,
+        label: hunterEligibility.label,
+        reason: hunterEligibility.reason,
+        opportunityTier: hunterEligibility.opportunityTier,
+        serviceLine: hunterEligibility.serviceLine,
+        researchRetrievedAt: hunterEligibility.researchRetrievedAt
+      },
       draftGenerationConfigured,
       draftGenerationDisabledReason,
       draft: draft
@@ -1110,6 +1682,55 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
             personalizationNotes: draft.personalizationNotes,
             editedAt: draft.editedAt,
             updatedAt: draft.updatedAt
+          }
+        : null,
+      outreachPlan: outreachPlan
+        ? {
+            id: outreachPlan.id,
+            version: outreachPlan.version,
+            status: outreachPlan.status,
+            qaStatus: outreachPlan.qaStatus,
+            serviceLine: outreachPlan.serviceLine,
+            opportunityType: outreachPlan.opportunityType,
+            objective: outreachPlan.objective,
+            triggerSummary: outreachPlan.triggerSummary,
+            buyerHypothesis: outreachPlan.buyerHypothesis,
+            valueProposition: outreachPlan.valueProposition,
+            likelyObjection: outreachPlan.likelyObjection,
+            callToAction: outreachPlan.callToAction,
+            senderRecommendation: outreachPlan.senderRecommendation,
+            confidence: outreachPlan.confidence,
+            qaIssues: outreachQaIssues,
+            qaRepairDisposition: classifyOutreachQaIssues(
+              outreachQaIssues,
+              outreachEvidence,
+              outreachSequence
+            ),
+            regenerationBlockReason: getOutreachRegenerationBlockReason({
+              planStatus: outreachPlan.status,
+              contactStatus: contact.contactStatus,
+              replyStatus: contact.replyStatus,
+              sequenceStatus: contact.sequenceStatus
+            }),
+            evidence: outreachEvidence,
+            models: {
+              strategy: outreachPlan.strategyModel,
+              drafting: outreachPlan.draftingModel,
+              qa: outreachPlan.qaModel
+            },
+            promptVersion: outreachPlan.promptVersion,
+            approvedAt: outreachPlan.approvedAt,
+            steps: outreachPlan.steps.map((step) => ({
+              id: step.id,
+              stepNumber: step.stepNumber,
+              channel: step.channel,
+              delayDays: step.delayDays,
+              subject: step.subject,
+              body: step.body,
+              angle: step.angle,
+              evidenceRefs: asStringArray(step.evidenceRefs),
+              qaIssues: readOutreachQaIssues(step.qaIssues)
+            }))
           }
         : null,
       draftStatus: readDraftStatus(scoring.tier, draft?.status ?? null, requiresAiDraft),
@@ -1173,8 +1794,32 @@ export async function getContactDirectory(tenant: TenantContext, filters: Contac
   );
 }
 
+export async function getOutreachQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return contacts.filter(isOutreachQueueContact);
+}
+
+export async function getOutreachQueues(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return {
+    attention: contacts.filter(isOutreachQueueContact),
+    activeCadences: contacts.filter(isActiveCadenceContact),
+    deliveryFailures: contacts.filter(isDeliveryFailureContact)
+  };
+}
+
+export async function getActiveCadenceQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return contacts.filter(isActiveCadenceContact);
+}
+
+export async function getDeliveryFailureQueue(tenant: TenantContext, filters: ContactDirectoryFilters = {}) {
+  const contacts = await getContactDirectory(tenant, filters);
+  return contacts.filter(isDeliveryFailureContact);
+}
+
 export async function getContactDirectoryFilters(tenant: TenantContext) {
-  const [pipelineAccounts, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
+  const [pipelineAccounts, outreachPlanCompanies, owners, approvedAccountCount, apolloCredentials, searchProfiles] = await Promise.all([
     prisma.lead.findMany({
       where: tenantWhere(tenant),
       distinct: ["companyId"],
@@ -1188,6 +1833,27 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
       },
       orderBy: {
         createdAt: "desc"
+      }
+    }),
+    prisma.company.findMany({
+      where: tenantWhere(tenant, {
+        contacts: {
+          some: tenantWhere(tenant, {
+            outreachPlans: {
+              some: tenantWhere(tenant, {
+                status: { not: OutreachPlanStatus.ARCHIVED },
+                ...VISIBLE_OUTREACH_PLAN_VERSION_WHERE
+              })
+            }
+          })
+        }
+      }),
+      select: {
+        id: true,
+        name: true
+      },
+      orderBy: {
+        name: "asc"
       }
     }),
     prisma.contact.findMany({
@@ -1235,9 +1901,12 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
     })
   ]);
   const sequenceOptions = mapApolloSequenceOptions(parseApolloSequenceDirectory(apolloCredentials[0]?.publicConfig));
+  const companies = new Map<string, { id: string; name: string }>();
+  for (const account of pipelineAccounts) companies.set(account.company.id, account.company);
+  for (const company of outreachPlanCompanies) companies.set(company.id, company);
 
   return {
-    companies: pipelineAccounts.map((lead) => lead.company),
+    companies: [...companies.values()].sort((left, right) => left.name.localeCompare(right.name)),
     searchProfiles,
     owners: owners.flatMap((owner) => (owner.assignedRep ? [owner.assignedRep] : [])),
     approvedAccountCount,
@@ -1260,6 +1929,55 @@ export async function getContactDirectoryFilters(tenant: TenantContext) {
 
 function asStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readOutreachQaIssues(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const code = typeof record.code === "string" ? record.code : null;
+    const severity: "ERROR" | "WARNING" | null =
+      record.severity === "ERROR" || record.severity === "WARNING" ? record.severity : null;
+    const message = typeof record.message === "string" ? record.message : null;
+    const stepNumber = typeof record.stepNumber === "number" ? record.stepNumber : null;
+    return code && severity && message ? [{ code, severity, message, stepNumber }] : [];
+  });
+}
+
+function readOutreachEvidence(value: unknown): OutreachEvidenceRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): OutreachEvidenceRecord[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id : null;
+    const kind =
+      typeof record.kind === "string" &&
+      [
+        "TRADEMINING",
+        "HUNTER_RESEARCH",
+        "HUNTER_SIGNAL",
+        "HUNTER_DECISION",
+        "COMPANY",
+        "NEWL_CAPABILITY"
+      ].includes(record.kind)
+        ? record.kind as OutreachEvidenceRecord["kind"]
+        : null;
+    const title = typeof record.title === "string" ? record.title : null;
+    const summary = typeof record.summary === "string" ? record.summary : null;
+    if (!id || !kind || !title || !summary) return [];
+    return [
+      {
+        id,
+        kind,
+        title,
+        summary,
+        sourceUrl: typeof record.sourceUrl === "string" ? record.sourceUrl : null,
+        publishedAt: typeof record.publishedAt === "string" ? record.publishedAt : null,
+        facts: asStringArray(record.facts)
+      }
+    ];
+  });
 }
 
 function addSuggestion(set: Set<string>, value: string | null | undefined) {
@@ -1287,43 +2005,60 @@ function sortSuggestions(values: Set<string>) {
 
 export function buildContactDirectoryWhere(tenant: TenantContext, filters: ContactDirectoryFilters) {
   const where: Prisma.ContactWhereInput = {
-    company: {
-      leads: {
-        some: tenantWhere(tenant)
+    AND: [
+      {
+        OR: [
+          {
+            company: {
+              leads: {
+                some: tenantWhere(tenant)
+              }
+            }
+          },
+          {
+            outreachPlans: {
+              some: tenantWhere(tenant, {
+                status: { not: OutreachPlanStatus.ARCHIVED }
+              })
+            }
+          }
+        ]
       }
-    }
+    ]
   };
 
   if (filters.query?.trim()) {
     const query = filters.query.trim();
-    where.OR = [
-      {
-        fullName: {
-          contains: query,
-          mode: "insensitive"
-        }
-      },
-      {
-        title: {
-          contains: query,
-          mode: "insensitive"
-        }
-      },
-      {
-        email: {
-          contains: query,
-          mode: "insensitive"
-        }
-      },
-      {
-        company: {
-          name: {
+    (where.AND as Prisma.ContactWhereInput[]).push({
+      OR: [
+        {
+          fullName: {
             contains: query,
             mode: "insensitive"
           }
+        },
+        {
+          title: {
+            contains: query,
+            mode: "insensitive"
+          }
+        },
+        {
+          email: {
+            contains: query,
+            mode: "insensitive"
+          }
+        },
+        {
+          company: {
+            name: {
+              contains: query,
+              mode: "insensitive"
+            }
+          }
         }
-      }
-    ];
+      ]
+    });
   }
 
   if (filters.companyId) {
@@ -1389,18 +2124,10 @@ function buildContactDirectoryOrder(sort: ContactDirectorySort) {
   ];
 }
 
-function buildLeadPipelineWhere(filters: LeadPipelineFilters) {
-  const where: {
-    companyId?: string;
-    stage?: LeadPipelineStage;
-    ownerUserId?: string | null;
-    score?: {
-      gte?: number;
-      lte?: number;
-    };
-  } = {};
+export function buildLeadPipelineWhere(filters: LeadPipelineFilters): Prisma.LeadWhereInput {
+  const where: Prisma.LeadWhereInput = {};
 
-  if (filters.stage && filters.stage !== "ALL") {
+  if (filters.stage && filters.stage !== "ALL" && filters.scope !== "SALES_OPPORTUNITIES") {
     where.stage = filters.stage;
   }
 

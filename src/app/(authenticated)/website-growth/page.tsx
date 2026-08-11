@@ -15,6 +15,7 @@ import {
   getWebsiteGrowthWorkflowStage,
   readScoutRunId,
   readScoutRunSummary,
+  readSeoRecoverySummary,
   type WebsiteGrowthWorkflowStage
 } from "@/modules/website-growth/workspace";
 import { requireModule } from "@/server/auth/authorization";
@@ -28,6 +29,7 @@ export default async function WebsiteGrowthPage() {
   const workspace = await getWebsiteGrowthWorkspace(context);
   const latestRun = workspace.latestScoutRun;
   const latestRunSummary = readScoutRunSummary(latestRun?.output);
+  const seoRecovery = readSeoRecoverySummary(latestRun?.output);
   const latestDraftIds = new Set(latestRunSummary.draftIds);
   const groups = groupDrafts(workspace.drafts);
 
@@ -70,6 +72,8 @@ export default async function WebsiteGrowthPage() {
         semrushRowCount={latestRunSummary.semrushRowCount}
         phase={latestRunSummary.phase}
       />
+
+      <SeoRecoveryMonitor summary={seoRecovery} />
 
       <WorkflowGuide />
 
@@ -126,6 +130,124 @@ export default async function WebsiteGrowthPage() {
       )}
     </div>
   );
+}
+
+function SeoRecoveryMonitor({
+  summary
+}: {
+  summary: ReturnType<typeof readSeoRecoverySummary>;
+}) {
+  if (!summary.available) return null;
+  const priorities = summary.candidates.filter((candidate) => candidate.status !== "MONITOR").slice(0, 4);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">SEO recovery monitor</p>
+          <h2 className="mt-2 text-xl font-semibold text-foreground">
+            {summary.counts.needsRecovery > 0
+              ? `${summary.counts.needsRecovery} ${summary.counts.needsRecovery === 1 ? "route needs" : "routes need"} recovery review.`
+              : "No commercial route currently crosses the recovery threshold."}
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+            Scout compares two complete, non-overlapping 28-day Search Console periods and combines legacy URLs with their configured destinations before recommending work.
+          </p>
+        </div>
+        <span className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-semibold text-mutedForeground">
+          Through {formatShortDate(summary.currentPeriod.endDate)}
+        </span>
+      </div>
+      <div className="grid gap-3 p-5 sm:grid-cols-2 xl:grid-cols-4">
+        <RecoveryMetric
+          label="Search clicks"
+          current={summary.currentClicks}
+          previous={summary.previousClicks}
+          change={summary.clickChangePercent}
+        />
+        <RecoveryMetric
+          label="Search impressions"
+          current={summary.currentImpressions}
+          previous={summary.previousImpressions}
+          change={summary.impressionChangePercent}
+        />
+        <RecoveryCount label="Migration transitions" value={summary.counts.migrationTransition} />
+        <RecoveryCount label="Routes improving" value={summary.counts.improving} />
+      </div>
+      {priorities.length > 0 ? (
+        <div className="border-t border-border p-5">
+          <h3 className="text-sm font-semibold text-foreground">Priority route monitoring</h3>
+          <div className="mt-3 grid gap-3 xl:grid-cols-2">
+            {priorities.map((candidate) => (
+              <article key={`${candidate.status}:${candidate.route}`} className="rounded-md border border-border bg-background p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="break-all font-mono text-sm font-semibold text-foreground">{candidate.route}</p>
+                  <span className={recoveryStatusClass(candidate.status)}>{recoveryStatusLabel(candidate.status)}</span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-mutedForeground">{candidate.reason}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function RecoveryMetric({
+  label,
+  current,
+  previous,
+  change
+}: {
+  label: string;
+  current: number;
+  previous: number;
+  change: number | null;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-background p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-foreground">{current.toLocaleString("en-US")}</p>
+      <p className="mt-1 text-xs text-mutedForeground">
+        Previous {previous.toLocaleString("en-US")} · {formatPercentChange(change)}
+      </p>
+    </div>
+  );
+}
+
+function RecoveryCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-border bg-background p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold text-foreground">{value.toLocaleString("en-US")}</p>
+      <p className="mt-1 text-xs text-mutedForeground">Combined legacy and destination routes</p>
+    </div>
+  );
+}
+
+function recoveryStatusLabel(status: string) {
+  if (status === "NEEDS_RECOVERY") return "Needs recovery";
+  if (status === "MIGRATION_TRANSITION") return "Migration transition";
+  if (status === "IMPROVING") return "Improving";
+  return "Monitor";
+}
+
+function recoveryStatusClass(status: string) {
+  if (status === "NEEDS_RECOVERY") return "rounded-full border border-danger/25 bg-danger/10 px-2.5 py-1 text-xs font-semibold text-danger";
+  if (status === "IMPROVING") return "rounded-full border border-success/25 bg-success/10 px-2.5 py-1 text-xs font-semibold text-success";
+  return "rounded-full border border-warning/25 bg-warning/10 px-2.5 py-1 text-xs font-semibold text-warning";
+}
+
+function formatPercentChange(value: number | null) {
+  if (value === null) return "New";
+  const percent = Math.round(value * 100);
+  return `${percent > 0 ? "+" : ""}${percent}%`;
+}
+
+function formatShortDate(value: string | null) {
+  if (!value) return "latest complete data";
+  return new Intl.DateTimeFormat("en-CA", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
 function WorkspaceNavigation({ signalCount }: { signalCount: number }) {

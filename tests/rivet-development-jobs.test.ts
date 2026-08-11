@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import { JobStatus } from "@prisma/client";
+import { PDFDocument } from "pdf-lib";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
@@ -12,6 +15,15 @@ const prismaMock = vi.hoisted(() => ({
   developmentSuggestion: {
     updateMany: vi.fn()
   },
+  teamshipReviewOrder: {
+    findFirst: vi.fn()
+  },
+  workflowArtifact: {
+    findFirst: vi.fn()
+  },
+  codexReviewRun: {
+    create: vi.fn()
+  },
   auditLog: {
     create: vi.fn()
   },
@@ -23,6 +35,7 @@ vi.mock("@/server/db", () => ({ prisma: prismaMock }));
 import {
   claimRivetDevelopmentJob,
   createRivetDevelopmentJob,
+  getRivetDevelopmentEvidence,
   RIVET_DEVELOPMENT_JOB_TYPE,
   updateRivetDevelopmentJob
 } from "@/modules/assistant/rivet-development-jobs";
@@ -75,8 +88,11 @@ const storedInput = {
 
 describe("Rivet approved development jobs", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    prismaMock.codexReviewRun.create.mockResolvedValue({ id: "review-1" });
+    prismaMock.automationJobRun.findFirst.mockResolvedValue(null);
+    prismaMock.automationJobRun.findMany.mockResolvedValue([]);
   });
 
   it("queues a tenant-scoped local Codex packet with required Garland context and hard safety boundaries", async () => {
@@ -112,7 +128,8 @@ describe("Rivet approved development jobs", () => {
         reporterStatement: "Special Instructions omitted CHEMTREC.",
         expectedOutcome: "PASS",
         observedOutcome: "FAIL"
-      }]
+      }],
+      "Preserve every business-content continuation line; decorative separators are optional."
     );
 
     expect(prismaMock.automationJobRun.create).toHaveBeenCalledWith({
@@ -122,6 +139,8 @@ describe("Rivet approved development jobs", () => {
         status: JobStatus.QUEUED,
         input: expect.objectContaining({
           issueKey: "GARLAND_SPECIAL_INSTRUCTIONS",
+          approvalComments:
+            "Preserve every business-content continuation line; decorative separators are optional.",
           requiredContextPaths: expect.arrayContaining([
             "AGENTS.md",
             "docs/customers/garland/overview.md",
@@ -139,15 +158,260 @@ describe("Rivet approved development jobs", () => {
     });
   });
 
-  it("atomically claims at most one queued job and returns a short-lived lease", async () => {
+  it("includes the exact saved Garland review and source-PDF pages in a field-update packet", async () => {
+    prismaMock.teamshipReviewOrder.findFirst.mockResolvedValue({
+      id: "review-order-1",
+      runId: "review-run-1",
+      psNumber: "PS123456",
+      srNumber: "SR812345",
+      pageNumbers: [2, 3],
+      pdfOrder: { psNumber: "PS123456", srNumber: "SR812345" },
+      review: { status: "FAIL", fields: [{ key: "commodity", status: "DISCREPANCY" }] }
+    });
+    prismaMock.workflowArtifact.findFirst.mockResolvedValue({
+      id: "source-pdf-1",
+      status: "REVIEWED",
+      contentType: "application/pdf",
+      sizeBytes: 1234,
+      contentHash: "a".repeat(64),
+      teamshipReviewRunId: "review-run-1",
+      extractionSummary: null
+    });
+    prismaMock.automationJobRun.create.mockImplementation(async ({ data }) => ({
+      id: "job-1",
+      ...data,
+      errorMessage: null
+    }));
+
+    await createRivetDevelopmentJob(
+      prismaMock as never,
+      context,
+      {
+        id: "suggestion-1",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Correct Garland commodity formatting",
+        summary: "A commodity value was written incorrectly.",
+        rationale: "Confirmed against the saved review.",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-1"],
+        proposedScope: { issueKey: "GARLAND_COMMODITY_FORMATTING" }
+      },
+      [{
+        id: "feedback-1",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "TEAMSHIP_FIELD_UPDATE",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123456",
+        reporterStatement: "The commodity value is wrong.",
+        expectedOutcome: "PASS",
+        observedOutcome: "PASS",
+        teamshipReviewRunId: "review-run-1",
+        teamshipReviewOrderId: "review-order-1",
+        artifactId: null,
+        evidence: {
+          affectedField: "COMMODITY",
+          actualValue: "SKU: SAMPLE-1, SN: SAMPLE-1",
+          expectedValue: "SKU: SAMPLE-1, Qty: 8"
+        }
+      }]
+    );
+
+    const packet = prismaMock.automationJobRun.create.mock.calls[0]?.[0]?.data?.input;
+    expect(packet).toEqual(expect.objectContaining({
+      version: 2,
+      evidenceManifests: [{
+        feedbackId: "feedback-1",
+        subjectId: "PS123456",
+        issueType: "TEAMSHIP_FIELD_UPDATE",
+        evidenceRequired: true,
+        evidenceStatus: "READY",
+        structuredFeedback: {
+          affectedField: "COMMODITY",
+          actualValue: "SKU: SAMPLE-1, SN: SAMPLE-1",
+          expectedValue: "SKU: SAMPLE-1, Qty: 8"
+        },
+        reviewOrder: expect.objectContaining({
+          id: "review-order-1",
+          runId: "review-run-1",
+          pageNumbers: [2, 3]
+        }),
+        artifacts: [expect.objectContaining({
+          artifactId: "source-pdf-1",
+          kind: "SOURCE_PDF",
+          pageNumbers: [2, 3]
+        })]
+      }]
+    }));
+  });
+
+  it("serves only the approved PDF pages under the active tenant-scoped lease", async () => {
+    const sourcePdf = await PDFDocument.create();
+    sourcePdf.addPage();
+    sourcePdf.addPage();
+    sourcePdf.addPage();
+    const sourceBytes = await sourcePdf.save();
+    const sourceHash = createHash("sha256").update(sourceBytes).digest("hex");
+    const leaseToken = "lease-token-with-enough-entropy";
+    const leaseHash = createHash("sha256").update(leaseToken).digest("hex");
     prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      input: {
+        ...storedInput,
+        version: 2,
+        evidenceManifests: [{
+          feedbackId: "feedback-1",
+          subjectId: "PS123456",
+          issueType: "TEAMSHIP_FIELD_UPDATE",
+          evidenceRequired: true,
+          evidenceStatus: "READY",
+          structuredFeedback: {
+            affectedField: "COMMODITY",
+            actualValue: "incorrect",
+            expectedValue: "correct"
+          },
+          reviewOrder: {
+            id: "review-order-1",
+            runId: "review-run-1",
+            psNumber: "PS123456",
+            srNumber: "SR812345",
+            pageNumbers: [2],
+            pdfOrder: {},
+            review: {}
+          },
+          artifacts: [{
+            artifactId: "source-pdf-1",
+            kind: "SOURCE_PDF",
+            contentType: "application/pdf",
+            sizeBytes: sourceBytes.byteLength,
+            contentHash: sourceHash,
+            pageNumbers: [2],
+            downloadPath: "/api/assistant/openclaw/development-jobs/evidence"
+          }]
+        }]
+      },
+      output: {
+        phase: "CLAIMED",
+        leaseTokenHash: leaseHash,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString()
+      }
+    });
+    prismaMock.workflowArtifact.findFirst.mockResolvedValue({
+      id: "source-pdf-1",
+      workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+      status: "REVIEWED",
+      contentType: "application/pdf",
+      sizeBytes: sourceBytes.byteLength,
+      contentHash: sourceHash,
+      chunkCount: 1,
+      chunks: [{
+        chunkIndex: 0,
+        contentHash: sourceHash,
+        bytes: Buffer.from(sourceBytes)
+      }]
+    });
+
+    const result = await getRivetDevelopmentEvidence(context, {
+      jobId: "job-1",
+      feedbackId: "feedback-1",
+      artifactId: "source-pdf-1",
+      leaseToken
+    });
+    const selected = await PDFDocument.load(result.bytes);
+
+    expect(selected.getPageCount()).toBe(1);
+    expect(result.contentType).toBe("application/pdf");
+    expect(result.contentHash).not.toBe(sourceHash);
+    expect(prismaMock.workflowArtifact.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-1",
+          id: "source-pdf-1"
+        })
+      })
+    );
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "assistant.rivet_development.read_evidence"
+        })
+      })
+    );
+  });
+
+  it("records an approved sibling as waiting while the same workflow has active or blocked Rivet work", async () => {
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-existing",
+      status: JobStatus.ERROR,
+      output: { phase: "BLOCKED" }
+    });
+    prismaMock.automationJobRun.create.mockImplementation(async ({ data }) => ({
+      id: "job-waiting",
+      ...data,
+      errorMessage: null
+    }));
+
+    const job = await createRivetDevelopmentJob(
+      prismaMock as never,
+      context,
+      {
+        id: "suggestion-2",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        title: "Another Garland correction",
+        summary: "A related defect was found.",
+        rationale: "Review it with the existing work.",
+        riskLevel: "HIGH",
+        sourceFeedbackIds: ["feedback-2"],
+        proposedScope: { issueKey: "GARLAND_RELATED_DEFECT" }
+      },
+      [{
+        id: "feedback-2",
+        moduleKey: "SHIPMENT_DOCUMENTS",
+        workflowKey: "GARLAND_TEAMSHIP_REVIEW",
+        classification: "CHECK_RESULT",
+        subjectType: "GARLAND_CHECK",
+        subjectId: "PS123456",
+        reporterStatement: "A related defect was found.",
+        expectedOutcome: "PASS",
+        observedOutcome: "FAIL"
+      }]
+    );
+
+    expect(job).toMatchObject({
+      id: "job-waiting",
+      status: JobStatus.QUEUED,
+      output: {
+        phase: "WAITING_FOR_RIVET",
+        attempt: 0,
+        blockedByJobId: "job-existing"
+      }
+    });
+    expect(prismaMock.automationJobRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        status: JobStatus.QUEUED,
+        output: expect.objectContaining({
+          phase: "WAITING_FOR_RIVET",
+          blockedByJobId: "job-existing"
+        })
+      })
+    });
+  });
+
+  it("atomically claims at most one queued job and returns a short-lived lease", async () => {
+    const queuedJob = {
       id: "job-1",
       tenantId: "tenant-1",
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: storedInput,
       output: { phase: "QUEUED", attempt: 0 }
-    });
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
     prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await claimRivetDevelopmentJob(context);
@@ -175,9 +439,10 @@ describe("Rivet approved development jobs", () => {
   });
 
   it("fails an expired lease for explicit review instead of starting a duplicate worker", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValue(null);
-    prismaMock.automationJobRun.findMany.mockResolvedValue([{
+    prismaMock.automationJobRun.findMany.mockResolvedValueOnce([{
       id: "job-expired",
+      status: JobStatus.RUNNING,
+      input: storedInput,
       output: {
         phase: "RUNNING",
         leaseExpiresAt: "2026-01-01T00:00:00.000Z"
@@ -201,15 +466,76 @@ describe("Rivet approved development jobs", () => {
     );
   });
 
+  it("leaves a waiting job queued until the active job in the same workflow clears", async () => {
+    const activeJob = {
+      id: "job-active",
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: {
+        phase: "RUNNING",
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString()
+      }
+    };
+    const waitingJob = {
+      id: "job-waiting",
+      status: JobStatus.QUEUED,
+      input: {
+        ...storedInput,
+        suggestionId: "suggestion-2",
+        issueKey: "GARLAND_SPECIAL_INSTRUCTIONS_2"
+      },
+      output: {
+        phase: "WAITING_FOR_RIVET",
+        blockedByJobId: "job-active",
+        attempt: 0
+      }
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([activeJob])
+      .mockResolvedValueOnce([waitingJob]);
+
+    await expect(claimRivetDevelopmentJob(context)).resolves.toEqual({ state: "empty" });
+    expect(prismaMock.automationJobRun.updateMany).not.toHaveBeenCalled();
+
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([waitingJob]);
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+
+    const released = await claimRivetDevelopmentJob(context);
+
+    expect(released).toMatchObject({
+      state: "claimed",
+      jobId: "job-waiting"
+    });
+    expect(prismaMock.automationJobRun.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "job-waiting",
+          status: JobStatus.QUEUED
+        }),
+        data: expect.objectContaining({
+          status: JobStatus.RUNNING,
+          output: expect.objectContaining({
+            phase: "CLAIMED"
+          })
+        })
+      })
+    );
+  });
+
   it("records only an approved-repository PR and never merges or deploys", async () => {
-    prismaMock.automationJobRun.findFirst.mockResolvedValueOnce({
+    const queuedJob = {
       id: "job-1",
       tenantId: "tenant-1",
       jobType: RIVET_DEVELOPMENT_JOB_TYPE,
       status: JobStatus.QUEUED,
       input: storedInput,
       output: { phase: "QUEUED", attempt: 0 }
-    });
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
     prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
     const claim = await claimRivetDevelopmentJob(context);
     if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
@@ -223,6 +549,75 @@ describe("Rivet approved development jobs", () => {
       input: storedInput,
       output: claimedOutput
     });
+
+    const review = await updateRivetDevelopmentJob(context, {
+      action: "review",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      commitSha: "a".repeat(40),
+      reviewAttempt: 1,
+      reviewStartedAt: new Date().toISOString(),
+      reviewVerdict: "PASS",
+      reviewRiskLevel: "LOW",
+      reviewSummary: "The exact commit passed the independent review.",
+      reviewFindings: [],
+      ticketCoverage: {
+        implemented: ["Preserved wrapped Special Instructions."],
+        missing: [],
+        outOfScope: []
+      },
+      reviewChecks: {
+        privacy: { status: "PASS", note: "Synthetic fixtures only." }
+      },
+      reviewTests: {
+        required: ["Focused Garland tests"],
+        passed: ["Focused Garland tests"],
+        knownFailures: []
+      },
+      businessQuestions: []
+    });
+
+    expect(review).toMatchObject({
+      state: "reviewed",
+      verdict: "PASS",
+      findingCount: 0
+    });
+    expect(prismaMock.codexReviewRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "tenant-1",
+        developmentSuggestionId: "suggestion-1",
+        developmentJobId: "job-1",
+        commitSha: "a".repeat(40),
+        attempt: 1,
+        verdict: "PASS"
+      })
+    });
+
+    const reviewedOutput = prismaMock.automationJobRun.update.mock.calls.at(-1)?.[0]?.data?.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: reviewedOutput
+    });
+
+    await expect(updateRivetDevelopmentJob(context, {
+      action: "review",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      commitSha: "a".repeat(40),
+      reviewAttempt: 1,
+      reviewVerdict: "PASS",
+      reviewRiskLevel: "LOW",
+      reviewSummary: "Duplicate review.",
+      reviewFindings: [],
+      ticketCoverage: { implemented: [], missing: [], outOfScope: [] },
+      reviewChecks: {},
+      reviewTests: {},
+      businessQuestions: []
+    })).rejects.toThrow("out of sequence");
 
     const result = await updateRivetDevelopmentJob(context, {
       action: "complete",
@@ -245,6 +640,7 @@ describe("Rivet approved development jobs", () => {
       },
       data: { pullRequestUrl: "https://github.com/newell29/newl-apps/pull/999" }
     });
+    expect(result.teamsMessage).toContain("READY_FOR_ALEX");
     expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -254,6 +650,125 @@ describe("Rivet approved development jobs", () => {
             deployed: true
           })
         })
+      })
+    );
+  });
+
+  it("refuses to mark a PR ready when the exact commit has not passed independent review", async () => {
+    const queuedJob = {
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.QUEUED,
+      input: storedInput,
+      output: { phase: "QUEUED", attempt: 0 }
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+    const claim = await claimRivetDevelopmentJob(context);
+    if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
+    const claimedOutput = prismaMock.automationJobRun.updateMany.mock.calls[0][0].data.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: claimedOutput
+    });
+
+    await expect(updateRivetDevelopmentJob(context, {
+      action: "complete",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      branchName: claim.packet.branchName,
+      commitSha: "b".repeat(40),
+      pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"],
+      summary: "Unreviewed change.",
+      tests: [],
+      knownLimitations: []
+    })).rejects.toThrow("independent Codex review passes the exact commit");
+  });
+
+  it("stores blocked review evidence and preserves the draft PR for Alex", async () => {
+    const queuedJob = {
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.QUEUED,
+      input: storedInput,
+      output: { phase: "QUEUED", attempt: 0 }
+    };
+    prismaMock.automationJobRun.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([queuedJob]);
+    prismaMock.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+    const claim = await claimRivetDevelopmentJob(context);
+    if (claim.state !== "claimed") throw new Error("Expected a claimed job.");
+    const claimedOutput = prismaMock.automationJobRun.updateMany.mock.calls[0][0].data.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: claimedOutput
+    });
+
+    await updateRivetDevelopmentJob(context, {
+      action: "review",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      commitSha: "c".repeat(40),
+      reviewAttempt: 1,
+      reviewVerdict: "BLOCKED",
+      reviewRiskLevel: "HIGH",
+      reviewSummary: "The change requires a new business decision.",
+      reviewFindings: [{
+        severity: "HIGH",
+        category: "BUSINESS_SCOPE",
+        file: "src/example.ts",
+        line: 10,
+        summary: "The change broadens the approved rule.",
+        requiredFix: "Ask the owner to approve the broader behaviour.",
+        autoFixable: false,
+        businessDecisionRequired: true
+      }],
+      ticketCoverage: { implemented: [], missing: ["Approved rule"], outOfScope: ["New rule"] },
+      reviewChecks: {},
+      reviewTests: { required: [], passed: [], knownFailures: [] },
+      businessQuestions: ["Should the broader rule be approved?"]
+    });
+    const blockedOutput = prismaMock.automationJobRun.update.mock.calls.at(-1)?.[0]?.data?.output;
+    prismaMock.automationJobRun.findFirst.mockResolvedValue({
+      id: "job-1",
+      tenantId: "tenant-1",
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      input: storedInput,
+      output: blockedOutput
+    });
+
+    const result = await updateRivetDevelopmentJob(context, {
+      action: "fail",
+      jobId: "job-1",
+      leaseToken: claim.leaseToken,
+      branchName: claim.packet.branchName,
+      commitSha: "c".repeat(40),
+      pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"],
+      errorCode: "RIVET_REVIEW_BLOCKED",
+      errorMessage: "Independent review needs an owner decision."
+    });
+
+    expect(result).toMatchObject({
+      state: "blocked",
+      pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"]
+    });
+    expect(prismaMock.developmentSuggestion.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { pullRequestUrl: "https://github.com/newell29/newl-apps/pull/999" }
       })
     );
   });

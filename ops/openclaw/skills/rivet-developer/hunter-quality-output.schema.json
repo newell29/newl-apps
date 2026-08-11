@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["auditedAt", "findings"],
+  "properties": {
+    "auditedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "signalId",
+          "category",
+          "severity",
+          "observedTier",
+          "recommendedTier",
+          "reproducible",
+          "summary",
+          "rationale",
+          "evidenceUrls"
+        ],
+        "properties": {
+          "signalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "NO_ISSUE",
+              "MODEL_JUDGMENT",
+              "EVIDENCE_RETRIEVAL",
+              "EVIDENCE_HANDOFF",
+              "DETERMINISTIC_RULE",
+              "DATA_OR_CONFIG"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["NONE", "LOW", "MEDIUM", "HIGH"]
+          },
+          "observedTier": {
+            "$ref": "#/$defs/opportunityTier"
+          },
+          "recommendedTier": {
+            "$ref": "#/$defs/opportunityTier"
+          },
+          "reproducible": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "evidenceUrls": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "string",
+              "pattern": "^https://"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "opportunityTier": {
+      "type": "string",
+      "enum": [
+        "HOT_OPPORTUNITY",
+        "QUALIFIED_CURRENT_ACCOUNT",
+        "WATCHLIST",
+        "BLOCKED",
+        "UNKNOWN"
+      ]
+    }
+  }
+}

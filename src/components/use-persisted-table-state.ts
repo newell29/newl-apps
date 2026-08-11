@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ColumnFiltersState, ColumnSizingState, SortingState, VisibilityState } from "@tanstack/react-table";
 
 type PersistedTableState = {
@@ -17,10 +17,16 @@ const DEFAULT_STATE: PersistedTableState = {
   columnSizing: {}
 };
 
-export function usePersistedTableState(storageKey: string) {
+export function usePersistedTableState(
+  storageKey: string,
+  initialColumnVisibility: VisibilityState = DEFAULT_STATE.columnVisibility
+) {
+  const initialColumnVisibilityRef = useRef(initialColumnVisibility);
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_STATE.sorting);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(DEFAULT_STATE.columnFilters);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(DEFAULT_STATE.columnVisibility);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
+    initialColumnVisibilityRef.current
+  );
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(DEFAULT_STATE.columnSizing);
   const [hydrated, setHydrated] = useState(false);
 
@@ -35,10 +41,15 @@ export function usePersistedTableState(storageKey: string) {
       const parsed = JSON.parse(raw) as Partial<PersistedTableState>;
       setSorting(Array.isArray(parsed.sorting) ? parsed.sorting : DEFAULT_STATE.sorting);
       setColumnFilters(Array.isArray(parsed.columnFilters) ? parsed.columnFilters : DEFAULT_STATE.columnFilters);
-      setColumnVisibility(isPlainObject(parsed.columnVisibility) ? parsed.columnVisibility : DEFAULT_STATE.columnVisibility);
+      setColumnVisibility(
+        isPlainObject(parsed.columnVisibility)
+          ? parsed.columnVisibility
+          : initialColumnVisibilityRef.current
+      );
       setColumnSizing(isPlainObject(parsed.columnSizing) ? parsed.columnSizing : DEFAULT_STATE.columnSizing);
     } catch {
       window.localStorage.removeItem(storageKey);
+      setColumnVisibility(initialColumnVisibilityRef.current);
     } finally {
       setHydrated(true);
     }

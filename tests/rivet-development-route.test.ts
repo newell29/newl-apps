@@ -92,4 +92,40 @@ describe("Rivet OpenClaw development job route", () => {
       pullRequestUrls: ["https://github.com/newell29/newl-apps/pull/999"]
     }));
   });
+
+  it("passes structured independent-review evidence to the tenant-scoped service", async () => {
+    mocks.update.mockResolvedValue({
+      state: "reviewed",
+      jobId: "job-1",
+      verdict: "PASS"
+    });
+    const response = await POST(new Request("https://newl.test/api/assistant/openclaw/development-jobs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "review",
+        jobId: "job-1",
+        leaseToken: "lease-1",
+        commitSha: "a".repeat(40),
+        reviewAttempt: 1,
+        reviewVerdict: "PASS",
+        reviewRiskLevel: "LOW",
+        reviewSummary: "No unresolved findings.",
+        reviewFindings: [],
+        ticketCoverage: { implemented: ["Approved issue"], missing: [], outOfScope: [] },
+        reviewChecks: { privacy: { status: "PASS", note: "No live data." } },
+        reviewTests: { required: ["Focused tests"], passed: ["Focused tests"], knownFailures: [] },
+        businessQuestions: []
+      })
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledWith(context, expect.objectContaining({
+      action: "review",
+      commitSha: "a".repeat(40),
+      reviewAttempt: 1,
+      reviewVerdict: "PASS",
+      reviewFindings: []
+    }));
+  });
 });

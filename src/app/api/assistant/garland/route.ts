@@ -68,8 +68,10 @@ export async function POST(request: Request) {
       return NextResponse.json({
         data: {
           awaitingApproval: suggestions.filter((item) => item.status === "AWAITING_APPROVAL"),
+          readyForAlex: suggestions.filter((item) => item.developmentJob?.phase === "READY_FOR_ALEX"),
+          blockedRivetReviews: suggestions.filter((item) => item.developmentJob?.phase === "BLOCKED"),
           unresolvedQueries,
-          safety: "No development, branch, pull request, merge, deployment, Teamship write, or printing action was started."
+          safety: "The digest did not start development, merge, deployment, Teamship writes, or printing. READY_FOR_ALEX means an independent Codex review passed; Alex remains the only merger."
         }
       });
     }

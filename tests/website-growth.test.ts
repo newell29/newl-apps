@@ -68,7 +68,8 @@ import {
   getWebsiteGrowthPrimaryChange,
   getWebsiteGrowthRoute,
   getWebsiteGrowthWorkflowStage,
-  readScoutRunSummary
+  readScoutRunSummary,
+  readSeoRecoverySummary
 } from "@/modules/website-growth/workspace";
 import { authenticateWebsiteGrowthBuildWorkerRequest } from "@/server/website-growth-build-worker-auth";
 import { authenticateWebsiteGrowthScoutRequest } from "@/server/website-growth-scout-auth";
@@ -289,6 +290,19 @@ describe("website growth Scout workspace", () => {
     ).toBe("PREVIEW_READY");
   });
 
+  it("treats every saved brief for a published opportunity as completed", () => {
+    expect(
+      getWebsiteGrowthWorkflowStage({
+        ...existingPageDraft,
+        status: WebsiteGrowthContentDraftStatus.APPROVED,
+        opportunity: {
+          ...existingPageDraft.opportunity,
+          status: WebsiteGrowthOpportunityStatus.PUBLISHED
+        }
+      })
+    ).toBe("COMPLETED");
+  });
+
   it("reads the latest Scout batch without treating raw signals as ideas", () => {
     expect(
       readScoutRunSummary({
@@ -320,14 +334,16 @@ describe("website growth Scout workspace", () => {
 
 describe("website growth weekly planning lanes", () => {
   it("offers a balanced weekly approval slate with a reserved question lane", () => {
-    expect(weeklyContentRecommendations).toHaveLength(4);
+    expect(weeklyContentRecommendations).toHaveLength(5);
     expect(weeklyContentRecommendations.map((lane) => lane.lane)).toEqual([
+      "SEO_RECOVERY",
       "CORE_PAGE",
       "QUESTION_ANSWER",
       "SUPPORTING_CONTENT",
       "QUICK_OPTIMIZATION"
     ]);
     expect(weeklyContentRecommendations.map((lane) => lane.publishLimit)).toEqual([
+      2,
       2,
       2,
       4,
@@ -412,6 +428,38 @@ describe("website growth weekly planning lanes", () => {
     expect(plan.laneCounts.QUESTION_ANSWER).toBe(1);
     expect(plan.laneCounts.QUICK_OPTIMIZATION).toBe(0);
     expect(packet.map((candidate) => candidate.id)).toEqual(["question", "core-1"]);
+  });
+
+  it("reserves packet capacity for SEO recovery before question-led and ordinary ideas", () => {
+    const recovery = weeklyCandidate({
+      id: "recovery",
+      action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+      topic: "SEO recovery for fulfillment services",
+      targetPage: "https://www.newlgroup.com/services/fulfillment-services",
+      score: 70,
+      evidence: { seoRecovery: true }
+    });
+    const question = weeklyCandidate({
+      id: "question-recovery-test",
+      action: WebsiteGrowthAction.ADD_SECTION,
+      topic: "how much does 3pl warehousing cost",
+      targetPage: "https://www.newlgroup.com/services/warehousing-services",
+      score: 65
+    });
+    const ordinary = weeklyCandidate({
+      id: "ordinary",
+      action: WebsiteGrowthAction.CREATE_PAGE,
+      topic: "consumer goods logistics",
+      targetPage: "https://www.newlgroup.com/industries/consumer-goods",
+      score: 95
+    });
+
+    const plan = selectWeeklyWebsiteGrowthCandidates([ordinary, question, recovery]);
+    const packet = selectWebsiteGrowthScoutPacketCandidates([ordinary, question, recovery], 3);
+
+    expect(plan.laneCounts.SEO_RECOVERY).toBe(1);
+    expect(plan.laneCounts.QUESTION_ANSWER).toBe(1);
+    expect(packet.map((candidate) => candidate.id)).toEqual(["recovery", "question-recovery-test", "ordinary"]);
   });
 });
 
@@ -506,7 +554,52 @@ describe("website growth Codex Scout completion", () => {
         prospects: []
       },
       drafts: []
-    })).toThrow("must identify live or cached SEMrush evidence");
+    })).toThrow("must identify live, cached, or unavailable SEMrush evidence");
+  });
+
+  it("continues with first-party and public-web research when SEMrush units are unavailable", () => {
+    const completion = parseWebsiteGrowthScoutCompletion({
+      runSummary: "SEMrush was unavailable; the bounded public-web backlink funnel still completed.",
+      semrush: {
+        queried: false,
+        source: "UNAVAILABLE",
+        observedAt: "2026-07-27T15:00:00.000Z",
+        summary: "SEMrush API units and a fresh cache were unavailable.",
+        rows: [],
+        tracking: {
+          projectId: null,
+          campaignId: null,
+          domain: null,
+          database: null,
+          device: null,
+          visibility: null,
+          previousVisibility: null,
+          top3: null,
+          top10: null,
+          top20: null,
+          top100: null,
+          improved: null,
+          declined: null,
+          entered: null,
+          lost: null,
+          trackedKeywords: []
+        }
+      },
+      backlinks: {
+        queried: true,
+        source: "WEB_DISCOVERY",
+        observedAt: "2026-07-27T15:00:00.000Z",
+        summary: "No public-web finalist passed Codex review.",
+        rawProspectsReviewed: 120,
+        duplicatesRejected: 80,
+        qualityRejected: 40,
+        prospects: []
+      },
+      drafts: []
+    });
+
+    expect(completion.semrush.source).toBe("UNAVAILABLE");
+    expect(completion.backlinks.source).toBe("WEB_DISCOVERY");
   });
 
   it("accepts explicitly dated cached SEMrush evidence without claiming a live query", () => {
@@ -549,6 +642,9 @@ describe("website growth Codex Scout completion", () => {
       candidateCount: 6,
       questionCandidateCount: 2,
       questionDraftCount: 1,
+      recoveryCandidateCount: 2,
+      recoveryDraftCount: 1,
+      seoRecovery: seoRecoverySnapshot(),
       researchSignalCount: 6505,
       researchInventory: { MONITORING: 6105 },
       keywordAdditionCount: 2,
@@ -569,8 +665,27 @@ describe("website growth Codex Scout completion", () => {
     expect(message).toContain(
       "Question and AI-answer lane: 2 question-led candidates reviewed; 1 promoted"
     );
+    expect(message).toContain("SEO recovery monitor: 157 to 140 clicks (-11%)");
+    expect(message).toContain("SEO recovery lane: 2 candidates reviewed by Codex; 1 promoted");
     expect(message).toContain("SEO performance: https://newl-apps.example.com/api/seo-performance.xlsx");
     expect(message).toContain("SEMrush keyword import: https://newl-apps.example.com/api/semrush-keywords.xlsx");
+  });
+
+  it("reads the latest SEO recovery snapshot for the owner workspace", () => {
+    const summary = readSeoRecoverySummary({
+      evidenceRefresh: { seoRecovery: seoRecoverySnapshot() }
+    });
+
+    expect(summary).toMatchObject({
+      available: true,
+      currentClicks: 140,
+      previousClicks: 157,
+      counts: { needsRecovery: 2, migrationTransition: 3, improving: 1 }
+    });
+    expect(summary.candidates[0]).toMatchObject({
+      route: "/services/fulfillment-services",
+      status: "NEEDS_RECOVERY"
+    });
   });
 
   it("sends a useful weekday Teams message when no new idea is promoted", () => {
@@ -618,14 +733,33 @@ describe("website growth Codex Scout completion", () => {
         observedAt: "2026-07-20T13:15:00.000Z",
         expiresAt: "2026-07-28T13:15:00.000Z",
         ageDays: 4,
-        tracking: semrushTrackingSnapshot()
+        tracking: semrushTrackingSnapshot(),
+        reports: [{
+          reportType: "POSITION_TRACKING",
+          subject: "Scout - Weekly Newl Position Tracking",
+          observedAt: "2026-07-20T13:15:00.000Z",
+          metrics: { visibility: 8.2 },
+          excerpt: "Position Tracking visibility 8.2%."
+        }]
+      },
+      semrushMailSync: {
+        status: "SUCCESS",
+        messagesSeen: 1,
+        eligibleMessages: 1,
+        attachmentsSeen: 1,
+        imported: 1,
+        duplicates: 0,
+        skipped: 0,
+        failed: 0,
+        latestObservedAt: "2026-07-20T13:15:00.000Z"
       },
       backlinkCounts: { NEEDS_REVIEW: 4 },
       reviewBaseUrl: "https://newl-apps.example.com"
     });
 
     expect(message).toContain("no SEMrush API units or Codex research were used");
-    expect(message).toContain("SEMrush cache: current");
+    expect(message).toContain("SEMrush evidence cache: current");
+    expect(message).toContain("SEMrush mailbox: 1 new report imported");
     expect(message).toContain("4 curated prospects currently need review");
     expect(message).toContain(
       "Question and AI-answer lane: 1 question-led candidate newly shortlisted"
@@ -810,18 +944,59 @@ function semrushTrackingSnapshot() {
   };
 }
 
+function seoRecoverySnapshot() {
+  return {
+    version: 1 as const,
+    currentPeriod: { startDate: "2026-07-06", endDate: "2026-08-02" },
+    previousPeriod: { startDate: "2026-06-08", endDate: "2026-07-05" },
+    site: {
+      current: { clicks: 140, impressions: 79_966, ctr: 0.00175, position: 40.7, brandedClicks: 33, nonBrandedClicks: 7 },
+      previous: { clicks: 157, impressions: 126_408, ctr: 0.00124, position: 33.2, brandedClicks: 29, nonBrandedClicks: 11 },
+      clickChangePercent: -0.108,
+      impressionChangePercent: -0.367,
+      positionChange: 7.5
+    },
+    country: {
+      canada: {
+        current: { clicks: 56, impressions: 8_663, ctr: 0.0065, position: 32.9, brandedClicks: 0, nonBrandedClicks: 0 },
+        previous: { clicks: 47, impressions: 10_331, ctr: 0.0045, position: 22.8, brandedClicks: 0, nonBrandedClicks: 0 }
+      },
+      unitedStates: {
+        current: { clicks: 28, impressions: 62_290, ctr: 0.0004, position: 40.9, brandedClicks: 0, nonBrandedClicks: 0 },
+        previous: { clicks: 45, impressions: 82_296, ctr: 0.0005, position: 32.1, brandedClicks: 0, nonBrandedClicks: 0 }
+      }
+    },
+    counts: { NEEDS_RECOVERY: 2, MIGRATION_TRANSITION: 3, IMPROVING: 1, MONITOR: 4 },
+    candidates: [{
+      route: "/services/fulfillment-services",
+      status: "NEEDS_RECOVERY" as const,
+      reason: "Qualified visibility needs recovery for /services/fulfillment-services.",
+      current: { clicks: 1, impressions: 4_000, ctr: 0.00025, position: 35, brandedClicks: 0, nonBrandedClicks: 1 },
+      previous: { clicks: 3, impressions: 5_000, ctr: 0.0006, position: 12, brandedClicks: 0, nonBrandedClicks: 3 },
+      clickChangePercent: -0.667,
+      impressionChangePercent: -0.2,
+      positionChange: 23,
+      legacySources: ["/glossary/kitting-services-definition"],
+      topQueries: ["kitting services"],
+      commercial: true
+    }]
+  };
+}
+
 function weeklyCandidate({
   id,
   action,
   topic,
   targetPage,
-  score
+  score,
+  evidence
 }: {
   id: string;
   action: WebsiteGrowthAction;
   topic: string;
   targetPage: string | null;
   score: number;
+  evidence?: Record<string, unknown>;
 }) {
   return {
     id,
@@ -830,6 +1005,7 @@ function weeklyCandidate({
     targetPage,
     sourcePage: targetPage,
     score,
+    evidence: evidence ?? {},
     updatedAt: new Date("2026-07-15T12:00:00Z")
   } as WebsiteGrowthOpportunity;
 }

@@ -9,6 +9,42 @@ export type SequenceCatalogItem = {
   name: string;
 };
 
+export const HUNTER_EMAIL_ONLY_SEQUENCE = {
+  id: "hunter-email-only",
+  name: "Hunter - Email Only"
+} as const;
+
+export const HUNTER_EXECUTIVE_REFERRAL_SEQUENCE = {
+  id: "hunter-executive-referral",
+  name: "Hunter - Executive Referral"
+} as const;
+
+export function isHunterManagedSequenceName(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return (
+    normalized === HUNTER_EMAIL_ONLY_SEQUENCE.name.toLowerCase() ||
+    normalized === HUNTER_EXECUTIVE_REFERRAL_SEQUENCE.name.toLowerCase()
+  );
+}
+
+export function shouldUseHunterSequenceRecommendation({
+  hunterEligible,
+  sequenceManuallyOverridden,
+  selectedSequenceName
+}: {
+  hunterEligible: boolean;
+  sequenceManuallyOverridden: boolean;
+  selectedSequenceName: string | null;
+}) {
+  if (!hunterEligible) {
+    return false;
+  }
+  return (
+    !sequenceManuallyOverridden ||
+    !isHunterManagedSequenceName(selectedSequenceName)
+  );
+}
+
 const fallbackSequenceCatalog: SequenceCatalogItem[] = [
   {
     id: "houston-import-decision-maker",
@@ -50,7 +86,8 @@ export function recommendSequenceForContact({
   department,
   companyName,
   sequenceMappings,
-  sequenceDirectory
+  sequenceDirectory,
+  hunterManaged = false
 }: {
   contactTier: ContactTier;
   title: string | null;
@@ -58,7 +95,11 @@ export function recommendSequenceForContact({
   companyName: string;
   sequenceMappings: ApolloSequenceMappingEntry[];
   sequenceDirectory: ApolloSequenceDirectoryEntry[];
+  hunterManaged?: boolean;
 }) {
+  if (hunterManaged) {
+    return recommendHunterSequence({ title, department, sequenceDirectory });
+  }
   const mappedSequence = findMappedApolloSequence(contactTier, sequenceMappings, sequenceDirectory);
   if (mappedSequence) {
     return mappedSequence;
@@ -70,6 +111,35 @@ export function recommendSequenceForContact({
     department,
     companyName
   });
+}
+
+function recommendHunterSequence({
+  title,
+  department,
+  sequenceDirectory
+}: {
+  title: string | null;
+  department: string | null;
+  sequenceDirectory: ApolloSequenceDirectoryEntry[];
+}) {
+  const text = `${title ?? ""} ${department ?? ""}`.toLowerCase();
+  const executive = /\b(chief|ceo|coo|president|owner|founder|managing director|general manager|vice president|vp)\b/.test(text);
+  const target = executive
+    ? HUNTER_EXECUTIVE_REFERRAL_SEQUENCE
+    : HUNTER_EMAIL_ONLY_SEQUENCE;
+  const live = sequenceDirectory.find(
+    (entry) =>
+      entry.active &&
+      !entry.archived &&
+      entry.name.trim().toLowerCase() === target.name.toLowerCase()
+  );
+  return {
+    id: live?.id ?? target.id,
+    name: live?.name ?? target.name,
+    reason: executive
+      ? "Hunter selected the executive-referral email cadence for a senior stakeholder. Calls remain a separate hot-opportunity task."
+      : "Hunter selected the standard email-only cadence. Calls remain disabled unless the saved opportunity is Hot."
+  };
 }
 
 function findMappedApolloSequence(

@@ -9,8 +9,10 @@ source_repo_path="${script_directory:h:h}"
 runtime_repo_path="${NEWL_APPS_SCOUT_RUNTIME_REPO_PATH:-${HOME}/Developer/newl-apps-scout-runtime}"
 runtime_main_ref="refs/scout-runtime/website-growth-main"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
+hunter_env_file="${HUNTER_ENV_FILE:-${HOME}/.openclaw/agents/hunter/.env}"
 source "${script_directory}/lib/resolve-codex-cli.zsh"
 resolve_codex_cli
+"${codex_bin}" --version >/dev/null
 
 if [[ ! -r "${scout_env_file}" ]]; then
   echo "Create the protected Scout environment file before installation." >&2
@@ -22,11 +24,13 @@ for required_name in NEWL_APPS_URL OPENCLAW_WEBSITE_GROWTH_TOKEN NEWL_WEBSITE_RE
     exit 1
   fi
 done
-if ! "${codex_bin}" mcp get semrush >/dev/null 2>&1; then
-  echo "Configure the official SEMrush MCP OAuth connection before installing the weekday job." >&2
+if ! grep -Eq "^HUNTER_BRAVE_SEARCH_API_KEY=.+" "${scout_env_file}" && {
+  [[ ! -r "${hunter_env_file}" ]] ||
+  ! grep -Eq "^HUNTER_BRAVE_SEARCH_API_KEY=.+" "${hunter_env_file}"
+}; then
+  echo "HUNTER_BRAVE_SEARCH_API_KEY is not configured in the protected Scout or Hunter environment file." >&2
   exit 1
 fi
-
 if [[ -e "${runtime_repo_path}" && ! -e "${runtime_repo_path}/.git" ]]; then
   echo "NEWL_APPS_SCOUT_RUNTIME_REPO_PATH exists but is not a Git worktree." >&2
   exit 1
@@ -44,13 +48,14 @@ git -C "${runtime_repo_path}" fetch origin "+main:${runtime_main_ref}"
 git -C "${runtime_repo_path}" checkout --detach "${runtime_main_ref}"
 
 runtime_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-scout-runtime.sh"
+build_notification_runner_path="${runtime_repo_path}/ops/openclaw/run-website-growth-build-notifications.sh"
 
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
   --display-name "NEWL Website Growth Scout" \
-  --description "Every Monday, run the deep read-only Codex Scout with official SEMrush MCP, persist a bounded cache, and send the approval/report package to Teams." \
+  --description "Every Monday and Wednesday, run bounded Brave backlink discovery, local Qwen triage, and read-only Codex final review; send the approval/report package to Teams." \
   --declaration-key "newl.website-growth.scout.weekly.v1" \
-  --cron "15 9 * * 1" \
+  --cron "15 9 * * 1,3" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\"]" \
@@ -64,9 +69,9 @@ openclaw cron add \
 openclaw cron add \
   --name "NEWL Website Growth Scout check-in" \
   --display-name "NEWL Website Growth Scout check-in" \
-  --description "Tuesday through Friday, refresh Search Console, GA4, forms, and queue state; reuse the stored SEMrush cache; send a Teams check-in without Codex or SEMrush API calls." \
+  --description "Tuesday, Thursday, and Friday, refresh Search Console, GA4, forms, and queue state; reuse the stored SEMrush cache; send a Teams check-in without Codex or SEMrush API calls." \
   --declaration-key "newl.website-growth.scout.weekday-checkin.v1" \
-  --cron "15 9 * * 2-5" \
+  --cron "15 9 * * 2,4-5" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\",\"--light\"]" \
@@ -77,5 +82,18 @@ openclaw cron add \
   --output-max-bytes 100000 \
   --no-deliver
 
-echo "Installed the deep Website Growth Scout for Mondays and the cache-backed check-in for Tuesday through Friday at 9:15 AM America/Toronto."
+openclaw cron add \
+  --name "NEWL Website Growth build notifications" \
+  --display-name "NEWL Website Growth build notifications" \
+  --description "Deliver deterministic Teams updates when an approved Website Growth build starts, reaches Preview, or fails." \
+  --declaration-key "newl.website-growth.build-notifications.v1" \
+  --every "2m" \
+  --command-argv "[\"/bin/zsh\",\"${build_notification_runner_path}\"]" \
+  --command-cwd "${runtime_repo_path}" \
+  --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
+  --timeout-seconds 90 \
+  --no-deliver
+
+echo "Installed the bounded Website Growth Scout for Mondays and Wednesdays and the cache-backed check-in for Tuesday, Thursday, and Friday at 9:15 AM America/Toronto."
+echo "Installed the deterministic Website Growth build notifier every two minutes."
 echo "Dedicated runtime: ${runtime_repo_path}"

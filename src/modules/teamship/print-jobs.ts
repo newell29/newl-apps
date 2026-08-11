@@ -20,7 +20,9 @@ export const TEAMSHIP_PRINT_JOB_STATUSES = [
   "CLAIMED",
   "COMPLETED",
   "FAILED",
-  "EXPIRED"
+  "EXPIRED",
+  "WAITING_BATCH",
+  "BLOCKED"
 ] as const;
 
 export type TeamshipPrintJobStatus = typeof TEAMSHIP_PRINT_JOB_STATUSES[number];
@@ -84,6 +86,26 @@ type PrintJobDependencies = {
   now?: () => Date;
 };
 
+type TeamshipPrintBatchChild = {
+  batchId: string;
+  batchPosition: number;
+  reviewOrderId: string;
+};
+
+export type TeamshipPrintReviewReference = {
+  psNumber: string;
+  srNumber: string;
+  teamshipOrderId: string;
+  teamshipUrl: string | null;
+};
+
+type CreateTeamshipPrintPlanInput = {
+  requestKey: string;
+  batch?: TeamshipPrintBatchChild;
+  shippingOrderNumber?: string;
+  reviewReference?: TeamshipPrintReviewReference;
+};
+
 const APPROVAL_TTL_MS = 15 * 60_000;
 const CLAIM_TTL_MS = 15 * 60_000;
 const MAX_PALLET_COUNT = 100;
@@ -103,12 +125,14 @@ export class TeamshipPrintJobError extends Error {
 
 export async function createTeamshipPrintPlan(
   context: AuthenticatedContext,
-  input: { shippingOrderNumber: string; requestKey: string },
+  input: CreateTeamshipPrintPlanInput,
   dependencies: PrintJobDependencies = {}
 ) {
-  await requirePrintAccess(context);
-  const shippingOrderNumber = requireShippingOrderNumber(input.shippingOrderNumber);
+  await requireTeamshipPrintAccess(context);
   const requestKey = requireRequestKey(input.requestKey);
+  const requestedShippingOrderNumber = input.reviewReference
+    ? null
+    : requireShippingOrderNumber(input.shippingOrderNumber);
   const now = dependencies.now?.() ?? new Date();
   const idempotencyKey = crypto
     .createHash("sha256")
@@ -119,7 +143,13 @@ export async function createTeamshipPrintPlan(
     where: { tenantId_idempotencyKey: { tenantId: context.tenantId, idempotencyKey } }
   });
   if (existing) {
-    if (existing.requestedByUserId !== context.userId || existing.shippingOrderNumber !== shippingOrderNumber) {
+    const reviewRequestMismatch = input.reviewReference
+      && existing.reviewOrderId !== input.batch?.reviewOrderId;
+    if (
+      existing.requestedByUserId !== context.userId
+      || (requestedShippingOrderNumber && existing.shippingOrderNumber !== requestedShippingOrderNumber)
+      || reviewRequestMismatch
+    ) {
       throw new TeamshipPrintJobError("The print request key is already in use.", 409);
     }
     return serializePrintJob(existing);
@@ -127,30 +157,18 @@ export async function createTeamshipPrintPlan(
 
   await expireTeamshipPrintJobs(context.tenantId, now);
 
-  const existingOrderJob = await prisma.teamshipPrintJob.findUnique({
-    where: { tenantId_activeOrderKey: { tenantId: context.tenantId, activeOrderKey: shippingOrderNumber } }
-  });
-  if (existingOrderJob) {
-    throw new TeamshipPrintJobError(
-      `Print request ${existingOrderJob.id} already controls shipping order ${shippingOrderNumber} with status ${existingOrderJob.status}. Check that request before printing again.`,
-      409
-    );
+  if (requestedShippingOrderNumber) {
+    await requireNoActivePrintJob(context.tenantId, requestedShippingOrderNumber);
   }
 
   const findOrders = dependencies.findOrders ?? findTeamshipShippingOrders;
-  const orders = await findOrders({
-    tenantId: context.tenantId,
-    orderIdentifier: shippingOrderNumber
-  });
-  const exact = orders.filter((order) => teamshipOrderMatchesShippingOrderNumber(order, shippingOrderNumber));
-  if (exact.length === 0) {
-    throw new TeamshipPrintJobError(`No exact Teamship shipping order ${shippingOrderNumber} was found.`, 404);
-  }
-  if (exact.length !== 1) {
-    throw new TeamshipPrintJobError(`Teamship returned more than one exact order ${shippingOrderNumber}; nothing was queued.`, 409);
+  const { shippingOrderNumber, order } = input.reviewReference
+    ? await resolveReviewPrintOrder(context, input.reviewReference, findOrders)
+    : await resolveDisplayPrintOrder(context, requestedShippingOrderNumber!, findOrders);
+  if (!requestedShippingOrderNumber) {
+    await requireNoActivePrintJob(context.tenantId, shippingOrderNumber);
   }
 
-  const order = exact[0]!;
   const teamshipOrderId = resolveTeamshipInternalOrderId(order);
   const customerName = readTeamshipCustomerName(order);
   const warehouseName = readTeamshipWarehouseName(order);
@@ -189,6 +207,9 @@ export async function createTeamshipPrintPlan(
           idempotencyKey,
           activeOrderKey: shippingOrderNumber,
           requestedByUserId: context.userId,
+          batchId: input.batch?.batchId,
+          batchPosition: input.batch?.batchPosition,
+          reviewOrderId: input.batch?.reviewOrderId,
           expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS)
         }
       });
@@ -205,7 +226,10 @@ export async function createTeamshipPrintPlan(
             status: "PENDING_APPROVAL",
             approvedPalletCount,
             documentPlan,
-            printerPlan
+            printerPlan,
+            batchId: input.batch?.batchId ?? null,
+            batchPosition: input.batch?.batchPosition ?? null,
+            reviewOrderId: input.batch?.reviewOrderId ?? null
           } as unknown as Prisma.InputJsonValue
         }
       });
@@ -227,7 +251,7 @@ export async function approveTeamshipPrintPlan(
   confirmed: boolean,
   dependencies: Pick<PrintJobDependencies, "now"> = {}
 ) {
-  await requirePrintAccess(context);
+  await requireTeamshipPrintAccess(context);
   if (!confirmed) {
     throw new TeamshipPrintJobError("Explicit print confirmation is required.");
   }
@@ -286,7 +310,7 @@ export async function approveTeamshipPrintPlan(
 }
 
 export async function getTeamshipPrintJobForEmployee(context: AuthenticatedContext, jobId: string) {
-  await requirePrintAccess(context);
+  await requireTeamshipPrintAccess(context);
   await expireTeamshipPrintJobs(context.tenantId, new Date());
   const job = await prisma.teamshipPrintJob.findFirst({
     where: { id: requireJobId(jobId), tenantId: context.tenantId, requestedByUserId: context.userId }
@@ -322,6 +346,12 @@ export async function claimNextTeamshipPrintJob(
   if (claimed.count !== 1) return null;
 
   const job = await prisma.teamshipPrintJob.findUniqueOrThrow({ where: { id: pending.id } });
+  if (job.batchId) {
+    await prisma.teamshipPrintBatch.updateMany({
+      where: { id: job.batchId, tenantId: tenant.id, status: "APPROVED" },
+      data: { status: "RUNNING" }
+    });
+  }
   const credentials = await resolveTenantTeamshipCredentials({ tenantId: tenant.id });
   if (!credentials) {
     await failTeamshipPrintJob(job.id, workerId, tenantSlug, {
@@ -357,17 +387,68 @@ export async function completeTeamshipPrintJob(
   });
   if (!job) return false;
   const normalized = parseExecutionResult(result, job);
-  const updated = await prisma.teamshipPrintJob.updateMany({
-    where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
-    data: {
-      status: "COMPLETED",
-      completedAt: new Date(),
-      result: normalized as unknown as Prisma.InputJsonValue,
-      errorCode: null,
-      errorMessage: null
+  const completedAt = new Date();
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.teamshipPrintJob.updateMany({
+      where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
+      data: {
+        status: "COMPLETED",
+        completedAt,
+        result: normalized as unknown as Prisma.InputJsonValue,
+        errorCode: null,
+        errorMessage: null
+      }
+    });
+    if (updated.count !== 1) return false;
+    if (!job.batchId) return true;
+
+    const batch = await tx.teamshipPrintBatch.findFirst({
+      where: { id: job.batchId, tenantId: tenant.id }
+    });
+    if (!batch) return true;
+
+    if (job.reviewOrderId && batch.reviewRunId) {
+      await tx.teamshipReviewOrder.updateMany({
+        where: {
+          id: job.reviewOrderId,
+          tenantId: tenant.id,
+          runId: batch.reviewRunId
+        },
+        data: {
+          workflowStatus: "BOL_PRINTED",
+          bolPrintedAt: completedAt,
+          bolPrintedByUserId: batch.approvedByUserId,
+          orderCompletedAt: null,
+          orderCompletedByUserId: null
+        }
+      });
     }
+
+    const next = await tx.teamshipPrintJob.findFirst({
+      where: { tenantId: tenant.id, batchId: job.batchId, status: "WAITING_BATCH" },
+      orderBy: { batchPosition: "asc" }
+    });
+    if (next) {
+      await tx.teamshipPrintJob.update({
+        where: { id: next.id },
+        data: {
+          status: "APPROVED",
+          expiresAt: new Date(completedAt.getTime() + CLAIM_TTL_MS)
+        }
+      });
+    } else {
+      await tx.teamshipPrintBatch.updateMany({
+        where: { id: job.batchId, tenantId: tenant.id, status: { in: ["APPROVED", "RUNNING"] } },
+        data: {
+          status: "COMPLETED",
+          completedAt,
+          errorCode: null,
+          errorMessage: null
+        }
+      });
+    }
+    return true;
   });
-  return updated.count === 1;
 }
 
 export async function failTeamshipPrintJob(
@@ -378,18 +459,48 @@ export async function failTeamshipPrintJob(
 ) {
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true } });
   if (!tenant) return false;
-  const updated = await prisma.teamshipPrintJob.updateMany({
-    where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
-    data: {
-      status: "FAILED",
-      failedAt: new Date(),
-      errorCode: sanitizeErrorCode(failure.errorCode),
-      errorMessage: sanitizeErrorMessage(failure.errorMessage),
-      result: failure.result ? sanitizeFailureResult(failure.result) as Prisma.InputJsonValue : undefined,
-      activeOrderKey: null
-    }
+  const current = await prisma.teamshipPrintJob.findFirst({
+    where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId }
   });
-  return updated.count === 1;
+  if (!current) return false;
+  const failedAt = new Date();
+  const errorCode = sanitizeErrorCode(failure.errorCode);
+  const errorMessage = sanitizeErrorMessage(failure.errorMessage);
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.teamshipPrintJob.updateMany({
+      where: { id: jobId, tenantId: tenant.id, status: "CLAIMED", workerId },
+      data: {
+        status: "FAILED",
+        failedAt,
+        errorCode,
+        errorMessage,
+        result: failure.result ? sanitizeFailureResult(failure.result) as Prisma.InputJsonValue : undefined,
+        activeOrderKey: null
+      }
+    });
+    if (updated.count !== 1) return false;
+    if (!current.batchId) return true;
+
+    await tx.teamshipPrintJob.updateMany({
+      where: { tenantId: tenant.id, batchId: current.batchId, status: "WAITING_BATCH" },
+      data: {
+        status: "BLOCKED",
+        errorCode: "BATCH_STOPPED",
+        errorMessage: "The batch stopped after an earlier order failed. Physical output must be checked before creating a new plan.",
+        activeOrderKey: null
+      }
+    });
+    await tx.teamshipPrintBatch.updateMany({
+      where: { id: current.batchId, tenantId: tenant.id, status: { in: ["APPROVED", "RUNNING"] } },
+      data: {
+        status: "PARTIAL_FAILED",
+        failedAt,
+        errorCode,
+        errorMessage
+      }
+    });
+    return true;
+  });
 }
 
 export function getTeamshipPrinterPlan(
@@ -512,7 +623,7 @@ function sameTeamshipName(left: string, right: string) {
   return left.replace(/\s+/g, " ").trim().toLowerCase() === right.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-async function requirePrintAccess(context: AuthenticatedContext) {
+export async function requireTeamshipPrintAccess(context: AuthenticatedContext) {
   await requireModule(context, ModuleKey.SHIPMENT_DOCUMENTS);
   await requireMutationAccess(context);
   if (!hasTeamshipInternalReadAccess(context)) {
@@ -521,6 +632,15 @@ async function requirePrintAccess(context: AuthenticatedContext) {
 }
 
 async function expireTeamshipPrintJobs(tenantId: string, now: Date) {
+  const expiredBatchJobs = await prisma.teamshipPrintJob.findMany({
+    where: {
+      tenantId,
+      batchId: { not: null },
+      status: { in: ["PENDING_APPROVAL", "APPROVED", "CLAIMED"] },
+      expiresAt: { lt: now }
+    },
+    select: { batchId: true }
+  });
   await prisma.teamshipPrintJob.updateMany({
     where: { tenantId, status: { in: ["PENDING_APPROVAL", "APPROVED", "CLAIMED"] }, expiresAt: { lt: now } },
     data: {
@@ -530,6 +650,27 @@ async function expireTeamshipPrintJobs(tenantId: string, now: Date) {
       activeOrderKey: null
     }
   });
+  const batchIds = Array.from(new Set(expiredBatchJobs.map((job) => job.batchId).filter((value): value is string => Boolean(value))));
+  if (batchIds.length > 0) {
+    await prisma.teamshipPrintJob.updateMany({
+      where: { tenantId, batchId: { in: batchIds }, status: "WAITING_BATCH" },
+      data: {
+        status: "BLOCKED",
+        errorCode: "BATCH_STOPPED",
+        errorMessage: "The batch stopped because an earlier print job expired.",
+        activeOrderKey: null
+      }
+    });
+    await prisma.teamshipPrintBatch.updateMany({
+      where: { tenantId, id: { in: batchIds }, status: { in: ["PENDING_APPROVAL", "APPROVED", "RUNNING"] } },
+      data: {
+        status: "PARTIAL_FAILED",
+        failedAt: now,
+        errorCode: "JOB_EXPIRED",
+        errorMessage: "A print job expired. The batch was stopped and was not retried."
+      }
+    });
+  }
 }
 
 function parseExecutionResult(value: unknown, job: { approvedPalletCount: number; documentPlan: unknown; printerPlan: unknown }) {
@@ -669,6 +810,148 @@ export function resolveTeamshipInternalOrderId(order: TeamshipShippingOrderDetai
     throw new TeamshipPrintJobError("Teamship did not return the internal shipping-order ID; nothing was queued.", 409);
   }
   return resolved;
+}
+
+export function resolveTeamshipDisplayShippingOrderNumber(order: TeamshipShippingOrderDetail) {
+  const internalOrderId = resolveTeamshipInternalOrderId(order);
+  const numericCandidates = [order.display_id, order.order_number, order.id, order.order_id]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => /^\d{1,10}$/.test(value))
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const displayCandidates = numericCandidates.filter((value) => value !== internalOrderId);
+
+  if (displayCandidates.length === 1) {
+    return displayCandidates[0]!;
+  }
+  if (displayCandidates.length > 1) {
+    throw new TeamshipPrintJobError(
+      "Teamship returned conflicting display shipping-order numbers; nothing was queued.",
+      409
+    );
+  }
+  if (numericCandidates.includes(internalOrderId)) {
+    return internalOrderId;
+  }
+  throw new TeamshipPrintJobError(
+    "Teamship did not return the display shipping-order number; nothing was queued.",
+    409
+  );
+}
+
+async function requireNoActivePrintJob(tenantId: string, shippingOrderNumber: string) {
+  const existingOrderJob = await prisma.teamshipPrintJob.findUnique({
+    where: { tenantId_activeOrderKey: { tenantId, activeOrderKey: shippingOrderNumber } }
+  });
+  if (existingOrderJob) {
+    throw new TeamshipPrintJobError(
+      `Print request ${existingOrderJob.id} already controls shipping order ${shippingOrderNumber} with status ${existingOrderJob.status}. Check that request before printing again.`,
+      409
+    );
+  }
+}
+
+async function resolveDisplayPrintOrder(
+  context: AuthenticatedContext,
+  shippingOrderNumber: string,
+  findOrders: typeof findTeamshipShippingOrders
+) {
+  const orders = await findOrders({
+    tenantId: context.tenantId,
+    orderIdentifier: shippingOrderNumber
+  });
+  const exact = orders.filter((order) => teamshipOrderMatchesShippingOrderNumber(order, shippingOrderNumber));
+  if (exact.length === 0) {
+    throw new TeamshipPrintJobError(`No exact Teamship shipping order ${shippingOrderNumber} was found.`, 404);
+  }
+  if (exact.length !== 1) {
+    throw new TeamshipPrintJobError(
+      `Teamship returned more than one exact order ${shippingOrderNumber}; nothing was queued.`,
+      409
+    );
+  }
+  return { shippingOrderNumber, order: exact[0]! };
+}
+
+async function resolveReviewPrintOrder(
+  context: AuthenticatedContext,
+  reference: TeamshipPrintReviewReference,
+  findOrders: typeof findTeamshipShippingOrders
+) {
+  const psNumber = requireReviewIdentifier(reference.psNumber, "PS", /^PS\d{6}$/);
+  const srNumber = requireReviewIdentifier(reference.srNumber, "SR", /^SR[A-Z0-9-]{1,30}$/);
+  const storedOrderId = requireShippingOrderNumber(reference.teamshipOrderId);
+  const expectedInternalId = readInternalOrderIdFromUrl(reference.teamshipUrl);
+  const orders = await findOrders({
+    tenantId: context.tenantId,
+    orderIdentifier: psNumber
+  });
+  const exact = orders.filter((order) =>
+    teamshipOrderMatchesReviewReference(order, {
+      psNumber,
+      srNumber,
+      storedOrderId,
+      expectedInternalId
+    })
+  );
+
+  if (exact.length === 0) {
+    throw new TeamshipPrintJobError(
+      `No exact Teamship shipping order was found for ${psNumber} / ${srNumber}; nothing was queued.`,
+      404
+    );
+  }
+  if (exact.length !== 1) {
+    throw new TeamshipPrintJobError(
+      `Teamship returned more than one exact order for ${psNumber} / ${srNumber}; nothing was queued.`,
+      409
+    );
+  }
+
+  const order = exact[0]!;
+  return {
+    shippingOrderNumber: resolveTeamshipDisplayShippingOrderNumber(order),
+    order
+  };
+}
+
+function teamshipOrderMatchesReviewReference(
+  order: TeamshipShippingOrderDetail,
+  reference: {
+    psNumber: string;
+    srNumber: string;
+    storedOrderId: string;
+    expectedInternalId: string | null;
+  }
+) {
+  const psMatches = [order.record_no, order.edi_field_2, order.order_number, order.display_id]
+    .some((value) => normalizeExactIdentifier(value) === reference.psNumber);
+  const srMatches = [order.shipment_id, order.amazon_shipment_id1, order.edi_field_1]
+    .some((value) => normalizeExactIdentifier(value) === reference.srNumber);
+  if (!psMatches || !srMatches) {
+    return false;
+  }
+
+  const internalOrderId = resolveTeamshipInternalOrderId(order);
+  if (reference.expectedInternalId) {
+    return internalOrderId === reference.expectedInternalId;
+  }
+  return internalOrderId === reference.storedOrderId
+    || teamshipOrderMatchesShippingOrderNumber(order, reference.storedOrderId);
+}
+
+function requireReviewIdentifier(value: unknown, label: string, pattern: RegExp) {
+  const normalized = normalizeExactIdentifier(value);
+  if (!pattern.test(normalized)) {
+    throw new TeamshipPrintJobError(`${label} review reference is invalid.`);
+  }
+  return normalized;
+}
+
+function normalizeExactIdentifier(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "");
 }
 
 function normalizeInternalOrderId(value: unknown) {

@@ -62,6 +62,7 @@ export type WebsiteGrowthQuestionIntent = {
 };
 
 export type WeeklyContentLane =
+  | "SEO_RECOVERY"
   | "CORE_PAGE"
   | "QUESTION_ANSWER"
   | "SUPPORTING_CONTENT"
@@ -76,6 +77,13 @@ export type WeeklyContentRecommendation = {
 };
 
 export const weeklyContentRecommendations: WeeklyContentRecommendation[] = [
+  {
+    lane: "SEO_RECOVERY",
+    label: "SEO migration recovery",
+    description: "Commercial routes with a material qualified-click or ranking decline after legacy and destination URLs are combined.",
+    publishLimit: 2,
+    actions: []
+  },
   {
     lane: "CORE_PAGE",
     label: "Core service or location page",

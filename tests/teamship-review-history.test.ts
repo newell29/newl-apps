@@ -30,6 +30,8 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 const context = {
   tenantId: "tenant-1",
   userId: "user-1",
+  userEmail: "user@example.com",
+  userName: "Synthetic User",
   role: "OPERATIONS",
   tenantSlug: "newl",
   tenantName: "Newl"

@@ -13,7 +13,7 @@ type NavEntry = {
   label: string;
   exact?: boolean;
   moduleKey?: ModuleKey;
-  allowedRoles?: PlatformRole[];
+  requiredRoles?: PlatformRole[];
   children?: never;
 };
 
@@ -30,20 +30,31 @@ type NavNode = NavEntry | NavGroup;
 const navEntries: NavNode[] = [
   { id: "dashboard", href: "/dashboard", label: "Dashboard" },
   { id: "assistant", href: "/assistant", label: "Company Assistant", moduleKey: "ASSISTANT" as ModuleKey },
+  { id: "agent-operations", href: "/agent-operations", label: "Agent Operations", moduleKey: "ASSISTANT" as ModuleKey },
   {
     id: "sales",
     label: "Sales",
     children: [
+      { id: "lead-hunter", href: "/lead-gen/hunter", label: "Hunter Control Tower", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-outreach", href: "/lead-gen/outreach", label: "Outreach Queue", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Sales Opportunities", moduleKey: "LEAD_GEN" as ModuleKey },
+      { id: "lead-apollo-review", href: "/lead-gen/apollo-review", label: "Apollo Exceptions", moduleKey: "LEAD_GEN" as ModuleKey },
       {
-        id: "trademining",
-        label: "TradeMining",
+        id: "lead-data-sources",
+        label: "Data Sources",
         moduleKey: "LEAD_GEN" as ModuleKey,
         children: [
-          { id: "lead-search-profiles", href: "/lead-gen/search-profiles", label: "Search Profiles", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-candidates", href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-pipeline", href: "/lead-gen/pipeline", label: "Pipeline", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-contacts", href: "/lead-gen/contacts", label: "Contacts", moduleKey: "LEAD_GEN" as ModuleKey },
-          { id: "lead-scoring-history", href: "/lead-gen/scoring-history", label: "Scoring History", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-search-profiles", href: "/lead-gen/search-profiles", label: "TradeMining Searches", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-candidates", href: "/lead-gen/candidates", label: "Found Companies", moduleKey: "LEAD_GEN" as ModuleKey }
+        ]
+      },
+      {
+        id: "lead-admin-quality",
+        label: "Admin & Quality",
+        moduleKey: "LEAD_GEN" as ModuleKey,
+        children: [
+          { id: "lead-automation-settings", href: "/lead-gen/automation-settings", label: "Automation Settings", moduleKey: "LEAD_GEN" as ModuleKey },
+          { id: "lead-scoring-history", href: "/lead-gen/scoring-history", label: "Scoring & Outcomes", moduleKey: "LEAD_GEN" as ModuleKey },
           { id: "lead-logs", href: "/operations/logs", label: "Health & Logs", moduleKey: "LEAD_GEN" as ModuleKey }
         ]
       },
@@ -167,6 +178,37 @@ const navEntries: NavNode[] = [
       { id: "credit-settings", href: "/finance/customer-cashflow/settings", label: "Credit Settings", moduleKey: "CUSTOMER_CASHFLOW" as ModuleKey }
     ]
   },
+  {
+    id: "customer-intelligence",
+    label: "Customer Intelligence",
+    moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey,
+    children: [
+      {
+        id: "ci-company-profiles",
+        href: "/customer-intelligence",
+        label: "Company Profiles",
+        exact: true,
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      },
+      {
+        id: "ci-identity-review",
+        href: "/customer-intelligence/review",
+        label: "Identity Review",
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey
+      },
+      {
+        id: "ci-reporting",
+        href: "/customer-intelligence/reporting",
+        label: "Reporting",
+        moduleKey: "CUSTOMER_INTELLIGENCE" as ModuleKey,
+        // Matches requireReadAccess in customer-intelligence/permissions.ts:
+        // the reporting pages are leadership-only, so the navigation entry must
+        // never be shown to READ_ONLY or other roles that receive every enabled
+        // module from the role policy but cannot actually open the route.
+        requiredRoles: ["ADMIN", "MANAGER", "FINANCE"] as PlatformRole[]
+      }
+    ]
+  },
   { id: "settings", href: "/settings", label: "Settings" }
 ];
 
@@ -197,8 +239,8 @@ export function AppShell({
   const displayName = userName?.trim() || userEmail || "Signed in";
   const [expandedNavIds, setExpandedNavIds] = useState<Record<string, boolean>>({});
   const visibleNavEntries = useMemo(
-    () => filterVisibleNavEntries(navEntries, enabledModuleKeys, role),
-    [enabledModuleKeys, role]
+    () => filterVisibleNavEntries(navEntries, role, enabledModuleKeys),
+    [role, enabledModuleKeys]
   );
 
   useEffect(() => {
@@ -343,8 +385,12 @@ function NavTree({
 }
 
 export function filterVisibleNavEntries(
+  
   entries: NavNode[],
-  enabledModuleKeys?: ModuleKey[],
+  role: PlatformRole | undefined,
+ 
+  enabledModuleKeys?: ModuleKey[]
+,
   role?: PlatformRole
 ): NavNode[] {
   const visibleEntries: NavNode[] = [];
@@ -355,7 +401,7 @@ export function filterVisibleNavEntries(
     }
 
     if (isNavGroup(entry)) {
-      const children = filterVisibleNavEntries(entry.children, enabledModuleKeys, role);
+      const children = filterVisibleNavEntries(entry.children, role, enabledModuleKeys);
       if (children.length > 0) {
         visibleEntries.push({ ...entry, children });
       }
@@ -363,6 +409,10 @@ export function filterVisibleNavEntries(
     }
 
     if (entry.moduleKey && !enabledModuleKeys?.includes(entry.moduleKey)) {
+      continue;
+    }
+
+    if (entry.requiredRoles && (!role || !entry.requiredRoles.includes(role))) {
       continue;
     }
 

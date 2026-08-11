@@ -2,6 +2,10 @@
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
+## Customer Intelligence relationship (additive)
+
+The canonical `Company` used by TradeMining, Hunter, Apollo, and the pipeline is the same identity that Customer Intelligence profiles. The `CUSTOMER_INTELLIGENCE` foundation adds `CompanyOperatingRelationship` and `CustomerSourceAccount` records around `Company` but never rewrites or removes existing company, lead, contact, or prospect data. It also adds `ContactPoint` and `ContactEvidence` around the existing `Contact`; identity matching never merges contacts by name alone. Future Customer Intelligence cross-sell research must keep existing customers out of cold-prospect and automatic-outreach queues.
+
 ## Purpose and status
 
 Lead generation, contacts, TradeMining, Apollo outreach is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/lead-gen/*`, `src/modules/lead-gen/*`, `src/modules/trademining/ingestion.ts`, Apollo integration files, lead/contact/company Prisma models.
@@ -13,6 +17,61 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+
+## Hunter dry-run control plane
+
+Hunter Phase 1 creates a daily, tenant-scoped prospecting plan without performing enrichment or outreach. It combines existing TradeMining company evidence with source-agnostic opportunity signals such as expansion, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and manually researched news.
+
+The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The employee-facing Hunter Control Tower presents the five operating stages, a local-day production summary, separate current workflow inventory, attention queues, and a collapsed researched-opportunity evidence drill-down; policy, kill-switch, manual evidence, and dry-run controls live on the separate Automation Settings page. No Phase 1 path calls Apollo or sends a customer communication.
+
+Phase 2 adds an opt-in external signal scout to the existing Mac-mini Hunter service. It reads a bounded set of recent public-news links, falls back between configured discovery transports, and classifies only headline metadata with local structured output. Accepted signals reuse the existing tenant-scoped signal table; rejected samples, source failures, model name, and prompt version remain in `AutomationJobRun`. The scout is disabled by default pending approval of the exact external sources and their terms. It still cannot call Apollo, change a cadence, or send outreach.
+
+The Sales navigation is arranged around operational intent: Hunter Control Tower, Outreach Queue, Sales Opportunities,
+and Apollo Exceptions are daily work; TradeMining Searches and Found Companies are source data; Automation Settings,
+Scoring & Outcomes, and Health & Logs are administrative and quality-control surfaces. Existing records are preserved.
+
+Phase 4 begins the assisted outreach-intelligence layer. For a ranked contact, Newl Apps can create a versioned
+company/contact Outreach Plan from a bounded Hunter and TradeMining evidence ledger, generate a complete five-touch
+sequence, and run both deterministic and model grounding checks. Generation does not approve, enroll, or send. A
+current plan blocks Apollo push until QA passes and an authenticated employee approves it.
+
+When an administrator explicitly selects **Assisted** mode, completed company research also queues a durable
+post-research handoff. The Mac-mini worker processes one eligible Hot or Qualified company per authenticated request:
+it verifies the latest Apollo company match, imports a bounded set of buyer contacts in `REVIEWING`, ranks them,
+and creates grounded Outreach Plans. Ambiguous/missing Apollo matches are recorded for review and are not searched
+again automatically. Assisted mode never approves a contact or plan, enrolls a cadence, or sends communication.
+
+Hunter Control Tower separates today’s successful research cohort from carry-forward outreach. Primary tier counts
+represent only companies completed in the latest run; still-current Hot and Qualified accounts from earlier runs
+remain actionable in a distinct carry-forward section. The planner records the cohort and source research run on
+each decision so an older opportunity cannot be presented as research completed today.
+
+The production summary is also local-day scoped across the downstream handoff: source matches, selected companies,
+new versus refresh composition, researched and qualified counts, Apollo contacts found, and plans ready must all
+come from runs started on the current tenant-local day. Needs Attention, active cadences, delivery failures,
+engagements, and meetings are labeled separately as current cross-day workflow inventory.
+
+Research preparation resolves a canonical company identity before selecting the bounded cohort. A normalized company
+domain takes precedence over legal suffixes and branch labels, preventing aliases of the same operating company from
+consuming multiple research slots. Tenant company IDs and prepared keys are still revalidated at completion.
+
+The Luna/Qwen comparison is visible under Automation Settings. Luna is the authoritative company-research
+synthesis consumed by Kimi and deterministic classification. Qwen receives the same saved public evidence only as a
+temporary non-blocking shadow. An administrator may replay the Luna audit against saved evidence without repeating
+Brave retrieval; replay does not rewrite a completed opportunity or authorize outreach.
+
+Apollo company mapping and employee discovery are separate states. A verified Apollo organization remains mapped
+when Apollo returns zero employees. It appears under **Mapped company — employee lookup needed**, where employees can
+be rechecked without repeating paid organization matching; it is not presented as an unmapped-company exception.
+The repeatable review procedure and the proposed next-phase automation contract are documented in
+`apollo-identity-resolution-playbook.md`.
+
+Company and contact identity resolution is tenant-wide. TradeMining ingestion reuses an existing company for a unique,
+safe legal-suffix name variant rather than creating another company row. Apollo organization ID and normalized domain
+take precedence over display-name spelling after a manual mapping; ambiguous name-only matches remain in human review.
+Apollo person/contact ID, then LinkedIn URL and concrete email, identify an existing contact across company aliases.
+If that person is already enrolled or paused in a Hunter-managed cadence, Hunter creates neither a duplicate contact
+nor another outreach plan. Prior non-Hunter cadence history remains eligible for the separately approved move policy.
 
 ## Data model
 

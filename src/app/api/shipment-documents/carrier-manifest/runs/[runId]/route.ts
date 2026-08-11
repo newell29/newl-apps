@@ -7,7 +7,7 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
 
-type DownloadType = "midland" | "speedy" | "suretrack" | "signed";
+type DownloadType = "midland" | "speedy" | "suretrack" | "clarke" | "guilbault" | "signed";
 
 type CarrierManifestRunRouteClient = typeof prisma & {
   shipmentCarrierManifestRun: {
@@ -22,6 +22,10 @@ type CarrierManifestRunRouteClient = typeof prisma & {
       speedyWorkbookBytes?: Uint8Array | null;
       suretrackFileName?: string | null;
       suretrackWorkbookBytes?: Uint8Array | null;
+      clarkeFileName?: string | null;
+      clarkeWorkbookBytes?: Uint8Array | null;
+      guilbaultFileName?: string | null;
+      guilbaultWorkbookBytes?: Uint8Array | null;
       signedCopyFileName?: string | null;
       signedCopyContentType?: string | null;
       signedCopyBytes?: Uint8Array | null;
@@ -43,7 +47,10 @@ export async function GET(
     const client = prisma as CarrierManifestRunRouteClient;
 
     if (!isDownloadType(documentType)) {
-      return NextResponse.json({ error: "documentType must be midland, speedy, suretrack, or signed." }, { status: 400 });
+      return NextResponse.json(
+        { error: "documentType must be midland, speedy, suretrack, clarke, guilbault, or signed." },
+        { status: 400 }
+      );
     }
 
     const run = await client.shipmentCarrierManifestRun.findFirst({
@@ -59,6 +66,10 @@ export async function GET(
         speedyWorkbookBytes: true,
         suretrackFileName: true,
         suretrackWorkbookBytes: true,
+        clarkeFileName: true,
+        clarkeWorkbookBytes: true,
+        guilbaultFileName: true,
+        guilbaultWorkbookBytes: true,
         signedCopyFileName: true,
         signedCopyContentType: true,
         signedCopyBytes: true
@@ -136,7 +147,14 @@ export async function DELETE(
 }
 
 function isDownloadType(value: string | null): value is DownloadType {
-  return value === "midland" || value === "speedy" || value === "suretrack" || value === "signed";
+  return (
+    value === "midland" ||
+    value === "speedy" ||
+    value === "suretrack" ||
+    value === "clarke" ||
+    value === "guilbault" ||
+    value === "signed"
+  );
 }
 
 function readDownload(
@@ -147,6 +165,10 @@ function readDownload(
     speedyWorkbookBytes?: Uint8Array | null;
     suretrackFileName?: string | null;
     suretrackWorkbookBytes?: Uint8Array | null;
+    clarkeFileName?: string | null;
+    clarkeWorkbookBytes?: Uint8Array | null;
+    guilbaultFileName?: string | null;
+    guilbaultWorkbookBytes?: Uint8Array | null;
     signedCopyFileName?: string | null;
     signedCopyContentType?: string | null;
     signedCopyBytes?: Uint8Array | null;
@@ -173,6 +195,22 @@ function readDownload(
     return {
       fileName: run.suretrackFileName,
       bytes: run.suretrackWorkbookBytes,
+      contentType: "application/vnd.ms-excel"
+    };
+  }
+
+  if (documentType === "clarke") {
+    return {
+      fileName: run.clarkeFileName,
+      bytes: run.clarkeWorkbookBytes,
+      contentType: "application/vnd.ms-excel"
+    };
+  }
+
+  if (documentType === "guilbault") {
+    return {
+      fileName: run.guilbaultFileName,
+      bytes: run.guilbaultWorkbookBytes,
       contentType: "application/vnd.ms-excel"
     };
   }

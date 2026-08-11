@@ -1,18 +1,28 @@
+import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP, isIPv4, isIPv6 } from "node:net";
 
 import {
+  JobStatus,
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState,
   WebsiteGrowthOutreachConsentBasis,
-  WebsiteGrowthOutreachMessageKind
+  WebsiteGrowthOutreachMessageKind,
+  type Prisma
 } from "@prisma/client";
 
+import {
+  describeWebsiteGrowthBacklinkBlocker,
+  formatWebsiteGrowthBacklinkBlockerCategory
+} from "@/modules/website-growth/backlink-blockers";
+import { WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE } from "@/modules/website-growth/backlinks";
 import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
 import {
   createAndSendMicrosoftGraphMailboxMessage,
-  fetchMicrosoftGraphMailboxMessages
+  fetchMicrosoftGraphMailboxMessages,
+  type MicrosoftGraphMailMessage
 } from "@/server/integrations/microsoft-graph-mail";
 
 export const WEBSITE_GROWTH_OUTREACH_DAILY_NEW_CONTACT_LIMIT = 5;
@@ -71,6 +81,23 @@ export type WebsiteGrowthOutreachSendInput = {
   subject: string;
   body: string;
 };
+
+export function buildWebsiteGrowthOutreachAttemptId({
+  tenantId,
+  opportunityId,
+  kind,
+  sequence
+}: {
+  tenantId: string;
+  opportunityId: string;
+  kind: WebsiteGrowthOutreachMessageKind;
+  sequence: number;
+}) {
+  const digest = createHash("sha256")
+    .update(`${tenantId}\u0000${opportunityId}\u0000${kind}\u0000${sequence}`)
+    .digest("hex");
+  return `wgo_${digest}`;
+}
 
 export function readWebsiteGrowthOutreachIdentity(
   env: NodeJS.ProcessEnv = process.env
@@ -165,8 +192,18 @@ export async function sendWebsiteGrowthOutreachEmail({
     country: normalized.recipientCountry,
     identity
   });
+  const attemptSequence =
+    normalized.kind === WebsiteGrowthOutreachMessageKind.FOLLOW_UP
+      ? opportunity.followUpCount + 1
+      : 0;
   const message = await prisma.websiteGrowthOutreachMessage.create({
     data: {
+      id: buildWebsiteGrowthOutreachAttemptId({
+        tenantId,
+        opportunityId: opportunity.id,
+        kind: normalized.kind,
+        sequence: attemptSequence
+      }),
       tenantId,
       opportunityId: opportunity.id,
       kind: normalized.kind,
@@ -205,7 +242,8 @@ export async function sendWebsiteGrowthOutreachEmail({
       prisma.websiteGrowthOutreachMessage.update({
         where: { id: message.id },
         data: {
-          externalMessageId: sent.id,
+          externalMessageId:
+            sent.id ?? `graph-sendmail-accepted:${message.id}`,
           conversationId: sent.conversationId
         }
       }),
@@ -279,6 +317,55 @@ export async function sendWebsiteGrowthOutreachEmail({
   }
 }
 
+export async function sendWebsiteGrowthOutreachFollowUp({
+  tenantId,
+  opportunityId,
+  subject,
+  body,
+  now = new Date()
+}: {
+  tenantId: string;
+  opportunityId: string;
+  subject: string;
+  body: string;
+  now?: Date;
+}) {
+  const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({
+    where: { id: opportunityId, tenantId },
+    select: {
+      recipientName: true,
+      recipientEmail: true,
+      recipientCountry: true,
+      contactSourceUrl: true,
+      consentBasis: true
+    }
+  });
+  if (
+    !opportunity?.recipientEmail ||
+    (opportunity.recipientCountry !== "CA" && opportunity.recipientCountry !== "US") ||
+    !opportunity.contactSourceUrl ||
+    !opportunity.consentBasis
+  ) {
+    throw new Error("The due follow-up is missing its previously approved recipient evidence.");
+  }
+
+  return sendWebsiteGrowthOutreachEmail({
+    tenantId,
+    input: {
+      opportunityId,
+      kind: WebsiteGrowthOutreachMessageKind.FOLLOW_UP,
+      recipientName: opportunity.recipientName,
+      recipientEmail: opportunity.recipientEmail,
+      recipientCountry: opportunity.recipientCountry,
+      contactSourceUrl: opportunity.contactSourceUrl,
+      consentBasis: opportunity.consentBasis,
+      subject,
+      body
+    },
+    now
+  });
+}
+
 export async function getDueWebsiteGrowthOutreachFollowUps({
   tenantId,
   limit = 5,
@@ -347,8 +434,11 @@ export async function syncWebsiteGrowthOutreachReplies({
     },
     include: {
       messages: {
-        where: { conversationId: { not: null } },
-        select: { conversationId: true }
+        select: {
+          conversationId: true,
+          subject: true,
+          sentAt: true
+        }
       }
     }
   });
@@ -367,28 +457,45 @@ export async function syncWebsiteGrowthOutreachReplies({
   );
   let replies = 0;
   let unsubscribes = 0;
+  const trackedByRecipient = new Map<string, number>();
+  for (const opportunity of tracked) {
+    const recipientEmail = opportunity.recipientEmail?.trim().toLowerCase();
+    if (!recipientEmail) continue;
+    trackedByRecipient.set(
+      recipientEmail,
+      (trackedByRecipient.get(recipientEmail) ?? 0) + 1
+    );
+  }
 
   for (const opportunity of tracked) {
-    const conversationIds = new Set(
-      opportunity.messages
-        .map((message) => message.conversationId)
-        .filter((value): value is string => Boolean(value))
-    );
     const recipientEmail = opportunity.recipientEmail?.trim().toLowerCase();
-    if (!recipientEmail || conversationIds.size === 0) continue;
+    if (!recipientEmail) continue;
 
-    const reply = messages.find((message) => {
-      const sender = message.from?.emailAddress?.address?.trim().toLowerCase();
-      const receivedAt = message.receivedDateTime ? new Date(message.receivedDateTime) : null;
-      return (
-        sender === recipientEmail &&
-        Boolean(message.conversationId && conversationIds.has(message.conversationId)) &&
-        Boolean(receivedAt && opportunity.contactedAt && receivedAt > opportunity.contactedAt)
-      );
-    });
+    const allowSenderOnlyFallback =
+      trackedByRecipient.get(recipientEmail) === 1;
+    const matched = messages
+      .map((message) => ({
+        message,
+        strict: isWebsiteGrowthOutreachReplyMatch({
+          recipientEmail,
+          contactedAt: opportunity.contactedAt,
+          outboundMessages: opportunity.messages,
+          inboundMessage: message
+        }),
+        senderOnly: isWebsiteGrowthOutreachReplyMatch({
+          recipientEmail,
+          contactedAt: opportunity.contactedAt,
+          outboundMessages: opportunity.messages,
+          inboundMessage: message,
+          allowSenderOnlyFallback
+        })
+      }))
+      .find((candidate) => candidate.strict || candidate.senderOnly);
+    const reply = matched?.message;
     if (!reply) continue;
 
     const replyText = `${reply.subject ?? ""}\n${reply.bodyPreview ?? ""}`.trim();
+    const senderOnlyFallback = Boolean(matched?.senderOnly && !matched.strict);
     const optedOut = isWebsiteGrowthOutreachOptOut(replyText);
     const receivedAt = reply.receivedDateTime ? new Date(reply.receivedDateTime) : now;
     await prisma.$transaction(async (tx) => {
@@ -399,7 +506,15 @@ export async function syncWebsiteGrowthOutreachReplies({
             ? WebsiteGrowthBacklinkStatus.LOST
             : WebsiteGrowthBacklinkStatus.REPLIED,
           lastReplyAt: receivedAt,
-          replySummary: replyText.slice(0, 1_000),
+          replySummary: [
+            senderOnlyFallback
+              ? "Possible reply matched by the exact sender after outreach even though the thread subject changed. Review before responding."
+              : null,
+            replyText
+          ]
+            .filter(Boolean)
+            .join("\n")
+            .slice(0, 1_000),
           nextFollowUpAt: null,
           unsubscribedAt: optedOut ? receivedAt : null
         }
@@ -435,7 +550,10 @@ export async function syncWebsiteGrowthOutreachReplies({
           entityId: opportunity.id,
           after: {
             receivedAt: receivedAt.toISOString(),
-            optedOut
+            optedOut,
+            matchMethod: senderOnlyFallback
+              ? "EXACT_SENDER_FALLBACK"
+              : "THREAD"
           }
         }
       });
@@ -447,16 +565,95 @@ export async function syncWebsiteGrowthOutreachReplies({
   return { replies, unsubscribes };
 }
 
+export function isWebsiteGrowthOutreachReplyMatch({
+  recipientEmail,
+  contactedAt,
+  outboundMessages,
+  inboundMessage,
+  allowSenderOnlyFallback = false
+}: {
+  recipientEmail: string;
+  contactedAt: Date | null;
+  outboundMessages: Array<{
+    conversationId: string | null;
+    subject: string;
+    sentAt: Date;
+  }>;
+  inboundMessage: MicrosoftGraphMailMessage;
+  allowSenderOnlyFallback?: boolean;
+}) {
+  const sender =
+    inboundMessage.from?.emailAddress?.address?.trim().toLowerCase() ?? null;
+  const receivedAt = inboundMessage.receivedDateTime
+    ? new Date(inboundMessage.receivedDateTime)
+    : null;
+  if (
+    sender !== recipientEmail.trim().toLowerCase() ||
+    !receivedAt ||
+    !contactedAt ||
+    receivedAt <= contactedAt
+  ) {
+    return false;
+  }
+
+  const conversationIds = new Set(
+    outboundMessages
+      .map((message) => message.conversationId)
+      .filter((value): value is string => Boolean(value))
+  );
+  if (
+    inboundMessage.conversationId &&
+    conversationIds.has(inboundMessage.conversationId)
+  ) {
+    return true;
+  }
+
+  const replySubject = normalizeWebsiteGrowthOutreachThreadSubject(
+    inboundMessage.subject
+  );
+  return Boolean(
+    (replySubject &&
+      outboundMessages.some(
+        (message) =>
+          message.sentAt < receivedAt &&
+          normalizeWebsiteGrowthOutreachThreadSubject(message.subject) ===
+            replySubject
+      )) ||
+      (allowSenderOnlyFallback &&
+        outboundMessages.some((message) => message.sentAt < receivedAt))
+  );
+}
+
+function normalizeWebsiteGrowthOutreachThreadSubject(
+  value: string | null | undefined
+) {
+  return value
+    ?.trim()
+    .replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase() || null;
+}
+
 export async function buildWebsiteGrowthOutreachTeamsSummary({
   tenantId,
   baseUrl,
+  runStartedAt,
+  executionStatus = JobStatus.SUCCESS,
   now = new Date()
 }: {
   tenantId: string;
   baseUrl: string;
+  runStartedAt: Date;
+  executionStatus?: JobStatus;
   now?: Date;
 }) {
-  const [counts, recentOutcomes] = await Promise.all([
+  const [
+    counts,
+    recentOutcomes,
+    blockedThisRunRecords,
+    humanDirectoryActions,
+    pendingDirectoryVerifications
+  ] = await Promise.all([
     prisma.websiteGrowthBacklinkOpportunity.groupBy({
       by: ["status"],
       where: { tenantId },
@@ -482,6 +679,38 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
       },
       orderBy: { updatedAt: "desc" },
       take: 10
+    }),
+    prisma.websiteGrowthBacklinkOpportunity.findMany({
+      where: {
+        tenantId,
+        status: WebsiteGrowthBacklinkStatus.BLOCKED,
+        updatedAt: { gte: runStartedAt, lte: now }
+      },
+      select: {
+        id: true,
+        title: true,
+        category: true,
+        notes: true,
+        submittedAt: true,
+        contactedAt: true,
+        directoryLoginUrl: true
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 20
+    }),
+    prisma.websiteGrowthBacklinkOpportunity.count({
+      where: {
+        tenantId,
+        directoryAccountState:
+          WebsiteGrowthDirectoryAccountState.HUMAN_ACTION_REQUIRED
+      }
+    }),
+    prisma.websiteGrowthBacklinkOpportunity.count({
+      where: {
+        tenantId,
+        directoryAccountState:
+          WebsiteGrowthDirectoryAccountState.EMAIL_VERIFICATION_PENDING
+      }
     })
   ]);
   const byStatus = Object.fromEntries(counts.map((row) => [row.status, row._count._all]));
@@ -491,7 +720,16 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
   const replied = byStatus[WebsiteGrowthBacklinkStatus.REPLIED] ?? 0;
   const submitted = byStatus[WebsiteGrowthBacklinkStatus.SUBMITTED] ?? 0;
   const live = byStatus[WebsiteGrowthBacklinkStatus.LIVE] ?? 0;
-  const blocked = byStatus[WebsiteGrowthBacklinkStatus.BLOCKED] ?? 0;
+  const blockedTotal = byStatus[WebsiteGrowthBacklinkStatus.BLOCKED] ?? 0;
+  const blockedThisRun = blockedThisRunRecords
+    .map((opportunity) => {
+      const blocker = describeWebsiteGrowthBacklinkBlocker({
+        ...opportunity,
+        status: WebsiteGrowthBacklinkStatus.BLOCKED
+      });
+      return blocker ? { ...opportunity, blocker } : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   const recentLines = recentOutcomes.map((outcome) => {
     if (outcome.status === WebsiteGrowthBacklinkStatus.LIVE && outcome.liveUrl) {
@@ -504,18 +742,166 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
     ].filter(Boolean).join(" — ");
   });
 
-  return {
-    needsAttention: needsReview > 0 || replied > 0 || blocked > 0,
-    message: [
-      "Website Growth outreach update",
-      `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
-      `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blocked} blocked.`,
+  const blockedLines = blockedThisRun.slice(0, 5).map(({ title, blocker }) =>
+    [
+      `Blocked: ${title}`,
+      `(${formatWebsiteGrowthBacklinkBlockerCategory(blocker.category)})`,
+      blocker.reason.replace(/\s+/g, " "),
+      `Next: ${blocker.nextAction}`,
+      `Retry: ${blocker.retryGuidance}`
+    ].join(" — ")
+  );
+  const message = [
+    executionStatus === JobStatus.ERROR
+      ? "Website Growth outreach update — executor failed"
+      : "Website Growth outreach update",
+    ...(executionStatus === JobStatus.ERROR
+      ? ["The constrained work phase did not complete successfully. No uncertain external action was retried; review the recorded run before the next cycle."]
+      : []),
+    `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
+    `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blockedThisRun.length} blocked this run; ${blockedTotal} blocked total.`,
+    `${humanDirectoryActions} directory account${humanDirectoryActions === 1 ? "" : "s"} need your help; ${pendingDirectoryVerifications} email verification${pendingDirectoryVerifications === 1 ? "" : "s"} pending.`,
+    ...(blockedLines.length > 0
+      ? [
+          "Blocked this run:",
+          ...blockedLines,
+          ...(blockedThisRun.length > blockedLines.length
+            ? [`${blockedThisRun.length - blockedLines.length} more blocked item${blockedThisRun.length - blockedLines.length === 1 ? "" : "s"} are listed in Newl Apps.`]
+            : [])
+        ]
+      : ["No items were blocked in this run."]),
       ...(recentLines.length > 0
         ? ["Recent directory and backlink results:", ...recentLines]
         : ["No new directory accounts or verified backlinks in the last seven days."]),
       `${baseUrl.replace(/\/+$/, "")}/website-growth/backlinks`
-    ].join("\n")
+  ].join("\n");
+  const output: Prisma.InputJsonObject = {
+    runType: "website_growth_backlink_outreach",
+    summary: {
+      needsReview,
+      approved,
+      contacted,
+      replied,
+      submitted,
+      live,
+      blockedThisRun: blockedThisRun.length,
+      blockedTotal,
+      humanDirectoryActions,
+      pendingDirectoryVerifications
+    },
+    blockedItems: blockedThisRun.map(({ id, title, blocker }) => ({
+      id,
+      title,
+      category: blocker.category,
+      reason: blocker.reason,
+      nextAction: blocker.nextAction,
+      retryGuidance: blocker.retryGuidance
+    })),
+    executionStatus
   };
+
+  await recordWebsiteGrowthBacklinkOutreachRun({
+    tenantId,
+    runStartedAt,
+    now,
+    output,
+    executionStatus
+  });
+
+  return {
+    needsAttention:
+      executionStatus === JobStatus.ERROR ||
+      needsReview > 0 ||
+      replied > 0 ||
+      blockedTotal > 0,
+    blockedThisRun: blockedThisRun.length,
+    blockedTotal,
+    message
+  };
+}
+
+export function parseWebsiteGrowthOutreachRunStartedAt({
+  value,
+  now = new Date()
+}: {
+  value: unknown;
+  now?: Date;
+}) {
+  if (typeof value !== "string" || !value.trim()) {
+    return new Date(now.getTime() - 2 * 60 * 60 * 1000);
+  }
+  const parsed = new Date(value);
+  const earliestAllowed = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const latestAllowed = new Date(now.getTime() + 5 * 60 * 1000);
+  if (
+    !Number.isFinite(parsed.getTime()) ||
+    parsed < earliestAllowed ||
+    parsed > latestAllowed
+  ) {
+    throw new Error(
+      "Backlink outreach run start time must be a valid timestamp from the last 24 hours."
+    );
+  }
+  return parsed;
+}
+
+async function recordWebsiteGrowthBacklinkOutreachRun({
+  tenantId,
+  runStartedAt,
+  now,
+  output,
+  executionStatus
+}: {
+  tenantId: string;
+  runStartedAt: Date;
+  now: Date;
+  output: Prisma.InputJsonObject;
+  executionStatus: JobStatus;
+}) {
+  const existing = await prisma.automationJobRun.findFirst({
+    where: {
+      tenantId,
+      jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE,
+      startedAt: runStartedAt
+    },
+    select: { id: true }
+  });
+  if (existing) {
+    await prisma.automationJobRun.updateMany({
+      where: {
+        id: existing.id,
+        tenantId,
+        jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE
+      },
+      data: {
+        status: executionStatus,
+        finishedAt: now,
+        output,
+        errorMessage:
+          executionStatus === JobStatus.ERROR
+            ? "The constrained backlink executor work phase failed validation."
+            : null
+      }
+    });
+    return;
+  }
+  await prisma.automationJobRun.create({
+    data: {
+      tenantId,
+      jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE,
+      status: executionStatus,
+      startedAt: runStartedAt,
+      finishedAt: now,
+      input: {
+        source: "OPENCLAW_BACKLINK_EXECUTOR"
+      },
+      output,
+      errorMessage:
+        executionStatus === JobStatus.ERROR
+          ? "The constrained backlink executor work phase failed validation."
+          : null
+    }
+  });
 }
 
 export function buildCompliantWebsiteGrowthOutreachBody({
@@ -823,9 +1209,7 @@ function validateOutreachState(
     if (
       opportunity.status !== WebsiteGrowthBacklinkStatus.IN_PROGRESS ||
       opportunity.messages.some(
-        (message) =>
-          message.kind === WebsiteGrowthOutreachMessageKind.INITIAL &&
-          Boolean(message.externalMessageId || message.conversationId)
+        (message) => message.kind === WebsiteGrowthOutreachMessageKind.INITIAL
       )
     ) {
       throw new Error("Initial outreach is no longer available for this opportunity.");
@@ -841,6 +1225,14 @@ function validateOutreachState(
     opportunity.followUpCount >= 2
   ) {
     throw new Error("A follow-up is not due for this opportunity.");
+  }
+  const recordedFollowUpAttempts = opportunity.messages.filter(
+    (message) => message.kind === WebsiteGrowthOutreachMessageKind.FOLLOW_UP
+  ).length;
+  if (recordedFollowUpAttempts > opportunity.followUpCount) {
+    throw new Error(
+      "A follow-up attempt is already recorded for this opportunity. Review the mailbox before retrying."
+    );
   }
   if (
     !opportunity.recipientEmail ||

@@ -37,7 +37,15 @@ Teamship may reset its selected printer when another shipping order opens. The w
 
 The same employee who creates a plan must explicitly approve its request ID. Changed pallet counts, missing or duplicated printer options, unavailable local queues, expired approvals, and ambiguous Teamship pages stop the job. Uncertain jobs never retry automatically.
 
+Phase 2 supervised batch printing is available from a saved Garland Teamship review run. An employee expands the run, selects individual PS numbers or all currently printable orders, prepares a live preflight plan, reviews the document and pallet-label totals, and explicitly approves the batch once. Each selected order remains a separate immutable `TeamshipPrintJob`. Only the first child job is released; the next is released after the previous child completes successfully, so the worker still reselects and verifies every printer on every order.
+
+Passed orders must have workflow status `READY_TO_PRINT`. A historical `FAIL` may also be selected after an employee explicitly confirms that its discrepancies were corrected in Teamship. This confirmation is an audited manual-correction override; it does not rewrite the historical review to `PASS` and does not bypass live order, customer, warehouse, pallet-count, or printer preflight. Missing-Teamship, pending-Teamship, no-PDF, already printed, and completed orders are not printable through a batch.
+
+If a child job fails, expires, or becomes uncertain, the batch stops. Remaining child jobs are blocked, no automatic retry occurs, and physical output must be checked before a newly selected plan is prepared. A completed child updates the saved order workflow to `BOL_PRINTED`.
+
 Garland shipping-order display numbers and Teamship's internal page IDs are separate identities. For example, the supervised order `30666` resolves to internal Teamship record `31064`. Nemo shows `30666`, while the local worker verifies the API mapping and navigates to `/ship-inventories/31064`; the Teamship detail page itself may visibly show only `Ship Inventory #31064`. The integration resolves this mapping for every order rather than hard-coding a customer example.
+
+Saved Garland review batches retain a PS number, SR number, Teamship record reference, and Teamship URL. Batch print planning must re-resolve that exact PS/SR pair and confirm the saved internal page ID before deriving the display shipping-order number. It must not pass the saved internal page ID into the display-number print lookup. A missing, conflicting, or ambiguous PS/SR/display/internal mapping excludes the order before approval and prints nothing.
 
 The signed-in exact-order Teamship page is authoritative for print-plan pallet-label quantity because it is the same order screen the local worker preflights immediately before printing. The tenant-bound local browser-read worker must confirm the exact internal page ID, Garland customer scope, and Annagem warehouse scope. It uses Teamship's hidden `pallets_count` when present; when Teamship omits that marker from the worker session, it sums only bounded pallet rows with observed values and rejects invalid, ambiguous, missing, or default-only rows. API detail and list-summary aliases are not a fallback for this approval quantity. If the local page cannot be read or does not match, plan creation fails closed. During the supervised `30666` investigation on 2026-07-22, the signed-in Teamship page showed one pallet while the API could still report `2`; plans using the stale value were rejected.
 
@@ -48,5 +56,5 @@ Some Teamship page responses omit the hidden pallet-count marker. The parser the
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.
 - Exact Teamship screen behaviour outside coded API/UI selectors. Requires employee confirmation.
 - Whether any customer communications can be automated. Requires owner confirmation.
-- When Phase 2 batch printing may be enabled after supervised single-order evidence. Requires owner confirmation.
+- Phase 2 supervised selection and batch approval were owner-confirmed on 2026-07-29; production enablement still requires the normal reviewed migration and deployment approvals.
 - Whether Phase 3 automatic printing should require per-batch approval or a separately approved automation policy. Requires owner confirmation.

@@ -14,9 +14,14 @@ Shipment documents and Garland Teamship review is documented because code, route
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Printing stops for changed pallet counts, a missing or duplicated exact printer, a changed selection, unavailable CUPS queue, invalid PDF download, expired approval, worker timeout, page/scope mismatch, or partial failure. No uncertain job is retried automatically; physical output must be checked first.
+- A batch releases only one child job at a time. Failure or expiry of the active child marks every waiting child blocked and changes the batch to `PARTIAL_FAILED`. Completed children stay completed; blocked children are not retried and must be included in a newly approved plan only after physical output is checked.
+- Batch plan creation re-resolves each saved PS/SR pair and verifies its saved Teamship internal page ID before using the separate display shipping-order number. If the identities do not resolve to one exact order, that row is excluded before approval; a Teamship internal page ID is never treated as the display order number.
 - Printing API routes remain outside session-cookie middleware so their dedicated OpenClaw and worker tokens are validated by the route handlers. The worker treats a login redirect as an authentication failure and never follows it.
 - Carrier-manifest attachments reject empty files, non-PDF contents, files larger than 20 MB, incomplete or out-of-order chunks, missing/deleted runs, and run or attachment identifiers outside the authenticated tenant. Incomplete uploads remain hidden from saved-run history and downloads.
 - Garland email attachment processing is bounded. Normal scheduled runs process newly received `PDF_METADATA_READY` files first and exclude `PDF_PARSE_FAILED` files so permanent failures cannot starve later orders. Retrying a failed PDF is a separate explicit operator action.
+- The Teamship update worker classifies terminal failures as worker preflight, Teamship login, Teamship API, editable-BOL cleanup, or unknown. Sanitized top-level errors are stored on the job and copied to orders that returned no evidence, so the UI and CSR report expose the actionable cause.
+- Teamship login retries once only for a transient network error, HTTP 429, or HTTP 5xx response. It does not retry rejected credentials, missing tokens, order updates, or uncertain browser work.
+- A batch-level failure after recorded order updates preserves the successful per-order evidence, triggers a read-only verification scan, and leaves the batch in `NEEDS_REVIEW`. Successful Teamship writes are never replayed automatically.
 
 ## Data model
 

@@ -17,6 +17,34 @@ type GarlandReferenceRow = {
   sourceSheet: string;
 };
 
+type GarlandSkuPrefixRule = {
+  prefix: string;
+  productType: string;
+  lengthIn: number;
+  widthIn: number;
+  heightIn: number;
+  weightLb: number;
+};
+
+const GARLAND_SKU_PREFIX_RULES: GarlandSkuPrefixRule[] = [
+  {
+    prefix: "SUME-100",
+    productType: "Convection Oven",
+    lengthIn: 45,
+    widthIn: 55,
+    heightIn: 42,
+    weightLb: 510
+  },
+  {
+    prefix: "SUMG-100",
+    productType: "Convection Oven",
+    lengthIn: 44,
+    widthIn: 55,
+    heightIn: 42,
+    weightLb: 515
+  }
+];
+
 const referenceBySku = new Map<string, GarlandReferenceRow[]>();
 
 for (const row of garlandReferenceRows as GarlandReferenceRow[]) {
@@ -56,7 +84,7 @@ export function buildGarlandProductDimensionRecommendations({
 
   for (const observedRow of observedRows) {
     addSku(skuOrder, observedRow.sku);
-    if (!isUps) {
+    if (!isUps && !findSkuPrefixRule(observedRow.sku)) {
       recommendations.push(observedRow);
     }
   }
@@ -65,13 +93,29 @@ export function buildGarlandProductDimensionRecommendations({
     return dedupeRecommendations(Array.from(skuOrder).map(buildUpsRuleRecommendation));
   }
 
+  for (const sku of skuOrder) {
+    const rule = findSkuPrefixRule(sku);
+
+    if (rule) {
+      recommendations.push(buildSkuPrefixRuleRecommendation(sku, rule));
+    }
+  }
+
   const learnedBySku = groupRecommendationsBySku(learnedProductDimensions);
 
   for (const sku of skuOrder) {
+    if (findSkuPrefixRule(sku)) {
+      continue;
+    }
+
     recommendations.push(...(learnedBySku.get(sku) ?? []));
   }
 
   for (const sku of skuOrder) {
+    if (findSkuPrefixRule(sku)) {
+      continue;
+    }
+
     for (const row of referenceBySku.get(sku) ?? []) {
       recommendations.push({
         sku,
@@ -133,6 +177,25 @@ function buildUpsRuleRecommendation(sku: string): GarlandProductDimensionRecomme
     weightUnit: "lbs",
     confidence: "HIGH",
     note: "Garland UPS rule: always use 1 x 1 x 1 and 1 lb regardless of SKU."
+  };
+}
+
+function buildSkuPrefixRuleRecommendation(
+  sku: string,
+  rule: GarlandSkuPrefixRule
+): GarlandProductDimensionRecommendation {
+  return {
+    sku,
+    source: "GARLAND_SKU_PREFIX_RULE",
+    productType: rule.productType,
+    quantity: null,
+    lengthIn: rule.lengthIn,
+    widthIn: rule.widthIn,
+    heightIn: rule.heightIn,
+    weightLb: rule.weightLb,
+    weightUnit: "lbs",
+    confidence: "HIGH",
+    note: `Garland SKU prefix rule ${rule.prefix}: always use ${rule.lengthIn} x ${rule.widthIn} x ${rule.heightIn} and ${rule.weightLb} lbs.`
   };
 }
 
@@ -269,6 +332,13 @@ function normalizeSku(value: string | null | undefined) {
   return value?.trim().toUpperCase().replace(/\s+/g, " ") || null;
 }
 
+function findSkuPrefixRule(sku: string) {
+  const normalizedSku = normalizeSku(sku);
+  return normalizedSku
+    ? GARLAND_SKU_PREFIX_RULES.find((rule) => normalizedSku.startsWith(rule.prefix)) ?? null
+    : null;
+}
+
 export function isUpsGarlandOrder({
   pdfOrder,
   teamshipOrder
@@ -326,13 +396,17 @@ function sourceRank(source: GarlandProductDimensionRecommendation["source"]) {
     return 1;
   }
 
-  if (source === "CSR_LEARNED") {
+  if (source === "GARLAND_SKU_PREFIX_RULE") {
     return 2;
   }
 
-  if (source === "TEAMSHIP_PALLET") {
+  if (source === "CSR_LEARNED") {
     return 3;
   }
 
-  return source === "TEAMSHIP_LEARNED" ? 4 : 5;
+  if (source === "TEAMSHIP_PALLET") {
+    return 4;
+  }
+
+  return source === "TEAMSHIP_LEARNED" ? 5 : 6;
 }

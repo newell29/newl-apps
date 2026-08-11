@@ -35,7 +35,7 @@ export default async function GarlandCarrierManifestsPage() {
       <PageHeader
         eyebrow="Garland Tools"
         title="Carrier manifests"
-        description="Upload the day's BOL bundle and generate editable loading manifests for Midland, Speedy, and Suretrack."
+        description="Upload the day's BOL bundle and generate editable loading manifests for Midland, Speedy, Suretrack, Clarke, and Guilbault Transport."
       />
 
       <GarlandToolTabs active="carrier-manifests" />
@@ -45,8 +45,8 @@ export default async function GarlandCarrierManifestsPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">Workflow</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Upload the daily Garland BOL bundle. The app reads each BOL, keeps only Midland, Speedy, and Suretrack
-              shipments, then prepares one editable Excel file per carrier for warehouse loading checks.
+              Upload the daily Garland BOL bundle. The app reads each BOL, keeps only Midland, Speedy, Suretrack,
+              Clarke, and Guilbault Transport shipments, then prepares one editable Excel file per carrier for warehouse loading checks.
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/30 p-4">

@@ -4,6 +4,7 @@ const SAFE_TEAMSHIP_FIELD_UPDATE_KEYS = new Set([
   "po_number",
   "freight_terms",
   "carrier",
+  "ship_to_name",
   "ship_to_address_1",
   "shipping_instructions"
 ]);

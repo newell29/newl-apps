@@ -3,16 +3,20 @@ import crypto from "node:crypto";
 import {
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
+  WebsiteGrowthDirectoryAccountState,
   type Prisma
 } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 
 export const MAX_BACKLINK_PROSPECTS_PER_RUN = 15;
+export const MAX_WEB_DISCOVERY_PROMOTIONS_PER_RUN = 5;
 export const MAX_ACTIVE_BACKLINK_QUEUE = 50;
 export const BACKLINK_REVIEW_RETENTION_DAYS = 45;
 export const MIN_BACKLINK_RELEVANCE_SCORE = 60;
 export const MIN_BACKLINK_QUALITY_SCORE = 60;
+export const WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE =
+  "WEBSITE_GROWTH_BACKLINK_OUTREACH";
 
 export type WebsiteGrowthBacklinkProspect = {
   sourceDomain: string;
@@ -35,7 +39,7 @@ export type WebsiteGrowthBacklinkProspect = {
 
 export type WebsiteGrowthBacklinkReview = {
   queried: boolean;
-  source: "LIVE_MCP" | "CACHE";
+  source: "LIVE_MCP" | "CACHE" | "WEB_DISCOVERY";
   observedAt: string;
   summary: string;
   rawProspectsReviewed: number;
@@ -72,7 +76,7 @@ export function parseWebsiteGrowthBacklinkReview(value: unknown): WebsiteGrowthB
   const observedAt = readRequiredTimestamp(record.observedAt);
   if (
     typeof record.queried !== "boolean" ||
-    (source !== "LIVE_MCP" && source !== "CACHE") ||
+    (source !== "LIVE_MCP" && source !== "CACHE" && source !== "WEB_DISCOVERY") ||
     !prospects
   ) {
     throw new Error("Scout completion is missing the required backlink review.");
@@ -83,8 +87,16 @@ export function parseWebsiteGrowthBacklinkReview(value: unknown): WebsiteGrowthB
   if (source === "CACHE" && record.queried !== false) {
     throw new Error("A cached backlink review must not claim a live SEMrush query.");
   }
+  if (source === "WEB_DISCOVERY" && record.queried !== true) {
+    throw new Error("A web backlink review must report that public search was queried.");
+  }
   if (prospects.length > MAX_BACKLINK_PROSPECTS_PER_RUN) {
     throw new Error(`Scout may return at most ${MAX_BACKLINK_PROSPECTS_PER_RUN} backlink prospects.`);
+  }
+  if (source === "WEB_DISCOVERY" && prospects.length > MAX_WEB_DISCOVERY_PROMOTIONS_PER_RUN) {
+    throw new Error(
+      `Scout may promote at most ${MAX_WEB_DISCOVERY_PROMOTIONS_PER_RUN} public-web backlink prospects.`
+    );
   }
 
   return {
@@ -170,7 +182,10 @@ export async function persistWebsiteGrowthBacklinkReview({
     const dedupeKey = buildWebsiteGrowthBacklinkDedupeKey(prospect);
     const current = existingByKey.get(dedupeKey);
     const evidence = {
-      transport: "official_mcp_oauth",
+      transport:
+        review.source === "WEB_DISCOVERY"
+          ? "brave_search_qwen_codex"
+          : "official_mcp_oauth",
       runId,
       reviewedAt: now.toISOString(),
       rows: prospect.evidence
@@ -221,6 +236,10 @@ export async function persistWebsiteGrowthBacklinkReview({
         firstSeenAt: now,
         lastSeenAt: now,
         category: prospect.category,
+        directoryAccountState:
+          prospect.category === WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION
+            ? WebsiteGrowthDirectoryAccountState.NEEDS_ACCOUNT
+            : WebsiteGrowthDirectoryAccountState.NOT_REQUIRED,
         title: prospect.title,
         sourceDomain: prospect.sourceDomain,
         sourceUrl: prospect.sourceUrl,
@@ -273,6 +292,7 @@ export async function getWebsiteGrowthBacklinkWorkspace(tenantId: string) {
   const [
     opportunities,
     latestScoutRun,
+    latestOutreachRun,
     statusCounts
   ] = await Promise.all([
     prisma.websiteGrowthBacklinkOpportunity.findMany({
@@ -292,6 +312,13 @@ export async function getWebsiteGrowthBacklinkWorkspace(tenantId: string) {
       where: { tenantId, jobType: "WEBSITE_GROWTH_SCOUT_WEEKLY" },
       orderBy: { startedAt: "desc" }
     }),
+    prisma.automationJobRun.findFirst({
+      where: {
+        tenantId,
+        jobType: WEBSITE_GROWTH_BACKLINK_OUTREACH_JOB_TYPE
+      },
+      orderBy: { startedAt: "desc" }
+    }),
     prisma.websiteGrowthBacklinkOpportunity.groupBy({
       by: ["status"],
       where: { tenantId },
@@ -302,6 +329,7 @@ export async function getWebsiteGrowthBacklinkWorkspace(tenantId: string) {
   return {
     opportunities,
     latestScoutRun,
+    latestOutreachRun,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row._count._all]))
   };
 }
@@ -326,7 +354,9 @@ export function buildWebsiteGrowthBacklinkTeamsLines({
   }
   const lines = [
     "",
-    `Backlink Scout: ${persisted.rawProspectsReviewed} prospects reviewed; ${review.duplicatesRejected} duplicates and ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects removed.`,
+    review.source === "WEB_DISCOVERY"
+      ? `Backlink Scout: bounded public-web research reviewed ${persisted.rawProspectsReviewed} search results; ${review.duplicatesRejected} previously seen or duplicate URLs and ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects were removed.`
+      : `Backlink Scout: ${persisted.rawProspectsReviewed} prospects reviewed; ${review.duplicatesRejected} duplicates and ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects removed.`,
     `${persisted.created} new curated prospect${persisted.created === 1 ? "" : "s"} need review; ${persisted.refreshed} existing prospect${persisted.refreshed === 1 ? "" : "s"} refreshed; ${persisted.activeQueueCount} active items remain in the bounded queue.`,
     review.summary,
     persisted.created > 0

@@ -10,7 +10,10 @@ import {
 } from "@prisma/client";
 import { NextResponse } from "next/server";
 import {
+  getActiveCadenceQueue,
   getContactDirectory,
+  getDeliveryFailureQueue,
+  getOutreachQueue,
   type ContactBooleanFilter,
   type ContactDraftStatusFilter,
   type ContactDirectoryFilters,
@@ -44,7 +47,15 @@ export async function GET(request: Request) {
       sort: parseSortParam(url.searchParams.get("sort"))
     };
 
-    const contacts = await getContactDirectory(context, filters);
+    const scope = url.searchParams.get("scope");
+    const contacts =
+      scope === "outreach"
+        ? await getOutreachQueue(context, filters)
+        : scope === "active-cadences"
+          ? await getActiveCadenceQueue(context, filters)
+          : scope === "delivery-failures"
+            ? await getDeliveryFailureQueue(context, filters)
+          : await getContactDirectory(context, filters);
     const csv = toCsv([
       [
         "Contact Name",
@@ -62,6 +73,8 @@ export async function GET(request: Request) {
         "Contact Score Summary",
         "Apollo Status",
         "Sequence Status",
+        "Apollo Delivery Failure",
+        "Apollo Delivery Failure Detected",
         "Reply Status",
         "Assigned Rep",
         "Recommended Sequence",
@@ -92,6 +105,8 @@ export async function GET(request: Request) {
         contact.contactScoreSummary,
         contact.apolloStatus,
         contact.sequenceStatus,
+        contact.apolloDeliveryFailureReason ?? "",
+        contact.apolloDeliveryFailureDetectedAt ?? "",
         contact.replyStatus,
         contact.assignedRep,
         contact.recommendedSequenceName ?? "",

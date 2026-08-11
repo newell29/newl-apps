@@ -23,6 +23,16 @@ describe("middleware machine route exemptions", () => {
     expect(matcher.test("/assistant/nemo-feedback")).toBe(true);
   });
 
+  it("lets Hunter quality enforce assistant token and admin Teams identity auth", () => {
+    expect(config.matcher[0]).toContain(
+      "api/assistant/openclaw/hunter-quality"
+    );
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/assistant/openclaw/hunter-quality")).toBe(false);
+    expect(matcher.test("/lead-gen/hunter")).toBe(true);
+  });
+
   it("lets the Mac Mini browser worker endpoints enforce their dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/assistant/teamship/browser-jobs");
   });
@@ -34,6 +44,43 @@ describe("middleware machine route exemptions", () => {
   it("lets Website Growth Scout and weekly cron routes enforce their dedicated token auth", () => {
     expect(config.matcher[0]).toContain("api/website-growth/scout");
     expect(config.matcher[0]).toContain("api/website-growth/weekly-plan");
+  });
+
+  it("lets the Hunter daily planner enforce Vercel cron authentication", () => {
+    expect(config.matcher[0]).toContain("api/lead-gen/hunter/daily-plan");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/lead-gen/hunter/daily-plan")).toBe(false);
+    expect(matcher.test("/lead-gen/hunter")).toBe(true);
+  });
+
+  it("lets the Hunter signal scout enforce tenant-bound ingestion authentication", () => {
+    expect(config.matcher[0]).toContain("api/lead-gen/hunter/signal-scout");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/lead-gen/hunter/signal-scout/prepare")).toBe(false);
+    expect(matcher.test("/api/lead-gen/hunter/signal-scout/complete")).toBe(false);
+    expect(matcher.test("/api/lead-gen/hunter/signal-scout/fail")).toBe(false);
+    expect(matcher.test("/lead-gen/hunter")).toBe(true);
+  });
+
+  it("lets the Hunter assisted handoff enforce tenant-bound ingestion authentication", () => {
+    expect(config.matcher[0]).toContain("api/lead-gen/hunter/outreach-handoff");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(
+      matcher.test("/api/lead-gen/hunter/outreach-handoff/process")
+    ).toBe(false);
+    expect(matcher.test("/lead-gen/outreach")).toBe(true);
+  });
+
+  it("lets Apollo exception autopilot enforce tenant-bound ingestion authentication", () => {
+    expect(config.matcher[0]).toContain("api/lead-gen/hunter/apollo-exceptions");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/lead-gen/hunter/apollo-exceptions/prepare")).toBe(false);
+    expect(matcher.test("/api/lead-gen/hunter/apollo-exceptions/complete")).toBe(false);
+    expect(matcher.test("/api/lead-gen/hunter/apollo-exceptions/fail")).toBe(false);
   });
 
   it("lets the approved-work backlink executor enforce its dedicated token auth", () => {

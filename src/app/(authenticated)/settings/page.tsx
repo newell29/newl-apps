@@ -12,6 +12,7 @@ import {
   saveAssistantProviderSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
+  saveLeadGenAiRuntimeSettingsAction,
   saveRoleModuleAccessAction,
   saveTenantUserAccessAction,
   saveTeamshipSettingsAction,
@@ -26,6 +27,8 @@ import { connectMicrosoftGraphAction } from "@/server/auth/actions";
 import { requireAdmin } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 import { getTeamshipBrowserReadRuntimeStatus } from "@/modules/teamship/browser-read-execution";
+import { ExistingQuickBooksAssociationControl } from "@/modules/customer-intelligence/components/existing-quickbooks-association-control";
+import { getExistingQuickBooksAssociationOptions } from "@/modules/customer-intelligence/existing-quickbooks-association";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +42,10 @@ const leadGenAiModelOptions = [
 export default async function SettingsPage() {
   const context = await getAuthenticatedContext();
   requireAdmin(context);
-  const settings = await getSettingsShell(context);
+  const [settings, quickBooksAssociationOptions] = await Promise.all([
+    getSettingsShell(context),
+    getExistingQuickBooksAssociationOptions(context)
+  ]);
   const teamshipBrowserRuntime = getTeamshipBrowserReadRuntimeStatus();
   const loginUrl = `${process.env.AUTH_URL ?? "https://newl-apps.vercel.app"}/login`;
 
@@ -132,7 +138,10 @@ export default async function SettingsPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">QuickBooks Connections</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Connect each legal entity separately so finance imports can distinguish Newl Worldwide from Newl USA while reusing shared canonical customer identity.
+              Connect each operating company separately so finance imports can distinguish Newl
+              Worldwide, Newl USA, and Newell&apos;s Express and Warehousing Ltd. while reusing shared
+              canonical customer identity. All three use the same QuickBooks OAuth app, each with its
+              own realm/company connection.
             </p>
           </div>
           <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
@@ -142,13 +151,19 @@ export default async function SettingsPage() {
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           {[
-            { entity: "NEWL_WORLDWIDE", title: "Newl Worldwide", description: "Canada transport and third-party warehouse activity." },
-            { entity: "NEWL_USA", title: "Newl USA", description: "US customers plus Charlotte warehousing operations." }
+            { slug: "newl-worldwide", title: "Newl Worldwide", description: "Canada transport and third-party warehouse activity." },
+            { slug: "newl-usa", title: "Newl USA", description: "US customers plus Charlotte warehousing operations." },
+            { slug: "newells-express", title: "Newell's Express and Warehousing Ltd.", description: "Local trucking and warehousing operations for Newell's Express and Warehousing Ltd." }
           ].map((target) => {
-            const connection = settings.quickbooksConnections.find((item) => item.legalEntity === target.entity);
+            const connection = settings.quickbooksConnections.find(
+              (item) => item.operatingCompanySlug === target.slug
+            );
+            const association = quickBooksAssociationOptions.find(
+              (item) => item.operatingCompanySlug === target.slug
+            );
 
             return (
-              <div key={target.entity} className="rounded-md border border-border bg-muted/40 p-4">
+              <div key={target.slug} className="rounded-md border border-border bg-muted/40 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-foreground">{target.title}</h3>
@@ -170,16 +185,24 @@ export default async function SettingsPage() {
                   <p>Realm ID: {connection?.realmId ?? "Not connected yet"}</p>
                   <p>Company: {connection?.companyName ?? "Pending QuickBooks callback"}</p>
                   <p>Environment: {connection?.environment ?? "production"}</p>
+                  <p>
+                    Customer Intelligence: {formatQuickBooksAssociationStatus(association?.status)}
+                  </p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <a
-                    href={`/api/integrations/quickbooks/connect?entity=${target.entity}`}
+                    href={`/api/integrations/quickbooks/connect?entity=${target.slug}`}
                     className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover"
                   >
                     {connection ? "Reconnect QuickBooks" : "Connect QuickBooks"}
                   </a>
                 </div>
+                {association?.status === "AVAILABLE" && association.operatingCompanyId ? (
+                  <ExistingQuickBooksAssociationControl
+                    operatingCompanyId={association.operatingCompanyId}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -1011,16 +1034,16 @@ export default async function SettingsPage() {
           <div>
             <h2 className="text-base font-semibold text-foreground">Apollo Rep Mapping</h2>
             <p className="mt-1 text-sm leading-6 text-mutedForeground">
-              Sync Apollo teammates into a tenant-scoped ownership directory, then maintain send-from email routing here for Pipeline assignment and sequence prep.
+              Sync Apollo teammates and every connected mailbox, then control which sender identities Hunter can use under each Apollo owner.
             </p>
           </div>
           <div className="flex items-center gap-3">
             <span className="rounded-full border border-accentBorder bg-accentSoft px-2.5 py-1 text-xs font-semibold text-primary">
-              {settings.apolloRepMapping.length.toLocaleString("en-US")} synced reps
+              {settings.apolloRepMapping.length.toLocaleString("en-US")} synced mailboxes
             </span>
             <form action={syncApolloRepMappingAction}>
               <button className="rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-                Sync Apollo reps
+                Sync Apollo mailboxes
               </button>
             </form>
           </div>
@@ -1032,16 +1055,18 @@ export default async function SettingsPage() {
               <thead className="bg-muted text-left text-xs font-semibold uppercase text-mutedForeground">
                 <tr>
                   <th className="px-3 py-3">Active</th>
+                  <th className="px-3 py-3">Sender identity</th>
                   <th className="px-3 py-3">Owner name</th>
-                  <th className="px-3 py-3">Apollo user ID</th>
                   <th className="px-3 py-3">Send-from email</th>
-                  <th className="px-3 py-3">Apollo email account ID</th>
+                  <th className="px-3 py-3">Routing weight</th>
+                  <th className="px-3 py-3">Apollo IDs</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border bg-background">
                 {buildApolloRepRows(settings.apolloRepMapping).map((entry, index) => (
                   <tr key={entry.id}>
                     <td className="px-3 py-3">
+                      <input type="hidden" name="apolloRepMappingId" defaultValue={entry.id} />
                       <input
                         type="checkbox"
                         name="apolloRepActiveIndex"
@@ -1051,15 +1076,17 @@ export default async function SettingsPage() {
                       />
                     </td>
                     <td className="px-3 py-3">
+                      <input
+                        name="apolloRepSenderLabel"
+                        defaultValue={entry.senderLabel}
+                        placeholder="Alex"
+                        className="w-36 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
                       <input type="hidden" name="apolloRepSequenceOwnerName" defaultValue={entry.sequenceOwnerName} />
                       <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
                         {entry.sequenceOwnerName}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <input type="hidden" name="apolloRepUserId" defaultValue={entry.apolloUserId ?? ""} />
-                      <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-mutedForeground">
-                        {entry.apolloUserId ?? "Missing Apollo user ID"}
                       </div>
                     </td>
                     <td className="px-3 py-3">
@@ -1072,11 +1099,25 @@ export default async function SettingsPage() {
                     </td>
                     <td className="px-3 py-3">
                       <input
+                        name="apolloRepRoutingWeight"
+                        type="number"
+                        min={0}
+                        max={100}
+                        defaultValue={entry.routingWeight}
+                        className="w-24 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      <input type="hidden" name="apolloRepUserId" defaultValue={entry.apolloUserId ?? ""} />
+                      <input
                         name="apolloRepSendFromEmailAccountId"
                         defaultValue={entry.sendFromEmailAccountId ?? ""}
                         placeholder="Auto-filled from Apollo sync"
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        className="w-52 rounded-md border border-border bg-background px-3 py-2 text-xs text-mutedForeground"
                       />
+                      <p className="mt-1 max-w-52 truncate text-[11px] text-mutedForeground">
+                        Owner: {entry.apolloUserId ?? "missing"}
+                      </p>
                     </td>
                   </tr>
                 ))}
@@ -1086,7 +1127,7 @@ export default async function SettingsPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-mutedForeground">
-              Owner name and Apollo user ID are synced from Apollo. The Apollo email account ID should resolve from the send-from mailbox during sync and is not usually the plain email address itself. Only active reps appear in Pipeline assignment.
+              Multiple mailboxes may share one Apollo owner. Active mailboxes with a weight above zero form that owner&apos;s pool; Hunter keeps every company on one deterministic sender. Use a larger weight for the mailbox that should receive most new companies.
             </p>
             <button className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
               Save Apollo rep mapping
@@ -1095,7 +1136,7 @@ export default async function SettingsPage() {
         </form>
         {settings.apolloRepMapping.length === 0 ? (
           <p className="mt-4 text-sm text-mutedForeground">
-            No Apollo reps are synced yet. Use <span className="font-medium text-foreground">Sync Apollo reps</span> to import teammate records from Apollo first.
+            No Apollo mailboxes are synced yet. Use <span className="font-medium text-foreground">Sync Apollo mailboxes</span> after connecting at least one mailbox in Apollo.
           </p>
         ) : null}
       </section>
@@ -1458,6 +1499,16 @@ export default async function SettingsPage() {
             </div>
           </div>
 
+          <button
+            type="submit"
+            disabled={Boolean(settings.tradeMiningScoringConfigWarning)}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
+          >
+            {settings.tradeMiningScoringConfigWarning ? "Scoring table migration required" : "Save scoring settings"}
+          </button>
+        </form>
+
+        <form action={saveLeadGenAiRuntimeSettingsAction} className="mt-6">
           <div className="rounded-md border border-border bg-background p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -1506,15 +1557,14 @@ export default async function SettingsPage() {
                 </p>
               </div>
             </div>
+            <button
+              type="submit"
+              disabled={Boolean(settings.tradeMiningScoringConfigWarning)}
+              className="mt-4 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
+            >
+              {settings.tradeMiningScoringConfigWarning ? "Scoring table migration required" : "Save AI runtime"}
+            </button>
           </div>
-
-          <button
-            type="submit"
-            disabled={Boolean(settings.tradeMiningScoringConfigWarning)}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary"
-          >
-            {settings.tradeMiningScoringConfigWarning ? "Scoring table migration required" : "Save scoring settings"}
-          </button>
         </form>
 
         <div className="mt-6 rounded-md border border-border bg-background p-4">
@@ -1823,6 +1873,23 @@ export default async function SettingsPage() {
       </section>
     </div>
   );
+}
+
+function formatQuickBooksAssociationStatus(status: string | undefined) {
+  switch (status) {
+    case "ASSOCIATED":
+      return "Associated";
+    case "AVAILABLE":
+      return "Existing connection ready to associate";
+    case "AMBIGUOUS":
+      return "Needs review — multiple matching connections";
+    case "CONFLICT":
+      return "Needs review — conflicting association";
+    case "MISSING_OPERATING_COMPANY":
+      return "Operating company record is missing";
+    default:
+      return "No matching active connection";
+  }
 }
 
 function Field({
@@ -2210,9 +2277,11 @@ function buildApolloRepRows(
   entries: Array<{
     id: string;
     sequenceOwnerName: string;
+    senderLabel: string;
     apolloUserId: string | null;
     sendFromEmail: string | null;
     sendFromEmailAccountId: string | null;
+    routingWeight: number;
     active: boolean;
   }>
 ) {

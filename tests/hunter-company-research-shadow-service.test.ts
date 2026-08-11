@@ -1,0 +1,435 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const generateHunterResearchLunaShadow = vi.hoisted(() => vi.fn());
+const prisma = vi.hoisted(() => ({
+  automationJobRun: {
+    findFirst: vi.fn(),
+    updateMany: vi.fn()
+  },
+  company: {
+    findMany: vi.fn()
+  },
+  hunterOpportunitySignal: {
+    findMany: vi.fn()
+  },
+  auditLog: {
+    create: vi.fn()
+  }
+}));
+
+vi.mock("@/server/integrations/openai-hunter-research-shadow", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/server/integrations/openai-hunter-research-shadow")
+  >("@/server/integrations/openai-hunter-research-shadow");
+  return {
+    ...actual,
+    generateHunterResearchLunaShadow
+  };
+});
+vi.mock("@/server/db", () => ({ prisma }));
+
+import {
+  HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL,
+  hunterResearchLunaShadowConfiguration,
+  replayHunterResearchLunaShadowComparison,
+  runHunterResearchLunaShadowBatch
+} from "@/modules/lead-gen/hunter-company-research-shadow";
+
+describe("Hunter Luna company-research synthesis service", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("OPENAI_API_KEY", "test-openai-key");
+    vi.stubEnv("HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_ENABLED", "true");
+    prisma.automationJobRun.findFirst.mockResolvedValue({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1"],
+        candidateCompanyKeys: ["example-retailer"]
+      },
+      output: null
+    });
+    prisma.company.findMany.mockResolvedValue([
+      {
+        id: "company-1",
+        name: "Example Retailer",
+        normalizedName: "example-retailer"
+      }
+    ]);
+    prisma.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
+    generateHunterResearchLunaShadow.mockResolvedValue({
+      rows: [synthesis()],
+      usage: {
+        inputTokens: 100,
+        cachedInputTokens: 10,
+        outputTokens: 30,
+        totalTokens: 130,
+        durationMs: 500
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("enables Luna only when both the explicit flag and server key are present", () => {
+    expect(hunterResearchLunaShadowConfiguration()).toMatchObject({
+      enabled: true,
+      requested: true,
+      authoritative: true,
+      recommended: HUNTER_COMPANY_RESEARCH_LUNA_SHADOW_MODEL
+    });
+    vi.stubEnv("OPENAI_API_KEY", "OPENAI_API_KEY_PLACEHOLDER");
+    expect(hunterResearchLunaShadowConfiguration()).toMatchObject({
+      enabled: false,
+      requested: true
+    });
+  });
+
+  it("stores authoritative tenant-scoped synthesis without changing companies directly", async () => {
+    const result = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: true
+    });
+
+    expect(result).toMatchObject({
+      state: "completed",
+      report: {
+        status: "SUCCESS",
+        authoritative: true,
+        expectedCompanyCount: 1,
+        evaluatedCompanyCount: 1,
+        firstPassSchemaValidCompanyCount: 1,
+        qwenSynthesisCompanyCount: 1,
+        qwenMissingCompanyCount: 0,
+        categoricalAgreementPercent: 100
+      }
+    });
+    expect(prisma.company.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-a",
+        id: { in: ["company-1"] }
+      },
+      select: { id: true, name: true, normalizedName: true }
+    });
+    expect(prisma.automationJobRun.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "run-1",
+          tenantId: "tenant-a",
+          status: "RUNNING"
+        }),
+        data: {
+          output: expect.objectContaining({
+            phase: "LUNA_PRIMARY_COMPLETE",
+            lunaShadow: expect.objectContaining({
+              authoritative: true,
+              status: "SUCCESS",
+              evaluatedCompanyCount: 1
+            })
+          })
+        }
+      })
+    );
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-5.6-luna",
+        packets: [expect.objectContaining({ companyId: "company-1" })]
+      })
+    );
+  });
+
+  it("rejects a company that is not in the prepared tenant cohort before OpenAI", async () => {
+    await expect(
+      runHunterResearchLunaShadowBatch({
+        tenantId: "tenant-a",
+        runId: "run-1",
+        packets: [{ ...packet(), companyId: "company-other" }],
+        finalBatch: true
+      })
+    ).rejects.toThrow("outside the prepared tenant cohort");
+    expect(generateHunterResearchLunaShadow).not.toHaveBeenCalled();
+  });
+
+  it("evaluates evidence even when Qwen omitted the company", async () => {
+    const result = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [{ ...packet(), qwenSynthesis: null }],
+      finalBatch: true
+    });
+
+    expect(result).toMatchObject({
+      state: "completed",
+      report: {
+        status: "SUCCESS",
+        evaluatedCompanyCount: 1,
+        qwenSynthesisCompanyCount: 0,
+        qwenMissingCompanyCount: 1,
+        categoricalAgreementPercent: null
+      }
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        packets: [expect.objectContaining({ qwenSynthesis: null })]
+      })
+    );
+  });
+
+  it("replays Luna from saved evidence without another retrieval step", async () => {
+    prisma.automationJobRun.findFirst.mockResolvedValue({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1"],
+        candidateCompanyKeys: ["example-retailer"]
+      },
+      output: null
+    });
+    prisma.company.findMany
+      .mockResolvedValueOnce([
+        {
+          id: "company-1",
+          name: "Example Retailer",
+          normalizedName: "example-retailer",
+          domain: "example.com",
+          priorityScore: 80,
+          primaryIndustry: "Retail",
+          importRecords: []
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "company-1",
+          name: "Example Retailer",
+          normalizedName: "example-retailer"
+        }
+      ]);
+    prisma.hunterOpportunitySignal.findMany.mockResolvedValue([
+      {
+        companyId: "company-1",
+        rawJson: { runId: "run-1" },
+        evidence: {
+          research: {
+            evidence: packet().publicEvidence,
+            synthesis: synthesis()
+          }
+        }
+      }
+    ]);
+
+    const result = await replayHunterResearchLunaShadowComparison({
+      tenantId: "tenant-a",
+      runId: "run-1"
+    });
+
+    expect(result).toMatchObject({
+      state: "completed",
+      replayedCompanyCount: 1
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
+    expect(prisma.hunterOpportunitySignal.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: "tenant-a",
+          sourceName: "Hunter company research"
+        })
+      })
+    );
+  });
+
+  it("ignores malformed Qwen shadow output instead of blocking Luna", async () => {
+    const result = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [{
+        ...packet(),
+        qwenSynthesis: {
+          ...synthesis(),
+          identityDisposition: "NOT_A_REAL_DISPOSITION"
+        }
+      }],
+      finalBatch: true
+    });
+
+    expect(result).toMatchObject({
+      state: "completed",
+      report: {
+        status: "SUCCESS",
+        evaluatedCompanyCount: 1,
+        qwenSynthesisCompanyCount: 0,
+        qwenMissingCompanyCount: 1
+      }
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
+  });
+
+  it("finalizes a running report when the final Luna batch is served from cache", async () => {
+    const first = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: false
+    });
+    expect(first).toMatchObject({ report: { status: "RUNNING" } });
+    const persistedOutput = prisma.automationJobRun.updateMany.mock.calls[0]![0].data.output;
+    prisma.automationJobRun.findFirst.mockResolvedValue({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1"],
+        candidateCompanyKeys: ["example-retailer"]
+      },
+      output: persistedOutput
+    });
+
+    const cached = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: true
+    });
+
+    expect(cached).toMatchObject({
+      state: "cached",
+      report: { status: "SUCCESS", evaluatedCompanyCount: 1 }
+    });
+    expect(generateHunterResearchLunaShadow).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports complete coverage after individually repairing a failed batch", async () => {
+    let output: Record<string, unknown> | null = null;
+    prisma.automationJobRun.findFirst.mockImplementation(async () => ({
+      id: "run-1",
+      input: {
+        candidateCompanyIds: ["company-1", "company-2"],
+        candidateCompanyKeys: ["example-retailer", "second-retailer"]
+      },
+      output
+    }));
+    prisma.company.findMany.mockImplementation(async ({ where }) => {
+      const ids = (where.id as { in: string[] }).in;
+      return ids.map((id) => id === "company-1"
+        ? { id, name: "Example Retailer", normalizedName: "example-retailer" }
+        : { id, name: "Second Retailer", normalizedName: "second-retailer" });
+    });
+    generateHunterResearchLunaShadow
+      .mockRejectedValueOnce(new Error("Luna returned invalid structured company research."))
+      .mockImplementation(async ({ packets }) => ({
+        rows: packets.map((item: { companyKey: string }) => ({
+          ...synthesis(),
+          companyKey: item.companyKey
+        })),
+        usage: {
+          inputTokens: 100,
+          cachedInputTokens: 10,
+          outputTokens: 30,
+          totalTokens: 130,
+          durationMs: 500
+        }
+      }));
+
+    const failed = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [
+        packet(),
+        {
+          ...packet(),
+          companyId: "company-2",
+          companyKey: "second-retailer",
+          companyName: "Second Retailer"
+        }
+      ],
+      finalBatch: true
+    });
+    expect(failed).toMatchObject({ state: "error", report: { status: "ERROR" } });
+    output = prisma.automationJobRun.updateMany.mock.calls.at(-1)![0].data.output;
+
+    const firstRepair = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [packet()],
+      finalBatch: false
+    });
+    expect(firstRepair).toMatchObject({ state: "completed", report: { status: "RUNNING" } });
+    output = prisma.automationJobRun.updateMany.mock.calls.at(-1)![0].data.output;
+
+    const secondRepair = await runHunterResearchLunaShadowBatch({
+      tenantId: "tenant-a",
+      runId: "run-1",
+      packets: [{
+        ...packet(),
+        companyId: "company-2",
+        companyKey: "second-retailer",
+        companyName: "Second Retailer"
+      }],
+      finalBatch: true
+    });
+
+    expect(secondRepair).toMatchObject({
+      state: "completed",
+      report: {
+        status: "SUCCESS",
+        evaluatedCompanyCount: 2,
+        expectedCompanyCount: 2,
+        failedBatchCount: 1
+      }
+    });
+  });
+});
+
+function packet() {
+  return {
+    companyId: "company-1",
+    companyKey: "example-retailer",
+    companyName: "Example Retailer",
+    domain: "example.com",
+    priorityScore: 80,
+    primaryIndustry: "Retail",
+    shipmentEvidence: [],
+    existingSignals: [],
+    publicEvidence: [{
+      evidenceIndex: 0,
+      pass: "FRESH_EVENTS",
+      query: "Example Retailer expansion",
+      title: "Example Retailer opens a distribution center",
+      url: "https://example.com/news",
+      sourceDomain: "example.com",
+      sourceType: "FIRST_PARTY",
+      publishedAt: "2026-07-20T00:00:00.000Z",
+      excerpt: "Example Retailer opened a North Carolina distribution center.",
+      firstParty: true
+    }],
+    qwenSynthesis: synthesis()
+  };
+}
+
+function synthesis() {
+  return {
+    companyKey: "example-retailer",
+    identityDisposition: "PASS",
+    identityConfidence: 92,
+    identityReason: "First-party evidence identifies the operating retailer.",
+    logisticsProvider: false,
+    namedExternalLogisticsProvider: false,
+    stableExclusiveProviderEvidence: false,
+    providerDisplacementEvidence: false,
+    freshness: "FRESH",
+    opportunitySummary: "A new distribution center supports a current warehousing opportunity.",
+    triggerEvidenceIndices: [0],
+    geography: "North Carolina",
+    companyCountry: "United States",
+    operatingRegion: "NORTH_AMERICA",
+    verifiedUsDivision: false,
+    usDivisionName: null,
+    usDivisionEvidenceIndices: [],
+    serviceLine: "WAREHOUSING",
+    signalType: "FACILITY_OPENING",
+    confidence: 88,
+    rationale: "The dated exact-company facility event is directly relevant.",
+    missingEvidence: [],
+    followUpQueries: []
+  };
+}

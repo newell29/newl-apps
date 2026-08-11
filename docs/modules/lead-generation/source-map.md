@@ -45,6 +45,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 | UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
 | Services/actions/queries | `src/modules/lead*` or evidence paths above | `src/server/*` | module-named tests |
 | Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
+| Outreach strategy and QA | `src/modules/lead-gen/outreach-plan.ts`, `src/modules/lead-gen/actions.ts` | `src/server/integrations/openai.ts` | `tests/outreach-plan.test.ts`, `tests/openai-outreach-integration.test.ts` |
 
 ## Open questions
 

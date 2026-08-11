@@ -1,6 +1,18 @@
 import { JobStatus, ModuleKey, PlatformRole, Prisma } from "@prisma/client";
 
-import { groupDevelopmentFeedback } from "@/modules/assistant/development-issue-grouping";
+import {
+  describeDevelopmentIssue,
+  groupDevelopmentFeedback,
+  isNonActionableDevelopmentFeedback,
+  type DevelopmentFeedbackCandidate
+} from "@/modules/assistant/development-issue-grouping";
+import {
+  feedbackRequiresSourceEvidence,
+  feedbackUsesFieldValues,
+  feedbackUsesOrderDecisions,
+  isGarlandFeedbackIssueType
+} from "@/modules/assistant/feedback-review-fields";
+import { ensureGarlandFeedbackReviewSourceArtifact } from "@/modules/assistant/operational-feedback-evidence";
 import { GARLAND_WORKFLOW_KEY } from "@/modules/assistant/garland-artifacts";
 import {
   createRivetDevelopmentJob,
@@ -12,6 +24,7 @@ import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const FEEDBACK_STATUSES = new Set(["REPORTED", "INVESTIGATING", "CONFIRMED", "REJECTED", "RESOLVED"]);
+const FEEDBACK_OUTCOMES = new Set(["PASS", "FAIL", "MISSING", "PENDING"]);
 const SUGGESTION_STATUSES = new Set(["AWAITING_APPROVAL", "APPROVED", "REJECTED"]);
 
 export class OperationalMemoryError extends Error {
@@ -115,6 +128,8 @@ export async function createOperationalFeedback(
   const workflowKey = normalizeRequiredText(input.workflowKey || GARLAND_WORKFLOW_KEY, "workflowKey", 100);
   const subjectType = normalizeRequiredText(input.subjectType, "subjectType", 100);
   const subjectId = normalizeOptionalText(input.subjectId, 200);
+  const classification = normalizeClassification(input.classification);
+  const evidence = normalizeFeedbackEvidence(input.evidence, classification);
 
   await validateFeedbackReferences(context.tenantId, input);
 
@@ -131,10 +146,10 @@ export async function createOperationalFeedback(
         artifactId: normalizeOptionalText(input.artifactId, 100),
         reporterUserId: context.userId,
         reporterStatement: statement,
-        expectedOutcome: normalizeOptionalText(input.expectedOutcome, 100),
-        observedOutcome: normalizeOptionalText(input.observedOutcome, 100),
-        classification: normalizeClassification(input.classification),
-        evidence: input.evidence ?? Prisma.JsonNull
+        expectedOutcome: normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome"),
+        observedOutcome: normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome"),
+        classification,
+        evidence
       },
       select: feedbackSelect
     });
@@ -179,7 +194,16 @@ export async function listOperationalFeedback(
 export async function reviewOperationalFeedback(
   context: AuthenticatedContext,
   feedbackId: string,
-  input: { status: string; resolutionNotes?: string | null }
+  input: {
+    status: string;
+    resolutionNotes?: string | null;
+    expectedOutcome?: string | null;
+    observedOutcome?: string | null;
+    classification?: string | null;
+    evidence?: Prisma.InputJsonValue | null;
+    teamshipReviewOrderId?: string | null;
+    artifactId?: string | null;
+  }
 ) {
   const status = input.status.trim().toUpperCase();
   if (!FEEDBACK_STATUSES.has(status)) {
@@ -187,16 +211,44 @@ export async function reviewOperationalFeedback(
   }
   const existing = await prisma.operationalFeedback.findFirst({
     where: { tenantId: context.tenantId, id: feedbackId },
-    select: { id: true, status: true, resolutionNotes: true }
+    select: {
+      id: true,
+      workflowKey: true,
+      subjectId: true,
+      classification: true,
+      status: true,
+      expectedOutcome: true,
+      observedOutcome: true,
+      evidence: true,
+      teamshipReviewRunId: true,
+      teamshipReviewOrderId: true,
+      artifactId: true,
+      resolutionNotes: true
+    }
   });
   if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
 
   const resolutionNotes = normalizeOptionalText(input.resolutionNotes, 4000);
+  const changes = await resolveOperationalFeedbackReviewChanges(
+    context,
+    existing,
+    input
+  );
+  if (status === "CONFIRMED") {
+    validateConfirmedFeedback(existing.workflowKey, changes);
+  }
   return prisma.$transaction(async (tx) => {
     const feedback = await tx.operationalFeedback.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
       data: {
         status,
+        expectedOutcome: changes.expectedOutcome,
+        observedOutcome: changes.observedOutcome,
+        classification: changes.classification,
+        evidence: changes.evidence,
+        teamshipReviewRunId: changes.teamshipReviewRunId,
+        teamshipReviewOrderId: changes.teamshipReviewOrderId,
+        artifactId: changes.artifactId,
         resolutionNotes,
         reviewedByUserId: context.userId,
         reviewedAt: new Date()
@@ -212,9 +264,101 @@ export async function reviewOperationalFeedback(
         entityId: feedbackId,
         before: {
           status: existing.status,
+          expectedOutcome: existing.expectedOutcome,
+          observedOutcome: existing.observedOutcome,
+          classification: existing.classification,
+          teamshipReviewRunId: existing.teamshipReviewRunId,
+          teamshipReviewOrderId: existing.teamshipReviewOrderId,
+          artifactId: existing.artifactId,
           resolutionNotes: existing.resolutionNotes
         } satisfies Prisma.InputJsonValue,
-        after: { status, resolutionNotes } satisfies Prisma.InputJsonValue
+        after: {
+          status,
+          expectedOutcome: changes.expectedOutcome,
+          observedOutcome: changes.observedOutcome,
+          classification: changes.classification,
+          teamshipReviewRunId: changes.teamshipReviewRunId,
+          teamshipReviewOrderId: changes.teamshipReviewOrderId,
+          artifactId: changes.artifactId,
+          resolutionNotes
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return feedback;
+  });
+}
+
+export async function updateOperationalFeedbackReviewFields(
+  context: AuthenticatedContext,
+  feedbackId: string,
+  input: {
+    expectedOutcome?: string | null;
+    observedOutcome?: string | null;
+    classification?: string | null;
+    evidence?: Prisma.InputJsonValue | null;
+    teamshipReviewOrderId?: string | null;
+    artifactId?: string | null;
+  }
+) {
+  const existing = await prisma.operationalFeedback.findFirst({
+    where: { tenantId: context.tenantId, id: feedbackId },
+    select: {
+      id: true,
+      workflowKey: true,
+      subjectId: true,
+      status: true,
+      expectedOutcome: true,
+      observedOutcome: true,
+      classification: true,
+      evidence: true,
+      teamshipReviewRunId: true,
+      teamshipReviewOrderId: true,
+      artifactId: true
+    }
+  });
+  if (!existing) throw new OperationalMemoryError("Feedback was not found.", 404);
+  if (!new Set(["REPORTED", "INVESTIGATING"]).has(existing.status)) {
+    throw new OperationalMemoryError("Only pending feedback can be corrected before review.", 409);
+  }
+  const changes = await resolveOperationalFeedbackReviewChanges(context, existing, input);
+
+  return prisma.$transaction(async (tx) => {
+    const feedback = await tx.operationalFeedback.update({
+      where: { tenantId_id: { tenantId: context.tenantId, id: feedbackId } },
+      data: {
+        expectedOutcome: changes.expectedOutcome,
+        observedOutcome: changes.observedOutcome,
+        classification: changes.classification,
+        evidence: changes.evidence,
+        teamshipReviewRunId: changes.teamshipReviewRunId,
+        teamshipReviewOrderId: changes.teamshipReviewOrderId,
+        artifactId: changes.artifactId
+      },
+      select: feedbackSelect
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.operational_feedback.correct_review_fields",
+        entityType: "OperationalFeedback",
+        entityId: feedbackId,
+        before: {
+          expectedOutcome: existing.expectedOutcome,
+          observedOutcome: existing.observedOutcome,
+          classification: existing.classification,
+          teamshipReviewRunId: existing.teamshipReviewRunId,
+          teamshipReviewOrderId: existing.teamshipReviewOrderId,
+          artifactId: existing.artifactId
+        } satisfies Prisma.InputJsonValue,
+        after: {
+          expectedOutcome: changes.expectedOutcome,
+          observedOutcome: changes.observedOutcome,
+          classification: changes.classification,
+          teamshipReviewRunId: changes.teamshipReviewRunId,
+          teamshipReviewOrderId: changes.teamshipReviewOrderId,
+          artifactId: changes.artifactId
+        } satisfies Prisma.InputJsonValue
       }
     });
     return feedback;
@@ -324,11 +468,14 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
       subjectId: true,
       reporterStatement: true,
       expectedOutcome: true,
-      observedOutcome: true
+      observedOutcome: true,
+      status: true
     }
   });
   const existing = await prisma.developmentSuggestion.findMany({
-    where: { tenantId: context.tenantId, status: { in: ["AWAITING_APPROVAL", "APPROVED"] } },
+    where: { tenantId: context.tenantId },
+    orderBy: { generatedAt: "asc" },
+    take: 500,
     select: {
       id: true,
       moduleKey: true,
@@ -340,22 +487,50 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
       riskLevel: true,
       sourceFeedbackIds: true,
       feedbackCount: true,
-      proposedScope: true
+      proposedScope: true,
+      generatedAt: true
     }
   });
-  const alreadyQueued = new Set(existing.flatMap((item) => jsonStringArray(item.sourceFeedbackIds)));
-  const groups = groupDevelopmentFeedback(feedback.filter((item) => !alreadyQueued.has(item.id)));
+  await reconcileAwaitingSuggestionReviewState(
+    context,
+    existing,
+    new Map(feedback.map((item) => [item.id, item.status]))
+  );
+  await reconcileAwaitingSuggestionDuplicates(context, existing);
+
+  const alreadyQueued = new Set(
+    existing
+      .filter((item) => ["AWAITING_APPROVAL", "APPROVED"].includes(item.status))
+      .flatMap((item) => [
+        ...jsonStringArray(item.sourceFeedbackIds),
+        ...readFollowUpFeedbackIds(item.proposedScope)
+      ])
+  );
+  const groups = groupDevelopmentFeedback(
+    feedback.filter((item) =>
+      item.status === "CONFIRMED" &&
+      !alreadyQueued.has(item.id) &&
+      !isNonActionableDevelopmentFeedback(item)
+    )
+  );
 
   const created = [];
   for (const group of groups) {
     const items = group.items;
     const first = items[0];
-    const matchingAwaiting = existing.find((item) =>
-      item.status === "AWAITING_APPROVAL" &&
+    const family = existing.filter((item) =>
       item.moduleKey === first.moduleKey &&
       item.workflowKey === first.workflowKey &&
-      readIssueKey(item.proposedScope) === group.issueKey
+      readSuggestionIssueKey(item) === group.issueKey
     );
+    const matchingApproved = [...family].reverse().find((item) => item.status === "APPROVED");
+    if (matchingApproved) {
+      created.push(await attachFollowUpFeedback(context, matchingApproved, items));
+      continue;
+    }
+
+    const matchingAwaiting = [...family].reverse().find((item) => item.status === "AWAITING_APPROVAL");
+    const previousResolved = [...family].reverse().find((item) => item.status === "RESOLVED");
     created.push(await prisma.$transaction(async (tx) => {
       const sourceFeedbackIds = [
         ...(matchingAwaiting ? jsonStringArray(matchingAwaiting.sourceFeedbackIds) : []),
@@ -392,7 +567,7 @@ export async function generateDevelopmentSuggestions(context: AuthenticatedConte
               riskLevel: first.workflowKey === GARLAND_WORKFLOW_KEY ? "HIGH" : "MEDIUM",
               sourceFeedbackIds,
               feedbackCount,
-              proposedScope: buildDevelopmentScope(group.issueKey)
+              proposedScope: buildDevelopmentScope(group.issueKey, previousResolved?.id)
             }
           });
       await tx.auditLog.create({
@@ -446,8 +621,49 @@ export async function listDevelopmentSuggestions(context: AuthenticatedContext, 
         }
       });
   const jobsById = new Map(jobs.map((job) => [job.id, summarizeRivetDevelopmentJob(job)]));
+  const feedbackIds = [...new Set(suggestions.flatMap((suggestion) => [
+    ...jsonStringArray(suggestion.sourceFeedbackIds),
+    ...readFollowUpFeedbackIds(suggestion.proposedScope)
+  ]))];
+  const feedback = feedbackIds.length === 0
+    ? []
+    : await prisma.operationalFeedback.findMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: feedbackIds }
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          subjectId: true,
+          reporterStatement: true,
+          expectedOutcome: true,
+          observedOutcome: true,
+          classification: true,
+          evidence: true,
+          teamshipReviewRunId: true,
+          teamshipReviewOrderId: true,
+          artifactId: true,
+          status: true,
+          createdAt: true
+        }
+      });
+  const feedbackById = new Map(feedback.map((item) => [item.id, item]));
   return suggestions.map((suggestion) => ({
     ...suggestion,
+    issueKey: readSuggestionIssueKey(suggestion),
+    followUpFeedbackCount: readFollowUpFeedbackIds(suggestion.proposedScope).length,
+    regressionOfSuggestionId: readScopeString(suggestion.proposedScope, "regressionOfSuggestionId"),
+    feedbackItems: [
+      ...jsonStringArray(suggestion.sourceFeedbackIds).flatMap((id) => {
+        const item = feedbackById.get(id);
+        return item ? [{ ...item, evidenceRole: "APPROVED_PACKET" as const }] : [];
+      }),
+      ...readFollowUpFeedbackIds(suggestion.proposedScope).flatMap((id) => {
+        const item = feedbackById.get(id);
+        return item ? [{ ...item, evidenceRole: "FOLLOW_UP" as const }] : [];
+      })
+    ],
     developmentJob: suggestion.developmentThreadId
       ? jobsById.get(suggestion.developmentThreadId) ?? null
       : null
@@ -501,13 +717,30 @@ export async function decideDevelopmentSuggestion(
           subjectId: true,
           reporterStatement: true,
           expectedOutcome: true,
-          observedOutcome: true
+          observedOutcome: true,
+          evidence: true,
+          teamshipReviewRunId: true,
+          teamshipReviewOrderId: true,
+          artifactId: true,
+          status: true
         }
       })
     : [];
+  if (
+    status === "APPROVED" &&
+    (
+      sourceFeedback.length !== jsonStringArray(existing.sourceFeedbackIds).length ||
+      sourceFeedback.some((item) => item.status !== "CONFIRMED")
+    )
+  ) {
+    throw new OperationalMemoryError(
+      "Review and confirm every source feedback item, then refresh the queue before starting Rivet.",
+      409
+    );
+  }
   return prisma.$transaction(async (tx) => {
     const job = status === "APPROVED"
-      ? await createRivetDevelopmentJob(tx, context, existing, sourceFeedback)
+      ? await createRivetDevelopmentJob(tx, context, existing, sourceFeedback, decisionNotes)
       : null;
     const suggestion = await tx.developmentSuggestion.update({
       where: { tenantId_id: { tenantId: context.tenantId, id: suggestionId } },
@@ -531,7 +764,15 @@ export async function decideDevelopmentSuggestion(
           status,
           decisionNotes,
           developmentJobId: job?.id ?? null,
-          developmentStarted: Boolean(job)
+          developmentQueued: Boolean(job),
+          developmentPhase: job
+            ? summarizeRivetDevelopmentJob({
+                id: job.id,
+                status: job.status,
+                output: job.output,
+                errorMessage: job.errorMessage
+              }).phase
+            : null
         } satisfies Prisma.InputJsonValue
       }
     });
@@ -570,7 +811,8 @@ export async function retryRivetDevelopmentSuggestion(
       riskLevel: true,
       sourceFeedbackIds: true,
       proposedScope: true,
-      developmentThreadId: true
+      developmentThreadId: true,
+      decisionNotes: true
     }
   });
   if (!existing?.developmentThreadId) {
@@ -602,12 +844,30 @@ export async function retryRivetDevelopmentSuggestion(
       subjectId: true,
       reporterStatement: true,
       expectedOutcome: true,
-      observedOutcome: true
+      observedOutcome: true,
+      evidence: true,
+      teamshipReviewRunId: true,
+      teamshipReviewOrderId: true,
+      artifactId: true
     }
   });
 
   return prisma.$transaction(async (tx) => {
-    const job = await createRivetDevelopmentJob(tx, context, existing, sourceFeedback);
+    const job = await createRivetDevelopmentJob(
+      tx,
+      context,
+      existing,
+      sourceFeedback,
+      existing.decisionNotes,
+      { excludeJobId: failedJob.id }
+    );
+    await tx.automationJobRun.update({
+      where: { id: failedJob.id },
+      data: {
+        status: JobStatus.CANCELLED,
+        errorMessage: "This Rivet job was superseded by an administrator-approved retry."
+      }
+    });
     const suggestion = await tx.developmentSuggestion.update({
       where: {
         tenantId_id: {
@@ -643,6 +903,110 @@ export async function retryRivetDevelopmentSuggestion(
   });
 }
 
+export async function resolveDevelopmentSuggestion(
+  context: AuthenticatedContext,
+  suggestionId: string
+) {
+  const existing = await prisma.developmentSuggestion.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: suggestionId,
+      status: "APPROVED"
+    },
+    select: {
+      id: true,
+      status: true,
+      title: true,
+      sourceFeedbackIds: true,
+      proposedScope: true,
+      pullRequestUrl: true,
+      developmentThreadId: true
+    }
+  });
+  if (!existing?.developmentThreadId || !existing.pullRequestUrl) {
+    throw new OperationalMemoryError("Only an approved Rivet suggestion with a pull request can be resolved.", 409);
+  }
+  const job = await prisma.automationJobRun.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      id: existing.developmentThreadId,
+      jobType: RIVET_DEVELOPMENT_JOB_TYPE,
+      status: JobStatus.SUCCESS
+    },
+    select: {
+      id: true,
+      status: true,
+      output: true,
+      errorMessage: true
+    }
+  });
+  const phase = job ? summarizeRivetDevelopmentJob(job).phase : null;
+  if (!job || !new Set(["READY_FOR_ALEX", "PR_OPEN"]).has(phase ?? "")) {
+    throw new OperationalMemoryError("The Rivet pull request must be ready for owner review first.", 409);
+  }
+
+  const resolvedAt = new Date();
+  const feedbackIds = [
+    ...jsonStringArray(existing.sourceFeedbackIds),
+    ...readFollowUpFeedbackIds(existing.proposedScope)
+  ];
+  const proposedScope = mergeDevelopmentScope(existing.proposedScope, {
+    lifecycleState: "FIX_DEPLOYED",
+    resolvedAt: resolvedAt.toISOString(),
+    resolvedPullRequestUrl: existing.pullRequestUrl,
+    followUpFeedbackIds: []
+  });
+
+  return prisma.$transaction(async (tx) => {
+    const suggestion = await tx.developmentSuggestion.update({
+      where: {
+        tenantId_id: {
+          tenantId: context.tenantId,
+          id: existing.id
+        }
+      },
+      data: {
+        status: "RESOLVED",
+        proposedScope,
+        decisionByUserId: context.userId,
+        decisionAt: resolvedAt,
+        decisionNotes: "Administrator confirmed the reviewed pull request is merged and deployed."
+      }
+    });
+    if (feedbackIds.length > 0) {
+      await tx.operationalFeedback.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          id: { in: [...new Set(feedbackIds)] },
+          status: { in: ["REPORTED", "INVESTIGATING", "CONFIRMED"] }
+        },
+        data: {
+          status: "RESOLVED",
+          resolutionNotes: `Covered by deployed development suggestion ${existing.id}.`,
+          reviewedByUserId: context.userId,
+          reviewedAt: resolvedAt
+        }
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.development_suggestion.resolve_deployed",
+        entityType: "DevelopmentSuggestion",
+        entityId: existing.id,
+        before: { status: existing.status } satisfies Prisma.InputJsonValue,
+        after: {
+          status: "RESOLVED",
+          pullRequestUrl: existing.pullRequestUrl,
+          resolvedFeedbackCount: feedbackIds.length
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return suggestion;
+  });
+}
+
 const feedbackSelect = {
   id: true,
   moduleKey: true,
@@ -657,6 +1021,7 @@ const feedbackSelect = {
   expectedOutcome: true,
   observedOutcome: true,
   classification: true,
+  evidence: true,
   status: true,
   resolutionNotes: true,
   reviewedByUserId: true,
@@ -711,6 +1076,251 @@ function normalizeOptionalText(value: string | null | undefined, maxLength: numb
   return text ? text.slice(0, maxLength) : null;
 }
 
+function normalizeFeedbackOutcome(value: string | null | undefined, field: string) {
+  const normalized = value?.trim().toUpperCase() || null;
+  if (normalized && !FEEDBACK_OUTCOMES.has(normalized)) {
+    throw new OperationalMemoryError(`${field} must be PASS, FAIL, MISSING, or PENDING.`);
+  }
+  return normalized;
+}
+
+type OperationalFeedbackReviewRecord = {
+  id: string;
+  workflowKey: string;
+  subjectId: string | null;
+  classification: string;
+  expectedOutcome: string | null;
+  observedOutcome: string | null;
+  evidence: Prisma.JsonValue | null;
+  teamshipReviewRunId: string | null;
+  teamshipReviewOrderId: string | null;
+  artifactId: string | null;
+};
+
+type OperationalFeedbackReviewChanges = {
+  classification: string;
+  expectedOutcome: string | null;
+  observedOutcome: string | null;
+  evidence: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
+  teamshipReviewRunId: string | null;
+  teamshipReviewOrderId: string | null;
+  artifactId: string | null;
+};
+
+async function resolveOperationalFeedbackReviewChanges(
+  context: Pick<AuthenticatedContext, "tenantId" | "userId">,
+  existing: OperationalFeedbackReviewRecord,
+  input: {
+    classification?: string | null;
+    expectedOutcome?: string | null;
+    observedOutcome?: string | null;
+    evidence?: Prisma.InputJsonValue | null;
+    teamshipReviewOrderId?: string | null;
+    artifactId?: string | null;
+  }
+): Promise<OperationalFeedbackReviewChanges> {
+  const classification = input.classification === undefined
+    ? existing.classification
+    : normalizeClassification(input.classification);
+  const expectedOutcome = input.expectedOutcome === undefined
+    ? existing.expectedOutcome
+    : normalizeFeedbackOutcome(input.expectedOutcome, "expectedOutcome");
+  const observedOutcome = input.observedOutcome === undefined
+    ? existing.observedOutcome
+    : normalizeFeedbackOutcome(input.observedOutcome, "observedOutcome");
+  const evidence = input.evidence === undefined
+    ? normalizeFeedbackEvidence(existing.evidence, classification)
+    : normalizeFeedbackEvidence(input.evidence, classification);
+  const reviewOrderId = input.teamshipReviewOrderId === undefined
+    ? existing.teamshipReviewOrderId
+    : normalizeOptionalText(input.teamshipReviewOrderId, 100);
+  let reviewRunId = reviewOrderId ? existing.teamshipReviewRunId : null;
+  let artifactId = input.artifactId === undefined
+    ? existing.artifactId
+    : normalizeOptionalText(input.artifactId, 100);
+
+  let reviewOrder: {
+    id: string;
+    runId: string;
+    psNumber: string;
+    srNumber: string;
+  } | null = null;
+  if (reviewOrderId) {
+    reviewOrder = await prisma.teamshipReviewOrder.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        id: reviewOrderId,
+        run: { deletedAt: null }
+      },
+      select: {
+        id: true,
+        runId: true,
+        psNumber: true,
+        srNumber: true
+      }
+    });
+    if (!reviewOrder) {
+      throw new OperationalMemoryError("The selected Garland review evidence was not found.", 404);
+    }
+    const subject = existing.subjectId?.trim().toUpperCase() ?? null;
+    if (subject && subject !== reviewOrder.psNumber && subject !== reviewOrder.srNumber) {
+      throw new OperationalMemoryError(
+        "The selected Garland review does not match this feedback PS or SR number.",
+        409
+      );
+    }
+    reviewRunId = reviewOrder.runId;
+  }
+
+  let artifact: {
+    id: string;
+    status: string;
+    teamshipReviewRunId: string | null;
+    extractionSummary: Prisma.JsonValue | null;
+  } | null = null;
+  if (artifactId) {
+    artifact = await prisma.workflowArtifact.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        id: artifactId,
+        workflowKey: GARLAND_WORKFLOW_KEY,
+        status: { in: ["REVIEWED", "EVIDENCE_READY"] }
+      },
+      select: {
+        id: true,
+        status: true,
+        teamshipReviewRunId: true,
+        extractionSummary: true
+      }
+    });
+    if (!artifact) {
+      throw new OperationalMemoryError("The selected Garland source evidence was not found.", 404);
+    }
+    const summary = readJsonRecord(artifact.extractionSummary);
+    if (
+      artifact.status === "EVIDENCE_READY" &&
+      summary.purpose === "RIVET_FEEDBACK_EVIDENCE" &&
+      summary.feedbackId !== existing.id
+    ) {
+      throw new OperationalMemoryError("The uploaded evidence belongs to different feedback.", 409);
+    }
+    if (
+      artifact.status === "REVIEWED" &&
+      reviewRunId &&
+      artifact.teamshipReviewRunId !== reviewRunId
+    ) {
+      artifactId = null;
+      artifact = null;
+    }
+  }
+
+  if (reviewRunId && !artifactId) {
+    const sourceArtifact = reviewOrderId
+      ? await ensureGarlandFeedbackReviewSourceArtifact(context, reviewOrderId)
+      : null;
+    artifactId = sourceArtifact?.id ?? null;
+  }
+
+  return {
+    classification,
+    expectedOutcome,
+    observedOutcome,
+    evidence,
+    teamshipReviewRunId: reviewRunId,
+    teamshipReviewOrderId: reviewOrder?.id ?? reviewOrderId,
+    artifactId
+  };
+}
+
+function validateConfirmedFeedback(
+  workflowKey: string,
+  changes: OperationalFeedbackReviewChanges
+) {
+  if (workflowKey !== GARLAND_WORKFLOW_KEY) return;
+  if (changes.classification === "CHECK_RESULT") {
+    throw new OperationalMemoryError(
+      "Choose a clearer issue type before confirming this legacy Garland feedback."
+    );
+  }
+  if (feedbackUsesOrderDecisions(changes.classification)) {
+    if (!changes.observedOutcome || !changes.expectedOutcome) {
+      throw new OperationalMemoryError(
+        "Choose both Nemo's original order decision and the correct order decision."
+      );
+    }
+    if (changes.observedOutcome === changes.expectedOutcome) {
+      throw new OperationalMemoryError(
+        "The original and correct order decisions must differ for an incorrect order-decision issue."
+      );
+    }
+  }
+  if (
+    feedbackRequiresSourceEvidence(changes.classification) &&
+    (!changes.teamshipReviewOrderId || !changes.artifactId)
+  ) {
+    throw new OperationalMemoryError(
+      "Link the exact saved Garland review and attach its source PDF or a supporting screenshot before confirming this field-update issue."
+    );
+  }
+}
+
+function normalizeFeedbackEvidence(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+  classification: string
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  if (!isGarlandFeedbackIssueType(classification)) {
+    return value === null || value === undefined
+      ? Prisma.JsonNull
+      : value as Prisma.InputJsonValue;
+  }
+  const record = readJsonRecord(value);
+  const affectedField = normalizeOptionalText(
+    typeof record.affectedField === "string" ? record.affectedField : null,
+    200
+  );
+  const actualValue = normalizeOptionalText(
+    typeof record.actualValue === "string" ? record.actualValue : null,
+    4000
+  );
+  const expectedValue = normalizeOptionalText(
+    typeof record.expectedValue === "string" ? record.expectedValue : null,
+    4000
+  );
+  if (feedbackUsesFieldValues(classification) && !affectedField) {
+    throw new OperationalMemoryError("Choose the Teamship field affected by this issue.");
+  }
+  if (classification === "TEAMSHIP_FIELD_UPDATE" && (!actualValue || !expectedValue)) {
+    throw new OperationalMemoryError("Provide both the value Nemo wrote and the correct value.");
+  }
+  if (classification === "MISSING_TEAMSHIP_UPDATE" && !expectedValue) {
+    throw new OperationalMemoryError("Provide the value Nemo should have written.");
+  }
+  if (
+    classification === "TEAMSHIP_FIELD_UPDATE" &&
+    actualValue &&
+    expectedValue &&
+    normalizeComparedFeedbackValue(actualValue) === normalizeComparedFeedbackValue(expectedValue)
+  ) {
+    throw new OperationalMemoryError("The value Nemo wrote and the correct value must differ.");
+  }
+  return {
+    issueType: classification,
+    affectedField,
+    actualValue,
+    expectedValue
+  } satisfies Prisma.InputJsonValue;
+}
+
+function normalizeComparedFeedbackValue(value: string) {
+  return value.toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+function readJsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 function normalizeClassification(value?: string | null) {
   const normalized = value?.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_").slice(0, 80);
   return normalized || "UNCLASSIFIED";
@@ -720,15 +1330,258 @@ function jsonStringArray(value: Prisma.JsonValue) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+type DevelopmentSuggestionQueueRecord = {
+  id: string;
+  moduleKey: ModuleKey;
+  workflowKey: string;
+  title: string;
+  summary: string;
+  rationale: string;
+  status: string;
+  riskLevel: string;
+  sourceFeedbackIds: Prisma.JsonValue;
+  feedbackCount: number;
+  proposedScope: Prisma.JsonValue | null;
+  generatedAt: Date;
+};
+
+async function reconcileAwaitingSuggestionReviewState(
+  context: AuthenticatedContext,
+  suggestions: DevelopmentSuggestionQueueRecord[],
+  feedbackStatuses: Map<string, string>
+) {
+  for (const suggestion of suggestions) {
+    if (suggestion.status !== "AWAITING_APPROVAL") continue;
+    const sourceFeedbackIds = jsonStringArray(suggestion.sourceFeedbackIds);
+    const hasUnconfirmedEvidence =
+      sourceFeedbackIds.length === 0 ||
+      sourceFeedbackIds.some((id) => feedbackStatuses.get(id) !== "CONFIRMED");
+    if (!hasUnconfirmedEvidence) continue;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.developmentSuggestion.update({
+        where: {
+          tenantId_id: {
+            tenantId: context.tenantId,
+            id: suggestion.id
+          }
+        },
+        data: {
+          status: "SUPERSEDED",
+          decisionByUserId: context.userId,
+          decisionAt: new Date(),
+          decisionNotes:
+            "Superseded because its Rivet packet included feedback that had not been administrator-confirmed."
+        }
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId: context.tenantId,
+          actorUserId: context.userId,
+          action: "assistant.development_suggestion.supersede_unreviewed",
+          entityType: "DevelopmentSuggestion",
+          entityId: suggestion.id,
+          before: {
+            status: suggestion.status,
+            sourceFeedbackIds
+          } satisfies Prisma.InputJsonValue,
+          after: {
+            status: "SUPERSEDED",
+            reason: "UNCONFIRMED_SOURCE_FEEDBACK"
+          } satisfies Prisma.InputJsonValue
+        }
+      });
+    });
+    suggestion.status = "SUPERSEDED";
+  }
+}
+
+async function reconcileAwaitingSuggestionDuplicates(
+  context: AuthenticatedContext,
+  suggestions: DevelopmentSuggestionQueueRecord[]
+) {
+  const families = new Map<string, DevelopmentSuggestionQueueRecord[]>();
+  for (const suggestion of suggestions) {
+    const familyKey = [
+      suggestion.moduleKey,
+      suggestion.workflowKey,
+      readSuggestionIssueKey(suggestion)
+    ].join(":");
+    families.set(familyKey, [...(families.get(familyKey) ?? []), suggestion]);
+  }
+
+  for (const family of families.values()) {
+    const canonical = [...family].reverse().find((item) => item.status === "APPROVED");
+    const duplicates = family.filter((item) => item.status === "AWAITING_APPROVAL");
+    if (!canonical || duplicates.length === 0) continue;
+
+    const followUpFeedbackIds = [...new Set([
+      ...readFollowUpFeedbackIds(canonical.proposedScope),
+      ...duplicates.flatMap((item) => jsonStringArray(item.sourceFeedbackIds))
+    ])];
+    const proposedScope = mergeDevelopmentScope(canonical.proposedScope, {
+      followUpFeedbackIds,
+      followUpFeedbackCount: followUpFeedbackIds.length
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.developmentSuggestion.update({
+        where: {
+          tenantId_id: {
+            tenantId: context.tenantId,
+            id: canonical.id
+          }
+        },
+        data: { proposedScope }
+      });
+      for (const duplicate of duplicates) {
+        await tx.developmentSuggestion.update({
+          where: {
+            tenantId_id: {
+              tenantId: context.tenantId,
+              id: duplicate.id
+            }
+          },
+          data: {
+            status: "SUPERSEDED",
+            decisionByUserId: context.userId,
+            decisionAt: new Date(),
+            decisionNotes: `Superseded by active issue family ${canonical.id}; feedback remains attached as follow-up evidence.`
+          }
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: context.tenantId,
+            actorUserId: context.userId,
+            action: "assistant.development_suggestion.supersede_duplicate",
+            entityType: "DevelopmentSuggestion",
+            entityId: duplicate.id,
+            before: { status: duplicate.status } satisfies Prisma.InputJsonValue,
+            after: {
+              status: "SUPERSEDED",
+              canonicalSuggestionId: canonical.id,
+              issueKey: readSuggestionIssueKey(canonical)
+            } satisfies Prisma.InputJsonValue
+          }
+        });
+        duplicate.status = "SUPERSEDED";
+      }
+    });
+    canonical.proposedScope = proposedScope;
+  }
+}
+
+async function attachFollowUpFeedback(
+  context: AuthenticatedContext,
+  suggestion: DevelopmentSuggestionQueueRecord,
+  feedback: DevelopmentFeedbackCandidate[]
+) {
+  const followUpFeedbackIds = [...new Set([
+    ...readFollowUpFeedbackIds(suggestion.proposedScope),
+    ...feedback.map((item) => item.id)
+  ])];
+  const proposedScope = mergeDevelopmentScope(suggestion.proposedScope, {
+    followUpFeedbackIds,
+    followUpFeedbackCount: followUpFeedbackIds.length
+  });
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.developmentSuggestion.update({
+      where: {
+        tenantId_id: {
+          tenantId: context.tenantId,
+          id: suggestion.id
+        }
+      },
+      data: { proposedScope }
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "assistant.development_suggestion.attach_follow_up",
+        entityType: "DevelopmentSuggestion",
+        entityId: suggestion.id,
+        after: {
+          issueKey: readSuggestionIssueKey(suggestion),
+          addedFeedbackIds: feedback.map((item) => item.id),
+          followUpFeedbackCount: followUpFeedbackIds.length,
+          approvedPacketChanged: false
+        } satisfies Prisma.InputJsonValue
+      }
+    });
+    return result;
+  });
+  suggestion.proposedScope = proposedScope;
+  return updated;
+}
+
 function readIssueKey(value: Prisma.JsonValue | null) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const issueKey = value.issueKey;
   return typeof issueKey === "string" && issueKey.trim() ? issueKey.trim() : null;
 }
 
-function buildDevelopmentScope(issueKey: string): Prisma.InputJsonValue {
+function readSuggestionIssueKey(
+  suggestion: Pick<
+    DevelopmentSuggestionQueueRecord,
+    "id" | "moduleKey" | "workflowKey" | "title" | "summary" | "proposedScope"
+  >
+) {
+  const stored = readIssueKey(suggestion.proposedScope);
+  const derived = describeDevelopmentIssue({
+    id: suggestion.id,
+    moduleKey: suggestion.moduleKey,
+    workflowKey: suggestion.workflowKey,
+    classification: "CHECK_RESULT",
+    reporterStatement: `${suggestion.title} ${suggestion.summary}`
+  }).key;
+  return stored?.startsWith("GENERIC_") && !derived.startsWith("GENERIC_")
+    ? derived
+    : stored ?? derived;
+}
+
+function readFollowUpFeedbackIds(value: Prisma.JsonValue | null) {
+  const object = readScopeObject(value);
+  return jsonStringArray(object.followUpFeedbackIds ?? []);
+}
+
+function readScopeString(value: Prisma.JsonValue | null, key: string) {
+  const candidate = readScopeObject(value)[key];
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function readScopeObject(value: Prisma.JsonValue | null): Record<string, Prisma.JsonValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, Prisma.JsonValue> = {};
+  for (const [key, candidate] of Object.entries(value)) {
+    if (candidate !== undefined) result[key] = candidate;
+  }
+  return result;
+}
+
+function mergeDevelopmentScope(
+  value: Prisma.JsonValue | null,
+  patch: Record<string, Prisma.JsonValue>
+): Prisma.JsonObject {
+  return {
+    ...readScopeObject(value),
+    ...patch
+  };
+}
+
+function buildDevelopmentScope(
+  issueKey: string,
+  regressionOfSuggestionId?: string
+): Prisma.InputJsonValue {
   return {
     issueKey,
+    lifecycleState: "AWAITING_APPROVAL",
+    ...(regressionOfSuggestionId
+      ? {
+          regressionOfSuggestionId,
+          regressionDetectedAt: new Date().toISOString()
+        }
+      : {}),
     requiresHumanApproval: true,
     approvalStartsDevelopment: true,
     developmentMode: "RIVET_LOCAL_CODEX_REVIEWED_PR",

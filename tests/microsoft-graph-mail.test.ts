@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAndSendMicrosoftGraphMailboxMessage,
+  fetchMicrosoftGraphMailboxFolderMessages,
   fetchMicrosoftGraphMessageAttachmentContent
 } from "@/server/integrations/microsoft-graph-mail";
 
@@ -29,28 +30,70 @@ describe("Microsoft Graph mail attachment downloads", () => {
   });
 });
 
+describe("Microsoft Graph mailbox folders", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reads messages only from the named Inbox child folder", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        value: [{ id: "semrush-folder-id", displayName: "Semrush" }]
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        value: [{ id: "message-1", subject: "Scout - Weekly Newl Position Tracking" }]
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMicrosoftGraphMailboxFolderMessages(
+      "token",
+      "partnerships@example.com",
+      "Inbox/Semrush",
+      { lookbackDays: 21, maxMessagesPerMailbox: 50 }
+    )).resolves.toEqual([
+      expect.objectContaining({ id: "message-1" })
+    ]);
+
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      "users/partnerships%40example.com/mailFolders/inbox/childFolders"
+    );
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain(
+      "users/partnerships%40example.com/mailFolders/semrush-folder-id/messages"
+    );
+  });
+
+  it("fails closed when the named child folder is missing", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMicrosoftGraphMailboxFolderMessages(
+      "token",
+      "partnerships@example.com",
+      "Inbox/Semrush",
+      { lookbackDays: 21, maxMessagesPerMailbox: 50 }
+    )).rejects.toThrow("could not find the Semrush mail folder");
+  });
+});
+
 describe("Microsoft Graph outbound mail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it("creates an immutable draft and sends that exact draft", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        id: "immutable-message-1",
-        conversationId: "conversation-1",
-        internetMessageId: "<message-1@example.com>"
-      }), {
-        status: 201,
-        headers: { "content-type": "application/json" }
-      }))
-      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+  it("sends directly with Mail.Send instead of requiring draft write access", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 202 })
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(createAndSendMicrosoftGraphMailboxMessage(
       "token",
-      "me",
+      "partnerships@example.com",
       {
         recipientEmail: "editor@publisher.example",
         recipientName: "Editor",
@@ -58,50 +101,42 @@ describe("Microsoft Graph outbound mail", () => {
         body: "A short, reviewed message."
       }
     )).resolves.toEqual({
-      id: "immutable-message-1",
-      conversationId: "conversation-1",
-      internetMessageId: "<message-1@example.com>"
+      id: null,
+      conversationId: null,
+      internetMessageId: null
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://graph.microsoft.com/v1.0/me/messages",
+      "https://graph.microsoft.com/v1.0/users/partnerships%40example.com/sendMail",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer token",
-          Prefer: 'IdType="ImmutableId"'
+          Authorization: "Bearer token"
         })
       })
     );
-    const createRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(createRequest.body))).toMatchObject({
-      subject: "Resource suggestion",
-      body: {
-        contentType: "Text",
-        content: "A short, reviewed message."
+    const sendRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(sendRequest.body))).toMatchObject({
+      message: {
+        subject: "Resource suggestion",
+        body: {
+          contentType: "Text",
+          content: "A short, reviewed message."
+        },
+        toRecipients: [{
+          emailAddress: {
+            address: "editor@publisher.example",
+            name: "Editor"
+          }
+        }]
       },
-      toRecipients: [{
-        emailAddress: {
-          address: "editor@publisher.example",
-          name: "Editor"
-        }
-      }]
+      saveToSentItems: true
     });
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "https://graph.microsoft.com/v1.0/me/messages/immutable-message-1/send",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: "Bearer token",
-          Prefer: 'IdType="ImmutableId"'
-        })
-      })
-    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not call send when draft creation fails", async () => {
+  it("surfaces a direct send failure without making a second request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         error: {

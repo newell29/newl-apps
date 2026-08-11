@@ -1,6 +1,7 @@
 import { JobStatus, type Prisma } from "@prisma/client";
 
 import { classifyTradeMiningIndustryFromRecords } from "@/modules/lead-gen/industry-classification";
+import { resolveExistingHunterCompanyByName } from "@/modules/lead-gen/hunter-company-identity";
 import {
   calculateLeadPipelineScoringForCompany,
   getCandidateFeed
@@ -320,6 +321,21 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
   const excludedCompanyKeywords = asStringArray(profileRules?.excludedCompanyKeywords).map((value) =>
     value.trim().toLowerCase()
   );
+  const companyIdentityCandidates = await prisma.company.findMany({
+    where: {
+      tenantId: tenant.tenantId
+    },
+    select: {
+      id: true,
+      name: true,
+      normalizedName: true,
+      domain: true,
+      apolloOrganizationId: true,
+      priorityScore: true,
+      candidateStatus: true,
+      doNotProspect: true
+    }
+  });
 
   for (const [index, record] of batch.records.entries()) {
     const companyIdentity = getCompanyIdentity(record, allowedCompanyIdentityRoles);
@@ -336,54 +352,71 @@ export async function ingestTradeMiningBatch(tenant: TenantContext, payload: unk
 
     const companyName = companyIdentity.name;
     const normalizedName = normalizeCompanyName(companyName);
-    const rawRecordKey = getRawRecordKey(batch, record, normalizedName, index);
     const priorityScore = calculateCandidateScore(record);
-
-    const existingCompany = await prisma.company.findUnique({
-      where: {
-        tenantId_normalizedName: {
-          tenantId: tenant.tenantId,
-          normalizedName
-        }
+    const resolvedCompany = resolveExistingHunterCompanyByName(
+      {
+        name: companyName,
+        normalizedName
       },
-      select: {
-        id: true,
-        priorityScore: true,
-        candidateStatus: true,
-        doNotProspect: true
-      }
-    });
+      companyIdentityCandidates
+    );
+    const existingCompany = resolvedCompany?.company ?? null;
+    const rawRecordKey = getRawRecordKey(
+      batch,
+      record,
+      existingCompany?.normalizedName ?? normalizedName,
+      index
+    );
 
     if (existingCompany?.doNotProspect || existingCompany?.candidateStatus === "DISQUALIFIED") {
       recordsSkipped += 1;
       continue;
     }
 
-    const company = await prisma.company.upsert({
-      where: {
-        tenantId_normalizedName: {
-          tenantId: tenant.tenantId,
-          normalizedName
-        }
-      },
-      update: {
-        name: companyName,
-        source: "trademining",
-        priorityScore: Math.max(existingCompany?.priorityScore ?? 0, priorityScore)
-      },
-      create: {
-        tenantId: tenant.tenantId,
-        name: companyName,
-        normalizedName,
-        source: "trademining",
-        priorityScore
-      }
-    });
+    const company = existingCompany
+      ? await prisma.company.update({
+          where: {
+            id: existingCompany.id
+          },
+          data: {
+            source: "trademining",
+            priorityScore: Math.max(existingCompany.priorityScore, priorityScore)
+          }
+        })
+      : await prisma.company.upsert({
+          where: {
+            tenantId_normalizedName: {
+              tenantId: tenant.tenantId,
+              normalizedName
+            }
+          },
+          update: {
+            source: "trademining",
+            priorityScore
+          },
+          create: {
+            tenantId: tenant.tenantId,
+            name: companyName,
+            normalizedName,
+            source: "trademining",
+            priorityScore
+          }
+        });
 
     if (existingCompany) {
       companiesUpdated += 1;
     } else {
       companiesCreated += 1;
+      companyIdentityCandidates.push({
+        id: company.id,
+        name: company.name,
+        normalizedName: company.normalizedName,
+        domain: company.domain,
+        apolloOrganizationId: company.apolloOrganizationId,
+        priorityScore: company.priorityScore,
+        candidateStatus: company.candidateStatus,
+        doNotProspect: company.doNotProspect
+      });
     }
     touchedCompanyIds.add(company.id);
 
@@ -590,10 +623,16 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
       tenantId: tenant.tenantId
     },
     select: {
-      input: true
+      input: true,
+      output: true
     }
   });
   const searchProfileId = readSearchProfileIdFromJobInput(existingJobRun?.input);
+  const previousOutput = jsonObject(existingJobRun?.output);
+  const previousMetadata = jsonObject(previousOutput.metadata);
+  const previousRecordsProcessed = jsonNumber(previousOutput.recordsProcessed);
+  const previousRecordsCreated = jsonNumber(previousOutput.recordsCreated);
+  const previousRecordsUpdated = jsonNumber(previousOutput.recordsUpdated);
   const qualifyingCompanies =
     searchProfileId && (input.status === "COMPLETED" || input.status === "PARTIAL")
       ? (
@@ -603,6 +642,7 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
         ).length
       : null;
   const completionMetadata = {
+    ...previousMetadata,
     ...(input.metadata ?? {}),
     ...(qualifyingCompanies === null ? {} : { qualifyingCompanies })
   };
@@ -617,10 +657,11 @@ export async function updateTradeMiningJobRunStatus(tenant: TenantContext, jobRu
       finishedAt: isFinished ? new Date() : undefined,
       errorMessage: input.errorMessage ?? null,
       output: {
+        ...previousOutput,
         externalStatus: input.status,
-        recordsProcessed: input.recordsProcessed ?? null,
-        recordsCreated: input.recordsCreated ?? null,
-        recordsUpdated: input.recordsUpdated ?? null,
+        recordsProcessed: input.recordsProcessed ?? previousRecordsProcessed,
+        recordsCreated: input.recordsCreated ?? previousRecordsCreated,
+        recordsUpdated: input.recordsUpdated ?? previousRecordsUpdated,
         metadata: completionMetadata,
         completedAt: input.completedAt ?? new Date().toISOString()
       }
@@ -1237,6 +1278,18 @@ function readJsonString(value: unknown, key: string) {
 
   const field = (value as Record<string, unknown>)[key];
   return typeof field === "string" && field.trim() ? field : null;
+}
+
+function jsonObject(value: unknown): Record<string, Prisma.JsonValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, Prisma.JsonValue>;
+}
+
+function jsonNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function mapExternalJobStatus(status: string) {

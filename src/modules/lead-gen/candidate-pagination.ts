@@ -1,4 +1,5 @@
 export const CANDIDATE_PAGE_SIZES = [25, 50, 75, 100] as const;
+export const CANDIDATE_REVIEW_QUEUE_LIMIT = 100;
 
 export type CandidatePageSize = (typeof CANDIDATE_PAGE_SIZES)[number];
 

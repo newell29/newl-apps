@@ -1,19 +1,26 @@
 import {
   WebsiteGrowthBacklinkCategory,
   WebsiteGrowthBacklinkStatus,
-  WebsiteGrowthOutreachConsentBasis
+  WebsiteGrowthOutreachConsentBasis,
+  WebsiteGrowthOutreachMessageKind
 } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   assertSafeWebsiteGrowthOutreachCopy,
+  buildWebsiteGrowthOutreachAttemptId,
   buildCompliantWebsiteGrowthOutreachBody,
   fetchWebsiteGrowthPublicContactEvidence,
   isWebsiteGrowthOutreachOptOut,
+  isWebsiteGrowthOutreachReplyMatch,
+  parseWebsiteGrowthOutreachRunStartedAt,
   readWebsiteGrowthOutreachIdentity,
   validateWebsiteGrowthContactSource,
   validateWebsiteGrowthOutreachConsent
 } from "@/modules/website-growth/backlink-outreach";
+import {
+  describeWebsiteGrowthBacklinkBlocker
+} from "@/modules/website-growth/backlink-blockers";
 import {
   buildWebsiteGrowthBacklinkDedupeKey,
   buildWebsiteGrowthBacklinkTeamsLines,
@@ -23,7 +30,8 @@ import {
 } from "@/modules/website-growth/backlinks";
 import {
   assertWebsiteGrowthBacklinkReportContainsNoSecrets,
-  isWebsiteGrowthBacklinkExecutorClaimable
+  isWebsiteGrowthBacklinkExecutorClaimable,
+  reportWebsiteGrowthBacklinkExecution
 } from "@/modules/website-growth/backlink-executor";
 import {
   authenticateWebsiteGrowthBacklinkExecutorRequest,
@@ -39,6 +47,30 @@ afterEach(() => {
 });
 
 describe("Website Growth backlink curation", () => {
+  it("builds one stable outbound attempt ID per opportunity and message sequence", () => {
+    const initial = buildWebsiteGrowthOutreachAttemptId({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      kind: WebsiteGrowthOutreachMessageKind.INITIAL,
+      sequence: 0
+    });
+    const repeated = buildWebsiteGrowthOutreachAttemptId({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      kind: WebsiteGrowthOutreachMessageKind.INITIAL,
+      sequence: 0
+    });
+    const followUp = buildWebsiteGrowthOutreachAttemptId({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      kind: WebsiteGrowthOutreachMessageKind.FOLLOW_UP,
+      sequence: 1
+    });
+
+    expect(repeated).toBe(initial);
+    expect(followUp).not.toBe(initial);
+  });
+
   it("parses the bounded structured Scout review", () => {
     const review = parseWebsiteGrowthBacklinkReview({
       queried: true,
@@ -71,6 +103,19 @@ describe("Website Growth backlink curation", () => {
       qualityRejected: 0,
       prospects: Array.from({ length: 16 }, () => buildProspect())
     })).toThrow("at most 15");
+  });
+
+  it("allows Codex to promote at most five Qwen finalists from public-web research", () => {
+    expect(() => parseWebsiteGrowthBacklinkReview({
+      queried: true,
+      source: "WEB_DISCOVERY",
+      observedAt: "2026-07-27T15:00:00.000Z",
+      summary: "Too many finalists were promoted.",
+      rawProspectsReviewed: 120,
+      duplicatesRejected: 80,
+      qualityRejected: 34,
+      prospects: Array.from({ length: 6 }, () => buildProspect())
+    })).toThrow("at most 5");
   });
 
   it("deduplicates hostname variants and target URL variants", () => {
@@ -148,6 +193,91 @@ describe("Website Growth backlink curation", () => {
     expect(() => assertWebsiteGrowthBacklinkReportContainsNoSecrets([
       "https://publisher.example/login?access_token=unsafe-value"
     ])).toThrow("cannot contain passwords");
+  });
+
+  it("requires a specific reason whenever Scout reports a block", async () => {
+    await expect(reportWebsiteGrowthBacklinkExecution({
+      tenantId: "tenant-1",
+      opportunityId: "opportunity-1",
+      status: WebsiteGrowthBacklinkStatus.BLOCKED,
+      notes: " "
+    })).rejects.toThrow("specific blocker reason");
+  });
+});
+
+describe("Website Growth backlink blocker guidance", () => {
+  it.each([
+    {
+      notes: "The directory requires CAPTCHA and phone verification.",
+      category: "MANUAL_SETUP",
+      retryWillHelpNow: false
+    },
+    {
+      notes: "No publicly displayed business email or submission method was found.",
+      category: "NO_CONTACT_METHOD",
+      retryWillHelpNow: false
+    },
+    {
+      notes: "The publisher requires unusual terms and owner confirmation.",
+      category: "NEEDS_OWNER_CONFIRMATION",
+      retryWillHelpNow: false
+    },
+    {
+      notes: "Microsoft Graph permission check failed before delivery.",
+      category: "TECHNICAL",
+      retryWillHelpNow: true
+    }
+  ])("classifies $category blockers and gives retry guidance", ({
+    notes,
+    category,
+    retryWillHelpNow
+  }) => {
+    const blocker = describeWebsiteGrowthBacklinkBlocker({
+      status: WebsiteGrowthBacklinkStatus.BLOCKED,
+      category: WebsiteGrowthBacklinkCategory.DIRECTORY_CITATION,
+      notes,
+      submittedAt: null,
+      contactedAt: null,
+      directoryLoginUrl: null
+    });
+
+    expect(blocker).toMatchObject({
+      category,
+      reason: notes,
+      retryWillHelpNow
+    });
+    expect(blocker?.nextAction).toBeTruthy();
+    expect(blocker?.retryGuidance).toBeTruthy();
+  });
+
+  it("blocks automatic retry guidance when external history exists", () => {
+    const blocker = describeWebsiteGrowthBacklinkBlocker({
+      status: WebsiteGrowthBacklinkStatus.BLOCKED,
+      category: WebsiteGrowthBacklinkCategory.CONTENT_CONTRIBUTION,
+      notes: "Microsoft Graph did not confirm the response.",
+      submittedAt: null,
+      contactedAt: new Date("2026-07-27T12:00:00.000Z"),
+      directoryLoginUrl: null
+    });
+
+    expect(blocker?.retryWillHelpNow).toBe(false);
+    expect(blocker?.retryGuidance).toContain("Do not retry automatically");
+  });
+
+  it("accepts a recent run start time with a bounded legacy fallback", () => {
+    const now = new Date("2026-07-27T16:00:00.000Z");
+    expect(parseWebsiteGrowthOutreachRunStartedAt({
+      value: "2026-07-27T15:55:00.000Z",
+      now
+    })).toEqual(new Date("2026-07-27T15:55:00.000Z"));
+    expect(() => parseWebsiteGrowthOutreachRunStartedAt({
+      value: "2026-07-25T15:55:00.000Z",
+      now
+    })).toThrow("last 24 hours");
+    expect(parseWebsiteGrowthOutreachRunStartedAt({
+      value: null,
+      now
+    })).toEqual(new Date("2026-07-27T14:00:00.000Z"));
   });
 });
 
@@ -229,6 +359,97 @@ describe("Website Growth backlink outreach compliance", () => {
   it("recognizes common opt-out language", () => {
     expect(isWebsiteGrowthOutreachOptOut("Please remove me from this list.")).toBe(true);
     expect(isWebsiteGrowthOutreachOptOut("Thanks, please send the details.")).toBe(false);
+  });
+
+  it("matches replies by conversation ID or normalized thread subject", () => {
+    const contactedAt = new Date("2026-07-25T12:00:00.000Z");
+    const outboundMessages = [{
+      conversationId: "conversation-1",
+      subject: "Briefing idea: coordinating Canada-U.S. warehouse inventory",
+      sentAt: contactedAt
+    }];
+
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "reply-by-conversation",
+        conversationId: "conversation-1",
+        subject: "A rewritten subject",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      }
+    })).toBe(true);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages: outboundMessages.map((message) => ({
+        ...message,
+        conversationId: null
+      })),
+      inboundMessage: {
+        id: "reply-1",
+        subject: "RE: Briefing idea: coordinating Canada-U.S. warehouse inventory",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      }
+    })).toBe(true);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "unrelated-1",
+        subject: "A different topic",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      }
+    })).toBe(false);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "sender-fallback-1",
+        subject: "A different topic",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "editor@publisher.example"
+          }
+        }
+      },
+      allowSenderOnlyFallback: true
+    })).toBe(true);
+    expect(isWebsiteGrowthOutreachReplyMatch({
+      recipientEmail: "editor@publisher.example",
+      contactedAt,
+      outboundMessages,
+      inboundMessage: {
+        id: "wrong-sender-1",
+        subject: "A different topic",
+        receivedDateTime: "2026-07-25T13:00:00.000Z",
+        from: {
+          emailAddress: {
+            address: "someone-else@publisher.example"
+          }
+        }
+      },
+      allowSenderOnlyFallback: true
+    })).toBe(false);
   });
 
   it("allows only a business contact on the approved referring domain", () => {

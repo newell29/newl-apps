@@ -1,4 +1,8 @@
-import type { TeamshipPhase2DryRunPlan, TeamshipPhase2OrderPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
+import {
+  findGarlandItemDetailEvidence,
+  type TeamshipPhase2DryRunPlan,
+  type TeamshipPhase2OrderPlan
+} from "@/modules/shipment-documents/teamship-phase2-dry-run";
 
 export type TeamshipPhase2AgentMode = "DRY_RUN" | "LIVE_API";
 export type TeamshipPhase2ExecutionMode = TeamshipPhase2AgentMode | "LIVE_BROWSER";
@@ -151,6 +155,7 @@ export async function executeTeamshipPhase2Job({
     throw new Error("Live Teamship updates require TEAMSHIP_ALLOW_LIVE_UPDATES=true or --allow-live-updates on the VM worker.");
   }
 
+  assertSafeGarlandSpecialInstructionUpdates(plan);
   assertLiveAllowlist(plan, options.liveAllowlistSrNumbers);
 
   return executeLiveApiUpdates({ job, plan, credentials, options });
@@ -379,6 +384,18 @@ function buildFieldBrowserInstruction(teamshipField: string): TeamshipBrowserFie
 }
 
 const FIELD_BROWSER_INSTRUCTIONS: Record<string, TeamshipBrowserFieldInstruction> = {
+  ship_first_name: {
+    preferredExecution: "TEAMSHIP_API",
+    browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
+    routeTemplate: "/ship-inventories/{teamshipOrderId}",
+    fieldLabel: "First Name",
+    primaryLocator: {
+      strategy: "LABEL_OR_NAME",
+      label: "First Name"
+    },
+    editInstruction: "Open the Teamship shipping order, find First Name, replace it with the approved Garland ship-to name, then save.",
+    saveInstruction: buildShippingOrderSaveInstruction()
+  },
   poNumber: {
     preferredExecution: "TEAMSHIP_API",
     browserFallbackPage: "TEAMSHIP_SHIPPING_ORDER",
@@ -506,6 +523,39 @@ export function buildTeamshipUpdatePayload(order: TeamshipPhase2OrderPlan): Reco
   };
 }
 
+export function assertSafeGarlandSpecialInstructionUpdates(plan: TeamshipPhase2DryRunPlan) {
+  const unsafeOrders = plan.orders.flatMap((order) =>
+    order.plannedFieldUpdates
+      .filter(
+        (field) =>
+          field.reviewFieldKey === "shipping_instructions" ||
+          field.teamshipField === "edi_field_4"
+      )
+      .map((field) => ({
+        order,
+        evidence: findGarlandItemDetailEvidence(field.proposedValue)
+      }))
+      .filter(
+        (
+          candidate
+        ): candidate is {
+          order: TeamshipPhase2OrderPlan;
+          evidence: string;
+        } => Boolean(candidate.evidence)
+      )
+  );
+
+  if (unsafeOrders.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Live Teamship update blocked because Special Instructions contain probable Garland item-detail text: ${unsafeOrders
+      .map(({ order, evidence }) => `${order.psNumber || order.srNumber} (${evidence})`)
+      .join(", ")}. Rebuild the job from the corrected PDF review.`
+  );
+}
+
 function mapTeamshipApiFieldName(teamshipField: string) {
   if (teamshipField === "carrier_value") {
     return "carrier";
@@ -538,31 +588,58 @@ function assertLiveAllowlist(plan: TeamshipPhase2DryRunPlan, allowlistSrNumbers:
 }
 
 async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipPhase2AgentCredentials, apiBaseUrl: string) {
-  const response = await fetchImpl(`${apiBaseUrl}/v1/login`, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      email: credentials.email,
-      password: credentials.password
-    }),
-    cache: "no-store"
-  });
-  const json = (await response.json().catch(() => null)) as TeamshipLoginResponse | null;
+  let lastError: unknown = null;
 
-  if (!response.ok || !json) {
-    throw new Error(`Teamship login failed with status ${response.status}.`);
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await fetchImpl(`${apiBaseUrl}/v1/login`, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password
+        }),
+        cache: "no-store"
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipLoginResponse | null;
+
+      if (!response.ok || !json) {
+        const error = new Error(`Teamship login failed with status ${response.status}.`);
+        if (attempt === 1 && isTransientLoginStatus(response.status)) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+
+      const token = json.data?.token ?? json.token;
+
+      if (!token) {
+        throw new Error("Teamship login succeeded but did not return an API token.");
+      }
+
+      return token;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1 && isRetryableNetworkError(error)) {
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const token = json.data?.token ?? json.token;
+  throw lastError instanceof Error ? lastError : new Error("Teamship login failed after one safe retry.");
+}
 
-  if (!token) {
-    throw new Error("Teamship login succeeded but did not return an API token.");
-  }
+function isTransientLoginStatus(status: number) {
+  return status === 429 || status >= 500;
+}
 
-  return token;
+function isRetryableNetworkError(error: unknown) {
+  return error instanceof TypeError;
 }
 
 async function updateTeamshipShippingOrder({

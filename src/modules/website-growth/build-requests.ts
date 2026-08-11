@@ -13,7 +13,7 @@ import {
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
-const JOB_TYPE = "WEBSITE_GROWTH_DEVELOPER_BUILD";
+export const WEBSITE_GROWTH_BUILD_JOB_TYPE = "WEBSITE_GROWTH_DEVELOPER_BUILD";
 export const WEBSITE_GROWTH_STALE_DISPATCH_MS = 10 * 60 * 1000;
 export const WEBSITE_GROWTH_STALE_RUNNING_MS = 45 * 60 * 1000;
 
@@ -23,6 +23,7 @@ export type WebsiteGrowthBuildPhase =
   | "RUNNING"
   | "PR_OPEN"
   | "PREVIEW_READY"
+  | "PUBLISHED"
   | "FAILED"
   | "CANCELLED";
 
@@ -73,7 +74,7 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
           status: JobStatus.QUEUED,
           startedAt: new Date(),
           input: input as unknown as Prisma.InputJsonValue,
-          output: { phase: "QUEUED" },
+          output: { phase: "QUEUED", notificationVersion: 1, teamsNotifications: {} },
           errorMessage: null,
           finishedAt: null
         }
@@ -82,10 +83,10 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
         const created = await tx.automationJobRun.create({
           data: {
             tenantId: context.tenantId,
-            jobType: JOB_TYPE,
+            jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE,
             status: JobStatus.QUEUED,
             input: input as unknown as Prisma.InputJsonValue,
-            output: { phase: "QUEUED" }
+            output: { phase: "QUEUED", notificationVersion: 1, teamsNotifications: {} }
           }
         });
         await tx.auditLog.create({
@@ -118,6 +119,8 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
         data: {
           output: {
             phase: "DISPATCHED",
+            notificationVersion: 1,
+            teamsNotifications: {},
             repository: dispatched.repository,
             workflowFile: dispatched.workflowFile,
             model: dispatched.model,
@@ -148,7 +151,12 @@ export async function createAndDispatchWebsiteGrowthBuildRequest({
         data: {
           status: JobStatus.ERROR,
           finishedAt: new Date(),
-          output: { phase: "FAILED", errorCode: "DISPATCH_FAILED" },
+          output: {
+            phase: "FAILED",
+            notificationVersion: 1,
+            teamsNotifications: {},
+            errorCode: "DISPATCH_FAILED"
+          },
           errorMessage: message
         }
       });
@@ -172,7 +180,7 @@ export async function findWebsiteGrowthBuildRequestForDraft(tenantId: string, co
   return prisma.automationJobRun.findFirst({
     where: {
       tenantId,
-      jobType: JOB_TYPE,
+      jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE,
       input: { path: ["contentDraftId"], equals: contentDraftId }
     },
     orderBy: { createdAt: "desc" }
@@ -242,7 +250,7 @@ export async function getWebsiteGrowthBuildRequestPackage(requestId: string, ten
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true, slug: true } });
   if (!tenant) return null;
   const job = await prisma.automationJobRun.findFirst({
-    where: { id: requestId, tenantId: tenant.id, jobType: JOB_TYPE }
+    where: { id: requestId, tenantId: tenant.id, jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE }
   });
   if (!job) return null;
   const input = parseBuildRequestInput(job.input);
@@ -285,7 +293,7 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
   requestId: string;
   tenantSlug: string;
   update: {
-    status: "RUNNING" | "PR_OPEN" | "PREVIEW_READY" | "FAILED";
+    status: "RUNNING" | "PR_OPEN" | "PREVIEW_READY" | "PUBLISHED" | "FAILED";
     githubRunUrl?: string;
     pullRequestUrl?: string;
     pullRequestNumber?: number;
@@ -297,20 +305,31 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
 }) {
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true } });
   if (!tenant) return false;
-  const job = await prisma.automationJobRun.findFirst({ where: { id: requestId, tenantId: tenant.id, jobType: JOB_TYPE } });
+  const job = await prisma.automationJobRun.findFirst({
+    where: { id: requestId, tenantId: tenant.id, jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE }
+  });
   if (!job) return false;
   const input = parseBuildRequestInput(job.input);
   if (!input) return false;
   validateWorkerTransition(job.status, readPhase(job.output), update.status);
 
-  const nextStatus = update.status === "FAILED" ? JobStatus.ERROR : update.status === "PREVIEW_READY" ? JobStatus.SUCCESS : JobStatus.RUNNING;
+  const nextStatus =
+    update.status === "FAILED"
+      ? JobStatus.ERROR
+      : update.status === "PREVIEW_READY" || update.status === "PUBLISHED"
+        ? JobStatus.SUCCESS
+        : JobStatus.RUNNING;
+  const deploymentUrl = normalizeOptionalUrl(update.previewUrl);
+  if (update.status === "PUBLISHED" && !deploymentUrl) {
+    throw new Error("Website Growth published status requires a valid HTTPS production URL.");
+  }
   const output = {
     ...readRecord(job.output),
     phase: update.status,
     githubRunUrl: normalizeOptionalUrl(update.githubRunUrl),
     pullRequestUrl: normalizeOptionalUrl(update.pullRequestUrl),
     pullRequestNumber: update.pullRequestNumber,
-    previewUrl: normalizeOptionalUrl(update.previewUrl),
+    previewUrl: deploymentUrl,
     commitSha: update.commitSha?.slice(0, 64),
     errorCode: update.errorCode?.slice(0, 80),
     updatedAt: new Date().toISOString()
@@ -323,7 +342,12 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
         status: nextStatus,
         output,
         errorMessage: update.status === "FAILED" ? update.errorMessage?.slice(0, 1000) || "Website build failed." : null,
-        finishedAt: update.status === "FAILED" || update.status === "PREVIEW_READY" ? new Date() : null
+        finishedAt:
+          update.status === "FAILED" ||
+          update.status === "PREVIEW_READY" ||
+          update.status === "PUBLISHED"
+            ? new Date()
+            : null
       }
     });
     if (update.status === "PR_OPEN" && update.pullRequestUrl) {
@@ -336,10 +360,48 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
         data: { status: WebsiteGrowthOpportunityStatus.IN_PROGRESS }
       });
     }
-    if (update.status === "PREVIEW_READY" && update.previewUrl) {
+    if (update.status === "PREVIEW_READY" && deploymentUrl) {
       await tx.websiteGrowthContentDraft.updateMany({
         where: { id: input.contentDraftId, tenantId: tenant.id },
-        data: { builtUrl: update.previewUrl }
+        data: { builtUrl: deploymentUrl }
+      });
+    }
+    if (update.status === "PUBLISHED") {
+      const publishedAt = new Date();
+      await tx.websiteGrowthContentDraft.updateMany({
+        where: {
+          id: input.contentDraftId,
+          tenantId: tenant.id,
+          status: {
+            in: [
+              WebsiteGrowthContentDraftStatus.APPROVED,
+              WebsiteGrowthContentDraftStatus.BUILT,
+              WebsiteGrowthContentDraftStatus.PUBLISHED
+            ]
+          }
+        },
+        data: {
+          status: WebsiteGrowthContentDraftStatus.PUBLISHED,
+          builtUrl: deploymentUrl,
+          publishedAt
+        }
+      });
+      await tx.websiteGrowthOpportunity.updateMany({
+        where: {
+          id: input.opportunityId,
+          tenantId: tenant.id,
+          status: {
+            in: [
+              WebsiteGrowthOpportunityStatus.APPROVED,
+              WebsiteGrowthOpportunityStatus.IN_PROGRESS,
+              WebsiteGrowthOpportunityStatus.PUBLISHED
+            ]
+          }
+        },
+        data: {
+          status: WebsiteGrowthOpportunityStatus.PUBLISHED,
+          publishedAt
+        }
       });
     }
     await tx.auditLog.create({
@@ -369,20 +431,25 @@ function validateWorkerTransition(currentStatus: JobStatus, currentPhase: Websit
   const allowed: Record<WebsiteGrowthBuildPhase, WebsiteGrowthBuildPhase[]> = {
     QUEUED: ["RUNNING", "FAILED"],
     DISPATCHED: ["RUNNING", "FAILED"],
-    RUNNING: ["PR_OPEN", "FAILED"],
-    PR_OPEN: ["PREVIEW_READY", "FAILED"],
-    PREVIEW_READY: [],
-    FAILED: [],
+    RUNNING: ["PR_OPEN", "PUBLISHED", "FAILED"],
+    PR_OPEN: ["PREVIEW_READY", "PUBLISHED", "FAILED"],
+    PREVIEW_READY: ["PUBLISHED"],
+    PUBLISHED: ["PUBLISHED"],
+    FAILED: ["PUBLISHED"],
     CANCELLED: []
   };
-  if (currentStatus === JobStatus.SUCCESS || currentStatus === JobStatus.CANCELLED || !allowed[currentPhase].includes(next)) {
+  if (
+    currentStatus === JobStatus.CANCELLED ||
+    (currentStatus === JobStatus.SUCCESS && next !== "PUBLISHED") ||
+    !allowed[currentPhase].includes(next)
+  ) {
     throw new Error(`Website Growth build cannot move from ${currentPhase} to ${next}.`);
   }
 }
 
 function readPhase(value: unknown): WebsiteGrowthBuildPhase {
   const phase = readRecord(value).phase;
-  return typeof phase === "string" && ["QUEUED", "DISPATCHED", "RUNNING", "PR_OPEN", "PREVIEW_READY", "FAILED", "CANCELLED"].includes(phase)
+  return typeof phase === "string" && ["QUEUED", "DISPATCHED", "RUNNING", "PR_OPEN", "PREVIEW_READY", "PUBLISHED", "FAILED", "CANCELLED"].includes(phase)
     ? phase as WebsiteGrowthBuildPhase
     : "QUEUED";
 }

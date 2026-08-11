@@ -3,6 +3,7 @@ export type ApolloQueueSummary = {
   message: string | null;
   requestedCompanies: number;
   processedCompanies: number;
+  skippedReviewCompanies: number;
   matchedCompanies: number;
   reviewNeededCompanies: number;
   companiesWithContacts: number;
@@ -16,6 +17,7 @@ export const EMPTY_APOLLO_QUEUE_SUMMARY: ApolloQueueSummary = {
   message: null,
   requestedCompanies: 0,
   processedCompanies: 0,
+  skippedReviewCompanies: 0,
   matchedCompanies: 0,
   reviewNeededCompanies: 0,
   companiesWithContacts: 0,

@@ -27,6 +27,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - A separate job applies only a verified patch to an isolated `codex/website-growth-*` or `kimi/website-growth-*` branch and opens a draft PR.
 - Only the Codex branch reports PR and Preview status to the primary Newl Apps build record during the Kimi trial.
 - The owner retains the merge decision for every branch. Kimi failure cannot block or downgrade the primary Codex result.
+- The website worker may report `PUBLISHED` only for a merged primary `codex/website-growth-*` PR after Vercel reports a successful production deployment. The callback is tenant scoped and can update status records, but it cannot merge or deploy.
 
 ## Workflow / rules summary
 

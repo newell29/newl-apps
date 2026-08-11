@@ -8,6 +8,7 @@ import {
   type TeamshipPhase2OrderPlan
 } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import {
+  assertSafeGarlandSpecialInstructionUpdates,
   buildDryRunEvidence,
   buildTeamshipUpdatePayload,
   type TeamshipPhase2AgentCredentials,
@@ -86,8 +87,22 @@ export type TeamshipBolCleanupJobResult = {
   notes: string[];
 };
 
+type TeamshipBolCleanupBrowserSession = {
+  browser: Browser;
+  page: Page;
+};
+
+type TeamshipBolCleanupOrderIdentity = Pick<TeamshipPhase2OrderPlan, "psNumber" | "srNumber" | "teamshipOrderId">;
+
+export type TeamshipBolCleanupBatchResult = {
+  orders: TeamshipBolCleanupOrderResult[];
+  browserRestartCount: number;
+  abortedReason: string | null;
+};
+
 const DEFAULT_TEAMSHIP_APP_BASE_URL = "https://app.teamshipos.com";
 const DEFAULT_ALLOWED_HOSTS = ["app.teamshipos.com", "members.fulfillit.io", "staging.teamshipos.com", "dev.teamshipos.com"];
+const DEFAULT_BOL_CLEANUP_BROWSER_RESTARTS = 1;
 
 const PALLET_DOM_HELPERS = String.raw`
   function collectPalletControls() {
@@ -168,6 +183,7 @@ export async function executeTeamshipPhase2BrowserJob({
     throw new Error("Live Teamship browser updates require TEAMSHIP_ALLOW_LIVE_UPDATES=true or --allow-live-updates on the VM worker.");
   }
 
+  assertSafeGarlandSpecialInstructionUpdates(plan);
   assertLiveAllowlist(plan, options.liveAllowlistSrNumbers);
 
   const appBaseUrl = resolveTeamshipAppBaseUrl(credentials);
@@ -340,6 +356,8 @@ export async function executeTeamshipPhase2BolCleanupJob({
   >;
   eligibleSrNumbers?: string[];
 }): Promise<TeamshipBolCleanupJobResult> {
+  assertSafeGarlandSpecialInstructionUpdates(plan);
+
   const appBaseUrl = resolveTeamshipAppBaseUrl(credentials);
   const screenshotRootDir = options.screenshotRootDir?.trim() || path.join("tmp", "teamship-browser-agent", job.id);
   const eligible = eligibleSrNumbers ? new Set(eligibleSrNumbers.map(normalizeIdentifier).filter(Boolean)) : null;
@@ -360,43 +378,62 @@ export async function executeTeamshipPhase2BolCleanupJob({
     };
   }
 
-  const browser = await launchBrowser(options);
-  const orders: TeamshipBolCleanupOrderResult[] = [];
-
-  try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
-
-    for (const [index, order] of ordersToClean.entries()) {
-      const orderScreenshotDir = path.join(screenshotRootDir, sanitizePathSegment(order.srNumber || order.teamshipOrderId || `bol-cleanup-${index + 1}`));
+  const batchResult = await runTeamshipBolCleanupBatch({
+    orders: ordersToClean,
+    maxBrowserRestarts: DEFAULT_BOL_CLEANUP_BROWSER_RESTARTS,
+    openSession: async () => {
+      const browser = await launchBrowser(options);
 
       try {
-        fs.mkdirSync(orderScreenshotDir, { recursive: true });
-        const teamshipUrl = resolveOrderUrl({ order, appBaseUrl, allowedHosts: options.allowedHosts });
-        logBrowserStage(order, `opening ${teamshipUrl} for post-API BOL cleanup`);
-        await page.goto(teamshipUrl, { waitUntil: "domcontentloaded" });
-        await maybeLogin(page, credentials);
-        const bolEditorCleanup = await openBolEditorAndApplyCleanup({
-          page,
-          order,
-          orderUrl: teamshipUrl,
-          appBaseUrl,
-          screenshotDir: orderScreenshotDir,
-          allowedHosts: options.allowedHosts
-        });
+        const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
 
-        orders.push({
-          psNumber: order.psNumber,
-          srNumber: order.srNumber,
-          teamshipOrderId: order.teamshipOrderId,
-          status: "UPDATED",
-          screenshotDir: orderScreenshotDir,
-          bolEditorCleanup
-        });
+        return { browser, page };
       } catch (error) {
-        await saveScreenshot(page, orderScreenshotDir, "bol-cleanup-error").catch(() => undefined);
-        const errorMessage = error instanceof Error ? error.message : "Unknown Teamship BOL cleanup failure.";
+        await browser.close().catch(() => undefined);
+        throw error;
+      }
+    },
+    executeOrder: async ({ order, index, session }) => {
+      const orderScreenshotDir = path.join(
+        screenshotRootDir,
+        sanitizePathSegment(order.srNumber || order.teamshipOrderId || `bol-cleanup-${index + 1}`)
+      );
+
+      fs.mkdirSync(orderScreenshotDir, { recursive: true });
+      const teamshipUrl = resolveOrderUrl({ order, appBaseUrl, allowedHosts: options.allowedHosts });
+      logBrowserStage(order, `opening ${teamshipUrl} for post-API BOL cleanup`);
+      await session.page.goto(teamshipUrl, { waitUntil: "domcontentloaded" });
+      await maybeLogin(session.page, credentials);
+      const bolEditorCleanup = await openBolEditorAndApplyCleanup({
+        page: session.page,
+        order,
+        orderUrl: teamshipUrl,
+        appBaseUrl,
+        screenshotDir: orderScreenshotDir,
+        allowedHosts: options.allowedHosts
+      });
+
+      return {
+        psNumber: order.psNumber,
+        srNumber: order.srNumber,
+        teamshipOrderId: order.teamshipOrderId,
+        status: "UPDATED",
+        screenshotDir: orderScreenshotDir,
+        bolEditorCleanup
+      };
+    },
+    recordFailure: async ({ order, index, session, error }) => {
+      const orderScreenshotDir = path.join(
+        screenshotRootDir,
+        sanitizePathSegment(order.srNumber || order.teamshipOrderId || `bol-cleanup-${index + 1}`)
+      );
+      const errorMessage = describeBrowserError(error);
+
+      if (session) {
+        fs.mkdirSync(orderScreenshotDir, { recursive: true });
+        await saveScreenshot(session.page, orderScreenshotDir, "bol-cleanup-error").catch(() => undefined);
         await pauseForBrowserDebug({
-          page,
+          page: session.page,
           options: {
             agentId: "bol-cleanup",
             allowLiveUpdates: true,
@@ -406,33 +443,183 @@ export async function executeTeamshipPhase2BolCleanupJob({
           errorMessage,
           orderLabel: order.srNumber || order.teamshipOrderId || `order ${index + 1}`
         });
-        orders.push({
-          psNumber: order.psNumber,
-          srNumber: order.srNumber,
-          teamshipOrderId: order.teamshipOrderId,
-          status: "FAILED",
-          screenshotDir: orderScreenshotDir,
-          error: errorMessage
-        });
       }
-    }
-  } finally {
-    await browser.close();
-  }
 
-  const failedOrders = orders.filter((order) => order.status === "FAILED");
+      return {
+        psNumber: order.psNumber,
+        srNumber: order.srNumber,
+        teamshipOrderId: order.teamshipOrderId,
+        status: "FAILED",
+        screenshotDir: orderScreenshotDir,
+        error: errorMessage
+      };
+    },
+    onBrowserRestart: ({ order, attempt }) => {
+      logBrowserStage(order, `browser session closed; starting bounded recovery attempt ${attempt}`);
+    }
+  });
+
+  const orders = batchResult.orders;
+  const incompleteOrders = orders.filter((order) => order.status !== "UPDATED");
 
   return {
     screenshotRootDir,
     orders,
-    hasFailures: failedOrders.length > 0,
+    hasFailures: incompleteOrders.length > 0,
     notes: [
-      failedOrders.length > 0
-        ? `Post-API BOL cleanup completed with ${failedOrders.length} failed order(s): ${failedOrders.map((order) => order.srNumber).join(", ")}.`
+      incompleteOrders.length > 0
+        ? `Post-API BOL cleanup completed with ${incompleteOrders.length} incomplete order(s): ${incompleteOrders
+            .map((order) => order.srNumber)
+            .join(", ")}.`
         : `Post-API BOL cleanup removed generated weight values for ${orders.length} order(s).`,
+      batchResult.browserRestartCount > 0
+        ? `The worker restarted the Teamship browser ${batchResult.browserRestartCount} time(s) after detecting a closed browser session.`
+        : null,
+      batchResult.abortedReason ? `BOL cleanup stopped safely: ${batchResult.abortedReason}` : null,
       `BOL cleanup screenshots were written under ${screenshotRootDir}.`
-    ]
+    ].filter((note): note is string => Boolean(note))
   };
+}
+
+export async function runTeamshipBolCleanupBatch<TOrder extends TeamshipBolCleanupOrderIdentity>({
+  orders,
+  openSession,
+  executeOrder,
+  recordFailure,
+  onBrowserRestart,
+  maxBrowserRestarts = DEFAULT_BOL_CLEANUP_BROWSER_RESTARTS
+}: {
+  orders: TOrder[];
+  openSession: () => Promise<TeamshipBolCleanupBrowserSession>;
+  executeOrder: (input: {
+    order: TOrder;
+    index: number;
+    session: TeamshipBolCleanupBrowserSession;
+  }) => Promise<TeamshipBolCleanupOrderResult>;
+  recordFailure: (input: {
+    order: TOrder;
+    index: number;
+    session: TeamshipBolCleanupBrowserSession | null;
+    error: unknown;
+  }) => Promise<TeamshipBolCleanupOrderResult>;
+  onBrowserRestart?: (input: { order: TOrder; index: number; attempt: number }) => void;
+  maxBrowserRestarts?: number;
+}): Promise<TeamshipBolCleanupBatchResult> {
+  const results: TeamshipBolCleanupOrderResult[] = [];
+  let session: TeamshipBolCleanupBrowserSession | null = null;
+  let browserRestartCount = 0;
+  let abortedReason: string | null = null;
+
+  try {
+    try {
+      session = await openSession();
+    } catch (error) {
+      abortedReason = `The Teamship browser could not be started: ${describeBrowserError(error)}`;
+
+      return {
+        orders: orders.map((order) => buildSkippedBolCleanupResult(order, abortedReason as string)),
+        browserRestartCount,
+        abortedReason
+      };
+    }
+
+    orderLoop: for (const [index, order] of orders.entries()) {
+      while (session) {
+        try {
+          results.push(await executeOrder({ order, index, session }));
+          continue orderLoop;
+        } catch (error) {
+          const browserSessionClosed = isBrowserSessionClosedError(error, session);
+
+          if (browserSessionClosed && browserRestartCount < Math.max(0, maxBrowserRestarts)) {
+            browserRestartCount += 1;
+            onBrowserRestart?.({ order, index, attempt: browserRestartCount });
+            await closeBolCleanupBrowserSession(session);
+            session = null;
+
+            try {
+              session = await openSession();
+              continue;
+            } catch (restartError) {
+              const restartMessage = `The Teamship browser closed and recovery attempt ${browserRestartCount} could not start: ${describeBrowserError(
+                restartError
+              )}`;
+              results.push(await recordFailure({ order, index, session: null, error: new Error(restartMessage) }));
+              abortedReason = restartMessage;
+              appendSkippedBolCleanupResults(results, orders.slice(index + 1), abortedReason);
+              break orderLoop;
+            }
+          }
+
+          results.push(await recordFailure({ order, index, session, error }));
+
+          if (browserSessionClosed) {
+            abortedReason = `The Teamship browser closed again after ${browserRestartCount} bounded recovery attempt(s).`;
+            appendSkippedBolCleanupResults(results, orders.slice(index + 1), abortedReason);
+            break orderLoop;
+          }
+
+          continue orderLoop;
+        }
+      }
+    }
+  } finally {
+    await closeBolCleanupBrowserSession(session);
+  }
+
+  return {
+    orders: results,
+    browserRestartCount,
+    abortedReason
+  };
+}
+
+export function isBrowserSessionClosedError(error: unknown, session?: TeamshipBolCleanupBrowserSession | null) {
+  const message = describeBrowserError(error);
+  const closedByMessage =
+    /target (?:page, context or browser|page|context) has been closed/i.test(message) ||
+    /(?:browser|page|context) (?:has been|was|is) closed/i.test(message) ||
+    /target closed/i.test(message) ||
+    /browser has disconnected/i.test(message) ||
+    /connection closed/i.test(message);
+  const pageClosed = session?.page.isClosed?.() ?? false;
+  const browserDisconnected = session ? !session.browser.isConnected() : false;
+
+  return closedByMessage || pageClosed || browserDisconnected;
+}
+
+export function describeIncompleteBolCleanup(cleanup: Pick<TeamshipBolCleanupOrderResult, "status" | "error">) {
+  return cleanup.status === "SKIPPED"
+    ? `Teamship API update succeeded, but BOL weight cleanup was skipped: ${cleanup.error ?? "The cleanup batch stopped safely."}`
+    : `Teamship API update succeeded, but BOL weight cleanup failed: ${cleanup.error ?? "Unknown failure."}`;
+}
+
+function appendSkippedBolCleanupResults<TOrder extends TeamshipBolCleanupOrderIdentity>(
+  results: TeamshipBolCleanupOrderResult[],
+  orders: TOrder[],
+  reason: string
+) {
+  for (const order of orders) {
+    results.push(buildSkippedBolCleanupResult(order, `Not attempted because ${reason}`));
+  }
+}
+
+function buildSkippedBolCleanupResult(order: TeamshipBolCleanupOrderIdentity, reason: string): TeamshipBolCleanupOrderResult {
+  return {
+    psNumber: order.psNumber,
+    srNumber: order.srNumber,
+    teamshipOrderId: order.teamshipOrderId,
+    status: "SKIPPED",
+    error: reason
+  };
+}
+
+async function closeBolCleanupBrowserSession(session: TeamshipBolCleanupBrowserSession | null) {
+  await session?.browser.close().catch(() => undefined);
+}
+
+function describeBrowserError(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown Teamship BOL cleanup failure.";
 }
 
 function logBrowserStage(order: TeamshipPhase2OrderPlan, message: string) {

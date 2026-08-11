@@ -1,15 +1,42 @@
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+
+import {
+  fillProtectedDirectoryCredentials,
+  type DirectoryCredentialContext,
+  type DirectoryCredentialFillInput
+} from "./directory-credentials.js";
 
 const DEFAULT_TOKEN_ENV = "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN";
+const DEFAULT_DIRECTORY_PASSWORD_MASTER_ENV =
+  "NEWL_DIRECTORY_PASSWORD_MASTER_V1";
+const DEFAULT_BUSINESS_PROFILE_PATH = path.join(
+  homedir(),
+  ".openclaw",
+  "agents",
+  "scout",
+  "backlink-business-profile.json"
+);
 
-type WebsiteGrowthPluginConfig = {
+export type WebsiteGrowthPluginConfig = {
   baseUrl: string;
   backlinkTokenEnv?: string;
   vercelProtectionBypassEnv?: string;
+  directoryPasswordMasterEnv?: string;
+  businessProfilePath?: string;
 };
 
 const emptyParameters = Type.Object({});
+const summaryParameters = Type.Object({
+  runStartedAt: Type.String({
+    format: "date-time",
+    description:
+      "UTC timestamp recorded immediately before this outreach cycle began."
+  })
+});
 const sendEmailParameters = Type.Object({
   opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
   kind: Type.Union([
@@ -33,6 +60,11 @@ const sendEmailParameters = Type.Object({
   subject: Type.String({ minLength: 1, maxLength: 180 }),
   body: Type.String({ minLength: 1, maxLength: 4000 })
 });
+const sendFollowUpParameters = Type.Object({
+  opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
+  subject: Type.String({ minLength: 1, maxLength: 180 }),
+  body: Type.String({ minLength: 1, maxLength: 4000 })
+});
 const reportParameters = Type.Object({
   opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
   status: Type.Union([
@@ -45,8 +77,31 @@ const reportParameters = Type.Object({
   liveUrl: Type.Optional(Type.String({ format: "uri", maxLength: 1000 })),
   directoryLoginUrl: Type.Optional(Type.String({ format: "uri", maxLength: 1000 })),
   directoryUsername: Type.Optional(Type.String({ maxLength: 320 })),
+  directoryAccountState: Type.Optional(Type.Union([
+    Type.Literal("EMAIL_VERIFICATION_PENDING"),
+    Type.Literal("HUMAN_ACTION_REQUIRED"),
+    Type.Literal("ACTIVE"),
+    Type.Literal("FAILED")
+  ])),
+  directoryChallengeType: Type.Optional(Type.Union([
+    Type.Literal("CAPTCHA"),
+    Type.Literal("MFA"),
+    Type.Literal("PHONE_VERIFICATION"),
+    Type.Literal("EMAIL_VERIFICATION"),
+    Type.Literal("PASSWORD_POLICY"),
+    Type.Literal("TERMS"),
+    Type.Literal("OTHER")
+  ])),
+  directoryChallengeDetail: Type.Optional(Type.String({ maxLength: 1000 })),
   acceptedTermsUrl: Type.Optional(Type.String({ format: "uri", maxLength: 1000 })),
   acceptedTermsSummary: Type.Optional(Type.String({ maxLength: 1000 }))
+});
+const directoryCredentialFillParameters = Type.Object({
+  opportunityId: Type.String({ minLength: 1, maxLength: 100 }),
+  targetId: Type.String({ minLength: 1, maxLength: 200 }),
+  usernameRef: Type.String({ minLength: 1, maxLength: 100 }),
+  passwordRef: Type.String({ minLength: 1, maxLength: 100 }),
+  confirmPasswordRef: Type.String({ minLength: 1, maxLength: 100 })
 });
 
 const configSchema = Type.Object({
@@ -56,6 +111,14 @@ const configSchema = Type.Object({
   })),
   vercelProtectionBypassEnv: Type.Optional(Type.String({
     description: "Optional Vercel Preview automation bypass environment variable."
+  })),
+  directoryPasswordMasterEnv: Type.Optional(Type.String({
+    description:
+      "Protected local environment variable containing the directory credential master. It is never sent to Newl Apps or the model."
+  })),
+  businessProfilePath: Type.Optional(Type.String({
+    description:
+      "Protected owner-approved public business profile read by the dedicated profile tool."
   }))
 });
 
@@ -65,6 +128,14 @@ const plugin = defineToolPlugin({
   description: "Executes only human-approved, non-paid Website Growth backlink outreach and directory work.",
   configSchema,
   tools: (tool) => [
+    tool({
+      name: "newl_backlink_business_profile",
+      label: "Read Approved Backlink Business Profile",
+      description:
+        "Return only the bounded, owner-approved public Newl identity and outreach rules. Never reads arbitrary files.",
+      parameters: emptyParameters,
+      factory: createBusinessProfileTool()
+    }),
     tool({
       name: "newl_backlink_claim",
       label: "Claim Approved Backlink Work",
@@ -94,25 +165,57 @@ const plugin = defineToolPlugin({
       factory: createApiTool("newl_backlink_sync_replies", "/api/website-growth/backlinks/executor/sync-replies", {})
     }),
     tool({
+      name: "newl_backlink_sync_directory_verifications",
+      label: "Sync Directory Verification Emails",
+      description:
+        "Check only pending directory accounts in the dedicated partnerships mailbox. Safely activates same-organization verification links without returning their URLs; ambiguous cases become human-action items.",
+      parameters: emptyParameters,
+      factory: createApiTool(
+        "newl_backlink_sync_directory_verifications",
+        "/api/website-growth/backlinks/executor/sync-directory-verifications",
+        {}
+      )
+    }),
+    tool({
       name: "newl_backlink_summary",
       label: "Summarize Backlink Outreach",
-      description: "Return deterministic Website Growth review and execution counts plus the Newl Apps review link for the Teams reminder.",
-      parameters: emptyParameters,
-      factory: createApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary", {})
+      description: "Return deterministic current-run and lifetime Website Growth execution counts, blocker reasons and the Newl Apps review link for the Teams reminder.",
+      parameters: summaryParameters,
+      factory: createParameterizedApiTool("newl_backlink_summary", "/api/website-growth/backlinks/executor/summary", summaryParameters)
     }),
     tool({
       name: "newl_backlink_send_email",
       label: "Send Approved Backlink Outreach",
       description: "Send one personalized message through the dedicated Newl mailbox. Newl Apps rechecks human approval, recipient suppression, consent evidence, country rules and volume limits before Microsoft 365 is called.",
       parameters: sendEmailParameters,
-      factory: createParameterizedApiTool("newl_backlink_send_email", "/api/website-growth/backlinks/executor/send-email")
+      factory: createParameterizedApiTool("newl_backlink_send_email", "/api/website-growth/backlinks/executor/send-email", sendEmailParameters)
+    }),
+    tool({
+      name: "newl_backlink_send_follow_up",
+      label: "Send Approved Backlink Follow-up",
+      description:
+        "Send one due follow-up using the recipient, country, contact source and consent evidence already recorded on the approved opportunity. The model supplies only the opportunity ID and message copy.",
+      parameters: sendFollowUpParameters,
+      factory: createParameterizedApiTool(
+        "newl_backlink_send_follow_up",
+        "/api/website-growth/backlinks/executor/send-follow-up",
+        sendFollowUpParameters
+      )
+    }),
+    tool({
+      name: "newl_backlink_fill_directory_credentials",
+      label: "Fill Protected Directory Credentials",
+      description:
+        "Prepare the approved directory account in Newl Apps, derive its unique password outside the model, and fill only the username/password browser fields. Never returns the password.",
+      parameters: directoryCredentialFillParameters,
+      factory: createDirectoryCredentialFillTool()
     }),
     tool({
       name: "newl_backlink_report",
       label: "Report Backlink Execution",
       description: "Report a confirmed directory submission, blocked action, lost opportunity or publicly verified live backlink. Never include a password or secret in any field.",
       parameters: reportParameters,
-      factory: createParameterizedApiTool("newl_backlink_report", "/api/website-growth/backlinks/executor/report")
+      factory: createParameterizedApiTool("newl_backlink_report", "/api/website-growth/backlinks/executor/report", reportParameters)
     })
   ]
 });
@@ -135,12 +238,16 @@ export function createApiTool(
   });
 }
 
-export function createParameterizedApiTool(name: string, path: string) {
+export function createParameterizedApiTool(
+  name: string,
+  path: string,
+  parameterSchema: TSchema = Type.Record(Type.String(), Type.Unknown())
+) {
   return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
     name,
     label: "Newl Website Growth API",
     description: "Calls the configured Newl Apps Website Growth executor endpoint.",
-    parameters: Type.Record(Type.String(), Type.Unknown()),
+    parameters: parameterSchema,
     async execute(_toolCallId: string, params: unknown) {
       const payload =
         params && typeof params === "object" && !Array.isArray(params)
@@ -149,6 +256,143 @@ export function createParameterizedApiTool(name: string, path: string) {
       return callNewlApps(config, path, payload);
     }
   });
+}
+
+export function createDirectoryCredentialFillTool() {
+  return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
+    name: "newl_backlink_fill_directory_credentials",
+    label: "Fill Protected Directory Credentials",
+    description:
+      "Derives and fills a unique directory password without exposing it to the model, logs, Teams, or Newl Apps.",
+    parameters: directoryCredentialFillParameters,
+    async execute(_toolCallId: string, params: unknown) {
+      try {
+        const input = parseDirectoryCredentialFillInput(params);
+        const context = await callNewlAppsData<DirectoryCredentialContext>(
+          config,
+          "/api/website-growth/backlinks/executor/directory-account",
+          { opportunityId: input.opportunityId }
+        );
+        const masterEnv =
+          config.directoryPasswordMasterEnv?.trim() ||
+          DEFAULT_DIRECTORY_PASSWORD_MASTER_ENV;
+        const workerEnvironment = { ...process.env };
+        const masterValue = process.env[masterEnv]?.trim();
+        delete workerEnvironment[masterEnv];
+        workerEnvironment.NEWL_DIRECTORY_PASSWORD_MASTER_V1 =
+          masterValue;
+        const result = await fillProtectedDirectoryCredentials({
+          input,
+          context,
+          env: workerEnvironment
+        });
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(result)
+          }],
+          details: {
+            status: "ok",
+            data: result
+          }
+        };
+      } catch (error) {
+        return textResult(
+          error instanceof Error
+            ? error.message
+            : "Protected directory credential fill failed.",
+          "failed"
+        );
+      }
+    }
+  });
+}
+
+export function createBusinessProfileTool() {
+  return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
+    name: "newl_backlink_business_profile",
+    label: "Read Approved Backlink Business Profile",
+    description:
+      "Returns the bounded public identity and policy fields from the protected owner-approved profile.",
+    parameters: emptyParameters,
+    async execute() {
+      try {
+        const profile = await readApprovedBusinessProfile(
+          config.businessProfilePath?.trim() || DEFAULT_BUSINESS_PROFILE_PATH
+        );
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify(profile)
+          }],
+          details: {
+            status: "ok",
+            data: profile
+          }
+        };
+      } catch (error) {
+        return textResult(
+          error instanceof Error
+            ? error.message
+            : "Approved backlink business profile could not be read.",
+          "failed"
+        );
+      }
+    }
+  });
+}
+
+export async function readApprovedBusinessProfile(profilePath: string) {
+  const raw = await readFile(profilePath, "utf8");
+  if (Buffer.byteLength(raw, "utf8") > 64 * 1024) {
+    throw new Error("Approved backlink business profile is too large.");
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Approved backlink business profile is invalid.");
+  }
+  const profile = parsed as Record<string, unknown>;
+  if (
+    typeof profile.status !== "string" ||
+    !profile.status.startsWith("OWNER_APPROVED_")
+  ) {
+    throw new Error("Backlink business profile is not owner approved.");
+  }
+  const outreachPolicy = readRecord(profile, "outreachPolicy");
+  const submissionRules = readRecord(profile, "submissionRules");
+  if (outreachPolicy.manualOpportunityApproval !== true) {
+    throw new Error("Manual backlink opportunity approval must remain enabled.");
+  }
+  if (submissionRules.allowPayment !== false) {
+    throw new Error("Paid backlink execution must remain disabled.");
+  }
+
+  return {
+    status: readBoundedString(profile, "status", 100),
+    legalEntities: readRecord(profile, "legalEntities"),
+    publicBrandName: readBoundedString(profile, "publicBrandName", 200),
+    website: readBoundedString(profile, "website", 1000),
+    senderName: readBoundedString(profile, "senderName", 200),
+    publicDescriptions: readRecord(profile, "publicDescriptions"),
+    publicLocations: readBoundedArray(profile, "publicLocations", 20),
+    publicPhone: readBoundedString(profile, "publicPhone", 100),
+    outreachMailbox: readBoundedString(profile, "outreachMailbox", 320),
+    approvedLogos: readBoundedArray(profile, "approvedLogos", 20),
+    approvedServiceCategories: readBoundedArray(
+      profile,
+      "approvedServiceCategories",
+      50
+    ),
+    approvedSocialProfiles: readBoundedArray(
+      profile,
+      "approvedSocialProfiles",
+      20
+    ),
+    certifications: readBoundedArray(profile, "certifications", 50),
+    forbiddenClaims: readBoundedArray(profile, "forbiddenClaims", 50),
+    outreachPolicy,
+    submissionRules
+  };
 }
 
 async function callNewlApps(
@@ -206,6 +450,102 @@ async function callNewlApps(
       "failed"
     );
   }
+}
+
+async function callNewlAppsData<T>(
+  config: WebsiteGrowthPluginConfig,
+  path: string,
+  payload: Record<string, unknown>
+) {
+  const tokenEnv = config.backlinkTokenEnv?.trim() || DEFAULT_TOKEN_ENV;
+  const token = process.env[tokenEnv]?.trim();
+  if (!token) {
+    throw new Error(
+      `Website Growth backlink execution is not configured. ${tokenEnv} is missing.`
+    );
+  }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json"
+  };
+  if (config.vercelProtectionBypassEnv) {
+    const bypass = process.env[config.vercelProtectionBypassEnv]?.trim();
+    if (bypass) headers["x-vercel-protection-bypass"] = bypass;
+  }
+  const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(60_000)
+  });
+  const json = (await response.json().catch(() => null)) as
+    | { data?: T; error?: string }
+    | null;
+  if (!response.ok || !json?.data) {
+    throw new Error(
+      json?.error ?? `Newl Apps returned ${response.status}.`
+    );
+  }
+  return json.data;
+}
+
+function parseDirectoryCredentialFillInput(
+  value: unknown
+): DirectoryCredentialFillInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Directory credential field references are required.");
+  }
+  const record = value as Record<string, unknown>;
+  const read = (name: keyof DirectoryCredentialFillInput) => {
+    const result = record[name];
+    if (typeof result !== "string" || !result.trim()) {
+      throw new Error(`Directory credential ${name} is required.`);
+    }
+    return result.trim();
+  };
+  return {
+    opportunityId: read("opportunityId"),
+    targetId: read("targetId"),
+    usernameRef: read("usernameRef"),
+    passwordRef: read("passwordRef"),
+    confirmPasswordRef: read("confirmPasswordRef")
+  };
+}
+
+function readRecord(value: Record<string, unknown>, name: string) {
+  const result = value[name];
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error(`Backlink business profile ${name} is required.`);
+  }
+  return result as Record<string, unknown>;
+}
+
+function readBoundedString(
+  value: Record<string, unknown>,
+  name: string,
+  maxLength: number
+) {
+  const result = value[name];
+  if (
+    typeof result !== "string" ||
+    !result.trim() ||
+    result.length > maxLength
+  ) {
+    throw new Error(`Backlink business profile ${name} is invalid.`);
+  }
+  return result.trim();
+}
+
+function readBoundedArray(
+  value: Record<string, unknown>,
+  name: string,
+  maxItems: number
+): unknown[] {
+  const result = value[name];
+  if (!Array.isArray(result) || result.length > maxItems) {
+    throw new Error(`Backlink business profile ${name} is invalid.`);
+  }
+  return [...result] as unknown[];
 }
 
 function normalizeBaseUrl(value: string) {

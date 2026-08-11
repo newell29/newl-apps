@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -18,7 +18,27 @@ const backlinkInstallerPath = path.join(
   repoRoot,
   "ops/openclaw/install-website-growth-backlink-executor.sh",
 );
+const backlinkEnablePath = path.join(
+  repoRoot,
+  "ops/openclaw/enable-website-growth-backlink-executor.sh",
+);
+const backlinkPromptPath = path.join(
+  repoRoot,
+  "ops/openclaw/prompts/website-growth-backlink-executor.md",
+);
+const backlinkRunnerPath = path.join(
+  repoRoot,
+  "ops/openclaw/run-website-growth-backlink-executor.sh",
+);
+const backlinkSkillPath = path.join(
+  repoRoot,
+  "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md",
+);
 const runnerPath = path.join(repoRoot, "ops/openclaw/run-website-growth-scout.sh");
+const skillPath = path.join(
+  repoRoot,
+  "ops/openclaw/skills/website-growth-scout/SKILL.md",
+);
 const runtimeRunnerPath = path.join(
   repoRoot,
   "ops/openclaw/run-website-growth-scout-runtime.sh",
@@ -26,6 +46,14 @@ const runtimeRunnerPath = path.join(
 const schemaPath = path.join(
   repoRoot,
   "ops/openclaw/skills/website-growth-scout/scout-output.schema.json",
+);
+const backlinkDiscoveryPath = path.join(
+  repoRoot,
+  "ops/openclaw/website_growth_backlink_discovery.py",
+);
+const backlinkValidatorPath = path.join(
+  repoRoot,
+  "ops/openclaw/validate-website-growth-backlink-agent-run.py",
 );
 
 describe("Website Growth Scout OpenClaw scripts", () => {
@@ -56,15 +84,19 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(script).toContain("${codex_bin}");
   });
 
-  it("splits the Monday deep run from cache-backed weekday check-ins", async () => {
+  it("splits Monday and Wednesday deep runs from cache-backed weekday check-ins", async () => {
     const installer = await readFile(installerPath, "utf8");
 
-    expect(installer).toContain('--cron "15 9 * * 1"');
-    expect(installer).toContain('--cron "15 9 * * 2-5"');
+    expect(installer).toContain('--cron "15 9 * * 1,3"');
+    expect(installer).toContain('--cron "15 9 * * 2,4-5"');
     expect(installer).toContain("NEWL_APPS_SCOUT_RUNTIME_REPO_PATH");
     expect(installer).toContain("run-website-growth-scout-runtime.sh");
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekly.v1"');
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekday-checkin.v1"');
+    expect(installer).toContain(
+      '--declaration-key "newl.website-growth.build-notifications.v1"'
+    );
+    expect(installer).toContain('--every "2m"');
     expect(installer).toContain('\\"--light\\"');
   });
 
@@ -79,6 +111,441 @@ describe("Website Growth Scout OpenClaw scripts", () => {
 
     expect(configureIndex).toBeGreaterThan(-1);
     expect(installIndex).toBeGreaterThan(configureIndex);
+  });
+
+  it("allows the protected backlink profile to already be installed at its target path", async () => {
+    const installer = await readFile(backlinkInstallerPath, "utf8");
+
+    expect(installer).toContain(
+      'if [[ "${profile_source:A}" == "${profile_target:A}" ]]; then'
+    );
+    expect(installer).toContain('chmod 600 "${profile_target}"');
+  });
+
+  it("installs a deterministic Rivet failure monitor beside the disabled outreach schedule", async () => {
+    const installer = await readFile(backlinkInstallerPath, "utf8");
+    const monitor = await readFile(
+      path.join(repoRoot, "ops/openclaw/run-rivet-backlink-failure-monitor.sh"),
+      "utf8"
+    );
+
+    expect(installer).toContain(
+      '--declaration-key "newl.rivet.website-growth.backlink-failure-monitor.v1"'
+    );
+    expect(installer).toContain('--every "15m"');
+    const failureMonitorBlock = installer.slice(
+      installer.indexOf('openclaw cron add \\\n  --name "NEWL Rivet Backlink Failure Monitor"'),
+      installer.indexOf('echo "Installed the dedicated Scout agent')
+    );
+    expect(failureMonitorBlock).not.toContain("--exact");
+    expect(installer).toContain("--command-argv");
+    expect(monitor).toContain(
+      "/api/website-growth/backlinks/executor/failures"
+    );
+    expect(monitor).toContain("openclaw cron disable");
+    expect(monitor).toContain("send_website_growth_teams_message");
+  });
+
+  it("runs backlink outreach through a deterministic command wrapper with no shell tools", async () => {
+    const [installer, enableScript, runner, prompt] = await Promise.all([
+      readFile(backlinkInstallerPath, "utf8"),
+      readFile(
+        path.join(
+          repoRoot,
+          "ops/openclaw/enable-website-growth-backlink-executor.sh",
+        ),
+        "utf8",
+      ),
+      readFile(backlinkRunnerPath, "utf8"),
+      readFile(backlinkPromptPath, "utf8"),
+    ]);
+
+    expect(installer).toContain('profile: "minimal"');
+    expect(installer).toContain('--model "openai/gpt-5.4-mini"');
+    expect(installer).toContain('alsoAllow: [');
+    expect(installer).not.toContain('  allow: [');
+    expect(installer).toContain(
+      'deny: ["exec", "bash", "read", "write", "edit", "apply_patch", "process"]'
+    );
+    expect(installer).toContain('"newl_backlink_business_profile"');
+    expect(installer).toContain('--command-argv "${executor_argv}"');
+    expect(installer).toContain("--no-deliver");
+    expect(installer).not.toContain('--agent scout\n  --model "openai/gpt-5.6-sol"');
+    expect(installer).toContain('canonical_executor_job_id="$(');
+    expect(installer).toContain('openclaw cron rm "${stale_job_id}"');
+    expect(installer).toContain(
+      'job.get("id") != sys.argv[2]'
+    );
+    expect(enableScript).toContain(
+      '(job.get("payload") or {}).get("kind") == "command"'
+    );
+    expect(enableScript).toContain("cron list --all --json");
+    expect(installer).toContain("openclaw cron list --all --json");
+    expect(enableScript).toContain("if len(matches) == 1:");
+    expect(runner).toContain('run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"');
+    expect(runner).toContain('"${openclaw_command}" agent');
+    expect(runner).toContain(
+      "/api/website-growth/backlinks/executor/summary"
+    );
+    expect(runner).toContain(
+      "The Scout browser work phase failed after its deterministic summary was delivered."
+    );
+    expect(runner).toContain("validate-website-growth-backlink-agent-run.py");
+    expect(runner).toContain('--model "openai/gpt-5.4-mini"');
+    expect(prompt).toContain(
+      "Never call or emulate Bash, exec, a shell, arbitrary file reads"
+    );
+    expect(prompt).toContain(
+      "Do not call `newl_backlink_summary` and do not send a Teams message."
+    );
+  });
+
+  it("loads the backlink executor skill and repeats claim-safe copy rules in the runtime prompt", async () => {
+    const [skill, prompt] = await Promise.all([
+      readFile(backlinkSkillPath, "utf8"),
+      readFile(backlinkPromptPath, "utf8"),
+    ]);
+
+    expect(skill).toMatch(
+      /^---\nname: website-growth-backlink-executor\ndescription: .+\n---\n/
+    );
+    expect(prompt).toContain(
+      "Apply these copy rules directly even if skill content is unavailable"
+    );
+    expect(prompt).toContain('Do not use the word "best" anywhere');
+    expect(prompt).toContain(
+      "Do not append a salutation sign-off, sender name,"
+    );
+    expect(prompt).toContain(
+      "Newl Apps adds the\napproved sender identity"
+    );
+  });
+
+  it("finds and enables the intentionally disabled backlink command job", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-enable-"));
+    const openclawPath = path.join(directory, "openclaw");
+    const enableLogPath = path.join(directory, "enabled.txt");
+    await writeFile(
+      openclawPath,
+      `#!/bin/zsh
+if [[ "$1" == "cron" && "$2" == "list" && "$3" == "--all" && "$4" == "--json" ]]; then
+  print -r -- '{"jobs":[{"id":"disabled-job-1","declarationKey":"newl.website-growth.backlink-outreach.weekday.v1","enabled":false,"payload":{"kind":"command"}}]}'
+  exit 0
+fi
+if [[ "$1" == "cron" && "$2" == "enable" && "$3" == "disabled-job-1" ]]; then
+  print -r -- "$3" > "$ENABLE_LOG_PATH"
+  exit 0
+fi
+exit 2
+`,
+    );
+    await chmod(openclawPath, 0o700);
+
+    try {
+      await expect(execFileAsync("/bin/zsh", [backlinkEnablePath], {
+        env: {
+          ...process.env,
+          OPENCLAW_BIN: openclawPath,
+          ENABLE_LOG_PATH: enableLogPath
+        }
+      })).resolves.toBeDefined();
+      expect(await readFile(enableLogPath, "utf8")).toBe("disabled-job-1\n");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when the backlink agent has no exposed tools", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-validator-"));
+    const agentOutputPath = path.join(directory, "agent-output.json");
+    const sessionsDirectory = path.join(directory, "sessions");
+    const sessionId = "synthetic-session-123";
+    await mkdir(sessionsDirectory);
+
+    try {
+      await writeFile(agentOutputPath, JSON.stringify({
+        result: {
+          meta: {
+            agentMeta: { sessionId },
+            systemPromptReport: { tools: { entries: [] } }
+          }
+        }
+      }));
+      await writeFile(
+        path.join(sessionsDirectory, `${sessionId}.jsonl`),
+        JSON.stringify({
+          type: "message",
+          message: { role: "assistant", content: [{ type: "text", text: "finished" }] }
+        })
+      );
+
+      await expect(execFileAsync("/usr/bin/python3", [
+        backlinkValidatorPath,
+        "--agent-output",
+        agentOutputPath,
+        "--sessions-directory",
+        sessionsDirectory
+      ])).rejects.toMatchObject({
+        stderr: expect.stringContaining("required executor tools were not exposed")
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a backlink agent run only after the required tool sequence completes", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-validator-"));
+    const agentOutputPath = path.join(directory, "agent-output.json");
+    const sessionsDirectory = path.join(directory, "sessions");
+    const sessionId = "synthetic-session-456";
+    const requiredTools = [
+      "newl_backlink_business_profile",
+      "newl_backlink_sync_replies",
+      "newl_backlink_sync_directory_verifications",
+      "newl_backlink_follow_ups",
+      "newl_backlink_verification",
+      "newl_backlink_claim"
+    ];
+    const exposedTools = [
+      ...requiredTools,
+      "newl_backlink_send_email",
+      "newl_backlink_send_follow_up",
+      "newl_backlink_fill_directory_credentials",
+      "newl_backlink_report"
+    ];
+    await mkdir(sessionsDirectory);
+
+    try {
+      await writeFile(agentOutputPath, JSON.stringify({
+        result: {
+          meta: {
+            agentMeta: { sessionId },
+            systemPromptReport: {
+              tools: { entries: [...exposedTools, "browser"].map((name) => ({ name })) }
+            }
+          }
+        }
+      }));
+      await writeFile(
+        path.join(sessionsDirectory, `${sessionId}.jsonl`),
+        requiredTools.flatMap((name, index) => {
+          const id = `call-${index}`;
+          return [
+            JSON.stringify({
+              type: "message",
+              message: {
+                role: "assistant",
+                content: [{ type: "toolCall", id, name, arguments: {} }]
+              }
+            }),
+            JSON.stringify({
+              type: "message",
+              message: {
+                role: "toolResult",
+                content: [{ type: "toolResult", id, toolCallId: id, name, content: "{}" }]
+              }
+            })
+          ];
+        }).join("\n")
+      );
+
+      await expect(execFileAsync("/usr/bin/python3", [
+        backlinkValidatorPath,
+        "--agent-output",
+        agentOutputPath,
+        "--sessions-directory",
+        sessionsDirectory
+      ])).resolves.toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an empty or unsuccessful backlink side-effect call", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-validator-"));
+    const agentOutputPath = path.join(directory, "agent-output.json");
+    const sessionsDirectory = path.join(directory, "sessions");
+    const sessionId = "synthetic-session-789";
+    const requiredTools = [
+      "newl_backlink_business_profile",
+      "newl_backlink_sync_replies",
+      "newl_backlink_sync_directory_verifications",
+      "newl_backlink_follow_ups",
+      "newl_backlink_verification",
+      "newl_backlink_claim"
+    ];
+    const exposedTools = [
+      ...requiredTools,
+      "newl_backlink_send_email",
+      "newl_backlink_send_follow_up",
+      "newl_backlink_fill_directory_credentials",
+      "newl_backlink_report"
+    ];
+    await mkdir(sessionsDirectory);
+
+    try {
+      await writeFile(agentOutputPath, JSON.stringify({
+        result: {
+          meta: {
+            agentMeta: { sessionId },
+            systemPromptReport: {
+              tools: { entries: [...exposedTools, "browser"].map((name) => ({ name })) }
+            }
+          }
+        }
+      }));
+      const transcript = requiredTools.flatMap((name, index) => {
+        const id = `call-${index}`;
+        return [
+          {
+            type: "message",
+            message: {
+              role: "assistant",
+              content: [{ type: "toolCall", id, name, arguments: {} }]
+            }
+          },
+          {
+            type: "message",
+            message: {
+              role: "toolResult",
+              content: [{ type: "toolResult", id, toolCallId: id, name, content: "{}" }]
+            }
+          }
+        ];
+      });
+      transcript.push(
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{
+              type: "toolCall",
+              id: "empty-send",
+              name: "newl_backlink_send_follow_up",
+              arguments: {}
+            }]
+          }
+        },
+        {
+          type: "message",
+          message: {
+            role: "toolResult",
+            content: [{
+              type: "toolResult",
+              id: "empty-send",
+              toolCallId: "empty-send",
+              name: "newl_backlink_send_follow_up",
+              content: "{}"
+            }]
+          }
+        }
+      );
+      await writeFile(
+        path.join(sessionsDirectory, `${sessionId}.jsonl`),
+        transcript.map((record) => JSON.stringify(record)).join("\n")
+      );
+
+      await expect(execFileAsync("/usr/bin/python3", [
+        backlinkValidatorPath,
+        "--agent-output",
+        agentOutputPath,
+        "--sessions-directory",
+        sessionsDirectory
+      ])).rejects.toMatchObject({
+        stderr: expect.stringContaining("omitted required fields")
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("delivers the deterministic summary even when the constrained agent turn fails", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-runner-"));
+    const scoutEnvPath = path.join(directory, "scout.env");
+    const gatewayEnvPath = path.join(directory, "gateway.env");
+    const openclawPath = path.join(directory, "openclaw");
+    const curlPath = path.join(directory, "curl");
+    const teamsLogPath = path.join(directory, "teams.log");
+
+    await writeFile(
+      scoutEnvPath,
+      [
+        "NEWL_APPS_URL=https://newl-apps.example.com",
+        "WEBSITE_GROWTH_TEAMS_TARGET=example-target",
+      ].join("\n"),
+    );
+    await writeFile(
+      gatewayEnvPath,
+      "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN=synthetic-token\n",
+    );
+    await writeFile(
+      openclawPath,
+      `#!/bin/zsh
+if [[ "$1" == "agent" ]]; then
+  exit 9
+fi
+message=""
+while [[ "$#" -gt 0 ]]; do
+  if [[ "$1" == "--message" ]]; then
+    shift
+    message="$1"
+  fi
+  shift
+done
+print -r -- "$message" > "$TEAMS_LOG_PATH"
+`,
+    );
+    await writeFile(
+      curlPath,
+      `#!/bin/zsh
+print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
+`,
+    );
+    await Promise.all([chmod(openclawPath, 0o700), chmod(curlPath, 0o700)]);
+
+    try {
+      let failure: unknown;
+      try {
+        await execFileAsync("/bin/zsh", [backlinkRunnerPath], {
+          env: {
+            ...process.env,
+            HOME: directory,
+            OPENCLAW_BIN: openclawPath,
+            CURL_BIN: curlPath,
+            WEBSITE_GROWTH_SCOUT_ENV_FILE: scoutEnvPath,
+            OPENCLAW_GATEWAY_ENV_FILE: gatewayEnvPath,
+            TEAMS_LOG_PATH: teamsLogPath,
+          },
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      const failedRun = failure as { code?: number; stderr?: string };
+      expect(failedRun.code).toBe(9);
+      expect(failedRun.stderr).toContain(
+        "failed after its deterministic summary was delivered",
+      );
+      expect(await readFile(teamsLogPath, "utf8")).toBe(
+        "Deterministic summary after failure\n",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("opens fresh backlink research tabs through the browser tool", async () => {
+    const [prompt, skill] = await Promise.all([
+      readFile(backlinkPromptPath, "utf8"),
+      readFile(backlinkSkillPath, "utf8"),
+    ]);
+
+    expect(prompt).toContain("Use the browser tool directly");
+    expect(prompt).toContain("Open every approved public URL in a fresh tab");
+    expect(prompt).toContain("Never navigate an assumed active tab");
+    expect(skill).toContain("open a fresh tab");
+    expect(skill).toContain("Retain and focus the stable tab handle");
+    expect(skill).toContain("Do not issue speculative browser actions");
   });
 
   it("updates the clean dedicated runtime from main before every Scout run", async () => {
@@ -103,8 +570,11 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(helper).toContain('--target "${WEBSITE_GROWTH_TEAMS_TARGET}"');
   });
 
-  it("instructs Scout to review question-led AI-answer opportunities without creating thin pages", async () => {
-    const runner = await readFile(runnerPath, "utf8");
+  it("instructs Scout to review question-led and SEO-recovery opportunities without creating thin pages", async () => {
+    const [runner, skill] = await Promise.all([
+      readFile(runnerPath, "utf8"),
+      readFile(skillPath, "utf8")
+    ]);
 
     expect(runner).toContain(
       "Treat candidates marked questionOpportunity as a dedicated customer-question and AI-answer lane."
@@ -114,6 +584,167 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     );
     expect(runner).toContain("Reject thin FAQ pages");
     expect(runner).toContain("guarantees an AI citation or ranking");
+    expect(runner).toContain("evaluate the combined legacy URLs and their current redirect destination");
+    expect(runner).toContain("Do not recreate thin legacy pages");
+    expect(skill).toContain("reserve up to two positions for deterministic SEO migration-recovery candidates");
+    expect(skill).toContain("Do not recreate thin legacy pages");
+  });
+
+  it("runs a bounded Brave, Qwen, then Codex backlink funnel", async () => {
+    const [runner, installer, discovery] = await Promise.all([
+      readFile(runnerPath, "utf8"),
+      readFile(installerPath, "utf8"),
+      readFile(backlinkDiscoveryPath, "utf8")
+    ]);
+
+    expect(installer).toContain("HUNTER_BRAVE_SEARCH_API_KEY");
+    expect(runner).toContain("website_growth_backlink_discovery.py");
+    expect(runner).toContain("no more than 5 high-quality");
+    expect(runner).toContain("backlinks.source to WEB_DISCOVERY");
+    expect(discovery).toContain('search_web("BRAVE", query, 10)');
+    expect(discovery).toContain('limits.get("fetches") or 40');
+    expect(discovery).toContain('limits.get("pagesPerDomain") or 2');
+    expect(discovery).toContain('limits.get("finalists") or 15');
+  });
+
+  it("batches local Qwen review and retries one invalid batch without repeating search", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append(len(rows))
+    if len(calls) == 1:
+        raise RuntimeError("synthetic truncated JSON")
+    return [
+        {
+            "id": row["id"],
+            "disposition": "REJECT",
+            "category": None,
+            "confidence": 90,
+            "reason": "synthetic"
+        }
+        for row in rows
+    ]
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+rows = [{"id": f"candidate-{index}"} for index in range(65)]
+decisions = module["ollama_request"]({}, "synthetic prompt", rows)
+print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+
+    expect(JSON.parse(stdout)).toEqual({
+      calls: [10, 10, 10, 10, 10, 10, 10, 5],
+      decisionCount: 65
+    });
+  });
+
+  it("retries only omitted Qwen candidates and forwards one persistent omission safely", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append([row["id"] for row in rows])
+    returned = []
+    for row in rows:
+        if row["id"] == "candidate-3":
+            continue
+        returned.append({
+            "id": row["id"],
+            "disposition": "REJECT",
+            "category": None,
+            "confidence": 90,
+            "reason": "synthetic"
+        })
+    return returned
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+rows = [{"id": f"candidate-{index}"} for index in range(5)]
+decisions = module["ollama_request"](module["TRIAGE_SCHEMA"], "synthetic prompt", rows)
+print(json.dumps({"calls": calls, "decisions": decisions}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+    const result = JSON.parse(stdout);
+
+    expect(result.calls).toEqual([
+      ["candidate-0", "candidate-1", "candidate-2", "candidate-3", "candidate-4"],
+      ["candidate-3"]
+    ]);
+    expect(result.decisions).toHaveLength(5);
+    expect(result.decisions[3]).toMatchObject({
+      id: "candidate-3",
+      disposition: "FETCH",
+      confidence: 0
+    });
+  });
+
+  it("forwards persistent invalid Qwen output through the bounded Codex fallback", async () => {
+    const python = String.raw`
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+calls = []
+def fake_batch(schema, prompt, rows):
+    calls.append([row["id"] for row in rows])
+    raise RuntimeError("synthetic invalid JSON")
+module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+triage = module["ollama_request"](
+    module["TRIAGE_SCHEMA"],
+    "synthetic prompt",
+    [{"id": "candidate-1", "queryLane": "DIRECTORY"}]
+)
+finalist = module["ollama_request"](
+    module["FINALIST_SCHEMA"],
+    "synthetic prompt",
+    [{
+        "id": "candidate-1",
+        "initialTriage": triage[0],
+        "pageExcerpt": "Public directory submission information."
+    }]
+)
+print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
+`;
+
+    const { stdout } = await execFileAsync("/usr/bin/python3", [
+      "-c",
+      python,
+      backlinkDiscoveryPath
+    ]);
+    const result = JSON.parse(stdout);
+
+    expect(result.calls).toEqual([
+      ["candidate-1"],
+      ["candidate-1"],
+      ["candidate-1"],
+      ["candidate-1"]
+    ]);
+    expect(result.triage[0]).toMatchObject({
+      disposition: "FETCH",
+      category: "DIRECTORY_CITATION",
+      confidence: 0
+    });
+    expect(result.finalist[0]).toMatchObject({
+      disposition: "FINALIST",
+      category: "DIRECTORY_CITATION",
+      confidence: 0,
+      pageSummary: "Public directory submission information."
+    });
+  });
+
+  it("uses the installed Qwen 3.6 model as the default", async () => {
+    const discovery = await readFile(backlinkDiscoveryPath, "utf8");
+
+    expect(discovery).toContain('DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M"');
+    expect(discovery).toContain("QWEN_BATCH_SIZE = 10");
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {
@@ -132,8 +763,12 @@ describe("Website Growth Scout OpenClaw scripts", () => {
   it.each([
     "install-website-growth-scout.sh",
     "install-website-growth-backlink-executor.sh",
+    "enable-website-growth-backlink-executor.sh",
+    "run-website-growth-backlink-executor.sh",
+    "run-rivet-backlink-failure-monitor.sh",
     "run-website-growth-scout.sh",
     "run-website-growth-scout-runtime.sh",
+    "run-website-growth-build-notifications.sh",
     "lib/website-growth-scout-runtime.zsh",
   ])("passes zsh syntax validation for %s", async (scriptName) => {
     await expect(

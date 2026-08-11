@@ -13,6 +13,8 @@ if ! load_website_growth_scout_env "${scout_env_file}"; then
   echo "Website Growth Scout environment file is not readable." >&2
   exit 1
 fi
+hunter_env_file="${HUNTER_ENV_FILE:-${HOME}/.openclaw/agents/hunter/.env}"
+load_website_growth_search_env "${hunter_env_file}" || true
 
 schema_path="${runner_directory}/skills/website-growth-scout/scout-output.schema.json"
 temporary_directory="$(mktemp -d)"
@@ -21,6 +23,7 @@ packet_path="${temporary_directory}/packet.json"
 result_path="${temporary_directory}/result.json"
 completion_request_path="${temporary_directory}/completion-request.json"
 completion_response_path="${temporary_directory}/completion-response.json"
+discovery_path="${temporary_directory}/backlink-discovery.json"
 run_id=""
 completed=0
 failure_stage="validate Scout runtime configuration"
@@ -38,7 +41,7 @@ report_failure() {
       /usr/bin/python3 - "${run_id}" "${temporary_directory}/failure.json" <<'PY'
 import json, sys
 with open(sys.argv[2], "w", encoding="utf-8") as handle:
-    json.dump({"runId": sys.argv[1], "message": "The read-only Codex Scout or SEMrush MCP step failed. Review the Scout worker log."}, handle)
+    json.dump({"runId": sys.argv[1], "message": "The bounded backlink discovery or read-only Codex Scout step failed. Review the Scout worker log."}, handle)
 PY
       curl --fail --silent --show-error \
         --request POST \
@@ -59,6 +62,7 @@ trap report_failure EXIT
 : "${NEWL_APPS_URL:?NEWL_APPS_URL is required}"
 : "${OPENCLAW_WEBSITE_GROWTH_TOKEN:?OPENCLAW_WEBSITE_GROWTH_TOKEN is required}"
 : "${WEBSITE_GROWTH_TEAMS_TARGET:?WEBSITE_GROWTH_TEAMS_TARGET is required}"
+: "${HUNTER_BRAVE_SEARCH_API_KEY:?HUNTER_BRAVE_SEARCH_API_KEY is required for bounded backlink discovery}"
 
 if [[ "${NEWL_APPS_URL}" != https://* ]]; then
   echo "NEWL_APPS_URL must use HTTPS." >&2
@@ -95,10 +99,6 @@ fi
 failure_stage="validate Scout dependencies"
 
 resolve_codex_cli
-if ! "${codex_bin}" mcp get semrush >/dev/null 2>&1; then
-  echo "Official SEMrush MCP is not configured for Codex. Run configure-semrush-mcp.sh first." >&2
-  exit 1
-fi
 
 failure_stage="refresh Search Console, GA4, forms, and the review queue"
 research_scope="weekly"
@@ -140,17 +140,37 @@ fi
 scout_model="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model"])' "${packet_path}")"
 scout_effort="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["reasoningEffort"])' "${packet_path}")"
 
-failure_stage="run read-only Codex and official SEMrush research"
+failure_stage="run bounded Brave Search and local Qwen backlink triage"
+/usr/bin/python3 "${runner_directory}/website_growth_backlink_discovery.py" \
+  --packet "${packet_path}" \
+  --output "${discovery_path}"
+
+/usr/bin/python3 - "${packet_path}" "${discovery_path}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    packet = json.load(handle)
+with open(sys.argv[2], encoding="utf-8") as handle:
+    discovery = json.load(handle)
+packet["backlinkDiscovery"]["finalists"] = discovery.get("finalists") or []
+packet["backlinkDiscovery"]["summary"] = discovery.get("summary") or {}
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(packet, handle, ensure_ascii=False)
+PY
+
+failure_stage="run read-only Codex final review"
 {
   printf '%s\n' "You are the read-only Newl Website Growth Scout."
   printf '%s\n' "Review every candidate in the supplied packet against the current website repository."
-  printf '%s\n' "Query the official SEMrush MCP server for each candidate and use only relevant, targeted rows."
-  printf '%s\n' "You must also inspect Newl Group's current SEMrush Position Tracking campaign, even when the packet has no page candidates."
-  printf '%s\n' "Run a bounded backlink review using SEMrush backlink profiles, referring domains, backlink gaps, and new/lost links."
-  printf '%s\n' "This packet contains the most recent sanitized SEMrush cache. If the official MCP reports that API units are unavailable, and only if the packet marks the cache fresh, reuse that exact cache instead of failing or inventing data."
-  printf '%s\n' "For live MCP evidence set source to LIVE_MCP, queried to true, and observedAt to the current ISO time. For cached evidence set source to CACHE, queried to false, and preserve the cache observedAt exactly."
+  printf '%s\n' "SEMrush is optional supporting evidence, not the primary backlink source. Do not use SEMrush for backlink discovery."
+  printf '%s\n' "When official SEMrush API units are available, use only relevant targeted rows and the matching Newl Position Tracking campaign."
+  printf '%s\n' "This packet contains the most recent sanitized SEMrush cache, including deterministic summaries of scheduled PDF reports received from mail@semrush.com in the dedicated partnerships mailbox folder. Treat scheduled reports as supporting evidence with their preserved observedAt date; do not describe them as live MCP results."
+  printf '%s\n' "If the official MCP reports that API units are unavailable, and only if the packet marks the cache fresh, reuse that exact cache instead of failing or inventing data. Scheduled report excerpts may add Site Audit, backlink, organic-position, and SEO-overview context, but they do not authorize new claims or replace first-party Search Console, GA4, and form evidence."
+  printf '%s\n' "If neither live SEMrush nor a fresh cache is available, return source UNAVAILABLE, queried false, current observedAt, an empty evidence row list, and an empty/null Position Tracking snapshot. The Scout run must continue."
+  printf '%s\n' "For live MCP evidence set source to LIVE_MCP, queried true, and observedAt to the current ISO time. For cached evidence set source to CACHE, queried false, and preserve the cache observedAt exactly."
   printf '%s\n' "Broad competitor-gap discovery runs only when semrush.researchScope is MONTHLY. On WEEKLY runs, rely on the persisted Newl Apps opportunity/backlink queues and make only candidate-specific competitive calls."
-  printf '%s\n' "Review broadly but return no more than 15 high-quality, actionable backlink prospects after deduplication and spam screening. Never return the raw backlink inventory."
+  printf '%s\n' "The packet's backlinkDiscovery.finalists are the only new public-web backlink candidates you may promote."
+  printf '%s\n' "Make the final evidence-based review and return no more than 5 high-quality, actionable prospects. Set backlinks.source to WEB_DISCOVERY, queried true, and observedAt to the current ISO time."
+  printf '%s\n' "Use backlinkDiscovery.summary.rawResults for rawProspectsReviewed and summary.duplicatesSkipped for duplicatesRejected. Set qualityRejected to summary.qwenRejected plus the finalists you do not promote. Never return or reconstruct the raw search inventory."
   printf '%s\n' "Classify each returned prospect as directory/citation, link reclamation, partner/ecosystem, content contribution, resource page, digital PR, or paid placement."
   printf '%s\n' "Reject link farms, irrelevant directories, automated link schemes, paid dofollow offers, and HIGH-spam-risk prospects."
   printf '%s\n' "Paid placements are research-only and require a separate human spending decision. Do not recommend buying ranking credit."
@@ -161,6 +181,9 @@ failure_stage="run read-only Codex and official SEMrush research"
   printf '%s\n' "SEMrush is supporting competitive and market evidence; do not relabel its search volume as Search Console impressions."
   printf '%s\n' "Return a draft only for ideas you recommend sending to the owner for approval. Do not approve anything."
   printf '%s\n' "Match existing Newl routes, templates, forms, hero patterns, CTAs, FAQs, and internal links."
+  printf '%s\n' "Treat candidates marked seoRecovery as a dedicated migration-recovery lane and review them before ordinary content ideas."
+  printf '%s\n' "For SEO recovery candidates, evaluate the combined legacy URLs and their current redirect destination. Inspect redirects, canonicals, sitemap inclusion, metadata, internal links, retained useful content, and query intent in the current website repository."
+  printf '%s\n' "Do not recreate thin legacy pages merely to recover raw impressions. Prefer the strongest existing commercial destination, prioritize qualified clicks and leads, and reject duplicate work already approved, building, preview-ready, or recently published."
   printf '%s\n' "Treat candidates marked questionOpportunity as a dedicated customer-question and AI-answer lane."
   printf '%s\n' "For question-led candidates, inspect the existing site answer first and prefer a direct answer section on the strongest relevant page."
   printf '%s\n' "Recommend a dedicated question guide only when the intent is substantial, distinct, commercially relevant, and cannot be answered well on an existing page."

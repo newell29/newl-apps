@@ -1,4 +1,9 @@
-import { ModuleKey, WebsiteGrowthContentDraftSource } from "@prisma/client";
+import {
+  ModuleKey,
+  PlatformRole,
+  WebsiteGrowthContentDraftSource,
+  WebsiteGrowthContentDraftStatus
+} from "@prisma/client";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
@@ -9,7 +14,10 @@ import {
   findWebsiteGrowthBuildRequestForDraft,
   summarizeWebsiteGrowthBuildRequest
 } from "@/modules/website-growth/build-requests";
-import { retryWebsiteGrowthDeveloperBuildAction } from "@/modules/website-growth/actions";
+import {
+  retryWebsiteGrowthDeveloperBuildAction,
+  updateWebsiteGrowthDraftAction
+} from "@/modules/website-growth/actions";
 import type {
   WebsiteGrowthPageChangePreview,
   WebsiteGrowthRenderedPagePreview
@@ -19,7 +27,10 @@ import {
   getWebsiteGrowthPrimaryChange,
   getWebsiteGrowthRoute
 } from "@/modules/website-growth/workspace";
-import { requireModule } from "@/server/auth/authorization";
+import {
+  requireModule,
+  resolveRoleCanMutate
+} from "@/server/auth/authorization";
 import { prisma } from "@/server/db";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
@@ -56,6 +67,9 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
   const changeType = getWebsiteGrowthChangeType(draft.opportunity.action);
   const route = getWebsiteGrowthRoute(draft);
   const primaryChange = getWebsiteGrowthPrimaryChange(draft);
+  const canReviewDraft =
+    (context.role === PlatformRole.ADMIN || context.role === PlatformRole.MANAGER) &&
+    await resolveRoleCanMutate(context.tenantId, context.role);
 
   return (
     <div className="space-y-6">
@@ -127,6 +141,13 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
         ) : null}
       </section>
 
+      <DraftDecisionPanel
+        canReviewDraft={canReviewDraft}
+        claimReview={claimReview}
+        draftId={draft.id}
+        status={draft.status}
+      />
+
       <section className="grid gap-4 lg:grid-cols-2">
         {buildPackage ? (
           <div className="rounded-lg border border-success/25 bg-success/10 p-5 lg:col-span-2">
@@ -186,6 +207,95 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
         <ReviewPanel title="Supporting keywords" items={readStringArray(draft.opportunity.supportingKeywords)} />
       </section>
     </div>
+  );
+}
+
+function DraftDecisionPanel({
+  canReviewDraft,
+  claimReview,
+  draftId,
+  status
+}: {
+  canReviewDraft: boolean;
+  claimReview: ReturnType<typeof reviewWebsiteGrowthClaims>;
+  draftId: string;
+  status: WebsiteGrowthContentDraftStatus;
+}) {
+  if (status === WebsiteGrowthContentDraftStatus.REJECTED) {
+    return (
+      <section className="rounded-lg border border-border bg-card p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Decision recorded</p>
+        <h2 className="mt-2 text-xl font-semibold text-foreground">This brief was rejected.</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+          Return it to review only if you want to reconsider this exact brief. Nothing has been sent to the website developer.
+        </p>
+        {canReviewDraft ? (
+          <form action={updateWebsiteGrowthDraftAction} className="mt-4">
+            <input type="hidden" name="draftId" value={draftId} />
+            <input type="hidden" name="status" value={WebsiteGrowthContentDraftStatus.DRAFT} />
+            <button className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+              Return to review
+            </button>
+          </form>
+        ) : null}
+      </section>
+    );
+  }
+
+  if (status !== WebsiteGrowthContentDraftStatus.DRAFT) {
+    return null;
+  }
+
+  const approvalBlocked = claimReview.status === "BLOCKED";
+
+  return (
+    <section className="rounded-lg border border-primary/25 bg-primary/5 p-5">
+      <p className="text-xs font-semibold uppercase tracking-wide text-primary">Your decision</p>
+      <h2 className="mt-2 text-xl font-semibold text-foreground">
+        Approve this brief or reject it.
+      </h2>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-mutedForeground">
+        Approval immediately starts the Codex website build on an isolated branch. Codex will open a draft GitHub PR and Vercel Preview for your visual review. It will not merge the PR or publish the page.
+      </p>
+
+      {!canReviewDraft ? (
+        <p className="mt-4 rounded-md border border-warning/25 bg-warning/10 p-3 text-sm leading-6 text-foreground">
+          An Admin or Manager with write access must approve or reject this brief.
+        </p>
+      ) : (
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <form action={updateWebsiteGrowthDraftAction} className="flex-1">
+            <input type="hidden" name="draftId" value={draftId} />
+            <input type="hidden" name="status" value={WebsiteGrowthContentDraftStatus.APPROVED} />
+            {claimReview.status === "OWNER_CONFIRMATION_REQUIRED" ? (
+              <label className="mb-3 flex items-start gap-2 rounded-md border border-warning/25 bg-background p-3 text-sm leading-6 text-foreground">
+                <input
+                  required
+                  type="checkbox"
+                  name="claimsConfirmed"
+                  className="mt-1"
+                />
+                I confirm the highlighted claims have current evidence, permission where needed, and an owner/review date.
+              </label>
+            ) : null}
+            <button
+              disabled={approvalBlocked}
+              className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+            >
+              {approvalBlocked ? "Approval blocked by claims review" : "Approve & start Codex build"}
+            </button>
+          </form>
+
+          <form action={updateWebsiteGrowthDraftAction}>
+            <input type="hidden" name="draftId" value={draftId} />
+            <input type="hidden" name="status" value={WebsiteGrowthContentDraftStatus.REJECTED} />
+            <button className="w-full rounded-md border border-danger/30 px-4 py-2.5 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 sm:w-auto">
+              Reject brief
+            </button>
+          </form>
+        </div>
+      )}
+    </section>
   );
 }
 

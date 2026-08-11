@@ -48,6 +48,7 @@ type CompanyRow = {
   candidateStatus?: string;
   doNotProspect?: boolean;
   domain?: string | null;
+  apolloOrganizationId?: string | null;
   primaryIndustry?: string | null;
   secondaryIndustry?: string | null;
   industryConfidence?: number | null;
@@ -176,7 +177,21 @@ const mockDb = vi.hoisted(() => {
       })
     },
     company: {
-      findMany: vi.fn(async () => []),
+      findMany: vi.fn(async ({ where, select }: {
+        where?: { tenantId?: string };
+        select?: Record<string, boolean>;
+      } = {}) => {
+        if (!select?.apolloOrganizationId) return [];
+        return [...state.companies.values()]
+          .filter((company) => !where?.tenantId || company.tenantId === where.tenantId)
+          .map((company) =>
+            Object.fromEntries(
+              Object.entries(select)
+                .filter(([, include]) => include)
+                .map(([key]) => [key, company[key as keyof CompanyRow] ?? null])
+            )
+          );
+      }),
       findUnique: vi.fn(async ({ where, select }: { where: { id?: string; tenantId_normalizedName?: { tenantId: string; normalizedName: string } }; select?: Record<string, boolean> }) => {
         const company = where.id
           ? [...state.companies.values()].find((candidate) => candidate.id === where.id) ?? null
@@ -569,6 +584,53 @@ describe("TradeMining ingestion", () => {
     });
   });
 
+  it("resolves a unique legal-name alias to the existing tenant company", async () => {
+    mockDb.state.searchProfiles.set(
+      "profile-a",
+      searchProfile({
+        id: "profile-a",
+        tenantId: "tenant-a",
+        allowedCompanyIdentityRoles: ["importer_name"]
+      })
+    );
+    mockDb.state.companies.set("tenant-a:atlas-copco-compressors-llc", {
+      id: "company-atlas",
+      tenantId: "tenant-a",
+      name: "Atlas Copco Compressors LLC",
+      normalizedName: "atlas-copco-compressors-llc",
+      source: "trademining",
+      priorityScore: 70,
+      candidateStatus: "NEW",
+      doNotProspect: false,
+      domain: "atlascopco.com",
+      apolloOrganizationId: "apollo-atlas"
+    });
+
+    await expect(
+      ingestTradeMiningBatch(tenant, {
+        source: "OPENCLAW",
+        searchProfileId: "profile-a",
+        records: [
+          {
+            importerName: "Atlas Copco Compressors, Inc.",
+            bolNumber: "BOL-alias",
+            shipmentDate: "2026-06-18",
+            destinationPort: "Charlotte, North Carolina"
+          }
+        ]
+      })
+    ).resolves.toMatchObject({
+      recordsCreated: 1,
+      companiesCreated: 0,
+      companiesUpdated: 1
+    });
+
+    expect(mockDb.state.companies.size).toBe(1);
+    expect([...mockDb.state.importRecords.values()][0]).toMatchObject({
+      companyId: "company-atlas"
+    });
+  });
+
   it("accepts canonical snake_case TradeMining fields and preserves richer BOL details", async () => {
     mockDb.state.searchProfiles.set("profile-a", searchProfile({ id: "profile-a", tenantId: "tenant-a" }));
 
@@ -702,6 +764,72 @@ describe("TradeMining ingestion", () => {
       action: "trademining.job.completed",
       entityType: "AutomationJobRun",
       entityId: started.jobRunId
+    });
+  });
+
+  it("preserves partial ingestion counters, checkpoint metadata, and the last batch across repeated failure updates", async () => {
+    mockDb.state.searchProfiles.set("profile-a", searchProfile({ id: "profile-a", tenantId: "tenant-a" }));
+
+    const started = await createTradeMiningJobRun(tenant, {
+      source: "OPENCLAW",
+      searchProfileId: "profile-a"
+    });
+    const existing = mockDb.state.jobRuns.get(started.jobRunId);
+    mockDb.state.jobRuns.set(started.jobRunId, {
+      ...existing!,
+      output: {
+        lastBatch: {
+          recordsProcessed: 250,
+          recordsCreated: 0,
+          recordsUpdated: 245,
+          recordsSkipped: 5
+        }
+      }
+    });
+
+    await updateTradeMiningJobRunStatus(tenant, started.jobRunId, {
+      status: "FAILED",
+      recordsProcessed: 250,
+      recordsCreated: 0,
+      recordsUpdated: 245,
+      errorMessage: "Newl Apps request failed with HTTP 500: connection pool exhausted",
+      metadata: {
+        recordsProcessedBeforeFailure: 250,
+        recordsSkippedBeforeFailure: 5,
+        ingestionCheckpoint: {
+          nextBatchIndex: 1,
+          totalBatches: 35,
+          completed: false
+        }
+      }
+    });
+
+    await updateTradeMiningJobRunStatus(tenant, started.jobRunId, {
+      status: "FAILED",
+      errorMessage: "Hunter ingestion failed",
+      metadata: { agent: "Hunter" }
+    });
+
+    expect(mockDb.state.jobRuns.get(started.jobRunId)?.output).toMatchObject({
+      externalStatus: "FAILED",
+      recordsProcessed: 250,
+      recordsCreated: 0,
+      recordsUpdated: 245,
+      lastBatch: {
+        recordsProcessed: 250,
+        recordsUpdated: 245,
+        recordsSkipped: 5
+      },
+      metadata: {
+        agent: "Hunter",
+        recordsProcessedBeforeFailure: 250,
+        recordsSkippedBeforeFailure: 5,
+        ingestionCheckpoint: {
+          nextBatchIndex: 1,
+          totalBatches: 35,
+          completed: false
+        }
+      }
     });
   });
 

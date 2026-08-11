@@ -30,6 +30,40 @@ flowchart LR
 
 Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
 
+- Reading Hunter requires authenticated Lead Generation module access.
+- Adding an opportunity signal and manually generating a dry-run plan require module mutation access.
+- Changing Hunter policy, allocation, mode, thresholds, jurisdictions, or kill switch requires tenant administrator access.
+- The daily machine route requires the existing Vercel `CRON_SECRET`, selects only Lead Generation-enabled tenants with a stored dry-run policy, and has no external-write capability.
+- Signal-scout and company-research machine routes require the tenant-bound ingestion credential and
+  resolve the tenant server-side. An explicit research cohort cannot select another tenant or bypass
+  the company/customer/contact suppression rules.
+- Company-research evidence and health are read through the authenticated Hunter page. Phase 3 has no
+  Apollo, pipeline-stage, cadence, email, LinkedIn, or other communication action.
+- The Hunter quality endpoint requires the distinct OpenClaw assistant token, Alex's mapped Microsoft
+  Entra identity, tenant administrator role, and mutation access. Every query and incident retains that
+  authenticated tenant ID.
+- The owner-approved standing value authorizes only reproducible Hunter/TradeMining code defects to
+  enter Rivet's existing restricted draft-PR queue. It does not authorize lead reclassification,
+  production data repair, TradeMining retry, outreach retry, merge, deployment, permissions, or
+  prospect communication.
+- Quality results and Rivet outcomes are sent only to the protected `RIVET_TEAMS_TARGET`.
+- Reading Outreach Plans requires authenticated Lead Generation access and remains tenant scoped through the contact
+  and company relations.
+- Generating, editing, or approving a plan requires Lead Generation mutation access. Approval records the authenticated
+  user ID and is rejected for an unapproved contact or unsafe company.
+- Plan generation never approves, enrolls, or communicates. An authenticated mutation-capable user's explicit
+  individual or bulk approval of a QA-passed plan is the human authorization boundary: it records the approver and
+  queues a protected Apollo enrollment job. The worker still revalidates company/contact safety, Hunter eligibility,
+  usable email, sender, sequence, and Apollo state before any external write. If Apollo discovery returned only a
+  person-search ID, the approved worker may create or deduplicate the corresponding saved Apollo contact after those
+  checks pass; the resulting tenant-scoped contact ID is persisted before sequence enrollment.
+- Only a tenant administrator can select `ASSISTED`. Processing requires the tenant-bound ingestion credential and
+  rechecks the stored mode and kill switch on every request. Assisted processing may create `REVIEWING` contacts
+  and unapproved plans; it cannot approve, assign, enroll, create a Sales Opportunity, or send.
+- Only a tenant administrator can manually queue current eligible opportunities for contact discovery. The action
+  reuses current tenant-scoped research, refreshes deterministic planning, and remains subject to Assisted mode,
+  the kill switch, Apollo match review, contact-fit review, and plan QA.
+
 ## Failure modes
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.

@@ -132,13 +132,15 @@ describe("getSettingsShell 7L contract", () => {
             IntegrationProvider.SEVEN_L,
             IntegrationProvider.OPENCLAW,
             IntegrationProvider.APOLLO,
+            IntegrationProvider.QUICKBOOKS,
             IntegrationProvider.MICROSOFT_GRAPH,
             IntegrationProvider.OPENAI,
-            IntegrationProvider.LOCAL_LLM
+            IntegrationProvider.LOCAL_LLM,
+            IntegrationProvider.TEAMSHIP
           ]
         }
       },
-      orderBy: [{ name: "asc" }, { updatedAt: "desc" }]
+      orderBy: { name: "asc" }
     });
 
     expect(settings.sevenLAccounts).toHaveLength(1);

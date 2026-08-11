@@ -11,6 +11,7 @@ import {
   weeklyContentRecommendations,
   type WeeklyContentLane
 } from "@/modules/website-growth/opportunities";
+import { isWebsiteGrowthSeoRecoveryOpportunity } from "@/modules/website-growth/seo-recovery";
 import { prisma } from "@/server/db";
 
 export type WeeklyWebsiteGrowthPlanResult = {
@@ -95,10 +96,13 @@ export function selectWeeklyWebsiteGrowthCandidates(candidates: WebsiteGrowthOpp
   for (const lane of weeklyContentRecommendations) {
     const laneCandidates = candidates
       .filter((candidate) =>
-        lane.lane === "QUESTION_ANSWER"
+        lane.lane === "SEO_RECOVERY"
+          ? isWebsiteGrowthSeoRecoveryOpportunity(candidate)
+          : lane.lane === "QUESTION_ANSWER"
           ? isWebsiteGrowthQuestionOpportunity(candidate)
           : lane.actions.includes(candidate.action) &&
-            !isWebsiteGrowthQuestionOpportunity(candidate)
+            !isWebsiteGrowthQuestionOpportunity(candidate) &&
+            !isWebsiteGrowthSeoRecoveryOpportunity(candidate)
       )
       .filter((candidate) => !selected.some((selectedCandidate) => selectedCandidate.id === candidate.id));
 
@@ -176,6 +180,7 @@ function normalizeReviewPage(value: string) {
 
 function emptyLaneCounts(): Record<WeeklyContentLane, number> {
   return {
+    SEO_RECOVERY: 0,
     CORE_PAGE: 0,
     QUESTION_ANSWER: 0,
     SUPPORTING_CONTENT: 0,

@@ -69,8 +69,17 @@ describe("ROLE_MATRIX", () => {
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.ASSISTANT)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.INVOICE_VERIFICATION)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.QUICKBOOKS_POSTING)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.CUSTOMER_CASHFLOW)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.LEAD_GEN)).toBe(false);
     expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.OCEAN_FREIGHT_PRICING)).toBe(false);
+  });
+
+  it("gives Customer Intelligence access to leadership roles only", () => {
+    expect(roleHasModuleAccess(PlatformRole.ADMIN, ModuleKey.CUSTOMER_INTELLIGENCE)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.MANAGER, ModuleKey.CUSTOMER_INTELLIGENCE)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.FINANCE, ModuleKey.CUSTOMER_INTELLIGENCE)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.SALES, ModuleKey.CUSTOMER_INTELLIGENCE)).toBe(false);
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.CUSTOMER_INTELLIGENCE)).toBe(false);
   });
 
   it("gives OPERATIONS assistant + lead-gen + operational modules", () => {
@@ -82,6 +91,7 @@ describe("ROLE_MATRIX", () => {
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.TRANSIT_LOOKUP)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.OCEAN_FREIGHT_PRICING)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.INVOICE_VERIFICATION)).toBe(true);
+    expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.WEBSITE_GROWTH)).toBe(true);
     expect(roleHasModuleAccess(PlatformRole.OPERATIONS, ModuleKey.QUICKBOOKS_POSTING)).toBe(false);
   });
 
@@ -95,6 +105,7 @@ describe("ROLE_MATRIX", () => {
       ModuleKey.SHIPMENT_DOCUMENTS,
       ModuleKey.INVOICE_VERIFICATION,
       ModuleKey.CUSTOMER_CASHFLOW,
+      ModuleKey.WEBSITE_GROWTH,
       ModuleKey.OCEAN_FREIGHT_PRICING
     ]);
   });

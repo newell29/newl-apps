@@ -89,6 +89,55 @@ type TeamshipReviewHistoryResponse = {
   error?: string;
 };
 
+type TeamshipPrintBatchResponse = {
+  id: string;
+  reviewRunId: string | null;
+  status: string;
+  summary: {
+    planned: Array<{
+      reviewOrderId: string;
+      psNumber: string;
+      srNumber: string;
+      reviewStatus: "PASS" | "FAIL";
+      manualCorrectionConfirmed: boolean;
+      shippingOrderNumber: string;
+      jobId: string;
+      palletCount: number;
+    }>;
+    excluded: Array<{
+      reviewOrderId: string;
+      psNumber: string;
+      srNumber: string;
+      reason: string;
+    }>;
+    totalPickingLists: number;
+    totalBols: number;
+    totalOutboundLabels: number;
+  };
+  jobs: Array<{
+    id: string;
+    shippingOrderNumber: string;
+    status: string;
+    palletCount: number;
+    position: number | null;
+    completedAt: string | null;
+    failedAt: string | null;
+    errorMessage: string | null;
+    printerPlan: {
+      pickingList?: { displayName?: string; queue?: string };
+      bol?: { exactName?: string };
+      outboundLabels?: { exactName?: string };
+    };
+  }>;
+  errorCode: string | null;
+  errorMessage: string | null;
+};
+
+type TeamshipPrintBatchApiResponse = {
+  batch?: TeamshipPrintBatchResponse;
+  error?: string;
+};
+
 type TeamshipReviewRunWorkspaceResponse = {
   id: string;
   documentLabel: string;
@@ -150,6 +199,7 @@ type TeamshipUpdateJobSummary = {
     plannedBolCleanupCount: number;
   };
   errorMessage: string | null;
+  failureStage: "WORKER_PREFLIGHT" | "TEAMSHIP_LOGIN" | "TEAMSHIP_API" | "BOL_CLEANUP" | "UNKNOWN" | null;
   agentId: string | null;
   createdAt: string;
   approvedAt: string | null;
@@ -1939,6 +1989,7 @@ function TeamshipUpdateJobsPanel({
                 </div>
                 {job.errorMessage ? (
                   <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
+                    {job.failureStage ? `Stopped during ${formatFailureStage(job.failureStage)}: ` : ""}
                     {job.errorMessage}
                   </div>
                 ) : null}
@@ -2623,7 +2674,7 @@ function ProductDimensionsTable({
                           value={row.item.commodityOverride ?? buildCommodityPreview(row.item)}
                           onChange={(event) => onPalletCommodityChange(srNumber, row.itemIndex, event.target.value)}
                           className="mt-1.5 min-h-14 w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs font-semibold text-foreground"
-                          placeholder="SKU: XXXXX SN: XXXXX"
+                          placeholder="SKU: XXXXX, SN: XXXXX"
                         />
                         <p className="mt-1.5 text-xs text-mutedForeground">
                           Edit this before creating the bot draft if Teamship should receive different pallet commodity text.
@@ -2719,6 +2770,186 @@ function TeamshipReviewHistorySection({
 }) {
   const historyTotals = buildHistoryTotals(history);
   const groupedRuns = groupHistoryRunsByShipmentDate(history.runs);
+  const [printSelections, setPrintSelections] = useState<Record<string, string[]>>({});
+  const [manualCorrectionConfirmations, setManualCorrectionConfirmations] = useState<Record<string, string[]>>({});
+  const [printBatches, setPrintBatches] = useState<Record<string, TeamshipPrintBatchResponse>>({});
+  const [printBatchMessages, setPrintBatchMessages] = useState<Record<string, string>>({});
+  const [printBatchErrors, setPrintBatchErrors] = useState<Record<string, string>>({});
+  const [printBatchLoadingRunId, setPrintBatchLoadingRunId] = useState<string | null>(null);
+
+  function selectedOrderIds(runId: string) {
+    return new Set(printSelections[runId] ?? []);
+  }
+
+  function confirmedCorrectionIds(runId: string) {
+    return new Set(manualCorrectionConfirmations[runId] ?? []);
+  }
+
+  function togglePrintSelection(runId: string, orderId: string, selected: boolean) {
+    setPrintSelections((current) => {
+      const next = new Set(current[runId] ?? []);
+      if (selected) {
+        next.add(orderId);
+      } else {
+        next.delete(orderId);
+      }
+      return { ...current, [runId]: Array.from(next) };
+    });
+    if (!selected) {
+      toggleManualCorrectionConfirmation(runId, orderId, false);
+    }
+    setPrintBatches((current) => {
+      const next = { ...current };
+      delete next[runId];
+      return next;
+    });
+  }
+
+  function toggleManualCorrectionConfirmation(runId: string, orderId: string, confirmed: boolean) {
+    setManualCorrectionConfirmations((current) => {
+      const next = new Set(current[runId] ?? []);
+      if (confirmed) {
+        next.add(orderId);
+      } else {
+        next.delete(orderId);
+      }
+      return { ...current, [runId]: Array.from(next) };
+    });
+  }
+
+  function selectAllPrintableOrders(run: TeamshipReviewHistoryRun) {
+    const selectable = run.orders.filter(isBatchPrintSelectable).map((order) => order.id);
+    setPrintSelections((current) => ({ ...current, [run.id]: selectable }));
+    setPrintBatches((current) => {
+      const next = { ...current };
+      delete next[run.id];
+      return next;
+    });
+    setPrintBatchErrors((current) => ({ ...current, [run.id]: "" }));
+    setPrintBatchMessages((current) => ({
+      ...current,
+      [run.id]: selectable.length > 0
+        ? `Selected ${selectable.length} printable PS number${selectable.length === 1 ? "" : "s"}. Confirm each corrected failed check before preparing the plan.`
+        : "No orders in this batch are currently available for printing."
+    }));
+  }
+
+  function clearPrintSelection(runId: string) {
+    setPrintSelections((current) => ({ ...current, [runId]: [] }));
+    setManualCorrectionConfirmations((current) => ({ ...current, [runId]: [] }));
+    setPrintBatches((current) => {
+      const next = { ...current };
+      delete next[runId];
+      return next;
+    });
+    setPrintBatchMessages((current) => ({ ...current, [runId]: "" }));
+    setPrintBatchErrors((current) => ({ ...current, [runId]: "" }));
+  }
+
+  async function preparePrintBatch(run: TeamshipReviewHistoryRun) {
+    const selected = selectedOrderIds(run.id);
+    const corrections = confirmedCorrectionIds(run.id);
+    const selectedOrders = run.orders.filter((order) => selected.has(order.id));
+    const unconfirmedFailed = selectedOrders.filter((order) => order.status === "FAIL" && !corrections.has(order.id));
+    if (selectedOrders.length === 0) {
+      setPrintBatchErrors((current) => ({ ...current, [run.id]: "Select at least one PS number to print." }));
+      return;
+    }
+    if (unconfirmedFailed.length > 0) {
+      setPrintBatchErrors((current) => ({
+        ...current,
+        [run.id]: `Confirm that Teamship was corrected for ${unconfirmedFailed.map((order) => order.psNumber).join(", ")} before preparing the plan.`
+      }));
+      return;
+    }
+
+    setPrintBatchLoadingRunId(run.id);
+    setPrintBatchErrors((current) => ({ ...current, [run.id]: "" }));
+    setPrintBatchMessages((current) => ({ ...current, [run.id]: "Checking each selected order and printer against live Teamship..." }));
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${run.id}/print-batches`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          requestKey: crypto.randomUUID(),
+          selections: selectedOrders.map((order) => ({
+            orderId: order.id,
+            manualCorrectionConfirmed: order.status === "FAIL" && corrections.has(order.id)
+          }))
+        })
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipPrintBatchApiResponse | null;
+      if (!response.ok || !json?.batch) {
+        throw new Error(json?.error ?? "Unable to prepare the print batch.");
+      }
+      setPrintBatches((current) => ({ ...current, [run.id]: json.batch! }));
+      setPrintBatchMessages((current) => ({
+        ...current,
+        [run.id]: json.batch!.summary.planned.length > 0
+          ? "Preflight complete. Review the exact document and label totals before approving."
+          : "No selected order passed print preflight."
+      }));
+    } catch (caught) {
+      setPrintBatchErrors((current) => ({
+        ...current,
+        [run.id]: caught instanceof Error ? caught.message : "Unable to prepare the print batch."
+      }));
+      setPrintBatchMessages((current) => ({ ...current, [run.id]: "" }));
+    } finally {
+      setPrintBatchLoadingRunId(null);
+    }
+  }
+
+  async function approvePrintBatch(runId: string, batchId: string) {
+    setPrintBatchLoadingRunId(runId);
+    setPrintBatchErrors((current) => ({ ...current, [runId]: "" }));
+    setPrintBatchMessages((current) => ({ ...current, [runId]: "Approving the batch. Nothing is retried automatically if printing becomes uncertain..." }));
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}/print-batches`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "approve", batchId, confirmed: true })
+      });
+      const json = (await response.json().catch(() => null)) as TeamshipPrintBatchApiResponse | null;
+      if (!response.ok || !json?.batch) {
+        throw new Error(json?.error ?? "Unable to approve the print batch.");
+      }
+      setPrintBatches((current) => ({ ...current, [runId]: json.batch! }));
+      setPrintBatchMessages((current) => ({
+        ...current,
+        [runId]: "Batch approved. Orders will print one at a time; the Bixolon printer is rechecked for every order."
+      }));
+    } catch (caught) {
+      setPrintBatchErrors((current) => ({
+        ...current,
+        [runId]: caught instanceof Error ? caught.message : "Unable to approve the print batch."
+      }));
+      setPrintBatchMessages((current) => ({ ...current, [runId]: "" }));
+    } finally {
+      setPrintBatchLoadingRunId(null);
+    }
+  }
+
+  async function refreshPrintBatch(runId: string, batchId: string) {
+    setPrintBatchLoadingRunId(runId);
+    setPrintBatchErrors((current) => ({ ...current, [runId]: "" }));
+    try {
+      const response = await fetch(`/api/shipment-documents/teamship-review/runs/${runId}/print-batches?batchId=${encodeURIComponent(batchId)}`);
+      const json = (await response.json().catch(() => null)) as TeamshipPrintBatchApiResponse | null;
+      if (!response.ok || !json?.batch) {
+        throw new Error(json?.error ?? "Unable to refresh the print batch.");
+      }
+      setPrintBatches((current) => ({ ...current, [runId]: json.batch! }));
+      setPrintBatchMessages((current) => ({ ...current, [runId]: `Batch status: ${formatPrintBatchStatus(json.batch!.status)}.` }));
+    } catch (caught) {
+      setPrintBatchErrors((current) => ({
+        ...current,
+        [runId]: caught instanceof Error ? caught.message : "Unable to refresh the print batch."
+      }));
+    } finally {
+      setPrintBatchLoadingRunId(null);
+    }
+  }
 
   return (
     <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
@@ -2730,6 +2961,9 @@ function TeamshipReviewHistorySection({
             <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
               One compact place to confirm which Garland PDF batches were processed, which orders need CSR review, and
               which records are ready to open, email, or mark complete.
+            </p>
+            <p className="mt-2 max-w-3xl text-xs text-mutedForeground">
+              These totals show the saved PDF-versus-Teamship comparison. Live update and editable-BOL completion are tracked separately under Bot drafts and run history.
             </p>
             <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-mutedForeground">
               {history.allDates
@@ -2941,10 +3175,146 @@ function TeamshipReviewHistorySection({
                       <HistoryRunInsightCard label="Next step" value={buildHistoryRunNextStep(run)} tone="warning" />
                     </div>
 
+                    <div className="mt-4 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Supervised batch printing</p>
+                          <h4 className="mt-1 text-base font-semibold text-foreground">Select PS numbers, check the plan, then approve once</h4>
+                          <p className="mt-1 max-w-3xl text-sm text-mutedForeground">
+                            Passed orders must be ready to print. Failed checks can also be selected after you confirm the Teamship correction was completed.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => selectAllPrintableOrders(run)}
+                            disabled={printBatchLoadingRunId === run.id}
+                            className="rounded-md border border-primary/30 bg-card px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Select all printable
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => clearPrintSelection(run.id)}
+                            disabled={printBatchLoadingRunId === run.id || selectedOrderIds(run.id).size === 0}
+                            className="rounded-md border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Clear
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void preparePrintBatch(run)}
+                            disabled={printBatchLoadingRunId === run.id || selectedOrderIds(run.id).size === 0}
+                            className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-primaryForeground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {printBatchLoadingRunId === run.id ? "Checking Teamship..." : `Prepare plan (${selectedOrderIds(run.id).size})`}
+                          </button>
+                        </div>
+                      </div>
+
+                      {printBatchErrors[run.id] ? (
+                        <div className="mt-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm font-medium text-danger">
+                          {printBatchErrors[run.id]}
+                        </div>
+                      ) : null}
+                      {printBatchMessages[run.id] ? (
+                        <div className="mt-3 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground">
+                          {printBatchMessages[run.id]}
+                        </div>
+                      ) : null}
+
+                      {printBatches[run.id] ? (
+                        <div className="mt-4 space-y-3 rounded-2xl border border-border bg-card p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                Print batch {printBatches[run.id]!.id}
+                              </p>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+                                {formatPrintBatchStatus(printBatches[run.id]!.status)}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                              <span className="rounded-full bg-muted px-3 py-1">
+                                {printBatches[run.id]!.summary.totalPickingLists} picking list{printBatches[run.id]!.summary.totalPickingLists === 1 ? "" : "s"}
+                              </span>
+                              <span className="rounded-full bg-muted px-3 py-1">
+                                {printBatches[run.id]!.summary.totalBols} BOL{printBatches[run.id]!.summary.totalBols === 1 ? "" : "s"}
+                              </span>
+                              <span className="rounded-full bg-muted px-3 py-1">
+                                {printBatches[run.id]!.summary.totalOutboundLabels} pallet label{printBatches[run.id]!.summary.totalOutboundLabels === 1 ? "" : "s"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-2 md:grid-cols-2">
+                            {printBatches[run.id]!.summary.planned.map((item) => (
+                              <div key={item.jobId} className="rounded-xl border border-border bg-background px-3 py-2 text-sm">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-foreground">{item.psNumber} · {item.srNumber}</span>
+                                  <span className={item.manualCorrectionConfirmed ? "text-warning" : "text-success"}>
+                                    {item.manualCorrectionConfirmed ? "Correction confirmed" : "Passed"}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-xs text-mutedForeground">
+                                  Teamship {item.shippingOrderNumber} · {item.palletCount} pallet label{item.palletCount === 1 ? "" : "s"}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {printBatches[run.id]!.summary.excluded.length > 0 ? (
+                            <div className="rounded-xl border border-warning/30 bg-warning/10 p-3">
+                              <p className="text-xs font-bold uppercase tracking-wide text-warning">Excluded before approval</p>
+                              <ul className="mt-2 space-y-1 text-sm text-foreground">
+                                {printBatches[run.id]!.summary.excluded.map((item) => (
+                                  <li key={`${item.reviewOrderId}:${item.reason}`}>
+                                    <span className="font-semibold">{item.psNumber}</span>: {item.reason}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+
+                          {printBatches[run.id]!.jobs[0]?.printerPlan ? (
+                            <p className="text-xs text-mutedForeground">
+                              Picking lists: {printBatches[run.id]!.jobs[0]!.printerPlan.pickingList?.displayName ?? "configured local printer"}
+                              {" · "}BOLs: {printBatches[run.id]!.jobs[0]!.printerPlan.bol?.exactName ?? "configured Teamship printer"}
+                              {" · "}Labels: {printBatches[run.id]!.jobs[0]!.printerPlan.outboundLabels?.exactName ?? "configured label printer"}
+                            </p>
+                          ) : null}
+
+                          <div className="flex flex-wrap gap-2">
+                            {printBatches[run.id]!.status === "PENDING_APPROVAL" && printBatches[run.id]!.summary.planned.length > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => void approvePrintBatch(run.id, printBatches[run.id]!.id)}
+                                disabled={printBatchLoadingRunId === run.id}
+                                className="rounded-md bg-danger px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Approve batch print
+                              </button>
+                            ) : null}
+                            {["APPROVED", "RUNNING", "COMPLETED", "PARTIAL_FAILED"].includes(printBatches[run.id]!.status) ? (
+                              <button
+                                type="button"
+                                onClick={() => void refreshPrintBatch(run.id, printBatches[run.id]!.id)}
+                                disabled={printBatchLoadingRunId === run.id}
+                                className="rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                Refresh print status
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
                     <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
                       <table className="min-w-full text-left text-sm">
                         <thead className="bg-muted/50 text-xs uppercase tracking-wide text-mutedForeground">
                           <tr>
+                            <th className="px-3 py-2">Print</th>
                             <th className="px-3 py-2">Order</th>
                             <th className="px-3 py-2">Review</th>
                             <th className="px-3 py-2">Result</th>
@@ -2957,6 +3327,16 @@ function TeamshipReviewHistorySection({
                           {run.orders.map((order) => (
                             <tr key={order.id} className={historyOrderRowClass(order)}>
                               <td className="px-3 py-2 align-top">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedOrderIds(run.id).has(order.id)}
+                                  onChange={(event) => togglePrintSelection(run.id, order.id, event.target.checked)}
+                                  disabled={!isBatchPrintSelectable(order) || printBatchLoadingRunId === run.id}
+                                  aria-label={`Select ${order.psNumber} for printing`}
+                                  className="h-4 w-4 rounded border-input"
+                                />
+                              </td>
+                              <td className="px-3 py-2 align-top">
                                 <p className="font-semibold text-foreground">{order.psNumber}</p>
                                 <p className="text-xs font-semibold text-mutedForeground">{order.srNumber}</p>
                                 <p className="text-xs text-mutedForeground">
@@ -2967,6 +3347,17 @@ function TeamshipReviewHistorySection({
                                 <span className={reviewStatusPillClass(order.status)}>
                                   {formatReviewStatus(order.status, order.mismatchCount)}
                                 </span>
+                                {order.status === "FAIL" && selectedOrderIds(run.id).has(order.id) ? (
+                                  <label className="mt-2 flex max-w-xs items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs font-semibold text-foreground">
+                                    <input
+                                      type="checkbox"
+                                      checked={confirmedCorrectionIds(run.id).has(order.id)}
+                                      onChange={(event) => toggleManualCorrectionConfirmation(run.id, order.id, event.target.checked)}
+                                      className="mt-0.5 h-4 w-4 rounded border-input"
+                                    />
+                                    I confirm this failed check was corrected in Teamship.
+                                  </label>
+                                ) : null}
                               </td>
                               <td className="max-w-md px-3 py-2 align-top text-mutedForeground">
                                 <p>{buildHistoryOrderResultText(order)}</p>
@@ -3231,6 +3622,30 @@ function buildHistoryRunNextStep(run: TeamshipReviewHistoryRun) {
   }
 
   return "Mark BOLs printed and orders complete as the warehouse finishes.";
+}
+
+export function isBatchPrintSelectable(order: TeamshipReviewHistoryOrder) {
+  if (!order.teamshipOrderId || !/^\d{1,10}$/.test(order.teamshipOrderId.trim())) {
+    return false;
+  }
+  if (order.workflowStatus === "BOL_PRINTED" || order.workflowStatus === "ORDER_COMPLETE") {
+    return false;
+  }
+  if (order.status === "PASS") {
+    return order.workflowStatus === "READY_TO_PRINT";
+  }
+  return order.status === "FAIL";
+}
+
+function formatPrintBatchStatus(status: string) {
+  if (status === "PENDING_APPROVAL") return "Awaiting your approval";
+  if (status === "APPROVED") return "Approved and queued";
+  if (status === "RUNNING") return "Printing one order at a time";
+  if (status === "COMPLETED") return "Completed";
+  if (status === "PARTIAL_FAILED") return "Stopped after a failure";
+  if (status === "FAILED") return "No printable orders";
+  if (status === "EXPIRED") return "Expired";
+  return status.toLowerCase().replaceAll("_", " ");
 }
 
 function buildHistoryOrderResultText(order: TeamshipReviewHistoryOrder) {
@@ -3968,6 +4383,10 @@ function formatDimensionSource(source: GarlandTeamshipOrderReview["productDimens
     return "UPS rule";
   }
 
+  if (source === "GARLAND_SKU_PREFIX_RULE") {
+    return "Garland SKU prefix rule";
+  }
+
   if (source === "TEAMSHIP_LEARNED") {
     return "Teamship learned";
   }
@@ -4350,7 +4769,7 @@ function buildCommodityPreview(item: GarlandPdfShippingOrder["items"][number]) {
   const serialNumbers = uniqueClientStrings(item.serialNumbers);
 
   if (serialNumbers.length > 0) {
-    return `SKU: ${sku} SN: ${serialNumbers.join(", ")}`;
+    return `SKU: ${sku}, SN: ${serialNumbers.join(", ")}`;
   }
 
   return `SKU: ${sku} QTY: ${quantity}`;
@@ -4693,6 +5112,10 @@ function stringifyValue(value: unknown) {
   }
 
   return String(value);
+}
+
+function formatFailureStage(value: TeamshipUpdateJobSummary["failureStage"]) {
+  return value?.toLowerCase().replaceAll("_", " ") ?? "worker execution";
 }
 
 function isErrorResponse(value: unknown): value is { error: string } {

@@ -10,12 +10,21 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from hunter_ingest import api_request, clean, required_env
+from hunter_company_research import (
+    HunterCompanyResearchRunError,
+    report_failure,
+    run_company_research,
+)
+from hunter_apollo_exception_resolution import run_apollo_exception_resolution
+from hunter_outreach_handoff import drain_outreach_handoff
+from hunter_signal_scout import run_signal_scout
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -195,6 +204,62 @@ def fail_job_run(base_url: str, token: str, job_run_id: str, error: Exception) -
         pass
 
 
+def ingestion_failure_message(stderr: str) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    message = lines[-1] if lines else "Hunter ingestion failed without a diagnostic message"
+    return message[:500]
+
+
+def is_transient_ingestion_failure(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "http 408",
+            "http 425",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "timed out",
+            "timeout",
+            "connection pool",
+            "can't reach database server",
+            "connection refused",
+            "connection reset",
+            "temporary failure",
+        )
+    )
+
+
+def run_ingestion_with_recovery(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Resume the same checkpointed ingestion after a bounded transient failure."""
+    configured_attempts = int(os.environ.get("HUNTER_INGESTION_PROCESS_ATTEMPTS", "2"))
+    max_attempts = max(1, min(3, configured_attempts))
+    configured_delay = int(os.environ.get("HUNTER_INGESTION_RECOVERY_DELAY_SECONDS", "15"))
+    recovery_delay = max(0, min(60, configured_delay))
+
+    for attempt in range(1, max_attempts + 1):
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result
+
+        message = ingestion_failure_message(result.stderr)
+        if attempt >= max_attempts or not is_transient_ingestion_failure(message):
+            raise RuntimeError(message)
+
+        print(
+            f"Hunter ingestion attempt {attempt}/{max_attempts} hit a transient Newl Apps failure; "
+            "resuming from the saved batch checkpoint.",
+            file=sys.stderr,
+        )
+        if recovery_delay:
+            time.sleep(recovery_delay)
+
+    raise RuntimeError("Hunter ingestion recovery loop ended unexpectedly")
+
+
 def profile_lookback_days(profile: dict[str, Any]) -> int:
     return max(1, int(profile.get("lookbackDays") or 1))
 
@@ -313,6 +378,244 @@ def resolve_current_profile(base_url: str, token: str, profile_id: str) -> dict[
     return resolve_profile(load_profiles(base_url, token), profile_id, None)
 
 
+def send_teams_message(message: str) -> bool:
+    target = clean(os.environ.get("HUNTER_TEAMS_TARGET"))
+    if not target:
+        return False
+    command = [
+        "openclaw",
+        "message",
+        "send",
+        "--channel",
+        "msteams",
+        "--target",
+        target,
+        "--message",
+        message,
+    ]
+    account = clean(os.environ.get("HUNTER_TEAMS_ACCOUNT"))
+    if account:
+        command.extend(["--account", account])
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        return True
+    except Exception as error:
+        print(f"Hunter could not send its Teams status message: {type(error).__name__}", file=sys.stderr)
+        return False
+
+
+def build_company_research_message(result: dict[str, Any]) -> str:
+    researched = int(result.get("researchedCount") or 0)
+    accepted = int(result.get("acceptedCount") or 0)
+    blocked = int(result.get("blockedCount") or 0)
+    missing = int(result.get("missingCompanyCount") or 0)
+    message = (
+        "Hunter company research completed: "
+        f"{researched} companies reached Luna and Kimi, {accepted} qualified for planning, "
+        f"{blocked} blocked, and {missing} omitted after bounded model-output repair. "
+    )
+    selection = result.get("selection")
+    if isinstance(selection, dict):
+        selected = int(selection.get("selectedCompanyCount") or 0)
+        new_companies = int(selection.get("newCompanyCount") or 0)
+        scheduled_refreshes = int(selection.get("scheduledRefreshSelectedCount") or 0)
+        material_refreshes = int(selection.get("materialRefreshSelectedCount") or 0)
+        recent_suppressed = int(selection.get("recentResearchSuppressedCount") or 0)
+        active_suppressed = int(selection.get("activeOutreachSuppressedCount") or 0)
+        cooldown_days = int(selection.get("cooldownDays") or 0)
+        message += (
+            f"Cohort selection: {new_companies}/{selected} new companies, "
+            f"{scheduled_refreshes} scheduled refreshes, {material_refreshes} new-trigger refreshes; "
+            f"{recent_suppressed} recent repeats and {active_suppressed} active-outreach companies suppressed "
+            f"under the {cooldown_days}-day cooldown. "
+        )
+    luna_comparison = result.get("lunaComparison")
+    if isinstance(luna_comparison, dict):
+        evaluated = int(luna_comparison.get("evaluatedCompanyCount") or 0)
+        expected = int(luna_comparison.get("expectedCompanyCount") or 0)
+        schema_valid = int(luna_comparison.get("firstPassSchemaValidCompanyCount") or 0)
+        qwen_valid = int(luna_comparison.get("qwenSynthesisCompanyCount") or 0)
+        qwen_missing = int(luna_comparison.get("qwenMissingCompanyCount") or 0)
+        agreement = luna_comparison.get("categoricalAgreementPercent")
+        agreement_text = (
+            f"{float(agreement):g}% categorical agreement with Qwen"
+            if isinstance(agreement, (int, float))
+            else "agreement unavailable"
+        )
+        message += (
+            f"Luna primary: {clean(luna_comparison.get('status')) or 'UNKNOWN'}, "
+            f"{evaluated}/{expected} evaluated, {schema_valid} schema-valid on first pass, "
+            f"Qwen shadow returned {qwen_valid} rows with {qwen_missing} omissions; "
+            f"{agreement_text}. "
+        )
+    return message + "Review Sales → Hunter Control Tower and Admin & Quality → Health & Logs."
+
+
+def run_company_research_with_notification(**kwargs: Any) -> dict[str, Any]:
+    max_attempts = max(
+        1,
+        min(3, int(os.environ.get("HUNTER_COMPANY_RESEARCH_MAX_ATTEMPTS", "3"))),
+    )
+    retry_base_seconds = max(
+        1,
+        min(300, int(os.environ.get("HUNTER_COMPANY_RESEARCH_RETRY_BASE_SECONDS", "30"))),
+    )
+    run_kwargs = dict(kwargs)
+    result: dict[str, Any]
+    for attempt in range(1, max_attempts + 1):
+        try:
+            result = run_company_research(**run_kwargs)
+            if attempt > 1 and isinstance(result, dict):
+                result["automaticRecovery"] = {
+                    "recovered": True,
+                    "attempt": attempt,
+                }
+            break
+        except HunterCompanyResearchRunError as error:
+            will_retry = bool(error.retryable and attempt < max_attempts)
+            report_failure(
+                required_env("NEWL_APPS_BASE_URL"),
+                required_env("INGESTION_API_TOKEN"),
+                error.run_id,
+                error,
+                retryable=error.retryable,
+                retry_scheduled=will_retry,
+                checkpoint_stage=error.checkpoint_stage,
+            )
+            if not will_retry:
+                send_teams_message(
+                    "Hunter company research failed after bounded checkpoint recovery. "
+                    "Paid retrieval or synthesis was preserved when a checkpoint was available. "
+                    "Review Sales → Hunter Control Tower and Admin & Quality → Health & Logs; "
+                    "no outreach was sent."
+                )
+                raise
+            next_attempt = attempt + 1
+            recovery_scope = (
+                "reuse the exact company cohort and resume from the "
+                f"{error.checkpoint_stage or 'available'} checkpoint"
+                if error.run_id
+                else "retry the tenant-scoped preparation request before any paid retrieval"
+            )
+            send_teams_message(
+                "Hunter company research hit a transient failure. "
+                f"Automatic recovery attempt {next_attempt}/{max_attempts} will {recovery_scope}."
+            )
+            time.sleep(retry_base_seconds * (2 ** (attempt - 1)))
+            if error.run_id:
+                run_kwargs["recovery_of_run_id"] = error.run_id
+    else:
+        raise RuntimeError("Hunter company research exhausted its recovery attempts.")
+    if (
+        isinstance(result, dict)
+        and result.get("state") not in {
+            "already_attempted",
+            "disabled",
+            "dry_run",
+            "idle",
+            "research_only",
+        }
+        and ("researchedCount" in result or "missingCompanyCount" in result)
+    ):
+        send_teams_message(build_company_research_message(result))
+    return result
+
+
+def build_signal_scout_message(result: dict[str, Any]) -> str:
+    selected = int(result.get("selectedArticleCount") or 0)
+    accepted = int(result.get("acceptedCount") or 0)
+    promoted = int(result.get("promotedCompanyCount") or 0)
+    filtered = int(result.get("filteredNonEventCount") or 0)
+    duplicates = int(result.get("duplicateUrlCount") or 0) + int(
+        result.get("duplicateEventCount") or 0
+    )
+    return (
+        "Hunter external opportunity scout completed: "
+        f"{selected} new Brave results reached Qwen, {accepted} signals passed first review, "
+        f"{promoted} new companies were queued for full Qwen/Kimi research, and "
+        f"{filtered} obvious non-event results plus {duplicates} repeat URLs or events were suppressed. "
+        "No Apollo search or outreach was performed by the scout."
+    )
+
+
+def run_signal_scout_with_notification(**kwargs: Any) -> dict[str, Any]:
+    try:
+        result = run_signal_scout(**kwargs)
+    except Exception:
+        send_teams_message(
+            "Hunter external opportunity scouting failed during Brave retrieval or Qwen classification. "
+            "Review Admin & Quality → Health & Logs; no Apollo search or outreach was sent."
+        )
+        raise
+    if (
+        isinstance(result, dict)
+        and result.get("state") not in {
+            "already_attempted",
+            "disabled",
+            "dry_run",
+        }
+        and "acceptedCount" in result
+    ):
+        send_teams_message(build_signal_scout_message(result))
+    return result
+
+
+def read_job_run_summary(base_url: str, token: str, job_run_id: str) -> dict[str, Any]:
+    response = api_request(
+        base_url,
+        token,
+        "GET",
+        f"/api/integrations/trademining/job-runs/{job_run_id}",
+    )
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    job_run = data.get("jobRun") if isinstance(data.get("jobRun"), dict) else {}
+    output = job_run.get("output") if isinstance(job_run.get("output"), dict) else {}
+    metadata = output.get("metadata") if isinstance(output.get("metadata"), dict) else {}
+    coverage = metadata.get("coverage") if isinstance(metadata.get("coverage"), dict) else {}
+    return {
+        "status": clean(job_run.get("status")) or "UNKNOWN",
+        "matchedRecords": coverage.get("matchedRecords"),
+        "exportedRecords": coverage.get("exportedRecords"),
+        "queryCount": coverage.get("queryCount"),
+        "retrievalComplete": coverage.get("retrievalComplete"),
+        "qualifyingCompanies": metadata.get("qualifyingCompanies"),
+        "recordsProcessed": output.get("recordsProcessed"),
+    }
+
+
+def format_count(value: Any) -> str:
+    if isinstance(value, bool):
+        return "unknown"
+    if isinstance(value, (int, float)):
+        return f"{int(value):,}"
+    return "unknown"
+
+
+def build_daily_trade_mining_message(
+    successes: list[dict[str, Any]],
+    failures: list[dict[str, str]],
+) -> str:
+    total = len(successes) + len(failures)
+    lines = [
+        f"Hunter TradeMining daily run finished: {len(successes)}/{total} profiles completed successfully."
+    ]
+    for result in successes:
+        completeness = "retrieval complete" if result.get("retrievalComplete") is True else "retrieval incomplete"
+        lines.append(
+            " • "
+            f"{result['profileName']}: {format_count(result.get('matchedRecords'))} matches, "
+            f"{format_count(result.get('exportedRecords'))} exported, "
+            f"{format_count(result.get('recordsProcessed'))} processed, "
+            f"{format_count(result.get('qualifyingCompanies'))} qualifying companies, "
+            f"{format_count(result.get('queryCount'))} queries, {completeness}."
+        )
+    for failure in failures:
+        lines.append(f" • {failure['profileName']}: failed. Review Admin & Quality → Health & Logs.")
+    if failures:
+        lines.append("One or more profiles require review; Hunter did not silently retry them.")
+    return "\n".join(lines)
+
+
 def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str) -> dict[str, Any]:
     profile_id = clean(profile.get("id"))
     profile_name = clean(profile.get("name"))
@@ -422,7 +725,12 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         ]
         if destination_markets:
             ingest_command.extend(["--destination-market", destination_markets[0]])
-        subprocess.run(ingest_command, check=True)
+        ingest_result = run_ingestion_with_recovery(ingest_command)
+        try:
+            ingestion_summary = json.loads(ingest_result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Hunter ingestion did not return its expected JSON summary") from error
+        job_summary = read_job_run_summary(base_url, token, job_run_id)
     except Exception as error:
         fail_job_run(base_url, token, job_run_id, error)
         raise
@@ -434,6 +742,10 @@ def run_profile(base_url: str, token: str, profile: dict[str, Any], trigger: str
         "portCount": len(destination_ports),
         "queryCount": int(export_manifest.get("coverage", {}).get("query_count") or 1),
         "retrievalComplete": bool(export_manifest.get("coverage", {}).get("retrieval_complete", False)),
+        "matchedRecords": job_summary.get("matchedRecords"),
+        "exportedRecords": job_summary.get("exportedRecords"),
+        "recordsProcessed": job_summary.get("recordsProcessed") or ingestion_summary.get("recordsProcessed"),
+        "qualifyingCompanies": job_summary.get("qualifyingCompanies"),
         "lookbackDays": lookback_days,
         "configuredLookbackDays": configured_lookback_days,
         "jobRunId": job_run_id,
@@ -502,25 +814,156 @@ def process_once(base_url: str, token: str, explicit_profile_id: Optional[str], 
         return True
 
     attempted_profile = False
+    successes: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
     for profile in profiles:
         if not is_profile_due(profile):
             continue
         attempted_profile = True
         try:
             result = run_profile(base_url, token, profile, "daily")
+            successes.append(result)
             print(json.dumps(result, indent=2))
         except Exception as error:
-            print(f'Hunter daily profile "{clean(profile.get("name")) or "unknown"}" failed: {error}', file=sys.stderr)
+            profile_name = clean(profile.get("name")) or "unknown"
+            failures.append({"profileName": profile_name})
+            print(f'Hunter daily profile "{profile_name}" failed: {error}', file=sys.stderr)
+            send_teams_message(
+                f'Hunter TradeMining profile "{profile_name}" failed. '
+                "The remaining due profiles will continue. Review Admin & Quality → Health & Logs."
+            )
 
     if not attempted_profile:
         print("No enabled TradeMining profile is due for its daily run.")
+    else:
+        send_teams_message(build_daily_trade_mining_message(successes, failures))
     return attempted_profile
+
+
+def signal_scout_due_now(now: Optional[dt.datetime] = None) -> bool:
+    enabled = os.environ.get("HUNTER_SIGNAL_SCOUT_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return False
+    timezone_name = os.environ.get("HUNTER_SIGNAL_SCOUT_TIMEZONE", "America/Toronto").strip()
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except Exception as error:
+        raise RuntimeError("HUNTER_SIGNAL_SCOUT_TIMEZONE must be a valid IANA timezone") from error
+    configured = os.environ.get("HUNTER_SIGNAL_SCOUT_DAILY_TIME", "08:30").strip()
+    try:
+        daily_time = dt.time.fromisoformat(configured)
+    except ValueError as error:
+        raise RuntimeError("HUNTER_SIGNAL_SCOUT_DAILY_TIME must use HH:MM format") from error
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    return current.astimezone(timezone).time() >= daily_time
+
+
+def company_research_due_now(now: Optional[dt.datetime] = None) -> bool:
+    enabled = os.environ.get("HUNTER_COMPANY_RESEARCH_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return False
+    timezone_name = os.environ.get("HUNTER_COMPANY_RESEARCH_TIMEZONE", "America/Toronto").strip()
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except Exception as error:
+        raise RuntimeError("HUNTER_COMPANY_RESEARCH_TIMEZONE must be a valid IANA timezone") from error
+    configured = os.environ.get("HUNTER_COMPANY_RESEARCH_DAILY_TIME", "09:15").strip()
+    try:
+        daily_time = dt.time.fromisoformat(configured)
+    except ValueError as error:
+        raise RuntimeError("HUNTER_COMPANY_RESEARCH_DAILY_TIME must use HH:MM format") from error
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    return current.astimezone(timezone).time() >= daily_time
+
+
+def run_outreach_handoff_poller(
+    base_url: str,
+    token: str,
+    poll_ms: int,
+    stop_event: threading.Event,
+) -> None:
+    """Drain interactive handoffs independently of long TradeMining work."""
+    while not stop_event.is_set():
+        try:
+            handoff = drain_outreach_handoff(base_url, token)
+            if handoff.get("state") not in {"idle", "disabled"}:
+                print(json.dumps({"hunterOutreachHandoff": handoff}, indent=2))
+        except Exception as error:
+            print(f"Hunter outreach handoff failed: {error}", file=sys.stderr)
+        stop_event.wait(poll_ms / 1000)
+
+
+def run_apollo_exception_poller(
+    base_url: str,
+    token: str,
+    poll_ms: int,
+    stop_event: threading.Event,
+) -> None:
+    """Resolve at most one new or materially changed Apollo exception per poll."""
+    while not stop_event.is_set():
+        try:
+            result = run_apollo_exception_resolution(base_url, token)
+            if result.get("state") not in {"idle", "disabled", "already_processing"}:
+                print(json.dumps({"hunterApolloExceptionAutopilot": result}, indent=2))
+        except Exception as error:
+            print(f"Hunter Apollo exception autopilot failed: {error}", file=sys.stderr)
+        stop_event.wait(poll_ms / 1000)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--plan", action="store_true", help="Validate one profile without logging in or exporting.")
+    parser.add_argument(
+        "--signal-scout-now",
+        action="store_true",
+        help="Run external signal discovery/classification now, even if today was already attempted.",
+    )
+    parser.add_argument(
+        "--signal-scout-dry-run",
+        action="store_true",
+        help="Run external signal discovery/classification without persisting signals.",
+    )
+    parser.add_argument(
+        "--company-research-now",
+        action="store_true",
+        help="Run evidence-first company research now, even if today was already attempted.",
+    )
+    parser.add_argument(
+        "--company-research-dry-run",
+        action="store_true",
+        help="Run evidence-first company research without persisting signals or a refreshed plan.",
+    )
+    parser.add_argument(
+        "--company-research-cohort",
+        help="Optional JSON array of company names/keys for an exact replay cohort.",
+    )
+    parser.add_argument(
+        "--company-research-output",
+        help="Optional local JSON path for the redacted research completion ledger.",
+    )
+    parser.add_argument(
+        "--company-research-resume",
+        help="Resume a matching company-research retrieval or synthesis checkpoint.",
+    )
+    parser.add_argument(
+        "--company-research-recovery-run-id",
+        help="Recover the exact tenant-scoped cohort from a failed Newl Apps company-research run.",
+    )
+    parser.add_argument(
+        "--company-research-only",
+        action="store_true",
+        help="Stop after web retrieval and local Qwen without calling Kimi.",
+    )
+    parser.add_argument(
+        "--apollo-exceptions-now",
+        action="store_true",
+        help="Resolve at most one eligible Apollo exception now.",
+    )
     parser.add_argument("--end-date", help="Use a specific YYYY-MM-DD TradeMining end date for a controlled run.")
     parser.add_argument("--test-days", type=int, help="Temporarily shorten an explicit profile run without changing it.")
     profile = parser.add_mutually_exclusive_group()
@@ -540,6 +983,46 @@ def main() -> int:
     token = required_env("INGESTION_API_TOKEN")
     poll_ms = max(5000, int(os.environ.get("HUNTER_POLL_MS", "60000")))
 
+    if args.apollo_exceptions_now:
+        print(json.dumps(run_apollo_exception_resolution(base_url, token), indent=2))
+        return 0
+
+    if args.signal_scout_now or args.signal_scout_dry_run:
+        print(
+            json.dumps(
+                run_signal_scout_with_notification(
+                    force=True,
+                    dry_run=args.signal_scout_dry_run,
+                ),
+                indent=2,
+            )
+        )
+        return 0
+    if (
+        args.company_research_now
+        or args.company_research_dry_run
+        or args.company_research_only
+        or args.company_research_resume
+        or args.company_research_recovery_run_id
+    ):
+        from hunter_company_research import read_company_keys
+
+        print(
+            json.dumps(
+                run_company_research_with_notification(
+                    force=True,
+                    dry_run=args.company_research_dry_run,
+                    company_keys=read_company_keys(args.company_research_cohort),
+                    replay_output=args.company_research_output,
+                    resume_checkpoint=args.company_research_resume,
+                    research_only=args.company_research_only,
+                    recovery_of_run_id=clean(args.company_research_recovery_run_id),
+                ),
+                indent=2,
+            )
+        )
+        return 0
+
     if args.plan:
         if not args.profile_id and not args.profile_name:
             raise RuntimeError("--plan requires --profile-id or --profile-name")
@@ -547,8 +1030,46 @@ def main() -> int:
         print(json.dumps(build_profile_plan(resolve_profile(profiles, clean(args.profile_id), clean(args.profile_name))), indent=2))
         return 0
 
+    if not args.once and not args.profile_id and not args.profile_name:
+        handoff_stop_event = threading.Event()
+        threading.Thread(
+            target=run_outreach_handoff_poller,
+            args=(base_url, token, poll_ms, handoff_stop_event),
+            name="hunter-outreach-handoff",
+            daemon=True,
+        ).start()
+        apollo_exception_stop_event = threading.Event()
+        threading.Thread(
+            target=run_apollo_exception_poller,
+            args=(base_url, token, poll_ms, apollo_exception_stop_event),
+            name="hunter-apollo-exception-autopilot",
+            daemon=True,
+        ).start()
+
+    last_signal_scout_check_date: Optional[dt.date] = None
+    last_company_research_check_date: Optional[dt.date] = None
     while True:
         process_once(base_url, token, clean(args.profile_id), clean(args.profile_name))
+        if not args.profile_id and not args.profile_name and signal_scout_due_now():
+            local_timezone = ZoneInfo(os.environ.get("HUNTER_SIGNAL_SCOUT_TIMEZONE", "America/Toronto").strip())
+            local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
+            if last_signal_scout_check_date != local_date:
+                last_signal_scout_check_date = local_date
+                try:
+                    print(json.dumps(run_signal_scout_with_notification(), indent=2))
+                except Exception as error:
+                    print(f"Hunter daily signal scout failed: {error}", file=sys.stderr)
+        if not args.profile_id and not args.profile_name and company_research_due_now():
+            local_timezone = ZoneInfo(
+                os.environ.get("HUNTER_COMPANY_RESEARCH_TIMEZONE", "America/Toronto").strip()
+            )
+            local_date = dt.datetime.now(dt.timezone.utc).astimezone(local_timezone).date()
+            if last_company_research_check_date != local_date:
+                last_company_research_check_date = local_date
+                try:
+                    print(json.dumps(run_company_research_with_notification(), indent=2))
+                except Exception as error:
+                    print(f"Hunter daily company research failed: {error}", file=sys.stderr)
         if args.once or args.profile_id or args.profile_name:
             return 0
         time.sleep(poll_ms / 1000)

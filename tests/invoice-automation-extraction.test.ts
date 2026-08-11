@@ -577,7 +577,11 @@ describe("invoice automation extraction", () => {
         Total CAD 100.00
       `
     });
-    const corrected = applyInvoiceCorrectionMemory(extractedDraft, "VENDOR", memories);
+    const corrected = applyInvoiceCorrectionMemory(
+      extractedDraft,
+      "VENDOR",
+      memories.map((memory) => ({ ...memory, usageCount: 1 }))
+    );
 
     expect(extractedDraft.productOrAccountName).toBe("5015 Trucking Rate");
     expect(corrected.productOrAccountName).toBe("5014 Warehouse Rate");

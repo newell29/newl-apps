@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getWorkspaceWorkflowStatus,
+  isBatchPrintSelectable,
   mergeTeamshipOrders,
   rowMatchesWorkspaceFilters
 } from "@/modules/shipment-documents/components/garland-teamship-review-client";
@@ -50,9 +51,9 @@ describe("Garland Teamship review workspace client helpers", () => {
       getWorkspaceWorkflowStatus(passedRow, [
         {
           id: "job-1",
-          tenantId: "tenant-1",
           shipmentDate: "2026-07-12T00:00:00.000Z",
           documentLabel: "July 12, 2026",
+          sourcePdfFileName: null,
           dryRun: true,
           agentMode: "DRY_RUN",
           status: "SUCCESS",
@@ -83,10 +84,16 @@ describe("Garland Teamship review workspace client helpers", () => {
             }
           ],
           createdAt: "2026-07-12T12:00:00.000Z",
+          errorMessage: null,
+          failureStage: null,
+          agentId: null,
           approvedAt: null,
-          cancelledAt: null,
+          agentClaimedAt: null,
           agentStartedAt: null,
-          agentFinishedAt: null
+          agentFinishedAt: null,
+          lastVerificationAt: null,
+          createdByName: null,
+          approvedByName: null
         }
       ])
     ).toBe("READY_TO_PRINT");
@@ -104,6 +111,29 @@ describe("Garland Teamship review workspace client helpers", () => {
     });
 
     expect(getWorkspaceWorkflowStatus(completedRow, [])).toBe("BOL_PRINTED");
+  });
+
+  it("allows corrected failed reviews to be selected without reopening printed orders", () => {
+    const base = {
+      id: "cmreview123456",
+      psNumber: "PS123456",
+      srNumber: "SR812345",
+      teamshipOrderId: "30202",
+      teamshipUrl: "https://members.fulfillit.io/ship-inventories/30202",
+      carrier: null,
+      shipToName: null,
+      city: null,
+      state: null,
+      pageNumbers: [1],
+      mismatchCount: 1,
+      bolPrintedAt: null,
+      orderCompletedAt: null
+    } satisfies Omit<Parameters<typeof isBatchPrintSelectable>[0], "status" | "workflowStatus">;
+
+    expect(isBatchPrintSelectable({ ...base, status: "FAIL", workflowStatus: "NEEDS_REVIEW" })).toBe(true);
+    expect(isBatchPrintSelectable({ ...base, status: "PASS", workflowStatus: "READY_TO_PRINT" })).toBe(true);
+    expect(isBatchPrintSelectable({ ...base, status: "PASS", workflowStatus: "NEEDS_SETUP" })).toBe(false);
+    expect(isBatchPrintSelectable({ ...base, status: "FAIL", workflowStatus: "BOL_PRINTED" })).toBe(false);
   });
 });
 

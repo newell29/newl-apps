@@ -1,15 +1,16 @@
 import type {
   GarlandCarrierManifestAttachmentSummary,
-  GarlandCarrierKey,
   GarlandCarrierManifestHistoryResponse,
   GarlandCarrierManifestRunSummary
+} from "@/modules/shipment-documents/carrier-manifest-types";
+import {
+  GARLAND_CARRIERS,
+  type GarlandCarrierKey
 } from "@/modules/shipment-documents/carrier-manifest-types";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 const WORKFLOW_KEY = "GARLAND_CARRIER_MANIFEST";
-const CARRIERS: GarlandCarrierKey[] = ["MIDLAND", "SPEEDY", "SURETRACK"];
-
 type CarrierManifestRunQueryClient = typeof prisma & {
   shipmentCarrierManifestRun: {
     findMany(args: {
@@ -31,6 +32,8 @@ type CarrierManifestRunRecord = {
   midlandWorkbookBytes: Uint8Array | null;
   speedyWorkbookBytes: Uint8Array | null;
   suretrackWorkbookBytes: Uint8Array | null;
+  clarkeWorkbookBytes: Uint8Array | null;
+  guilbaultWorkbookBytes: Uint8Array | null;
   signedCopyFileName: string | null;
   signedCopyUploadedAt: Date | null;
   attachments: Array<{
@@ -71,6 +74,8 @@ export async function getGarlandCarrierManifestHistory(
         midlandWorkbookBytes: true,
         speedyWorkbookBytes: true,
         suretrackWorkbookBytes: true,
+        clarkeWorkbookBytes: true,
+        guilbaultWorkbookBytes: true,
         signedCopyFileName: true,
         signedCopyUploadedAt: true,
         attachments: {
@@ -128,6 +133,8 @@ function mapGarlandCarrierManifestRunSummary(record: CarrierManifestRunRecord): 
     hasMidlandWorkbook: Boolean(record.midlandWorkbookBytes),
     hasSpeedyWorkbook: Boolean(record.speedyWorkbookBytes),
     hasSuretrackWorkbook: Boolean(record.suretrackWorkbookBytes),
+    hasClarkeWorkbook: Boolean(record.clarkeWorkbookBytes),
+    hasGuilbaultWorkbook: Boolean(record.guilbaultWorkbookBytes),
     signedCopyFileName: record.signedCopyFileName,
     signedCopyUploadedAt: record.signedCopyUploadedAt?.toISOString() ?? null,
     attachments
@@ -138,7 +145,9 @@ function readCarrierCounts(value: unknown): Record<GarlandCarrierKey, number> {
   const counts: Record<GarlandCarrierKey, number> = {
     MIDLAND: 0,
     SPEEDY: 0,
-    SURETRACK: 0
+    SURETRACK: 0,
+    CLARKE: 0,
+    GUILBAULT: 0
   };
 
   if (!value || typeof value !== "object") {
@@ -146,7 +155,7 @@ function readCarrierCounts(value: unknown): Record<GarlandCarrierKey, number> {
   }
 
   const record = value as Record<string, unknown>;
-  for (const carrier of CARRIERS) {
+  for (const carrier of GARLAND_CARRIERS) {
     counts[carrier] = typeof record[carrier] === "number" ? record[carrier] : 0;
   }
 

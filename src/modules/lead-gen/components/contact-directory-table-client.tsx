@@ -6,6 +6,9 @@ import {
   ContactOutreachDraftStatus,
   ContactStatus,
   ContactTier,
+  OutreachChannel,
+  OutreachPlanStatus,
+  OutreachQaStatus,
   ReplyStatus,
   SequenceStatus
 } from "@prisma/client";
@@ -22,7 +25,10 @@ import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { DataGridColumnMenu } from "@/components/data-grid-column-menu";
 import { usePersistedTableState } from "@/components/use-persisted-table-state";
-import type { ApolloPushJobSummary } from "@/modules/lead-gen/apollo-push-jobs";
+import type {
+  ApolloPushJobDetailItem,
+  ApolloPushJobSummary
+} from "@/modules/lead-gen/apollo-push-jobs";
 import type { ContactSequenceStatusFilter } from "@/modules/lead-gen/queries";
 import {
   EMPTY_CONTACT_BULK_ACTION_SUMMARY,
@@ -52,6 +58,9 @@ type ContactDirectoryRow = {
   sequenceStatus: SequenceStatus;
   apolloPushBlockedReason: string | null;
   apolloPushBlockedAt: string | null;
+  apolloPauseKind: string | null;
+  apolloPauseReason: string | null;
+  apolloPauseResumeAt: string | null;
   effectiveSequenceStatus: ContactSequenceStatusFilter;
   replyStatus: ReplyStatus;
   recommendedSequenceName: string;
@@ -61,6 +70,22 @@ type ContactDirectoryRow = {
   sequenceOverrideReason: string | null;
   sequenceManuallyOverridden: boolean;
   requiresAiDraft: boolean;
+  canGenerateOutreachPlan: boolean;
+  hunterEligibility: {
+    status:
+      | "ELIGIBLE"
+      | "NEEDS_HUNTER_ASSESSMENT"
+      | "WATCHLIST"
+      | "BLOCKED"
+      | "STALE_RESEARCH"
+      | "NOT_SELECTED"
+      | "INVALID_HANDOFF";
+    label: string;
+    reason: string;
+    opportunityTier: string | null;
+    serviceLine: string | null;
+    researchRetrievedAt: string | null;
+  };
   draftGenerationConfigured: boolean;
   draftGenerationDisabledReason: string | null;
   draft: {
@@ -69,6 +94,66 @@ type ContactDirectoryRow = {
     body: string;
     personalizationNotes: string | null;
     status: ContactOutreachDraftStatus;
+  } | null;
+  outreachPlan: {
+    id: string;
+    version: number;
+    status: OutreachPlanStatus;
+    qaStatus: OutreachQaStatus;
+    serviceLine: string;
+    opportunityType: string;
+    objective: string;
+    triggerSummary: string;
+    buyerHypothesis: string;
+    valueProposition: string;
+    likelyObjection: string;
+    callToAction: string;
+    senderRecommendation: string | null;
+    confidence: number;
+    qaRepairDisposition:
+      | "AUTOMATIC"
+      | "MODEL_QA_RETRY"
+      | "MODEL_REGENERATION"
+      | "HUMAN_REVIEW";
+    regenerationBlockReason: string | null;
+    qaIssues: Array<{
+      code: string;
+      severity: "ERROR" | "WARNING";
+      message: string;
+      stepNumber: number | null;
+    }>;
+    evidence: Array<{
+      id: string;
+      kind: string;
+      title: string;
+      summary: string;
+      sourceUrl: string | null;
+      publishedAt: string | null;
+      facts: string[];
+    }>;
+    models: {
+      strategy: string;
+      drafting: string;
+      qa: string | null;
+    };
+    promptVersion: string;
+    approvedAt: Date | null;
+    steps: Array<{
+      id: string;
+      stepNumber: number;
+      channel: OutreachChannel;
+      delayDays: number;
+      subject: string | null;
+      body: string;
+      angle: string;
+      evidenceRefs: string[];
+      qaIssues: Array<{
+        code: string;
+        severity: "ERROR" | "WARNING";
+        message: string;
+        stepNumber: number | null;
+      }>;
+    }>;
   } | null;
   draftStatus: string;
   lastTouchAt: Date | null;
@@ -79,20 +164,35 @@ type ContactDirectoryRow = {
   updatedAt: Date;
 };
 
+const OUTREACH_DEFAULT_COLUMN_VISIBILITY = {
+  recommendedSequenceName: false,
+  lastTouchAt: false,
+  lastReplyAt: false,
+  source: false,
+  updatedAt: false
+};
+
 export function ContactDirectoryTableClient({
   contacts,
   initialApolloPushJobs,
+  initialActiveApolloPushJobId,
   sequenceOptions,
   bulkUpdateContactSequenceAction,
   bulkRemoveContactsAction,
   bulkPushContactsToApolloAction,
+  bulkApproveOutreachPlansAction,
+  bulkRepairFailedOutreachPlansAction,
   syncSelectedApolloStatusesAction,
   updateContactSequenceAction,
   saveContactDraftAction,
-  generateContactDraftAction
+  generateContactDraftAction,
+  approveOutreachPlanAction,
+  recheckHunterCompanyContactsAction,
+  canRecheckHunterContacts
 }: {
   contacts: ContactDirectoryRow[];
   initialApolloPushJobs: ApolloPushJobSummary[];
+  initialActiveApolloPushJobId: string | null;
   sequenceOptions: readonly SequenceCatalogItem[];
   bulkUpdateContactSequenceAction: (
     previousState: ContactBulkActionSummary,
@@ -106,6 +206,14 @@ export function ContactDirectoryTableClient({
     previousState: ContactBulkActionSummary,
     formData: FormData
   ) => Promise<ContactBulkActionSummary>;
+  bulkApproveOutreachPlansAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
+  bulkRepairFailedOutreachPlansAction: (
+    previousState: ContactBulkActionSummary,
+    formData: FormData
+  ) => Promise<ContactBulkActionSummary>;
   syncSelectedApolloStatusesAction: (
     previousState: ContactBulkActionSummary,
     formData: FormData
@@ -113,6 +221,9 @@ export function ContactDirectoryTableClient({
   updateContactSequenceAction: (formData: FormData) => Promise<void>;
   saveContactDraftAction: (formData: FormData) => Promise<void>;
   generateContactDraftAction: (formData: FormData) => Promise<void>;
+  approveOutreachPlanAction: (formData: FormData) => Promise<void>;
+  recheckHunterCompanyContactsAction: (formData: FormData) => Promise<void>;
+  canRecheckHunterContacts: boolean;
 }) {
   const router = useRouter();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -128,13 +239,23 @@ export function ContactDirectoryTableClient({
     bulkPushContactsToApolloAction,
     EMPTY_CONTACT_BULK_ACTION_SUMMARY
   );
+  const [bulkApproveState, runBulkApproveAction, isBulkApprovePending] = useActionState(
+    bulkApproveOutreachPlansAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
+  const [qaRepairState, runQaRepairAction, isQaRepairPending] = useActionState(
+    bulkRepairFailedOutreachPlansAction,
+    EMPTY_CONTACT_BULK_ACTION_SUMMARY
+  );
   const [apolloSyncState, runApolloSyncAction, isApolloSyncPending] = useActionState(
     syncSelectedApolloStatusesAction,
     EMPTY_CONTACT_BULK_ACTION_SUMMARY
   );
   const [apolloPushJobs, setApolloPushJobs] = useState(initialApolloPushJobs);
   const [activeApolloPushJobId, setActiveApolloPushJobId] = useState<string | null>(
-    initialApolloPushJobs.find((job) => job.status === "QUEUED" || job.status === "RUNNING")?.id ?? null
+    initialActiveApolloPushJobId ??
+      initialApolloPushJobs.find(isApolloPushJobStillActive)?.id ??
+      null
   );
   const startedApolloPushJobIdsRef = useRef<Set<string>>(new Set());
   const {
@@ -146,7 +267,10 @@ export function ContactDirectoryTableClient({
     setColumnVisibility,
     columnSizing,
     setColumnSizing
-  } = usePersistedTableState("newl-apps:lead-gen:contacts-grid");
+  } = usePersistedTableState(
+    "newl-apps:lead-gen:outreach-grid",
+    OUTREACH_DEFAULT_COLUMN_VISIBILITY
+  );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -162,7 +286,7 @@ export function ContactDirectoryTableClient({
 
   function getDraftButtonLabel(contact: ContactDirectoryRow, hasDraft: boolean) {
     if (contact.draftGenerationConfigured) {
-      return hasDraft ? "Regenerate AI Draft" : "Generate AI Draft";
+      return hasDraft || contact.outreachPlan ? "Regenerate Plan + Sequence" : "Generate Outreach Plan";
     }
 
     if (contact.draftGenerationDisabledReason === "LEAD_GEN_AI_DISABLED") {
@@ -248,9 +372,9 @@ export function ContactDirectoryTableClient({
           return (
             <div className="max-w-[220px]">
               <Link
-                href={`/lead-gen/pipeline?company=${contact.companyId}&companyName=${encodeURIComponent(contact.companyName)}`}
+                href={`/lead-gen/candidates?q=${encodeURIComponent(contact.companyName)}`}
                 className="font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
-                title={`Open ${contact.companyName} in Pipeline`}
+                title={`Open ${contact.companyName} in Found Companies`}
               >
                 {contact.companyName}
               </Link>
@@ -342,6 +466,17 @@ export function ContactDirectoryTableClient({
           return (
             <div className="max-w-[300px]">
               <StatusBadge value={contact.draftStatus} tone={draftStatusTone(contact.draftStatus)} />
+              {contact.outreachPlan ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    value={contact.outreachPlan.status}
+                    tone={outreachPlanStatusTone(contact.outreachPlan.status)}
+                  />
+                  <span className="text-xs text-mutedForeground">
+                    {contact.outreachPlan.steps.length} touches · QA {formatEnum(contact.outreachPlan.qaStatus)}
+                  </span>
+                </div>
+              ) : null}
               {contact.draft ? (
                 <div className="mt-2 rounded-md border border-border bg-background p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-mutedForeground">Subject</p>
@@ -373,7 +508,20 @@ export function ContactDirectoryTableClient({
             return <StatusBadge value="PUSH_BLOCKED" tone="danger" />;
           }
 
-          return <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />;
+          return (
+            <div className="max-w-[220px]">
+              <StatusBadge value={contact.sequenceStatus} tone={sequenceStatusTone(contact.sequenceStatus)} />
+              {contact.sequenceStatus === SequenceStatus.PAUSED && contact.apolloPauseKind === "OUT_OF_OFFICE" ? (
+                <p className="mt-2 line-clamp-3 text-xs leading-5 text-mutedForeground">
+                  Out of office
+                  {contact.apolloPauseResumeAt
+                    ? ` · resumes ${formatDateOnly(contact.apolloPauseResumeAt)}`
+                    : ""}
+                  {contact.apolloPauseReason ? ` · ${contact.apolloPauseReason}` : ""}
+                </p>
+              ) : null}
+            </div>
+          );
         }
       },
       {
@@ -469,10 +617,49 @@ export function ContactDirectoryTableClient({
                   Change Sequence
                 </button>
               </form>
+              <div className="rounded-md border border-border bg-background px-3 py-2 text-xs">
+                <div className="font-semibold text-foreground">{contact.hunterEligibility.label}</div>
+                <div className="mt-1 text-mutedForeground">
+                  {contact.hunterEligibility.serviceLine
+                    ? `${formatEnum(contact.hunterEligibility.serviceLine)} · `
+                    : ""}
+                  {contact.hunterEligibility.reason}
+                </div>
+              </div>
+              {canRecheckHunterContacts && contact.hunterEligibility.status === "ELIGIBLE" ? (
+                <form action={recheckHunterCompanyContactsAction} className="space-y-1">
+                  <input type="hidden" name="companyId" value={contact.companyId} />
+                  <label className="flex items-start gap-2 text-[11px] leading-4 text-mutedForeground">
+                    <input
+                      type="checkbox"
+                      name="authorizePaidEmailEnrichment"
+                      value="yes"
+                      className="mt-0.5"
+                    />
+                    <span>
+                      If saved contacts still have masked emails, authorize up to 3 email-only Apollo
+                      enrichments (max 1 credit each; no phone or waterfall).
+                    </span>
+                  </label>
+                  <button className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft">
+                    Re-evaluate company contacts
+                  </button>
+                  <p className="text-[11px] leading-4 text-mutedForeground">
+                    Rechecks only this company, enforces the 1-3 contact limit, and archives unselected draft plans.
+                  </p>
+                </form>
+              ) : null}
+              {contact.outreachPlan ? (
+                <OutreachPlanPanel
+                  contact={contact}
+                  approveOutreachPlanAction={approveOutreachPlanAction}
+                  generateContactDraftAction={generateContactDraftAction}
+                />
+              ) : null}
               {contact.draft ? (
                 <details className="rounded-md border border-border bg-background p-3">
                   <summary className="cursor-pointer text-xs font-semibold text-primary">View Draft</summary>
-                  {contact.requiresAiDraft ? (
+                  {contact.canGenerateOutreachPlan ? (
                     <>
                       <form action={generateContactDraftAction} className="mt-3">
                         <input type="hidden" name="contactId" value={contact.id} />
@@ -516,16 +703,15 @@ export function ContactDirectoryTableClient({
                       value={contact.draft.personalizationNotes ?? "No notes recorded"}
                     />
                     <p className="text-xs text-mutedForeground">
-                      Saving keeps the draft ready for Apollo push. The actual enrollment still happens only when you use
-                      Push to Apollo.
+                      Saving changes the first email and invalidates the previous QA result. Regenerate the plan to run
+                      the grounded QA gate again before approval or Apollo push.
                     </p>
                     <p className="text-xs text-mutedForeground">
-                      If you want a different angle, use Regenerate AI Draft and Newl Apps will write a fresh version
-                      from the shipment context.
+                      Regeneration creates a new immutable plan version from the saved Hunter and TradeMining evidence.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <button className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover">
-                        Save Draft
+                        Save edits
                       </button>
                     </div>
                   </form>
@@ -533,13 +719,21 @@ export function ContactDirectoryTableClient({
               ) : (
                 <div className="space-y-2">
                   <p className="text-xs text-mutedForeground">
-                    {contact.requiresAiDraft
-                      ? "This tier requires a Newl Apps draft before Apollo push."
-                      : contact.contactTier === ContactTier.TIER_1
-                        ? "No Newl draft available yet."
-                        : "Tier 2+ contacts use Apollo/template drafting later."}
+                    {contact.canGenerateOutreachPlan
+                      ? "Generate a grounded Newl outreach plan and complete five-touch sequence."
+                      : contact.hunterEligibility.status === "ELIGIBLE"
+                        ? "This contact must be ranked before Newl can generate an outreach plan."
+                        : `${contact.hunterEligibility.label}: ${contact.hunterEligibility.reason}`}
                   </p>
-                  {contact.requiresAiDraft ? (
+                  {!contact.canGenerateOutreachPlan ? (
+                    <Link
+                      href="/lead-gen/hunter"
+                      className="inline-flex text-xs font-semibold text-primary hover:underline"
+                    >
+                      Review in Hunter
+                    </Link>
+                  ) : null}
+                  {contact.canGenerateOutreachPlan ? (
                     <div className="space-y-2">
                       <form action={generateContactDraftAction}>
                         <input type="hidden" name="contactId" value={contact.id} />
@@ -565,7 +759,10 @@ export function ContactDirectoryTableClient({
       sequenceOptions,
       updateContactSequenceAction,
       saveContactDraftAction,
-      generateContactDraftAction
+      generateContactDraftAction,
+      approveOutreachPlanAction,
+      recheckHunterCompanyContactsAction,
+      canRecheckHunterContacts
     ]
   );
 
@@ -601,6 +798,13 @@ export function ContactDirectoryTableClient({
   const selectedContactsBlockedByAssignment = selectedContacts.filter((contact) =>
     Boolean(contact.apolloAssignmentBlockReason)
   );
+  const isAnyBulkActionPending =
+    isBulkSequencePending ||
+    isBulkApprovePending ||
+    isQaRepairPending ||
+    isBulkRemovePending ||
+    isApolloPushPending ||
+    isApolloSyncPending;
 
   useEffect(() => {
     if (bulkActionState.status === "success" && bulkActionState.completedAt) {
@@ -621,10 +825,30 @@ export function ContactDirectoryTableClient({
   }, [apolloPushState.completedAt, apolloPushState.status]);
 
   useEffect(() => {
-    if (apolloPushState.jobRunId) {
-      setActiveApolloPushJobId(apolloPushState.jobRunId);
+    if (bulkApproveState.status === "success" && bulkApproveState.completedAt) {
+      setSelectedIds([]);
     }
-  }, [apolloPushState.jobRunId]);
+  }, [bulkApproveState.completedAt, bulkApproveState.status]);
+
+  useEffect(() => {
+    const jobRunId = bulkApproveState.jobRunId ?? apolloPushState.jobRunId;
+    if (jobRunId) {
+      setActiveApolloPushJobId(jobRunId);
+      router.refresh();
+    }
+  }, [apolloPushState.jobRunId, bulkApproveState.jobRunId, router]);
+
+  useEffect(() => {
+    setApolloPushJobs((current) => {
+      const next = [
+        ...initialApolloPushJobs,
+        ...current.filter(
+          (job) => !initialApolloPushJobs.some((initial) => initial.id === job.id)
+        )
+      ];
+      return next.slice(0, 10);
+    });
+  }, [initialApolloPushJobs]);
 
   useEffect(() => {
     if (!activeApolloPushJobId) {
@@ -715,18 +939,20 @@ export function ContactDirectoryTableClient({
   return (
     <>
       <ApolloPushJobHistoryPanel jobs={apolloPushJobs} />
-      {isBulkSequencePending || isBulkRemovePending || isApolloPushPending || isApolloSyncPending ? (
+      {isAnyBulkActionPending ? (
         <div className="border-b border-border bg-primary/5 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">
                 {isBulkRemovePending
                   ? "Removing contacts"
-                  : isApolloPushPending
-                    ? "Pushing selected contacts to Apollo"
-                    : isApolloSyncPending
-                      ? "Syncing Apollo contact statuses"
-                      : "Updating contact cadence"}
+                  : isBulkApprovePending
+                    ? "Approving plans and queueing Apollo enrollment"
+                    : isApolloPushPending
+                      ? "Pushing selected contacts to Apollo"
+                      : isApolloSyncPending
+                        ? "Syncing Apollo contact statuses"
+                        : "Updating contact cadence"}
               </p>
               <p className="text-xs text-mutedForeground">
                 Working through {selectedIds.length} selected contact{selectedIds.length === 1 ? "" : "s"} now.
@@ -740,6 +966,8 @@ export function ContactDirectoryTableClient({
         </div>
       ) : null}
       {bulkActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkActionState} /> : null}
+      {bulkApproveState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={bulkApproveState} /> : null}
+      {qaRepairState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={qaRepairState} /> : null}
       {removeActionState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={removeActionState} /> : null}
       {apolloPushState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloPushState} /> : null}
       {apolloSyncState.status !== "idle" ? <ContactBulkActionSummaryBanner summary={apolloSyncState} /> : null}
@@ -794,23 +1022,34 @@ export function ContactDirectoryTableClient({
               </label>
             ) : null}
             {selectedContactsBlockedByAssignment.length > 0 ? (
-              <p className="max-w-[300px] rounded-md border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
-                Assign a sales rep to {selectedContactsBlockedByAssignment.length} selected contact
-                {selectedContactsBlockedByAssignment.length === 1 ? "" : "s"} before pushing to Apollo.
+              <p className="max-w-[300px] rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-foreground">
+                Bulk approval will assign {selectedContactsBlockedByAssignment.length} unassigned contact
+                {selectedContactsBlockedByAssignment.length === 1 ? "" : "s"} to you. A direct Apollo retry still
+                requires an assigned rep.
               </p>
             ) : null}
             <button
               type="submit"
-              disabled={
-                selectedIds.length === 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
-              }
+              disabled={selectedIds.length === 0 || isAnyBulkActionPending}
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isBulkSequencePending ? "Applying..." : "Apply selected cadence"}
+            </button>
+            <button
+              type="submit"
+              formAction={runBulkApproveAction}
+              disabled={selectedIds.length === 0 || isAnyBulkActionPending}
+              className="rounded-md bg-success px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isBulkApprovePending ? "Approving..." : "Approve selected & enroll"}
+            </button>
+            <button
+              type="submit"
+              formAction={runQaRepairAction}
+              disabled={selectedIds.length === 0 || isAnyBulkActionPending}
+              className="rounded-md border border-warning/30 bg-warning/10 px-3 py-1.5 text-xs font-semibold text-warning transition-colors hover:bg-warning/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isQaRepairPending ? "Repairing / retrying QA..." : "Repair / retry failed QA"}
             </button>
             <button
               type="submit"
@@ -818,24 +1057,18 @@ export function ContactDirectoryTableClient({
               disabled={
                 selectedIds.length === 0 ||
                 selectedContactsBlockedByAssignment.length > 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
+                isAnyBulkActionPending
               }
               className="rounded-md border border-success/30 bg-success/10 px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isApolloPushPending ? "Pushing..." : "Push to Apollo"}
+              {isApolloPushPending ? "Pushing..." : "Retry approved in Apollo"}
             </button>
             <button
               type="submit"
               formAction={runApolloSyncAction}
               disabled={
                 selectedIds.length === 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
+                isAnyBulkActionPending
               }
               className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -846,10 +1079,7 @@ export function ContactDirectoryTableClient({
               formAction={runBulkRemoveAction}
               disabled={
                 selectedIds.length === 0 ||
-                isBulkSequencePending ||
-                isBulkRemovePending ||
-                isApolloPushPending ||
-                isApolloSyncPending
+                isAnyBulkActionPending
               }
               onClick={(event) => {
                 if (
@@ -868,9 +1098,12 @@ export function ContactDirectoryTableClient({
         </div>
 
         <div className="border-b border-border bg-card px-4 py-2 text-xs text-mutedForeground">
-          Contacts already enrolled, paused, replied, bounced, or finished can still be assigned a new selected cadence, but
-          the user must explicitly confirm that override first. Live Apollo push still blocks contacts that already show
-          Apollo sequence history, so re-enrollment stays deliberate.
+          Use <strong>Approve selected &amp; enroll</strong> for new QA-passed Hunter plans. It records your approval
+          and queues one guarded Apollo enrollment job for all eligible selections.{" "}
+          <strong>Retry approved in Apollo</strong> is only for contacts that were already approved but need another
+          enrollment attempt.
+          Contacts with prior cadence history can move into the selected Hunter cadence after explicit approval;
+          replies, bounces, rejected contacts, do-not-contact records, and contacts without usable email remain blocked.
         </div>
       </form>
       <div className="overflow-x-auto">
@@ -932,6 +1165,186 @@ export function ContactDirectoryTableClient({
   );
 }
 
+function OutreachPlanPanel({
+  contact,
+  approveOutreachPlanAction,
+  generateContactDraftAction
+}: {
+  contact: ContactDirectoryRow;
+  approveOutreachPlanAction: (formData: FormData) => Promise<void>;
+  generateContactDraftAction: (formData: FormData) => Promise<void>;
+}) {
+  const plan = contact.outreachPlan;
+  if (!plan) return null;
+
+  const canApprove =
+    plan.status === OutreachPlanStatus.QA_PASSED &&
+    plan.qaStatus === OutreachQaStatus.PASSED &&
+    contact.contactStatus !== ContactStatus.REJECTED &&
+    contact.contactStatus !== ContactStatus.DO_NOT_CONTACT;
+
+  return (
+    <details className="rounded-md border border-accentBorder bg-accentSoft/40 p-3">
+      <summary className="cursor-pointer text-xs font-semibold text-primary">
+        Outreach Plan v{plan.version} · {formatEnum(plan.serviceLine)}
+      </summary>
+
+      <div className="mt-3 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <StatusBadge value={plan.status} tone={outreachPlanStatusTone(plan.status)} />
+          <StatusBadge
+            value={`QA_${plan.qaStatus}`}
+            tone={plan.qaStatus === OutreachQaStatus.PASSED ? "success" : "danger"}
+          />
+          <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground">
+            {plan.confidence}% confidence
+          </span>
+        </div>
+
+        <div className="grid gap-2">
+          <DraftMeta label="Opportunity" value={plan.opportunityType} />
+          <DraftMeta label="Objective" value={plan.objective} />
+          <DraftMeta label="Trigger" value={plan.triggerSummary} />
+          <DraftMeta label="Buyer hypothesis" value={plan.buyerHypothesis} />
+          <DraftMeta label="Value proposition" value={plan.valueProposition} />
+          <DraftMeta label="Likely objection" value={plan.likelyObjection} />
+          <DraftMeta label="Call to action" value={plan.callToAction} />
+          <DraftMeta label="Recommended sender" value={plan.senderRecommendation ?? "No sender recommendation"} />
+        </div>
+
+        {plan.qaIssues.length > 0 ? (
+          <div className="rounded-md border border-danger/20 bg-danger/5 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-danger">QA findings</p>
+            <p className="mt-1 text-xs font-semibold text-foreground">
+              {plan.qaRepairDisposition === "AUTOMATIC"
+                ? "Automatically repairable without another model call."
+                : plan.qaRepairDisposition === "MODEL_QA_RETRY"
+                  ? "QA was temporarily unavailable. Retry the saved sequence without regenerating it."
+                : plan.qaRepairDisposition === "MODEL_REGENERATION"
+                  ? "Requires model regeneration because the remaining issue is semantic."
+                  : "Requires human evidence, sender, or configuration review."}
+            </p>
+            <ul className="mt-2 space-y-1 text-xs leading-5 text-foreground">
+              {plan.qaIssues.map((issue, index) => (
+                <li key={`${issue.code}-${issue.stepNumber ?? "plan"}-${index}`}>
+                  {issue.stepNumber ? `Step ${issue.stepNumber}: ` : ""}
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="rounded-md border border-success/20 bg-success/5 px-3 py-2 text-xs text-success">
+            Deterministic and model grounding checks passed with no recorded issues.
+          </p>
+        )}
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Complete sequence</p>
+          {plan.steps.map((step) => (
+            <details
+              key={step.id}
+              open={step.channel === "EMAIL"}
+              className="rounded-md border border-border bg-card p-3"
+            >
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">
+                Step {step.stepNumber} · Day {step.delayDays} · {formatEnum(step.channel)}
+              </summary>
+              <div className="mt-2 space-y-2 text-xs">
+                <DraftMeta label="Angle" value={step.angle} />
+                {step.subject ? <DraftMeta label="Subject" value={step.subject} /> : null}
+                <p className="whitespace-pre-wrap leading-5 text-foreground">{step.body}</p>
+                <p className="text-mutedForeground">Evidence: {step.evidenceRefs.join(", ")}</p>
+              </div>
+            </details>
+          ))}
+        </div>
+
+        <details className="rounded-md border border-border bg-card p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-foreground">
+            Evidence ledger ({plan.evidence.length})
+          </summary>
+          <div className="mt-2 space-y-2">
+            {plan.evidence.map((record) => (
+              <div key={record.id} className="rounded-md border border-border/70 p-2 text-xs">
+                <p className="font-semibold text-foreground">{record.title}</p>
+                <p className="mt-1 leading-5 text-mutedForeground">{record.summary}</p>
+                <p className="mt-1 font-mono text-[10px] text-mutedForeground">{record.id}</p>
+                {record.sourceUrl ? (
+                  <a
+                    href={record.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-block font-semibold text-primary hover:underline"
+                  >
+                    Open source
+                  </a>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <p className="text-[11px] leading-5 text-mutedForeground">
+          Strategy {plan.models.strategy} · Drafting {plan.models.drafting} · QA {plan.models.qa ?? "not recorded"} ·{" "}
+          {plan.promptVersion}
+        </p>
+
+        <form action={generateContactDraftAction} className="space-y-2 rounded-md border border-border bg-card p-3">
+          <input type="hidden" name="contactId" value={contact.id} />
+          <label className="block text-xs font-semibold text-foreground" htmlFor={`outreach-feedback-${contact.id}`}>
+            Feedback for regeneration
+          </label>
+          <textarea
+            id={`outreach-feedback-${contact.id}`}
+            name="reviewerFeedback"
+            maxLength={2000}
+            rows={3}
+            placeholder="Example: Make the opening more direct, emphasize Charlotte warehousing, and shorten every email."
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+          />
+          <button
+            disabled={
+              !contact.draftGenerationConfigured ||
+              Boolean(plan.regenerationBlockReason)
+            }
+            className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accentSoft disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Regenerate emails with feedback
+          </button>
+          <p className="text-[11px] leading-4 text-mutedForeground">
+            {plan.regenerationBlockReason ??
+              "Feedback can change tone and emphasis before approval, including after a finished historical cadence. Evidence and grounded QA gates still apply."}
+          </p>
+        </form>
+
+        {plan.status === OutreachPlanStatus.APPROVED ? (
+          <p className="rounded-md border border-success/20 bg-success/5 px-3 py-2 text-xs font-semibold text-success">
+            Approved. Apollo enrollment was queued automatically and remains visible in the job status above.
+          </p>
+        ) : (
+          <form action={approveOutreachPlanAction}>
+            <input type="hidden" name="planId" value={plan.id} />
+            <button
+              disabled={!canApprove}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primaryForeground transition-colors hover:bg-primaryHover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Approve and enroll in Apollo
+            </button>
+            {!canApprove ? (
+              <p className="mt-2 text-xs text-mutedForeground">
+                {plan.qaStatus !== OutreachQaStatus.PASSED
+                  ? "Regenerate the plan until the grounded QA gate passes."
+                  : "This plan is not currently eligible for approval."}
+              </p>
+            ) : null}
+          </form>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function StatusBadge({ value, tone }: { value: string; tone: "neutral" | "success" | "warning" | "danger" }) {
   const className =
     tone === "success"
@@ -951,19 +1364,21 @@ function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
   }
 
   return (
-    <div className="border-b border-border bg-muted/40 px-4 py-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-foreground">Apollo push jobs</p>
-          <p className="text-xs text-mutedForeground">
-            Track recent bulk pushes, current progress, and any contacts Apollo skipped or rejected.
-          </p>
+    <details className="border-b border-border bg-muted/40">
+      <summary className="cursor-pointer list-none px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Apollo enrollment history</p>
+            <p className="text-xs text-mutedForeground">
+              Expand only when you need job progress, skipped-contact reasons, or an enrollment audit.
+            </p>
+          </div>
+          <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
+            {jobs.length} recent job{jobs.length === 1 ? "" : "s"}
+          </span>
         </div>
-        <span className="rounded-full border border-accentBorder bg-card px-2.5 py-1 text-xs font-semibold text-primary">
-          {jobs.length} recent job{jobs.length === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="mt-3 space-y-3">
+      </summary>
+      <div className="space-y-3 px-4 pb-4">
         {jobs.map((job) => {
           const progressPercent =
             job.selectedContacts > 0 ? Math.round((job.processedContacts / job.selectedContacts) * 100) : 0;
@@ -976,16 +1391,20 @@ function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-foreground">Apollo bulk push</p>
-                      <StatusBadge value={job.status} tone={apolloJobTone(job.status)} />
+                      <StatusBadge
+                        value={job.pendingContacts > 0 ? "PENDING_CONFIRMATION" : job.status}
+                        tone={job.pendingContacts > 0 ? "warning" : apolloJobTone(job.status)}
+                      />
                     </div>
                     <p className="mt-1 text-xs text-mutedForeground">
                       Started {formatDateTime(job.startedAt)}
                       {job.finishedAt ? ` • Finished ${formatDateTime(job.finishedAt)}` : ""}
                     </p>
                   </div>
-                  <div className="grid min-w-[340px] gap-2 text-right sm:grid-cols-4 sm:text-left">
+                  <div className="grid min-w-[420px] gap-2 text-right sm:grid-cols-5 sm:text-left">
                     <ContactBulkMetric label="Selected" value={job.selectedContacts} />
                     <ContactBulkMetric label="Enrolled" value={job.enrolledContacts} />
+                    <ContactBulkMetric label="Pending" value={job.pendingContacts} />
                     <ContactBulkMetric label="Skipped" value={job.skippedContacts} />
                     <ContactBulkMetric label="Failed" value={job.failedContacts} />
                   </div>
@@ -1023,7 +1442,7 @@ function ApolloPushJobHistoryPanel({ jobs }: { jobs: ApolloPushJobSummary[] }) {
           );
         })}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -1033,6 +1452,10 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
   const title = isError
     ? summary.operation === "remove"
       ? "Contact removal failed"
+      : summary.operation === "approve"
+        ? "Bulk approval failed"
+      : summary.operation === "qa_repair"
+        ? "QA repair failed"
       : summary.operation === "apollo_push"
         ? "Apollo push failed"
         : summary.operation === "apollo_sync"
@@ -1040,6 +1463,10 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
           : "Cadence update failed"
     : summary.operation === "remove"
       ? "Contact removal summary"
+      : summary.operation === "approve"
+        ? "Bulk approval and enrollment summary"
+      : summary.operation === "qa_repair"
+        ? "QA repair summary"
       : summary.operation === "apollo_push"
         ? "Apollo push summary"
         : summary.operation === "apollo_sync"
@@ -1055,7 +1482,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
         </div>
         {summary.completedAt ? <span className="text-xs text-mutedForeground">{formatDateTime(summary.completedAt)}</span> : null}
       </div>
-      {summary.operation === "apollo_push" && apolloBlockerSummary.length > 0 ? (
+      {(summary.operation === "apollo_push" || summary.operation === "approve") &&
+      apolloBlockerSummary.length > 0 ? (
         <div className="mt-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-foreground">Apollo blockers</p>
           <div className="mt-2 space-y-2">
@@ -1080,6 +1508,20 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
                 <ContactBulkMetric label="Removed drafts" value={summary.removedDrafts} />
                 <ContactBulkMetric label="Apollo deletions" value={summary.pushedToApollo ? 1 : 0} />
               </>
+            ) : summary.operation === "approve" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Approved" value={summary.approvedContacts} />
+                <ContactBulkMetric label="Skipped" value={summary.skippedContacts} />
+                <ContactBulkMetric label="Companies" value={summary.companiesTouched} />
+              </>
+            ) : summary.operation === "qa_repair" ? (
+              <>
+                <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
+                <ContactBulkMetric label="Repaired / regenerated" value={summary.updatedContacts} />
+                <ContactBulkMetric label="Needs human review" value={summary.skippedContacts} />
+                <ContactBulkMetric label="Failed" value={summary.failedContacts} />
+              </>
             ) : summary.operation === "apollo_push" ? (
               <>
                 <ContactBulkMetric label="Selected" value={summary.selectedContacts} />
@@ -1103,7 +1545,8 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
               </>
             )}
           </div>
-          {summary.operation === "apollo_push" && summary.details.length > 0 ? (
+          {(summary.operation === "apollo_push" || summary.operation === "approve") &&
+          summary.details.length > 0 ? (
             <ApolloPushDetails details={summary.details} />
           ) : null}
         </>
@@ -1112,8 +1555,17 @@ function ContactBulkActionSummaryBanner({ summary }: { summary: ContactBulkActio
   );
 }
 
-function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) {
-  const skippedOrFailed = details.filter((detail) => detail.outcome !== "enrolled");
+function ApolloPushDetails({
+  details
+}: {
+  details: Array<ApolloPushJobDetailItem | ContactBulkActionDetail>;
+}) {
+  const skippedOrFailed = details.filter(
+    (detail) =>
+      detail.outcome === "pending" ||
+      detail.outcome === "skipped" ||
+      detail.outcome === "failed"
+  );
 
   if (skippedOrFailed.length === 0) {
     return null;
@@ -1136,7 +1588,11 @@ function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) 
                     : "border-warning/30 bg-warning/10 text-warning"
                 }`}
               >
-                {detail.outcome === "failed" ? "Failed" : "Skipped"}
+                {detail.outcome === "failed"
+                  ? "Failed"
+                  : detail.outcome === "pending"
+                    ? "Pending"
+                    : "Skipped"}
               </span>
             </div>
             <p className="mt-1 text-xs text-mutedForeground">{detail.reason ?? "No reason returned."}</p>
@@ -1148,14 +1604,17 @@ function ApolloPushDetails({ details }: { details: ContactBulkActionDetail[] }) 
 }
 
 function summarizeApolloBlockers(summary: ContactBulkActionSummary) {
-  if (summary.operation !== "apollo_push" || summary.details.length === 0) {
+  if (
+    (summary.operation !== "apollo_push" && summary.operation !== "approve") ||
+    summary.details.length === 0
+  ) {
     return [];
   }
 
   const reasonCounts = new Map<string, number>();
 
   for (const detail of summary.details) {
-    if (detail.outcome === "enrolled") {
+    if (detail.outcome === "enrolled" || detail.outcome === "approved") {
       continue;
     }
 
@@ -1169,7 +1628,7 @@ function summarizeApolloBlockers(summary: ContactBulkActionSummary) {
     .slice(0, 3);
 }
 
-function summarizeApolloJobBlockers(details: ContactBulkActionDetail[]) {
+function summarizeApolloJobBlockers(details: ApolloPushJobDetailItem[]) {
   const reasonCounts = new Map<string, number>();
 
   for (const detail of details) {
@@ -1192,12 +1651,7 @@ function isApolloPushJobStillActive(job: ApolloPushJobSummary) {
     return true;
   }
 
-  return job.details.some(
-    (detail) =>
-      detail.outcome === "skipped" &&
-      detail.reason ===
-        "Apollo accepted the push, but the cadence enrollment is still propagating in Apollo and was not visible during Newl Apps verification."
-  );
+  return job.pendingContacts > 0;
 }
 
 function apolloJobTone(status: ApolloPushJobSummary["status"]) {
@@ -1266,6 +1720,17 @@ function formatDateTime(value: string) {
   }).format(date);
 }
 
+function formatDateOnly(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric"
+  }).format(date);
+}
+
 function contactStatusTone(status: ContactStatus) {
   if (status === ContactStatus.APPROVED) return "success";
   if (status === ContactStatus.REVIEWING) return "warning";
@@ -1301,6 +1766,13 @@ function requiresSequenceOverrideConfirmation(sequenceStatus: SequenceStatus) {
 function draftStatusTone(status: string) {
   if (status === ContactOutreachDraftStatus.APPROVED || status === ContactOutreachDraftStatus.EDITED) return "success";
   if (status === ContactOutreachDraftStatus.AVAILABLE || status === ContactOutreachDraftStatus.DRAFT) return "warning";
+  return "neutral";
+}
+
+function outreachPlanStatusTone(status: OutreachPlanStatus) {
+  if (status === OutreachPlanStatus.APPROVED || status === OutreachPlanStatus.QA_PASSED) return "success";
+  if (status === OutreachPlanStatus.QA_FAILED) return "danger";
+  if (status === OutreachPlanStatus.DRAFT) return "warning";
   return "neutral";
 }
 

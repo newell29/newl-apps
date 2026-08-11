@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const upsertTradeMiningScoringConfig = vi.fn();
+const updateTradeMiningScoringConfig = vi.fn();
 const findIntegrationCredential = vi.fn();
 const createIntegrationCredential = vi.fn();
 const updateIntegrationCredential = vi.fn();
@@ -28,7 +29,8 @@ vi.mock("@/server/db", () => ({
       update: (...args: unknown[]) => updateTradeMiningSearchProfile(...args)
     },
     tradeMiningScoringConfig: {
-      upsert: (...args: unknown[]) => upsertTradeMiningScoringConfig(...args)
+      upsert: (...args: unknown[]) => upsertTradeMiningScoringConfig(...args),
+      update: (...args: unknown[]) => updateTradeMiningScoringConfig(...args)
     }
   }
 }));
@@ -56,6 +58,7 @@ import {
   saveMicrosoftGraphSettingsAction,
   saveApolloRepMappingAction,
   saveApolloSequenceMappingAction,
+  saveLeadGenAiRuntimeSettingsAction,
   saveSearchProfileApolloSequenceMappingAction,
   saveTradeMiningScoringSettingsAction,
   syncApolloRepMappingAction,
@@ -129,6 +132,7 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       tenantName: "Newl Group"
     });
     upsertTradeMiningScoringConfig.mockResolvedValue({});
+    updateTradeMiningScoringConfig.mockResolvedValue({});
     findIntegrationCredential.mockResolvedValue(null);
     createIntegrationCredential.mockResolvedValue({});
     updateIntegrationCredential.mockResolvedValue({});
@@ -239,6 +243,28 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
   });
 
+  it("saves lead-generation AI runtime settings without rewriting scoring weights", async () => {
+    const formData = new FormData();
+    formData.set("aiClassificationEnabled", "true");
+    formData.set("aiModel", "gpt-5.4-mini");
+
+    await saveLeadGenAiRuntimeSettingsAction(formData);
+
+    expect(updateTradeMiningScoringConfig).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-1"
+      },
+      data: {
+        aiClassificationEnabled: true,
+        aiModel: "gpt-5.4-mini"
+      }
+    });
+    expect(upsertTradeMiningScoringConfig).not.toHaveBeenCalled();
+    expect(revalidatePath).toHaveBeenCalledWith("/settings");
+    expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/outreach");
+    expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/contacts");
+  });
+
   it("rejects incomplete or inverted mid-market TEU ranges", async () => {
     const missingMaximum = buildValidScoringFormData();
     missingMaximum.delete("midMarketTeuMax");
@@ -261,12 +287,16 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     formData.append("apolloRepActiveIndex", "0");
     formData.append("apolloRepSequenceOwnerName", "Zalan Riaz");
     formData.append("apolloRepUserId", "apollo-user-1");
+    formData.append("apolloRepSenderLabel", "Zalan");
     formData.append("apolloRepSendFromEmail", "zalan@newlgroup.com");
     formData.append("apolloRepSendFromEmailAccountId", "email-account-1");
+    formData.append("apolloRepRoutingWeight", "100");
     formData.append("apolloRepSequenceOwnerName", "");
     formData.append("apolloRepUserId", "");
+    formData.append("apolloRepSenderLabel", "");
     formData.append("apolloRepSendFromEmail", "");
     formData.append("apolloRepSendFromEmailAccountId", "");
+    formData.append("apolloRepRoutingWeight", "0");
 
     await saveApolloRepMappingAction(formData);
 
@@ -278,10 +308,12 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       {
         id: "apollo-rep-1",
         sequence_owner_name: "Zalan Riaz",
+        sender_label: "Zalan",
         active: true,
         apollo_user_id: "apollo-user-1",
         send_from_email: "zalan@newlgroup.com",
-        send_from_email_account_id: "email-account-1"
+        send_from_email_account_id: "email-account-1",
+        routing_weight: 100
       }
     ]);
     expect(revalidatePath).toHaveBeenCalledWith("/lead-gen/pipeline");
@@ -441,19 +473,75 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       {
         id: "apollo-rep-1",
         sequence_owner_name: "Zalan Riaz",
+        sender_label: "zalan@newlgroup.com",
         active: false,
         apollo_user_id: "apollo-user-1",
         send_from_email: "zalan@newlgroup.com",
-        send_from_email_account_id: "email-account-1"
+        send_from_email_account_id: "email-account-1",
+        routing_weight: 100
       },
       {
         id: "apollo-rep-apollo-user-2",
         sequence_owner_name: "Alex Newell",
+        sender_label: "Alex Newell",
         active: true,
         apollo_user_id: "apollo-user-2",
         send_from_email: "alex@apollo.test",
-        send_from_email_account_id: null
+        send_from_email_account_id: null,
+        routing_weight: 100
       }
+    ]);
+  });
+
+  it("syncs multiple Apollo mailboxes under one owner without activating new secondary senders", async () => {
+    fetchApolloRepDirectory.mockResolvedValue([
+      {
+        apolloUserId: "apollo-user-alex",
+        sequenceOwnerName: "Alex Newell",
+        email: "alex@newlgroup.com"
+      }
+    ]);
+    fetchApolloEmailAccountDirectory.mockResolvedValue([
+      {
+        id: "mailbox-alex",
+        userId: "apollo-user-alex",
+        email: "alex@newlgroup.com",
+        active: true,
+        isDefault: true,
+        revokedAt: null,
+        inactiveReason: null
+      },
+      {
+        id: "mailbox-faisal",
+        userId: "apollo-user-alex",
+        email: "faisal@newlgroup.com",
+        active: true,
+        isDefault: false,
+        revokedAt: null,
+        inactiveReason: null
+      }
+    ]);
+
+    await syncApolloRepMappingAction();
+
+    const args = createIntegrationCredential.mock.calls[0][0];
+    expect(args.data.publicConfig.apolloUserMapping).toEqual([
+      expect.objectContaining({
+        sequence_owner_name: "Alex Newell",
+        sender_label: "alex@newlgroup.com",
+        apollo_user_id: "apollo-user-alex",
+        send_from_email_account_id: "mailbox-alex",
+        routing_weight: 100,
+        active: true
+      }),
+      expect.objectContaining({
+        sequence_owner_name: "Alex Newell",
+        sender_label: "faisal@newlgroup.com",
+        apollo_user_id: "apollo-user-alex",
+        send_from_email_account_id: "mailbox-faisal",
+        routing_weight: 0,
+        active: false
+      })
     ]);
   });
 
@@ -663,18 +751,22 @@ describe("saveTradeMiningScoringSettingsAction", () => {
       {
         id: "apollo-rep-legacy",
         sequence_owner_name: "Alex Newell",
+        sender_label: "alex@newlgroup.com",
         active: true,
         apollo_user_id: "apollo-user-new",
         send_from_email: "alex@newlgroup.com",
-        send_from_email_account_id: "email-account-legacy"
+        send_from_email_account_id: "email-account-legacy",
+        routing_weight: 100
       },
       {
         id: "apollo-rep-apollo-user-existing-renamed",
         sequence_owner_name: "Jamie Smith",
+        sender_label: "Jamie Smith",
         active: true,
         apollo_user_id: "apollo-user-existing-renamed",
         send_from_email: "jamie@apollo.test",
-        send_from_email_account_id: null
+        send_from_email_account_id: null,
+        routing_weight: 100
       }
     ]);
   });

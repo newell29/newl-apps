@@ -86,7 +86,7 @@ Requires explicit approval to create the live schedule and send the first Teams 
 
 Enable this only after the supervised PDF test passes. Schedule it for 10:00 AM in `America/Toronto` and target Alex's existing direct Teams conversation as `user:<aad-object-id>`. Run it under the dedicated Rivet developer agent through the Codex harness. The scheduled run may call only `newl_development_suggestion_digest`; it summarizes approval-gated team suggestions and captured failed/unanswered Nemo queries. Its response must say that approval is required and no development was started.
 
-Do not give the scheduled digest task Codex, GitHub write, deployment, Teamship write, printing, or arbitrary browser permissions. The separate Rivet worker in `rivet-development-worker.md` may claim work only after the administrator selects **Approve & start Rivet**. That approval permits an isolated Codex branch and draft PR only; merge, deployment, migration execution, Teamship writes, printing, shipping, permission changes, and customer communication remain prohibited.
+Do not give the scheduled digest task Codex, GitHub write, deployment, Teamship write, printing, or arbitrary browser permissions. The separate Rivet worker in `rivet-development-worker.md` may claim work only after the administrator selects **Approve & queue Rivet**. Approved work may wait behind an earlier Garland job. That approval permits an isolated Codex branch and draft PR only; merge, deployment, migration execution, Teamship writes, printing, shipping, permission changes, and customer communication remain prohibited.
 
 ## Rollback
 

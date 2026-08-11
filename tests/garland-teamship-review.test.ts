@@ -5,6 +5,7 @@ import {
   parseGarlandShippingOrderPages,
   parseTeamshipAlertDigest
 } from "@/modules/shipment-documents/teamship-review";
+import { buildTeamshipPhase2DryRunPlan } from "@/modules/shipment-documents/teamship-phase2-dry-run";
 import { buildTeamshipPayloadInspection } from "@/modules/shipment-documents/teamship-payload-inspector";
 import type { GarlandPdfShippingOrder, TeamshipShippingOrderDetail } from "@/modules/shipment-documents/teamship-review-types";
 import {
@@ -172,6 +173,40 @@ X16 TOP PANINI GRILL PLATE
     });
   });
 
+  it("extracts ship-to city and postal code when PDF text omits the city comma", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+10018968 PS210497 7/24/2026
+Pre-Shipper
+GARLAND CUSTOMER
+123 TEST STREET
+QUEBEFC QC G1P 2H3
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812997 Ship To PO 12345 Frt Terms PPDG
+Order Date 7/24/2026 Ship Via SPEEDY
+Ln Item Number T Site
+Location
+Lot/Serial
+Ref Ship Qty Qty Open UM Due
+ Shipped
+1 TEST-SKU 891210
+TEST PRODUCT
+1.00 EA 7/24/2026`
+      }
+    ]);
+
+    expect(orders[0]).toMatchObject({
+      psNumber: "PS210497",
+      shipToAddress1: "123 TEST STREET",
+      shipToCity: "QUEBEFC",
+      shipToState: "QC",
+      shipToPostalCode: "G1P 2H3"
+    });
+  });
+
   it("extracts alphanumeric lot/serial values without treating site locations as serials", () => {
     const orders = parseGarlandShippingOrderPages([
       {
@@ -262,6 +297,199 @@ NEWLS
     });
     expect(orders[0]?.items[0]?.serialNumbers).not.toContain("891210");
     expect(orders[0]?.items[0]?.serialNumbers).not.toContain("NEWLS");
+  });
+
+  it("extracts multiple Garland Lot/Serial references placed on one PDF text line", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+11906259 PS210506 7/24/2026
+Pre-Shipper
+GARLAND CUSTOMER
+TORONTO, ON M6N 4C4
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR813506 Ship To PO 98806 Frt Terms PPADD-CD
+Order Date 7/24/2026 Ship Via SPEEDY
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 GTBG36-AR36-5001 891210
+DESCRIPTION
+1.00 EA 7/24/2026
+2606891101389 2606891101823`
+      }
+    ]);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "GTBG36-AR36-5001",
+      quantity: 1,
+      serialNumbers: ["2606891101389", "2606891101823"]
+    });
+  });
+
+  it("keeps Lot/Serial rows that continue an item from the previous PDF page", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS123456 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812345 Ship To PO TEST-PO Frt Terms PPADD-CD
+Order Date 12/31/2099 Ship Via TEST CARRIER
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 TEST-OVEN-5001 999999
+SYNTHETIC OVEN DESCRIPTION
+1.00 EA 12/31/2099`
+      },
+      {
+        pageNumber: 2,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS123456 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Sales Order SR812345 Order Date 12/31/2099 Ship To PO TEST-PO
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+NEWLS 9900000000001 1.00 ( )
+2 TEST-FRYER-5002 999999
+SYNTHETIC FRYER DESCRIPTION
+1.00 EA 12/31/2099
+NEWLS 9900000000002 1.00 ( )`
+      }
+    ]);
+    const review = buildGarlandTeamshipReview(
+      orders,
+      [
+        {
+          ...sampleTeamshipOrder(
+            "SR812345",
+            "PS123456",
+            "TEST CARRIER",
+            "SYNTHETIC GARLAND CUSTOMER",
+            "TEST-PO",
+            "PPADD-CD",
+            [
+              "SKU: TEST-OVEN-5001 QTY: 1",
+              "SKU: TEST-FRYER-5002, SN: 9900000000002"
+            ]
+          ),
+          id: 312345
+        }
+      ]
+    );
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]?.pageNumbers).toEqual([1, 2]);
+    expect(orders[0]?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sku: "TEST-OVEN-5001",
+          serialNumbers: ["9900000000001"]
+        }),
+        expect.objectContaining({
+          sku: "TEST-FRYER-5002",
+          serialNumbers: ["9900000000002"]
+        })
+      ])
+    );
+    expect(review.reviews[0]?.fields.find((field) => field.key === "serialNumbers")).toMatchObject({
+      status: "DISCREPANCY",
+      pdfValue: "9900000000001, 9900000000002",
+      teamshipValue: "9900000000002"
+    });
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: TEST-OVEN-5001, SN: 9900000000001"
+    });
+  });
+
+  it("keeps serialized Garland item evidence in the review and planned commodity", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS999916 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR999916 Ship To PO TEST-PO Frt Terms PPADD-CD
+Order Date 12/31/2099 Ship Via TEST CARRIER
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 TESTITEM-A 999999
+DESCRIPTION
+1.00 EA 12/31/2099
+NEWLS 9900000000001 1.00 (              )`
+      }
+    ]);
+    const review = buildGarlandTeamshipReview(
+      orders,
+      [
+        {
+          ...sampleTeamshipOrder(
+            "SR999916",
+            "PS999916",
+            "TEST CARRIER",
+            "SYNTHETIC GARLAND CUSTOMER",
+            "TEST-PO",
+            "PPADD-CD",
+            ["SKU: TESTITEM-A QTY: 1"]
+          ),
+          id: 39916
+        }
+      ]
+    );
+    const plan = buildTeamshipPhase2DryRunPlan(review);
+
+    expect(orders[0]?.items[0]).toMatchObject({
+      sku: "TESTITEM-A",
+      quantity: 1,
+      serialNumbers: ["9900000000001"]
+    });
+    expect(review.reviews[0]?.fields.find((field) => field.key === "serialNumbers")).toMatchObject({
+      status: "DISCREPANCY",
+      pdfValue: "9900000000001",
+      teamshipValue: "No serials found in fetched Teamship detail"
+    });
+    expect(plan.orders[0]?.plannedPalletRows[0]).toMatchObject({
+      commodity: "SKU: TESTITEM-A, SN: 9900000000001",
+      teamshipFields: expect.objectContaining({
+        pallet_1_commodity: "SKU: TESTITEM-A, SN: 9900000000001"
+      })
+    });
   });
 
   it("keeps approved eight-digit Garland Lot/Serial references out of the quantity fallback", () => {
@@ -381,6 +609,125 @@ C-CLEAN STRONG CLEANING STRENGTH
     );
     expect(orders[0]?.instructions).not.toContain("Lot/Serial");
     expect(orders[0]?.instructions).not.toContain("Ship Qty");
+  });
+
+  it("keeps split CHEMTREC and quantity continuations inside the item-header cluster", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+99999999 PS123456 12/31/2099
+Pre-Shipper
+SYNTHETIC GARLAND CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR812345 Ship To PO TEST-PO Frt Terms PPADD-CD
+Order Date 12/31/2099 Ship Via TEST CARRIER
+RECEIVING BY APPOINTMENT
+DANGEROUS GOODS - SYNTHETIC CLEANER PROPER NAME: TEST MATERIAL, CLASS 8
+24 HOUR DG NUMBER:
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+CHEMTREC - 1-800-000-0000
+QUANTITY: 2
+1 TEST-CLEANER-5001 999999
+SYNTHETIC CLEANER DESCRIPTION
+2.00 EA 12/31/2099`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe(
+      [
+        "RECEIVING BY APPOINTMENT",
+        "DANGEROUS GOODS - SYNTHETIC CLEANER PROPER NAME: TEST MATERIAL, CLASS 8",
+        "24 HOUR DG NUMBER:",
+        "CHEMTREC - 1-800-000-0000",
+        "QUANTITY: 2"
+      ].join("\n")
+    );
+    expect(orders[0]?.instructions).not.toContain("Lot/Serial");
+    expect(orders[0]?.instructions).not.toContain("TEST-CLEANER-5001");
+    expect(orders[0]?.instructions).not.toContain("SYNTHETIC CLEANER DESCRIPTION");
+  });
+
+  it("does not treat continuation-page item configuration as Special Instructions", () => {
+    const orders = parseGarlandShippingOrderPages([
+      {
+        pageNumber: 1,
+        text: `Ship-To Pre-Shipper Print Date
+15023 PS219914 7/27/2026
+Pre-Shipper
+TEST CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Order Number SR819914 Ship To PO TEST-PO Frt Terms PU
+Order Date 6/26/2026 Ship Via P/U
+FOR PICKUP PLEASE CONTACT:
+1. TEST CONTACT - 555-0100
+2. TEST RECEIVING - 555-0101
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+1 TEST-RANGE-5003 891210
+TEST RANGE
+Top Section 1 Two Open Burners`
+      },
+      {
+        pageNumber: 2,
+        text: `Ship-To Pre-Shipper Print Date
+15023 PS219914 7/27/2026
+Pre-Shipper
+TEST CUSTOMER
+100 TEST STREET
+TEST CITY, ON A1A 1A1
+Canada
+P I C K L I S T/P R E - S H I P P E R
+Sales Order SR819914 Order Date 6/26/2026 Ship To PO TEST-PO
+Ln Item Number T
+Site
+Location
+Lot/Serial
+Ref
+Ship Qty Qty Open UM Due
+Shipped
+Top Section 2 Two Open Burners
+Dial Type Fahrenheit
+WallClear Combust CLEAR
+Open Top Input = 33000, Injector = 36
+---------------------------End of Comments------------------------
+ITEM: 24
+1.00 EA 7/27/2026
+NEWLS 2600000000001 1.00 ( )
+3 TEST-FRYER-0053 891210
+TEST FRYER
+2.00 EA 7/27/2026`
+      }
+    ]);
+
+    expect(orders[0]?.instructions).toBe(
+      [
+        "FOR PICKUP PLEASE CONTACT:",
+        "1. TEST CONTACT - 555-0100",
+        "2. TEST RECEIVING - 555-0101"
+      ].join("\n")
+    );
+    expect(orders[0]?.instructions).not.toContain("Top Section");
+    expect(orders[0]?.instructions).not.toContain("End of Comments");
+    expect(orders[0]?.instructions).not.toContain("ITEM: 24");
+    expect(orders[0]?.instructions).not.toContain("2600000000001");
   });
 
   it("parses Teamship alert digest orders and item details", () => {
@@ -1061,6 +1408,35 @@ NEWLS 2604816191908 1.00 ( )`
     );
   });
 
+  it("uses the approved Frymaster dimensions and weight for UHCTHD6T00004", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS123456",
+      srNumber: "SR812345",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "DIMENSION TEST CUSTOMER",
+      shipToPo: "PO-DIMENSION-TEST",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["UHCTHD6T00004"],
+      serialNumbers: []
+    });
+
+    const review = buildGarlandTeamshipReview([pdfOrder], []);
+
+    expect(review.reviews[0]?.productDimensions).toEqual([
+      expect.objectContaining({
+        sku: "UHCTHD6T00004",
+        source: "GARLAND_REFERENCE",
+        productType: "Frymaster",
+        lengthIn: 33,
+        widthIn: 58,
+        heightIn: 36,
+        weightLb: 396,
+        confidence: "HIGH"
+      })
+    ]);
+  });
+
   it("adds learned Teamship dimension recommendations ahead of Garland reference rows", () => {
     const pdfOrder = samplePdfOrder({
       psNumber: "PS210502",
@@ -1102,6 +1478,59 @@ NEWLS 2604816191908 1.00 ( )`
       heightIn: 18,
       weightLb: 90
     });
+  });
+
+  it("applies the fixed SUME-100 and SUMG-100 dimensions to every matching SKU prefix", () => {
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS210503",
+      srNumber: "SR812503",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "PREFIX DIM TEST CUSTOMER",
+      shipToPo: "PO-PREFIX-DIMS",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["sume-100-custom", "SUMG-100-9999"],
+      serialNumbers: []
+    });
+
+    const review = buildGarlandTeamshipReview([pdfOrder], [], [], {
+      learnedProductDimensions: [
+        {
+          sku: "SUME-100-CUSTOM",
+          source: "TEAMSHIP_LEARNED",
+          productType: null,
+          quantity: null,
+          lengthIn: 1,
+          widthIn: 2,
+          heightIn: 3,
+          weightLb: 4,
+          weightUnit: "lbs",
+          confidence: "HIGH",
+          note: "Conflicting learned dimensions."
+        }
+      ]
+    });
+
+    expect(review.reviews[0]?.productDimensions).toEqual([
+      expect.objectContaining({
+        sku: "SUME-100-CUSTOM",
+        source: "GARLAND_SKU_PREFIX_RULE",
+        lengthIn: 45,
+        widthIn: 55,
+        heightIn: 42,
+        weightLb: 510,
+        confidence: "HIGH"
+      }),
+      expect.objectContaining({
+        sku: "SUMG-100-9999",
+        source: "GARLAND_SKU_PREFIX_RULE",
+        lengthIn: 44,
+        widthIn: 55,
+        heightIn: 42,
+        weightLb: 515,
+        confidence: "HIGH"
+      })
+    ]);
   });
 
   it("uses the Garland UPS placeholder dimension rule instead of SKU-specific dimensions", () => {
@@ -1212,6 +1641,251 @@ NEWLS 2604816191908 1.00 ( )`
     expect(fetchMock.mock.calls.some(([input, init]) => String(input).includes("/v1/ship-inventories") && init?.method)).toBe(
       false
     );
+  });
+
+  it("retrieves an exact PS match when the Teamship list row does not expose its SR", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            {
+              id: 10,
+              record_no: "PS210206",
+              customer: { company: "Garland Canada Distribution" }
+            }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: {
+            id: 10,
+            shipment_id: "SR808478",
+            record_no: "PS210206",
+            carrier: "Midland Transport",
+            po_number: "0000037656",
+            edi_field_3: "PPADD-CD",
+            ship_to_name: "J.R. MAHONEY LTD.",
+            ship_to_address_1: "1810 KINGS ROAD",
+            ship_to_city: "SYDNEY",
+            ship_to_state: "NS",
+            ship_to_zip: "B1L 1C5",
+            ship_to_country: "CA",
+            shipping_instructions:
+              "MIDLAND THIRD PARTY ACCOUNT #129083 GARLAND ATTN. RECEIVING FREIGHT QUOTE 97068",
+            items: [{ sku: "E1SGHMV6XHU3US", inventory_count: 1 }],
+            custom_fields: [
+              { label: "Commodity", value: "SKU: E1SGHMV6XHU3US, SN: 2604816191908" }
+            ]
+          }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const [pdfOrder] = parseGarlandShippingOrderPages([{ pageNumber: 1, text: pageOne }]);
+    const review = buildGarlandTeamshipReview([pdfOrder!], orders);
+
+    expect(orders).toHaveLength(1);
+    expect(review.reviews[0]).toMatchObject({
+      psNumber: "PS210206",
+      srNumber: "SR808478",
+      status: "PASS",
+      issueCount: 0
+    });
+  });
+
+  it("does not stop paging when duplicate rows match only the first requested PS number", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_LIST_PAGE_LIMIT = "2";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "2";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        const offset = new URL(url).searchParams.get("offset");
+        return Response.json({
+          data:
+            offset === "0"
+              ? [
+                  { id: 10, record_no: "PS210206" },
+                  { id: 11, record_no: "PS210206" }
+                ]
+              : [{ id: 12, record_no: "PS210207" }]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: { id: 10, shipment_id: "SR808478", record_no: "PS210206" }
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/11")) {
+        return Response.json({
+          data: { id: 11, shipment_id: "SR-DUPLICATE", record_no: "PS210206" }
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/12")) {
+        return Response.json({
+          data: { id: 12, shipment_id: "SR808479", record_no: "PS210207" }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [
+        { srNumber: "SR808478", psNumber: "PS210206" },
+        { srNumber: "SR808479", psNumber: "PS210207" }
+      ],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders.map((order) => order.record_no)).toEqual(["PS210206", "PS210207"]);
+  });
+
+  it("prefers exact PS when a repeated SR belongs to a different Teamship PS", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            { id: 10, shipment_id: "SR808478", record_no: "PS210206" },
+            { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/11")) {
+        return Response.json({
+          data: { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+        });
+      }
+
+      throw new Error(`The wrong PS must not be fetched for a repeated SR: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR808478", psNumber: "PS210207" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([
+      expect.objectContaining({ shipment_id: "SR808478", record_no: "PS210207" })
+    ]);
+  });
+
+  it("keeps distinct targeted PS orders that share the same SR number", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({
+          data: [
+            { id: 10, shipment_id: "SR808478", record_no: "PS210206" },
+            { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+          ]
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/10")) {
+        return Response.json({
+          data: { id: 10, shipment_id: "SR808478", record_no: "PS210206" }
+        });
+      }
+
+      if (url.endsWith("/v1/ship-inventories/11")) {
+        return Response.json({
+          data: { id: 11, shipment_id: "SR808478", record_no: "PS210207" }
+        });
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [
+        { srNumber: "SR808478", psNumber: "PS210206" },
+        { srNumber: "SR808478", psNumber: "PS210207" }
+      ],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders.map((order) => order.record_no)).toEqual(["PS210206", "PS210207"]);
+  });
+
+  it("does not partially match a longer PS number", async () => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({ data: [{ id: 10, record_no: "PS2102067" }] });
+      }
+
+      throw new Error(`A longer PS number must not be fetched for PS210206: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR808478", psNumber: "PS210206" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toEqual([]);
   });
 
   it("parses Teamship UI page inventory serials from hidden order data", () => {
@@ -1342,6 +2016,119 @@ NEWLS 2604816191908 1.00 ( )`
     });
   });
 
+  it.each([
+    {
+      label: "partially populated",
+      apiCity: "STALE API CITY",
+      apiState: "ON",
+      apiPostalCode: ""
+    },
+    {
+      label: "entirely absent",
+      apiCity: "",
+      apiState: "",
+      apiPostalCode: ""
+    }
+  ])("uses exact Teamship page ship-to values when API aliases are $label", async ({
+    apiCity,
+    apiState,
+    apiPostalCode
+  }) => {
+    process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
+    process.env.TEAMSHIP_PASSWORD = "configured-in-env";
+    process.env.TEAMSHIP_API_BASE_URL = "https://teamship.test/api";
+    process.env.TEAMSHIP_MAX_LIST_PAGES = "1";
+
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/login")) {
+        return Response.json({ data: { token: "token-1" } });
+      }
+
+      if (url.includes("/api/v1/ship-inventories?")) {
+        return Response.json({
+          data: [{ id: 39912, shipment_id: "SR999912", record_no: "PS999912" }]
+        });
+      }
+
+      if (url.endsWith("/api/v1/ship-inventories/39912")) {
+        return Response.json({
+          data: {
+            id: 39912,
+            shipment_id: "SR999912",
+            record_no: "PS999912",
+            ship_city: apiCity,
+            ship_state: apiState,
+            ship_zip: apiPostalCode,
+            items: [{ sku: "SYNTHETIC-SKU", inventory_stock: { serial_number: "9900000000012" } }]
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && (init?.method ?? "GET") === "GET") {
+        return new Response('<input type="hidden" name="_token" value="csrf-1">', {
+          headers: {
+            "set-cookie": "teamship_session=before-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/login") && init?.method === "POST") {
+        return new Response("", {
+          status: 302,
+          headers: {
+            "set-cookie": "teamship_session=after-login; Path=/"
+          }
+        });
+      }
+
+      if (url.endsWith("/ship-inventories/39912")) {
+        return new Response(`
+          <input name="ship_city" value="SYNTHETIC CITY">
+          <input name="ship_state" value="ON">
+          <input name="ship_zip" value="A1A 1A1">
+        `);
+      }
+
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    const orders = await fetchTeamshipShippingOrdersForReview({
+      orderReferences: [{ srNumber: "SR999912", psNumber: "PS999912" }],
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const pdfOrder = samplePdfOrder({
+      psNumber: "PS999912",
+      srNumber: "SR999912",
+      pageNumbers: [1],
+      shipVia: "MIDLAND",
+      shipToName: "SYNTHETIC GARLAND CUSTOMER",
+      shipToPo: "PO-SYNTHETIC",
+      freightTerms: "PPADD-CD",
+      itemSkus: ["SYNTHETIC-SKU"],
+      serialNumbers: ["9900000000012"]
+    });
+    pdfOrder.shipToCity = "SYNTHETIC CITY";
+    pdfOrder.shipToState = "ON";
+    pdfOrder.shipToPostalCode = "A1A 1A1";
+
+    const review = buildGarlandTeamshipReview([pdfOrder], orders);
+    const fieldsByKey = new Map(review.reviews[0]?.fields.map((field) => [field.key, field]));
+
+    expect(orders[0]).toMatchObject({
+      ship_to_city: "SYNTHETIC CITY",
+      ship_to_state: "ON",
+      ship_to_zip: "A1A 1A1",
+      ship_city: "SYNTHETIC CITY",
+      ship_state: "ON",
+      ship_zip: "A1A 1A1"
+    });
+    expect(fieldsByKey.get("ship_to_city")).toMatchObject({ status: "MATCH", teamshipValue: "SYNTHETIC CITY" });
+    expect(fieldsByKey.get("ship_to_state")).toMatchObject({ status: "MATCH", teamshipValue: "ON" });
+    expect(fieldsByKey.get("ship_to_zip")).toMatchObject({ status: "MATCH", teamshipValue: "A1A 1A1" });
+  });
+
   it("uses Teamship API detail serials without falling back to the UI page", async () => {
     process.env.TEAMSHIP_EMAIL = "reviewer@example.com";
     process.env.TEAMSHIP_PASSWORD = "configured-in-env";
@@ -1367,6 +2154,9 @@ NEWLS 2604816191908 1.00 ( )`
             id: 30202,
             shipment_id: "SR808478",
             edi_field_2: "PS210206-SR808478",
+            ship_city: "MATCHING CITY",
+            ship_state: "ON",
+            ship_zip: "A1A 1A1",
             items: [
               {
                 sku: "E1SGHMV6XHU3US",

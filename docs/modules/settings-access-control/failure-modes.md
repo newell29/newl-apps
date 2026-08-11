@@ -34,6 +34,12 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
 
+## Lead-generation AI cannot be enabled
+
+- Symptom: saving the lead-generation AI toggle returns a server-side application error because an unrelated scoring rule is invalid.
+- Cause: the AI runtime controls previously shared the full TradeMining scoring form, so enabling AI revalidated and rewrote every scoring field.
+- Prevention: the AI toggle and legacy AI-model selector use a dedicated tenant-scoped action that updates only those two fields. Company-scoring changes retain their independent 100-point validation.
+
 ## Testing
 
 Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
