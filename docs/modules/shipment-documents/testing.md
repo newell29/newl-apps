@@ -21,6 +21,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Rivet evidence tests require a tenant-scoped active lease, verify artifact hashes, and confirm that a source PDF is reduced to only the approved Garland review pages before the worker receives it. Worker tests also block evidence files from Git changes.
 - Teamship update-worker regression tests cover a single retry for transient login failures, no retry for rejected credentials, safe failure-message redaction, explicit failure-stage reporting, preservation of successful order evidence after a later batch failure, and exact CSR reporting instead of a generic incomplete-attempt message.
 - Rivet queue tests confirm that a later approved Garland suggestion waits behind active or review-blocked Garland work and is claimed automatically only after that workflow scope clears.
+- Garland email automation tests distinguish completely missed batches from partial matches, preserve the retry timer across mailbox rescans, defer each complete miss for 15 minutes, and finalize after the third retry.
 
 ## Data model
 

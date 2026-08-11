@@ -25,6 +25,8 @@ For a Teams-uploaded PDF, the selected PS/SR is reviewed and saved before any up
 
 Emails are classified using Garland-domain, PS-range, order/page-count, attachment, and correction signals. Attachments are hashed for duplicate detection. Parsed PDF pages extract PS number, SR number, ship-to data, PO, freight terms, order date, ship-via, instructions, and item rows when present. Teamship review compares Garland parsed data with Teamship details.
 
+If every PDF order in a newly received batch is missing from Teamship, the scheduled automation treats the result as a possible email-versus-Teamship timing race. It defers the saved review and retries the complete batch after 15 minutes, up to three times. If any order in the batch matches Teamship, the result is finalized immediately and unmatched orders remain visible for CSR review; partial batches are never retried automatically. After the third retry, a still-completely-missing batch is finalized as missing so it cannot loop indefinitely.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.

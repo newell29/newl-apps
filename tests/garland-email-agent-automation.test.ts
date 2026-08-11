@@ -2,12 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   garlandSourceAttachment: {
-    findMany: vi.fn()
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn()
   }
 }));
 const getGarlandGraphSettingsMock = vi.hoisted(() => vi.fn());
 const requireModuleMock = vi.hoisted(() => vi.fn());
 const requireMutationAccessMock = vi.hoisted(() => vi.fn());
+const getMicrosoftGraphApplicationAccessTokenMock = vi.hoisted(() => vi.fn());
+const fetchMicrosoftGraphMessageAttachmentContentMock = vi.hoisted(() => vi.fn());
+const extractGarlandShippingOrdersFromPdfBytesMock = vi.hoisted(() => vi.fn());
+const getGarlandLearnedProductDimensionRecommendationsMock = vi.hoisted(() => vi.fn());
+const buildGarlandTeamshipReviewMock = vi.hoisted(() => vi.fn());
+const saveTeamshipReviewRunMock = vi.hoisted(() => vi.fn());
+const buildTeamshipPhase2DryRunPlanMock = vi.hoisted(() => vi.fn());
+const fetchTeamshipShippingOrdersForReviewMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/server/db", () => ({ prisma: prismaMock }));
 vi.mock("@/server/auth/authorization", () => ({
@@ -18,29 +28,38 @@ vi.mock("@/modules/shipment-documents/garland-email-intake", () => ({
   getGarlandGraphSettings: getGarlandGraphSettingsMock
 }));
 vi.mock("@/server/integrations/microsoft-graph-application", () => ({
-  getMicrosoftGraphApplicationAccessToken: vi.fn()
+  getMicrosoftGraphApplicationAccessToken: getMicrosoftGraphApplicationAccessTokenMock
 }));
 vi.mock("@/server/integrations/microsoft-graph-mail", () => ({
-  fetchMicrosoftGraphMessageAttachmentContent: vi.fn()
+  fetchMicrosoftGraphMessageAttachmentContent: fetchMicrosoftGraphMessageAttachmentContentMock
 }));
 vi.mock("@/modules/shipment-documents/garland-pdf-server-extraction", () => ({
-  extractGarlandShippingOrdersFromPdfBytes: vi.fn()
+  extractGarlandShippingOrdersFromPdfBytes: extractGarlandShippingOrdersFromPdfBytesMock
 }));
 vi.mock("@/modules/shipment-documents/garland-product-dimension-directory", () => ({
-  getGarlandLearnedProductDimensionRecommendations: vi.fn()
+  getGarlandLearnedProductDimensionRecommendations: getGarlandLearnedProductDimensionRecommendationsMock
+}));
+vi.mock("@/modules/shipment-documents/teamship-review", () => ({
+  buildGarlandTeamshipReview: buildGarlandTeamshipReviewMock
 }));
 vi.mock("@/modules/shipment-documents/teamship-review-history", () => ({
-  saveTeamshipReviewRun: vi.fn()
+  saveTeamshipReviewRun: saveTeamshipReviewRunMock
+}));
+vi.mock("@/modules/shipment-documents/teamship-phase2-dry-run", () => ({
+  buildTeamshipPhase2DryRunPlan: buildTeamshipPhase2DryRunPlanMock
 }));
 vi.mock("@/modules/shipment-documents/teamship-update-jobs", () => ({
   approveTeamshipUpdateJob: vi.fn(),
   createTeamshipUpdateJob: vi.fn()
 }));
 vi.mock("@/server/integrations/teamship", () => ({
-  fetchTeamshipShippingOrdersForReview: vi.fn()
+  fetchTeamshipShippingOrdersForReview: fetchTeamshipShippingOrdersForReviewMock
 }));
 
-import { processGarlandEmailAgentReadyAttachments } from "@/modules/shipment-documents/garland-email-agent-automation";
+import {
+  isCompletelyMissingTeamshipBatch,
+  processGarlandEmailAgentReadyAttachments
+} from "@/modules/shipment-documents/garland-email-agent-automation";
 
 const context = {
   tenantId: "tenant-1",
@@ -61,6 +80,16 @@ describe("Garland email attachment processing queue", () => {
       runtimeNotes: ""
     });
     prismaMock.garlandSourceAttachment.findMany.mockResolvedValue([]);
+    prismaMock.garlandSourceAttachment.findFirst.mockResolvedValue(null);
+    prismaMock.garlandSourceAttachment.update.mockResolvedValue({});
+    getMicrosoftGraphApplicationAccessTokenMock.mockResolvedValue("graph-token");
+    fetchMicrosoftGraphMessageAttachmentContentMock.mockResolvedValue({ contentBytes: "cGRm" });
+    extractGarlandShippingOrdersFromPdfBytesMock.mockResolvedValue(buildExtraction());
+    getGarlandLearnedProductDimensionRecommendationsMock.mockResolvedValue([]);
+    buildGarlandTeamshipReviewMock.mockReturnValue(buildReview({ pdfOrderCount: 4, missingTeamshipCount: 4 }));
+    saveTeamshipReviewRunMock.mockResolvedValue("review-run-1");
+    buildTeamshipPhase2DryRunPlanMock.mockReturnValue({ orders: [] });
+    fetchTeamshipShippingOrdersForReviewMock.mockResolvedValue([]);
   });
 
   it("prioritizes newly received PDFs and does not let permanent parse failures consume the bounded queue", async () => {
@@ -70,7 +99,19 @@ describe("Garland email attachment processing queue", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           tenantId: "tenant-1",
-          intakeStatus: { in: ["PDF_METADATA_READY"] }
+          OR: expect.arrayContaining([
+            { intakeStatus: { in: ["PDF_METADATA_READY"] } },
+            expect.objectContaining({
+              intakeStatus: {
+                in: [
+                  "TEAMSHIP_BATCH_RETRY_PENDING_1",
+                  "TEAMSHIP_BATCH_RETRY_PENDING_2",
+                  "TEAMSHIP_BATCH_RETRY_PENDING_3"
+                ]
+              },
+              updatedAt: { lte: expect.any(Date) }
+            })
+          ])
         }),
         orderBy: [{ sourceEmail: { receivedAt: "desc" } }, { createdAt: "desc" }],
         take: 8
@@ -87,9 +128,139 @@ describe("Garland email attachment processing queue", () => {
     expect(prismaMock.garlandSourceAttachment.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          intakeStatus: { in: ["PDF_METADATA_READY", "PDF_PARSE_FAILED"] }
+          OR: expect.arrayContaining([
+            { intakeStatus: { in: ["PDF_METADATA_READY", "PDF_PARSE_FAILED"] } }
+          ])
         })
       })
     );
   });
+
+  it("defers a newly received batch when every PDF order is missing from Teamship", async () => {
+    prismaMock.garlandSourceAttachment.findMany.mockResolvedValue([buildAttachment("PDF_METADATA_READY")]);
+
+    const result = await processGarlandEmailAgentReadyAttachments(context, { maxAttachments: 8 });
+
+    expect(result.deferredAllMissingAttachmentCount).toBe(1);
+    expect(saveTeamshipReviewRunMock).not.toHaveBeenCalled();
+    expect(prismaMock.garlandSourceAttachment.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { tenantId_id: { tenantId: "tenant-1", id: "attachment-1" } },
+        data: expect.objectContaining({ intakeStatus: "TEAMSHIP_BATCH_RETRY_PENDING_1" })
+      })
+    );
+  });
+
+  it("finalizes a partial match immediately instead of retrying the genuinely missing rows", async () => {
+    prismaMock.garlandSourceAttachment.findMany.mockResolvedValue([buildAttachment("PDF_METADATA_READY")]);
+    buildGarlandTeamshipReviewMock.mockReturnValue(
+      buildReview({ pdfOrderCount: 4, missingTeamshipCount: 3, teamshipMatchedCount: 1 })
+    );
+
+    const result = await processGarlandEmailAgentReadyAttachments(context, { maxAttachments: 8 });
+
+    expect(result.deferredAllMissingAttachmentCount).toBe(0);
+    expect(saveTeamshipReviewRunMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.garlandSourceAttachment.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ intakeStatus: "PDF_PARSED" }) })
+    );
+  });
+
+  it("finalizes a completely missing batch after the third delayed retry", async () => {
+    prismaMock.garlandSourceAttachment.findMany.mockResolvedValue([
+      buildAttachment("TEAMSHIP_BATCH_RETRY_PENDING_3")
+    ]);
+
+    const result = await processGarlandEmailAgentReadyAttachments(context, { maxAttachments: 8 });
+
+    expect(result.deferredAllMissingAttachmentCount).toBe(0);
+    expect(saveTeamshipReviewRunMock).toHaveBeenCalledTimes(1);
+    expect(prismaMock.garlandSourceAttachment.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ intakeStatus: "PDF_PARSED" }) })
+    );
+  });
+
+  it("recognizes only zero-match, all-missing reviews as retry candidates", () => {
+    expect(isCompletelyMissingTeamshipBatch(buildReview({ pdfOrderCount: 4, missingTeamshipCount: 4 }))).toBe(true);
+    expect(
+      isCompletelyMissingTeamshipBatch(
+        buildReview({ pdfOrderCount: 4, missingTeamshipCount: 3, teamshipMatchedCount: 1 })
+      )
+    ).toBe(false);
+    expect(isCompletelyMissingTeamshipBatch(buildReview({ pdfOrderCount: 0, missingTeamshipCount: 0 }))).toBe(false);
+  });
 });
+
+function buildAttachment(intakeStatus: string) {
+  return {
+    id: "attachment-1",
+    tenantId: "tenant-1",
+    sourceEmailId: "email-1",
+    graphAttachmentId: "graph-attachment-1",
+    fileName: "4 ORDERS 6 PAGES - PS123456 - PS123459.pdf",
+    contentType: "application/pdf",
+    sizeBytes: 1024,
+    contentHash: null,
+    pageCount: null,
+    extractedPsNumbers: null,
+    extractedSrNumbers: null,
+    extractionFingerprint: null,
+    intakeStatus,
+    duplicateOfAttachmentId: null,
+    storageRef: null,
+    parseError: null,
+    createdAt: new Date("2026-08-11T12:30:00.000Z"),
+    updatedAt: new Date("2026-08-11T12:30:00.000Z"),
+    sourceEmail: {
+      id: "email-1",
+      mailboxAddress: "warehouse@example.com",
+      graphMessageId: "message-1",
+      subject: "4 ORDERS 6 PAGES - PS123456 - PS123459",
+      receivedAt: new Date("2026-08-11T12:30:00.000Z")
+    }
+  };
+}
+
+function buildExtraction() {
+  return {
+    contentHash: "synthetic-hash",
+    pageCount: 4,
+    psNumbers: ["PS123456", "PS123457", "PS123458", "PS123459"],
+    srNumbers: ["SR812345", "SR812346", "SR812347", "SR812348"],
+    orders: [
+      {
+        psNumber: "PS123456",
+        srNumber: "SR812345",
+        pageNumbers: [1],
+        items: []
+      }
+    ]
+  };
+}
+
+function buildReview({
+  pdfOrderCount,
+  missingTeamshipCount,
+  teamshipMatchedCount = 0
+}: {
+  pdfOrderCount: number;
+  missingTeamshipCount: number;
+  teamshipMatchedCount?: number;
+}) {
+  return {
+    summary: {
+      pdfOrderCount,
+      teamshipMatchedCount,
+      passedCount: 0,
+      failedCount: 0,
+      missingTeamshipCount,
+      pendingTeamshipCount: 0,
+      noPdfCount: 0,
+      skippedAlreadyReviewedCount: 0
+    },
+    pdfOrders: [],
+    reviews: [],
+    teamshipAlerts: [],
+    fetchedAt: "2026-08-11T12:35:00.000Z"
+  };
+}
