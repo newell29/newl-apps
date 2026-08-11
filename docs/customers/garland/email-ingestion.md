@@ -25,6 +25,8 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 The scheduled attachment queue prioritizes the most recently received unprocessed Garland PDFs. A `PDF_PARSE_FAILED` attachment is not retried by normal scheduled runs because a permanently failing older PDF must not consume the bounded queue and delay a newer order. Failed PDFs can be retried only through an explicit operator-controlled retry.
 
+When a newly parsed PDF contains orders but none of them are yet visible in Teamship, the attachment remains pending and becomes eligible for another scheduled lookup after 5 minutes. This bounded timing-race retry runs at most three times and is not used for a partially matched batch.
+
 ## Pallet and printing notes
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.

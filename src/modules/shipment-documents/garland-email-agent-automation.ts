@@ -5,6 +5,7 @@ import {
   MAX_TEAMSHIP_BATCH_RETRIES,
   readTeamshipBatchRetryAttempt,
   TEAMSHIP_BATCH_RETRY_DELAY_MS,
+  TEAMSHIP_BATCH_RETRY_DELAY_MINUTES,
   TEAMSHIP_BATCH_RETRY_STATUSES
 } from "@/modules/shipment-documents/garland-email-agent-retry";
 import { extractGarlandShippingOrdersFromPdfBytes } from "@/modules/shipment-documents/garland-pdf-server-extraction";
@@ -193,7 +194,7 @@ export async function processGarlandEmailAgentReadyAttachments(
         });
         result.deferredAllMissingAttachmentCount += 1;
         result.skippedReasons.push(
-          `${attachment.fileName}: all ${review.summary.pdfOrderCount} PDF orders were missing in Teamship; retry ${nextAttempt} of ${MAX_TEAMSHIP_BATCH_RETRIES} is deferred for 15 minutes.`
+          `${attachment.fileName}: all ${review.summary.pdfOrderCount} PDF orders were missing in Teamship; retry ${nextAttempt} of ${MAX_TEAMSHIP_BATCH_RETRIES} is deferred for ${TEAMSHIP_BATCH_RETRY_DELAY_MINUTES} minutes.`
         );
         continue;
       }

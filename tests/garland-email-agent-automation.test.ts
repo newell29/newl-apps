@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   garlandSourceAttachment: {
@@ -73,6 +73,8 @@ const context = {
 
 describe("Garland email attachment processing queue", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-11T12:30:00.000Z"));
     vi.clearAllMocks();
     getGarlandGraphSettingsMock.mockResolvedValue({
       mailSyncEnabled: true,
@@ -92,6 +94,10 @@ describe("Garland email attachment processing queue", () => {
     fetchTeamshipShippingOrdersForReviewMock.mockResolvedValue([]);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("prioritizes newly received PDFs and does not let permanent parse failures consume the bounded queue", async () => {
     await processGarlandEmailAgentReadyAttachments(context, { maxAttachments: 8 });
 
@@ -109,7 +115,7 @@ describe("Garland email attachment processing queue", () => {
                   "TEAMSHIP_BATCH_RETRY_PENDING_3"
                 ]
               },
-              updatedAt: { lte: expect.any(Date) }
+              updatedAt: { lte: new Date("2026-08-11T12:25:00.000Z") }
             })
           ])
         }),
@@ -142,6 +148,9 @@ describe("Garland email attachment processing queue", () => {
     const result = await processGarlandEmailAgentReadyAttachments(context, { maxAttachments: 8 });
 
     expect(result.deferredAllMissingAttachmentCount).toBe(1);
+    expect(result.skippedReasons).toContain(
+      "4 ORDERS 6 PAGES - PS123456 - PS123459.pdf: all 4 PDF orders were missing in Teamship; retry 1 of 3 is deferred for 5 minutes."
+    );
     expect(saveTeamshipReviewRunMock).not.toHaveBeenCalled();
     expect(prismaMock.garlandSourceAttachment.update).toHaveBeenLastCalledWith(
       expect.objectContaining({
