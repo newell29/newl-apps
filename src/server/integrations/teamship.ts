@@ -893,14 +893,15 @@ async function loginToTeamshipWeb(
   });
   mergeSetCookies(cookieJar, readSetCookies(loginPageResponse.headers));
   const loginPageHtml = await loginPageResponse.text().catch(() => "");
-  const csrfToken = readHtmlFormValueByName(loginPageHtml, "_token") ?? readMetaContentByName(loginPageHtml, "csrf-token");
+  const loginCsrfToken =
+    readHtmlFormValueByName(loginPageHtml, "_token") ?? readMetaContentByName(loginPageHtml, "csrf-token");
   const body = new URLSearchParams({
     email,
     password
   });
 
-  if (csrfToken) {
-    body.set("_token", csrfToken);
+  if (loginCsrfToken) {
+    body.set("_token", loginCsrfToken);
   }
 
   const loginResponse = await fetchImpl(`${webBaseUrl}/login`, {
@@ -916,6 +917,22 @@ async function loginToTeamshipWeb(
   });
   mergeSetCookies(cookieJar, readSetCookies(loginResponse.headers));
 
+  const authenticatedPageResponse = await fetchImpl(`${webBaseUrl}/ship-inventories`, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      cookie: serializeCookies(cookieJar)
+    },
+    cache: "no-store",
+    redirect: "manual"
+  }).catch(() => null);
+  if (authenticatedPageResponse) {
+    mergeSetCookies(cookieJar, readSetCookies(authenticatedPageResponse.headers));
+  }
+
+  const authenticatedPageHtml = authenticatedPageResponse?.ok
+    ? await authenticatedPageResponse.text().catch(() => "")
+    : "";
+  const authenticatedCsrfToken = readMetaContentByName(authenticatedPageHtml, "csrf-token");
   const cookieHeader = serializeCookies(cookieJar);
   if (!cookieHeader) {
     throw new Error(`Teamship web login did not return a session cookie. Teamship returned status ${loginResponse.status}.`);
@@ -923,7 +940,7 @@ async function loginToTeamshipWeb(
 
   return {
     cookieHeader,
-    csrfToken
+    csrfToken: authenticatedCsrfToken ?? loginCsrfToken
   };
 }
 
