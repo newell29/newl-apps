@@ -172,7 +172,7 @@ function buildPrompt(pageNumbers: number[]) {
     "Return exactly one OCR entry per attached image. Do not skip non-target carriers. Do not decide whether the app needs the row.",
     "Set isNewBolPage true only when the Header overview shows a new BILL OF LADING header with printed CARRIER, REFERENCES, and SHIPMENT ID fields.",
     "Set isNewBolPage false for continuation/footer pages, signature pages, or pages that only show lower BOL sections. A handwritten carrier name in a signature area is not a new BOL.",
-    "Read carrier as the literal value under the Carrier box label, for example SURETRACK STANDARD, SPEEDY, MIDLAND, CLARKE, GUILBAULT TRANSPORT, DAY & ROSS, or blank.",
+    "Read carrier as the literal value under the Carrier box label, for example SURETRACK STANDARD, SPEEDY, MIDLAND, CLARKE, GUILBAULT TRANSPORT, ROSEDALE, DAY & ROSS, or blank.",
     "Read psNumber from References and shipment id. The PS value is before the first dash, for example PS209872 from PS209872-SR810664 - SR810664.",
     "Read srNumber from Shipment ID in References and shipment id. Use digits only, for example 810664 from SR810664.",
     "Read cityProvince from Consignee city/province. Use only city and province/state, for example OTTAWA, ON or CALGARY, AB. Do not include postal code or country.",

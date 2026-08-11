@@ -31,6 +31,8 @@ If every PDF order in a newly received batch is missing from Teamship, the sched
 
 Pallet dimensions, serials, weight, and SKU observations are represented in Teamship review/update types and `GarlandProductDimensionObservation`. The UPS special dimension rule is confirmed in existing documentation and tests should be consulted before changing it. Printer mappings, duplicate print protection, and a general print service were not located; production printing requires explicit human approval.
 
+Garland carrier-manifest generation recognizes the printed BOL carrier-box value `ROSEDALE` alongside Midland, Speedy, Suretrack, Clarke, and Guilbault Transport. Rosedale receives the same separate editable workbook, driver time-in/time-out fields, tenant-scoped saved history, and download behavior as the other supported carriers.
+
 ## Open questions
 
 - Final employee-approved Garland order lifecycle terms. Requires employee confirmation.
