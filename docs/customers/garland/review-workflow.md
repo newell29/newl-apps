@@ -25,6 +25,8 @@ Emails are classified using Garland-domain, PS-range, order/page-count, attachme
 
 Garland PS numbers are the unique shipment-document identity for matching PDF orders to Teamship. SR numbers can repeat in Teamship, so the review should prefer exact PS/pack-slip matches and use SR-only matching only when the SR cannot conflict with a different Teamship PS number.
 
+Teamship list pagination must advance by the number of rows Teamship actually returns. Teamship can cap a requested page below Newl Apps' requested limit, so a shorter response is not proof that the list has ended. Newl Apps stops only on an empty page, a repeated page, the configured safety-page limit, or after every requested PS/SR has been matched.
+
 For a Teams-uploaded multi-order PDF, the CSR must name one exact PS or SR number. Newl Apps stores the complete PDF as source evidence but filters the parsed orders before querying Teamship. An exact PS selects one order. An SR is accepted only when it selects one PDF order; if it repeats, Nemo asks for the PS number. Missing or unmatched references stop without a Teamship query, and the saved response names the selected PS/SR plus the number of other PDF orders ignored.
 
 Employee feedback about these reviews is grouped into stable root-cause families. New reports do not create another development approval while the same family already has an approved Rivet fix; they remain follow-up evidence until the reviewed PR is explicitly recorded as deployed. Evidence reported after that point is presented as one linked regression family.
