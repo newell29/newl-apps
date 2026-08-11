@@ -1030,6 +1030,84 @@ function normalizeTeamshipPsNumber(order: TeamshipShippingOrderSummary) {
   return "";
 }
 
+function readTeamshipReferenceTokens(order: TeamshipShippingOrderSummary) {
+  const psNumbers = new Set<string>();
+  const srNumbers = new Set<string>();
+  const visited = new Set<object>();
+  let visitedScalarCount = 0;
+
+  const addTokens = (value: unknown) => {
+    const text = String(value ?? "").toUpperCase();
+
+    for (const match of text.matchAll(/(?:^|[^A-Z0-9])(PS\d{6})(?=$|[^A-Z0-9])/g)) {
+      if (match[1]) psNumbers.add(match[1]);
+    }
+
+    for (const match of text.matchAll(/(?:^|[^A-Z0-9])(SR\d{6})(?=$|[^A-Z0-9])/g)) {
+      if (match[1]) srNumbers.add(match[1]);
+    }
+  };
+
+  const visit = (value: unknown, referenceContext: boolean, depth: number) => {
+    if (value === null || value === undefined || depth > 4 || visitedScalarCount >= 200) {
+      return;
+    }
+
+    if (typeof value === "string" || typeof value === "number") {
+      if (referenceContext) {
+        visitedScalarCount += 1;
+        addTokens(value);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        visit(item, referenceContext, depth + 1);
+      }
+      return;
+    }
+
+    if (typeof value !== "object" || visited.has(value)) {
+      return;
+    }
+
+    visited.add(value);
+    const record = value as Record<string, unknown>;
+    const descriptor = [record.label, record.edi_key, record.name]
+      .find((candidate) => typeof candidate === "string");
+    const describedReference = typeof descriptor === "string" && isTeamshipReferenceKey(descriptor);
+
+    for (const [key, childValue] of Object.entries(record)) {
+      if (isSensitiveTeamshipKey(key)) {
+        continue;
+      }
+
+      visit(
+        childValue,
+        referenceContext || isTeamshipReferenceKey(key) || describedReference,
+        depth + 1
+      );
+    }
+  };
+
+  visit(order, false, 0);
+
+  return { psNumbers, srNumbers };
+}
+
+function isTeamshipReferenceKey(key: string) {
+  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+  return (
+    normalized.startsWith("ps") ||
+    normalized.startsWith("sr") ||
+    ["record", "order", "shipment", "reference", "external", "display", "edi"].some((token) =>
+      normalized.includes(token)
+    )
+  );
+}
+
 function normalizeTeamshipOrderReferences(
   orderReferences: TeamshipOrderReference[],
   legacySrNumbers: string[]
@@ -1070,8 +1148,17 @@ function teamshipOrderMatchesReference(
     return reference.psNumber === orderPsNumber;
   }
 
+  const referenceTokens = readTeamshipReferenceTokens(order);
+  if (reference.psNumber && referenceTokens.psNumbers.size > 0) {
+    return referenceTokens.psNumbers.has(reference.psNumber);
+  }
+
   const orderSrNumber = normalizeTeamshipShipmentId(order);
-  return Boolean(reference.srNumber && orderSrNumber === reference.srNumber);
+  if (reference.srNumber && orderSrNumber) {
+    return orderSrNumber === reference.srNumber;
+  }
+
+  return Boolean(reference.srNumber && referenceTokens.srNumbers.has(reference.srNumber));
 }
 
 function normalizeText(value: unknown) {
