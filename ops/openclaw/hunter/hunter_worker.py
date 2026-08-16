@@ -880,6 +880,15 @@ def company_research_due_now(now: Optional[dt.datetime] = None) -> bool:
     return current.astimezone(timezone).time() >= daily_time
 
 
+def apollo_exception_autopilot_enabled() -> bool:
+    """Keep the Brave-backed exception resolver independently pausable."""
+    enabled = os.environ.get(
+        "HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED",
+        "false",
+    ).strip().lower()
+    return enabled in {"1", "true", "yes", "on"}
+
+
 def run_outreach_handoff_poller(
     base_url: str,
     token: str,
@@ -984,6 +993,17 @@ def main() -> int:
     poll_ms = max(5000, int(os.environ.get("HUNTER_POLL_MS", "60000")))
 
     if args.apollo_exceptions_now:
+        if not apollo_exception_autopilot_enabled():
+            print(
+                json.dumps(
+                    {
+                        "state": "disabled",
+                        "reason": "HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED is off",
+                    },
+                    indent=2,
+                )
+            )
+            return 0
         print(json.dumps(run_apollo_exception_resolution(base_url, token), indent=2))
         return 0
 
@@ -1038,13 +1058,14 @@ def main() -> int:
             name="hunter-outreach-handoff",
             daemon=True,
         ).start()
-        apollo_exception_stop_event = threading.Event()
-        threading.Thread(
-            target=run_apollo_exception_poller,
-            args=(base_url, token, poll_ms, apollo_exception_stop_event),
-            name="hunter-apollo-exception-autopilot",
-            daemon=True,
-        ).start()
+        if apollo_exception_autopilot_enabled():
+            apollo_exception_stop_event = threading.Event()
+            threading.Thread(
+                target=run_apollo_exception_poller,
+                args=(base_url, token, poll_ms, apollo_exception_stop_event),
+                name="hunter-apollo-exception-autopilot",
+                daemon=True,
+            ).start()
 
     last_signal_scout_check_date: Optional[dt.date] = None
     last_company_research_check_date: Optional[dt.date] = None
