@@ -7,8 +7,38 @@ const scriptPath = path.join(
   process.cwd(),
   "ops/openclaw/hunter/hunter_apollo_exception_resolution.py"
 );
+const workerPath = path.join(process.cwd(), "ops/openclaw/hunter/hunter_worker.py");
 
 describe("Hunter Apollo-exception worker", () => {
+  it("defaults the Brave-backed autopilot off and requires an explicit enablement", () => {
+    const source = [
+      "import importlib.util, json, os, pathlib, sys",
+      "script = pathlib.Path(sys.argv[1])",
+      "sys.path.insert(0, str(script.parent))",
+      "spec = importlib.util.spec_from_file_location('hunter_worker', script)",
+      "module = importlib.util.module_from_spec(spec)",
+      "spec.loader.exec_module(module)",
+      "os.environ.pop('HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED', None)",
+      "default_enabled = module.apollo_exception_autopilot_enabled()",
+      "os.environ['HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED'] = 'true'",
+      "explicit_enabled = module.apollo_exception_autopilot_enabled()",
+      "os.environ['HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED'] = 'false'",
+      "paused = module.apollo_exception_autopilot_enabled()",
+      "print(json.dumps({'default': default_enabled, 'explicit': explicit_enabled, 'paused': paused}))"
+    ].join("\n");
+    const result = spawnSync("python3", ["-c", source, workerPath], {
+      encoding: "utf8",
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      default: false,
+      explicit: true,
+      paused: false
+    });
+  });
+
   it("deduplicates Brave evidence and completes the exact claimed run", () => {
     const source = [
       "import importlib.util, json, pathlib, sys",
