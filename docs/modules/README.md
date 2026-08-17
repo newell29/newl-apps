@@ -2,6 +2,6 @@
 
 > Evidence status: Confirmed from code.
 
-Discovered modules: `assistant`, `agent-operations`, `lead-generation`, `ups-tools`, `ltl-rate-portal`, `shipment-documents`, `invoice-automation`, `customer-cashflow`, `credit-checks`, `ocean-freight-pricing`, `website-inbound`, `website-growth`, `settings-access-control`, `operations-logs`, `customer-intelligence`.
+Discovered modules: `assistant`, `agent-operations`, `lead-generation`, `supply-chain-design`, `ups-tools`, `ltl-rate-portal`, `shipment-documents`, `invoice-automation`, `customer-cashflow`, `credit-checks`, `ocean-freight-pricing`, `website-inbound`, `website-growth`, `settings-access-control`, `operations-logs`, `customer-intelligence`.
 
 Unimplemented or not located as standalone modules: reporting, notifications beyond credit-check/email helpers, tasks as a general task module, do-not-contact/compliance center, generic WMS inventory UI, broad printing service.

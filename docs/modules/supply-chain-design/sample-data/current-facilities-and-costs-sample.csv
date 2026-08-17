@@ -1,0 +1,3 @@
+Facility ID,Facility Name,Facility Type,Facility ZIP / Postal Code,Annual Facility / Warehouse Cost,Pallet Capacity,Current Inventory Pallets,Current Inventory Units,Current Inventory Value,Currency,Notes
+TOR-01,Toronto Current DC,Owned,M5V 2T6,275000,12000,3500,42000,1250000,USD,Current Toronto distribution centre with annual all-in warehouse cost.
+DFW-01,Dallas Current 3PL,Existing 3PL,75201,210000,9000,2300,28000,840000,USD,Current Dallas 3PL warehouse with annual all-in warehouse cost.

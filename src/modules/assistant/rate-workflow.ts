@@ -1,7 +1,10 @@
 import { AssistantSourceKind, ModuleKey } from "@prisma/client";
 
+import { pickPreferredSevenLAccount } from "@/modules/ltl-rate-portal/account-selection";
+import { calculateLtlFreightClass, normalizeExplicitFreightClass } from "@/modules/ltl-rate-portal/freight-class";
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
-import type { LtlCountryCode, LtlFreightPiece, LtlQuoteRequest, SevenLAccountConfig } from "@/modules/ltl-rate-portal/types";
+import { preflightSevenLQuoteRequest } from "@/modules/ltl-rate-portal/request-preflight";
+import type { LtlCountryCode, LtlFreightPiece, LtlQuoteRequest } from "@/modules/ltl-rate-portal/types";
 import { AuthorizationError, requireModule } from "@/server/auth/authorization";
 import { getLtlQuotes } from "@/server/integrations/seven-l";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -144,6 +147,18 @@ export async function maybeRunAssistantRateRequest(
       }
     };
   }
+  const preflight = preflightSevenLQuoteRequest(parsed.request);
+  if (!preflight.ok) {
+    return {
+      answer: `I could not prepare this LTL quote for 7L. ${preflight.message}.`,
+      sources: [],
+      metadata: {
+        rateRequestHandled: true,
+        complete: true,
+        quoteBlocked: "request-validation"
+      }
+    };
+  }
 
   try {
     await requireModule(context, ModuleKey.LTL_RATE_PORTAL);
@@ -192,7 +207,7 @@ export async function maybeRunAssistantRateRequest(
 
   let response: Awaited<ReturnType<typeof getLtlQuotes>>;
   try {
-    response = await getLtlQuotes(account, [parsed.request], carrierHashes);
+    response = await getLtlQuotes(account, [preflight.request], carrierHashes);
   } catch (error) {
     return {
       answer: [
@@ -306,7 +321,7 @@ export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRateReq
   const destinationLabel = parseLocationLabel(prompt, "to", [" at ", " weighing", " weight", " class ", " pallet", " skid", " piece"]);
   const originLocation = resolveAssistantRateLocation(originLabel, postalCodes[0] ?? null);
   const destinationLocation = resolveAssistantRateLocation(destinationLabel, postalCodes[1] ?? null);
-  const pieces = dimensions && weight
+  const pieces = dimensions && weight && quantity
     ? [buildFreightPiece({ dimensions, weight, quantity, freightClass })]
     : null;
 
@@ -314,7 +329,8 @@ export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRateReq
     originLocation ? null : "origin ZIP/postal code or city",
     destinationLocation ? null : "destination ZIP/postal code or city",
     dimensions ? null : "dimensions",
-    weight ? null : "weight"
+    weight ? null : "weight",
+    quantity ? null : "quantity"
   ].filter((value): value is string => Boolean(value));
 
   const request =
@@ -354,15 +370,6 @@ export function parseAssistantRatePrompt(prompt: string): ParsedAssistantRateReq
   };
 }
 
-function pickPreferredSevenLAccount(accounts: SevenLAccountConfig[]) {
-  return (
-    accounts.find((account) => !account.dryRun && account.secretConfigured && account.status === "ACTIVE") ??
-    accounts.find((account) => !account.dryRun && account.status === "ACTIVE") ??
-    accounts.find((account) => account.status === "ACTIVE") ??
-    null
-  );
-}
-
 function buildFreightPiece({
   dimensions,
   weight,
@@ -372,17 +379,30 @@ function buildFreightPiece({
   dimensions: { length: number; width: number; height: number };
   weight: number;
   quantity: number;
-  freightClass: string;
+  freightClass: string | null;
 }): LtlFreightPiece {
+  const calculated = freightClass
+    ? null
+    : calculateLtlFreightClass({
+        totalWeight: weight,
+        weightUnit: "lb",
+        quantity,
+        length: dimensions.length,
+        width: dimensions.width,
+        height: dimensions.height,
+        dimensionUnit: "in"
+      });
+  const resolvedFreightClass = freightClass ?? (calculated?.ok ? calculated.freightClass : "");
+
   return {
     qty: quantity,
     weight,
-    weightType: "each",
+    weightType: quantity > 1 ? "total" : "each",
     length: dimensions.length,
     width: dimensions.width,
     height: dimensions.height,
     dimType: "PLT",
-    freightClass,
+    freightClass: resolvedFreightClass,
     hazmat: false,
     stack: false
   };
@@ -408,12 +428,12 @@ function parseWeight(prompt: string) {
 
 function parseQuantity(prompt: string) {
   const match = prompt.match(/(\d+)\s*(?:pallets?|skids?|pieces?)/i);
-  return match ? Number.parseInt(match[1], 10) : 1;
+  return match ? Number.parseInt(match[1], 10) : null;
 }
 
 function parseFreightClass(prompt: string) {
   const match = prompt.match(/\bclass\s+(\d{2,3}(?:\.\d+)?)\b/i);
-  return match ? match[1] : "125";
+  return normalizeExplicitFreightClass(match?.[1]);
 }
 
 function parsePostalCodes(prompt: string) {
@@ -576,13 +596,15 @@ function buildParsedSummary({
   destinationLocation: ResolvedAssistantRateLocation | null;
   dimensions: { length: number; width: number; height: number } | null;
   weight: number | null;
-  quantity: number;
+  quantity: number | null;
 }) {
   const origin = formatResolvedLocationSummary(originLabel, originLocation) || "origin pending";
   const destination = formatResolvedLocationSummary(destinationLabel, destinationLocation) || "destination pending";
-  const pieceSummary = dimensions
+  const pieceSummary = dimensions && quantity
     ? `${quantity} pallet(s) ${dimensions.length}x${dimensions.width}x${dimensions.height}`
-    : `${quantity} pallet(s)`;
+    : dimensions
+      ? `quantity pending ${dimensions.length}x${dimensions.width}x${dimensions.height}`
+      : "quantity pending";
   const weightSummary = weight ? `${weight} lbs each` : "weight pending";
 
   return `${origin} to ${destination}, ${pieceSummary}, ${weightSummary}`;

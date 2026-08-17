@@ -353,7 +353,197 @@ describe("7L client integration", () => {
       })
     );
   });
+
+  it("limits carrier concurrency while preserving the complete carrier outcome set", async () => {
+    process.env.SEVEN_L_RUNTIME_ACCOUNTS_JSON = JSON.stringify([
+      {
+        name: "7L Live Preferred Carriers",
+        username: "parallel-demo",
+        password: "secret",
+        baseUrl: "https://restapi.my7l.com"
+      }
+    ]);
+    const account = accountWithCarriers(5);
+    let activeRates = 0;
+    let maxActiveRates = 0;
+
+    fetchMock.mockImplementation(async (input: string) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/login")) {
+        return jsonResponse({ data: { accessToken: "token-123", exp: Math.floor(Date.now() / 1000) + 3600 } });
+      }
+      if (url.includes("/api/v1/ltl/ltlrates")) {
+        activeRates += 1;
+        maxActiveRates = Math.max(maxActiveRates, activeRates);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeRates -= 1;
+        const carrierHash = new URL(url).searchParams.get("carrierHash") ?? "";
+        if (carrierHash === "carrier-hash-3") {
+          return jsonResponse({ data: { results: [{ Error: "Carrier unavailable" }] } });
+        }
+        return jsonResponse({
+          data: {
+            results: [
+              {
+                Name: carrierHash,
+                Code: carrierHash,
+                SCAC: carrierHash,
+                ServiceLevel: "Less than Truckload",
+                TransitDays: 2,
+                QuoteNumber: carrierHash,
+                RateBreakdown: [{ MINIMUM: "100.00" }],
+                RateRemarks: [],
+                Total: carrierHash === "carrier-hash-4" ? "90.00" : "100.00"
+              }
+            ]
+          }
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    });
+
+    const response = await getLtlQuotes(
+      account,
+      [{ ...lane, originCity: "CHARLOTTE", originState: "NC", destinationCity: "HOUSTON", destinationState: "TX" }],
+      account.carriers.map((carrier) => carrier.carrierHash),
+      { carrierConcurrency: 3 }
+    );
+
+    expect(maxActiveRates).toBeLessThanOrEqual(3);
+    expect(response.data).toHaveLength(4);
+    expect(response.errors).toHaveLength(1);
+    expect(response.data.map((quote) => quote.carrierHash)).toEqual([
+      "carrier-hash-1",
+      "carrier-hash-2",
+      "carrier-hash-4",
+      "carrier-hash-5"
+    ]);
+  });
+
+  it("reuses shared ZIP lookups and deduplicates in-flight token login under concurrency", async () => {
+    process.env.SEVEN_L_RUNTIME_ACCOUNTS_JSON = JSON.stringify([
+      {
+        name: "7L Live Preferred Carriers",
+        username: "shared-demo",
+        password: "secret",
+        baseUrl: "https://restapi.my7l.com"
+      }
+    ]);
+    const sharedLocationCache = new Map();
+    let loginCalls = 0;
+    let zipCalls = 0;
+    fetchMock.mockImplementation(async (input: string) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/login")) {
+        loginCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return jsonResponse({ data: { accessToken: "token-123", exp: Math.floor(Date.now() / 1000) + 3600 } });
+      }
+      if (url.includes("/api/v1/tools/zipcodes")) {
+        zipCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const parsed = new URL(url);
+        const zipcode = parsed.searchParams.get("zipcode") ?? "";
+        return jsonResponse({
+          data: {
+            results: [
+              {
+                City: zipcode === "28273" ? "Charlotte" : "Houston",
+                StateAbbr: zipcode === "28273" ? "NC" : "TX",
+                Country: "US",
+                Zipcode: zipcode
+              }
+            ]
+          }
+        });
+      }
+      if (url.includes("/api/v1/ltl/ltlrates")) {
+        return jsonResponse({
+          data: {
+            results: [
+              {
+                Name: "Southeastern Freight",
+                Code: "SEFL",
+                SCAC: "SEFL",
+                ServiceLevel: "Less than Truckload",
+                TransitDays: 2,
+                QuoteNumber: "SEFL-123",
+                RateBreakdown: [{ MINIMUM: "250.00" }],
+                RateRemarks: [],
+                Total: "320.00"
+              }
+            ]
+          }
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    });
+
+    await Promise.all([
+      getLtlQuotes(liveAccount, [lane], ["carrier-hash-1"], { locationCache: sharedLocationCache }),
+      getLtlQuotes(liveAccount, [lane], ["carrier-hash-1"], { locationCache: sharedLocationCache })
+    ]);
+
+    expect(loginCalls).toBe(1);
+    expect(zipCalls).toBe(2);
+  });
+
+  it("converts timed-out carrier calls into safe carrier failures", async () => {
+    process.env.SEVEN_L_RUNTIME_ACCOUNTS_JSON = JSON.stringify([
+      {
+        name: "7L Live Preferred Carriers",
+        username: "timeout-demo",
+        password: "secret",
+        baseUrl: "https://restapi.my7l.com"
+      }
+    ]);
+    fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/login")) {
+        return jsonResponse({ data: { accessToken: "token-123", exp: Math.floor(Date.now() / 1000) + 3600 } });
+      }
+      if (url.includes("/api/v1/ltl/ltlrates")) {
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("Aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    });
+
+    const response = await getLtlQuotes(
+      liveAccount,
+      [{ ...lane, originCity: "CHARLOTTE", originState: "NC", destinationCity: "HOUSTON", destinationState: "TX" }],
+      ["carrier-hash-1"],
+      { requestTimeoutMs: 5 }
+    );
+
+    expect(response.data).toEqual([]);
+    expect(response.errors).toEqual([
+      expect.objectContaining({
+        carrierHash: "carrier-hash-1",
+        errorMessage: "7L carrier request timed out after 5 ms."
+      })
+    ]);
+  });
 });
+
+function accountWithCarriers(count: number): SevenLAccountConfig {
+  return {
+    ...liveAccount,
+    carriers: Array.from({ length: count }, (_, index) => ({
+      carrierHash: `carrier-hash-${index + 1}`,
+      name: `Carrier ${index + 1}`,
+      code: `C${index + 1}`,
+      scac: `C${index + 1}`,
+      defaulted: false,
+      enabled: true
+    }))
+  };
+}
 
 function jsonResponse(body: unknown) {
   return {

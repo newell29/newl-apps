@@ -19,6 +19,7 @@ enum PlatformRole {
 enum ModuleKey {
   ASSISTANT
   LEAD_GEN
+  SUPPLY_CHAIN_DESIGN
   UPS_TOOLS
   LTL_RATE_PORTAL
   TRANSIT_LOOKUP
@@ -545,6 +546,62 @@ enum InvoiceAutomationBatchStatus {
   COMPLETED
 }
 
+enum SupplyChainDesignProjectStatus {
+  DRAFT
+}
+
+enum SupplyChainDesignUploadStatus {
+  READY
+}
+
+enum SupplyChainDesignTableType {
+  CURRENT_NETWORK_ACTIVITY
+  FACILITIES
+  SHIPMENTS
+  INVENTORY
+  FACILITY_COSTS
+  CUSTOMERS
+  CANDIDATE_FACILITIES
+  SCENARIO_LANE_COSTS
+  DEMAND_POINTS
+  LOGISTICS_MARKETS
+  CANADA_PROVINCE_MARKET_MAP
+  STUDY_CONTROL
+  PROVIDER_OPTIONS
+  SHIPMENT_PROFILES
+  OUTBOUND_RATE_CACHE
+  EXPECTED_PROVIDER_RESULTS
+}
+
+enum SupplyChainDesignMappingFieldRequirement {
+  REQUIRED
+  OPTIONAL
+}
+
+enum SupplyChainDesignMappingStatus {
+  DRAFT
+}
+
+enum SupplyChainDesignModelRunStatus {
+  SUCCESS
+  FAILED
+}
+
+enum SupplyChainDesignScenarioStatus {
+  SUCCESS
+  FAILED
+}
+
+enum SupplyChainDesignNetworkScenarioComparisonStatus {
+  EVALUATING
+  RATES_REQUIRED
+  RATING
+  READY_FOR_COST_EVALUATION
+  COMPLETE
+  INCOMPLETE
+  FAILED
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -552,42 +609,49 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships                             Membership[]
-  moduleAccess                            TenantModuleAccess[]
-  rolePolicies                            TenantRolePolicy[]
-  roleModuleAccess                        TenantRoleModuleAccess[]
-  integrationCredentials                  IntegrationCredential[]
-  auditLogs                               AuditLog[]
-  jobRuns                                 AutomationJobRun[]
-  companies                               Company[]
-  importRecords                           TradeMiningImportRecord[]
-  searchProfiles                          TradeMiningSearchProfile[]
-  tradeMiningScoringConfig                TradeMiningScoringConfig?
-  leadScoreSnapshots                      LeadScoreSnapshot[]
-  leadOutcomeEvents                       LeadOutcomeEvent[]
+  memberships                                    Membership[]
+  moduleAccess                                   TenantModuleAccess[]
+  rolePolicies                                   TenantRolePolicy[]
+  roleModuleAccess                               TenantRoleModuleAccess[]
+  integrationCredentials                         IntegrationCredential[]
+  auditLogs                                      AuditLog[]
+  jobRuns                                        AutomationJobRun[]
+  companies                                      Company[]
+  importRecords                                  TradeMiningImportRecord[]
+  searchProfiles                                 TradeMiningSearchProfile[]
+  tradeMiningScoringConfig                       TradeMiningScoringConfig?
+  leadScoreSnapshots                             LeadScoreSnapshot[]
+  leadOutcomeEvents                              LeadOutcomeEvent[]
   hunterAutomationPolicy                  HunterAutomationPolicy?
   hunterOpportunitySignals                HunterOpportunitySignal[]
   hunterProspectingDecisions              HunterProspectingDecision[]
   hunterOutreachSuppressions              HunterOutreachSuppression[]
-  contacts                                Contact[]
-  leads                                   Lead[]
-  contactOutreachDrafts                   ContactOutreachDraft[]
+  contacts                                       Contact[]
+  leads                                          Lead[]
+  contactOutreachDrafts                          ContactOutreachDraft[]
   outreachPlans                           OutreachPlan[]
   outreachSequenceSteps                   OutreachSequenceStep[]
-  apolloCompanyMatches                    ApolloCompanyMatch[]
-  ltlBatchQuoteLanes                      LtlBatchQuoteLane[]
-  assistantThreads                        AssistantChatThread[]
-  assistantMessages                       AssistantChatMessage[]
-  websiteInboundSubmissions               WebsiteInboundSubmission[]
-  websiteGrowthOpportunities              WebsiteGrowthOpportunity[]
-  websiteGrowthContentDrafts              WebsiteGrowthContentDraft[]
-  websiteGrowthDataImports                WebsiteGrowthDataImport[]
-  websiteGrowthMetrics                    WebsiteGrowthMetric[]
-  websiteGrowthBacklinks                  WebsiteGrowthBacklinkOpportunity[]
-  websiteGrowthOutreachMessages           WebsiteGrowthOutreachMessage[]
-  websiteGrowthSuppressions               WebsiteGrowthOutreachSuppression[]
-  creditChecks                            CreditCheck[]
-  assistantRuns                           AssistantRun[]
+  apolloCompanyMatches                           ApolloCompanyMatch[]
+  ltlBatchQuoteLanes                             LtlBatchQuoteLane[]
+  assistantThreads                               AssistantChatThread[]
+  assistantMessages                              AssistantChatMessage[]
+  websiteInboundSubmissions                      WebsiteInboundSubmission[]
+  supplyChainDesignProjects                      SupplyChainDesignProject[]
+  supplyChainDesignMappings                      SupplyChainDesignFileMapping[]
+  supplyChainDesignModelRuns                     SupplyChainDesignModelRun[]
+  supplyChainDesignScenarios                     SupplyChainDesignScenario[]
+  supplyChainDesignScreeningRuns                 SupplyChainDesignScreeningRun[]
+  supplyChainDesignLtlRatePreparationRuns        SupplyChainDesignLtlRatePreparationRun[]
+  supplyChainDesignNetworkScenarioComparisonRuns SupplyChainDesignNetworkScenarioComparisonRun[]
+  websiteGrowthOpportunities                     WebsiteGrowthOpportunity[]
+  websiteGrowthContentDrafts                     WebsiteGrowthContentDraft[]
+  websiteGrowthDataImports                       WebsiteGrowthDataImport[]
+  websiteGrowthMetrics                           WebsiteGrowthMetric[]
+  websiteGrowthBacklinks                         WebsiteGrowthBacklinkOpportunity[]
+  websiteGrowthOutreachMessages                  WebsiteGrowthOutreachMessage[]
+  websiteGrowthSuppressions                      WebsiteGrowthOutreachSuppression[]
+  creditChecks                                   CreditCheck[]
+  assistantRuns                                  AssistantRun[]
   operatingCompanies                      OperatingCompany[]
   companyOperatingRelationships           CompanyOperatingRelationship[]
   customerSourceAccounts                  CustomerSourceAccount[]
@@ -599,60 +663,61 @@ model Tenant {
   customerRevenueLines                    CustomerRevenueLine[]
   customerMonthlyFinancials               CustomerMonthlyFinancial[]
   customerIntelligenceEnablements         CustomerIntelligenceEnablement[]
-  assistantRetrievedSources               AssistantRetrievedSource[]
-  assistantKnowledgeDocuments             AssistantKnowledgeDocument[]
-  assistantKnowledgeChunks                AssistantKnowledgeChunk[]
-  assistantMemories                       AssistantMemory[]
-  assistantMailboxSyncStates              AssistantMailboxSyncState[]
-  assistantAutomations                    AssistantAutomation[]
-  assistantAutomationRuns                 AssistantAutomationRun[]
-  workflowArtifacts                       WorkflowArtifact[]
-  workflowArtifactChunks                  WorkflowArtifactChunk[]
-  operationalFeedback                     OperationalFeedback[]
-  approvedOperationalLessons              ApprovedOperationalLesson[]
-  developmentSuggestions                  DevelopmentSuggestion[]
+  assistantRetrievedSources                      AssistantRetrievedSource[]
+  assistantKnowledgeDocuments                    AssistantKnowledgeDocument[]
+  assistantKnowledgeChunks                       AssistantKnowledgeChunk[]
+  assistantMemories                              AssistantMemory[]
+  assistantMailboxSyncStates                     AssistantMailboxSyncState[]
+  assistantAutomations                           AssistantAutomation[]
+  assistantAutomationRuns                        AssistantAutomationRun[]
+  workflowArtifacts                              WorkflowArtifact[]
+  workflowArtifactChunks                         WorkflowArtifactChunk[]
+  operationalFeedback                            OperationalFeedback[]
+  approvedOperationalLessons                     ApprovedOperationalLesson[]
+  developmentSuggestions                         DevelopmentSuggestion[]
   codexReviewRuns                         CodexReviewRun[]
-  shipmentDocumentRuns                    ShipmentDocumentRun[]
-  shipmentCarrierManifestRuns             ShipmentCarrierManifestRun[]
-  shipmentCarrierManifestAttachments      ShipmentCarrierManifestAttachment[]
-  teamshipReviewRuns                      TeamshipReviewRun[]
-  teamshipReviewOrders                    TeamshipReviewOrder[]
-  teamshipDailySyncRuns                   TeamshipDailySyncRun[]
-  teamshipSyncedOrders                    TeamshipSyncedOrder[]
-  teamshipUpdateJobs                      TeamshipUpdateJob[]
-  teamshipUpdateOrders                    TeamshipUpdateOrder[]
-  teamshipBrowserReadJobs                 TeamshipBrowserReadJob[]
+  shipmentDocumentRuns                           ShipmentDocumentRun[]
+  shipmentCarrierManifestRuns                    ShipmentCarrierManifestRun[]
+  shipmentCarrierManifestAttachments             ShipmentCarrierManifestAttachment[]
+  teamshipReviewRuns                             TeamshipReviewRun[]
+  teamshipReviewOrders                           TeamshipReviewOrder[]
+  teamshipDailySyncRuns                          TeamshipDailySyncRun[]
+  teamshipSyncedOrders                           TeamshipSyncedOrder[]
+  teamshipUpdateJobs                             TeamshipUpdateJob[]
+  teamshipUpdateOrders                           TeamshipUpdateOrder[]
+  teamshipBrowserReadJobs                        TeamshipBrowserReadJob[]
   teamshipPrintBatches                    TeamshipPrintBatch[]
-  teamshipPrintJobs                       TeamshipPrintJob[]
-  openClawUnresolvedTurns                 OpenClawUnresolvedTurn[]
-  garlandProductDimensionObservations     GarlandProductDimensionObservation[]
-  garlandSourceEmails                     GarlandSourceEmail[]
-  garlandSourceAttachments                GarlandSourceAttachment[]
-  garlandEmailSyncRuns                    GarlandEmailSyncRun[]
-  cashflowCustomers                       CashflowCustomer[]
-  cashflowCustomerAliases                 CashflowCustomerAlias[]
-  cashflowFiles                           CashflowFile[]
-  cashflowCustomerInvoices                CashflowCustomerInvoice[]
-  cashflowVendorBills                     CashflowVendorBill[]
-  cashflowSnapshots                       CashflowCustomerSnapshot[]
-  cashflowAlerts                          CashflowAlert[]
-  cashflowFollowUps                       CashflowFollowUp[]
-  cashflowAccountingLines                 CashflowAccountingLine[]
-  cashflowSettings                        CashflowSettings?
-  oceanFreightAgents                      OceanFreightAgent[]
-  oceanFreightAgentBranches               OceanFreightAgentBranch[]
-  oceanFreightAgentContacts               OceanFreightAgentContact[]
-  oceanFreightSourceEmails                OceanFreightSourceEmail[]
-  oceanFreightSourceAttachments           OceanFreightSourceAttachment[]
-  oceanFreightRateCandidates              OceanFreightRateCandidate[]
-  oceanFreightRates                       OceanFreightRate[]
-  invoiceAutomationDocuments              InvoiceAutomationDocument[]
-  invoiceAutomationBatches                InvoiceAutomationBatch[]
-  invoiceAutomationInvoices               InvoiceAutomationInvoice[]
-  invoiceAutomationQuickBooksEntities     InvoiceAutomationQuickBooksEntity[]
-  invoiceAutomationQuickBooksTransactions InvoiceAutomationQuickBooksTransaction[]
-  invoiceAutomationEntityAliases          InvoiceAutomationEntityAlias[]
-  invoiceAutomationCorrectionMemories     InvoiceAutomationCorrectionMemory[]
+  teamshipPrintJobs                              TeamshipPrintJob[]
+  openClawUnresolvedTurns                        OpenClawUnresolvedTurn[]
+  garlandProductDimensionObservations            GarlandProductDimensionObservation[]
+  garlandSourceEmails                            GarlandSourceEmail[]
+  garlandSourceAttachments                       GarlandSourceAttachment[]
+  garlandEmailSyncRuns                           GarlandEmailSyncRun[]
+  cashflowCustomers                              CashflowCustomer[]
+  cashflowCustomerAliases                        CashflowCustomerAlias[]
+  cashflowFiles                                  CashflowFile[]
+  cashflowCustomerInvoices                       CashflowCustomerInvoice[]
+  cashflowVendorBills                            CashflowVendorBill[]
+  cashflowSnapshots                              CashflowCustomerSnapshot[]
+  cashflowAlerts                                 CashflowAlert[]
+  cashflowFollowUps                              CashflowFollowUp[]
+  cashflowAccountingLines                        CashflowAccountingLine[]
+  cashflowSettings                               CashflowSettings?
+  oceanFreightAgents                             OceanFreightAgent[]
+  oceanFreightAgentBranches                      OceanFreightAgentBranch[]
+  oceanFreightAgentContacts                      OceanFreightAgentContact[]
+  oceanFreightSourceEmails                       OceanFreightSourceEmail[]
+  oceanFreightSourceAttachments                  OceanFreightSourceAttachment[]
+  oceanFreightRateCandidates                     OceanFreightRateCandidate[]
+  oceanFreightRates                              OceanFreightRate[]
+  invoiceAutomationDocuments                     InvoiceAutomationDocument[]
+  invoiceAutomationBatches                       InvoiceAutomationBatch[]
+  invoiceAutomationInvoices                      InvoiceAutomationInvoice[]
+  invoiceAutomationQuickBooksEntities            InvoiceAutomationQuickBooksEntity[]
+  invoiceAutomationQuickBooksTransactions        InvoiceAutomationQuickBooksTransaction[]
+  invoiceAutomationEntityAliases                 InvoiceAutomationEntityAlias[]
+  invoiceAutomationCorrectionMemories            InvoiceAutomationCorrectionMemory[]
+  supplyChainDesignFiles                         SupplyChainDesignProjectFile[]
 }
 
 model User {
@@ -691,6 +756,14 @@ model User {
   teamshipPrintBatchesApproved       TeamshipPrintBatch[]                @relation("TeamshipPrintBatchApprovedBy")
   teamshipPrintJobsRequested         TeamshipPrintJob[]                  @relation("TeamshipPrintJobRequestedBy")
   teamshipPrintJobsApproved          TeamshipPrintJob[]                  @relation("TeamshipPrintJobApprovedBy")
+  supplyChainDesignProjectsCreated   SupplyChainDesignProject[]          @relation("SupplyChainDesignProjectCreatedBy")
+  supplyChainDesignFilesUploaded     SupplyChainDesignProjectFile[]      @relation("SupplyChainDesignProjectFileUploadedBy")
+  supplyChainDesignMappingsCreated   SupplyChainDesignFileMapping[]      @relation("SupplyChainDesignFileMappingCreatedBy")
+  supplyChainDesignModelRunsCreated  SupplyChainDesignModelRun[]         @relation("SupplyChainDesignModelRunCreatedBy")
+  supplyChainDesignScenariosCreated  SupplyChainDesignScenario[]         @relation("SupplyChainDesignScenarioCreatedBy")
+  supplyChainDesignScreeningRunsCreated SupplyChainDesignScreeningRun[]   @relation("SupplyChainDesignScreeningRunCreatedBy")
+  supplyChainDesignLtlRatePreparationRunsCreated SupplyChainDesignLtlRatePreparationRun[] @relation("SupplyChainDesignLtlRatePreparationRunCreatedBy")
+  supplyChainDesignNetworkScenarioComparisonRunsCreated SupplyChainDesignNetworkScenarioComparisonRun[] @relation("SupplyChainDesignNetworkScenarioComparisonRunCreatedBy")
 
   @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }
@@ -831,6 +904,200 @@ model WebsiteInboundSubmission {
   @@index([tenantId, createdAt])
   @@index([tenantId, status])
   @@index([tenantId, formType])
+}
+
+model SupplyChainDesignProject {
+  id              String                         @id @default(cuid())
+  tenantId        String
+  name            String
+  description     String?
+  status          SupplyChainDesignProjectStatus @default(DRAFT)
+  createdByUserId String?
+  createdAt       DateTime                       @default(now())
+  updatedAt       DateTime                       @updatedAt
+
+  tenant                        Tenant                                          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy                     User?                                           @relation("SupplyChainDesignProjectCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+  files                         SupplyChainDesignProjectFile[]
+  mappings                      SupplyChainDesignFileMapping[]
+  modelRuns                     SupplyChainDesignModelRun[]
+  scenarios                     SupplyChainDesignScenario[]
+  screeningRuns                 SupplyChainDesignScreeningRun[]
+  ltlRatePreparationRuns        SupplyChainDesignLtlRatePreparationRun[]
+  networkScenarioComparisonRuns SupplyChainDesignNetworkScenarioComparisonRun[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignProjectFile {
+  id               String                        @id @default(cuid())
+  tenantId         String
+  projectId        String
+  originalFileName String
+  contentType      String?
+  sizeBytes        Int
+  contentHash      String
+  fileBytes        Bytes
+  rowCount         Int
+  detectedHeaders  Json
+  previewRows      Json
+  status           SupplyChainDesignUploadStatus @default(READY)
+  uploadedByUserId String?
+  createdAt        DateTime                      @default(now())
+
+  tenant     Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project    SupplyChainDesignProject       @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  uploadedBy User?                          @relation("SupplyChainDesignProjectFileUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: NoAction)
+  mappings   SupplyChainDesignFileMapping[]
+
+  @@unique([tenantId, projectId, contentHash])
+  @@unique([tenantId, id])
+  @@index([tenantId, projectId, createdAt])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignFileMapping {
+  id              String                         @id @default(cuid())
+  tenantId        String
+  projectId       String
+  fileId          String
+  tableType       SupplyChainDesignTableType
+  fieldMappings   Json
+  status          SupplyChainDesignMappingStatus @default(DRAFT)
+  createdByUserId String?
+  createdAt       DateTime                       @default(now())
+  updatedAt       DateTime                       @updatedAt
+
+  tenant    Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   SupplyChainDesignProject     @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  file      SupplyChainDesignProjectFile @relation(fields: [tenantId, fileId], references: [tenantId, id], onDelete: Cascade)
+  createdBy User?                        @relation("SupplyChainDesignFileMappingCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, fileId])
+  @@unique([tenantId, id])
+  @@index([tenantId, projectId])
+  @@index([tenantId, tableType])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignModelRun {
+  id              String                          @id @default(cuid())
+  tenantId        String
+  projectId       String
+  status          SupplyChainDesignModelRunStatus
+  inputReferences Json
+  resultSummary   Json?
+  errorMessage    String?
+  createdByUserId String?
+  createdAt       DateTime                        @default(now())
+
+  tenant               Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project              SupplyChainDesignProject    @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  createdBy            User?                       @relation("SupplyChainDesignModelRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+  baselineForScenarios SupplyChainDesignScenario[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, projectId, createdAt])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignScenario {
+  id                 String                          @id @default(cuid())
+  tenantId           String
+  projectId          String
+  name               String
+  status             SupplyChainDesignScenarioStatus
+  inputReferences    Json
+  selectedFacilities Json
+  baselineRunId      String
+  resultSummary      Json?
+  errorMessage       String?
+  createdByUserId    String?
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
+
+  tenant    Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   SupplyChainDesignProject  @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  baseline  SupplyChainDesignModelRun @relation(fields: [tenantId, baselineRunId], references: [tenantId, id], onDelete: NoAction)
+  createdBy User?                     @relation("SupplyChainDesignScenarioCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, projectId, createdAt])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignScreeningRun {
+  id              String                          @id @default(cuid())
+  tenantId        String
+  projectId       String
+  status          SupplyChainDesignModelRunStatus
+  inputReferences Json
+  resultSummary   Json?
+  errorMessage    String?
+  createdByUserId String?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+
+  tenant    Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   SupplyChainDesignProject @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  createdBy User?                    @relation("SupplyChainDesignScreeningRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, projectId, createdAt])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignLtlRatePreparationRun {
+  id              String                          @id @default(cuid())
+  tenantId        String
+  projectId       String
+  status          SupplyChainDesignModelRunStatus
+  inputReferences Json
+  resultSummary   Json?
+  errorMessage    String?
+  createdByUserId String?
+  createdAt       DateTime                        @default(now())
+  updatedAt       DateTime                        @updatedAt
+
+  tenant    Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   SupplyChainDesignProject @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  createdBy User?                    @relation("SupplyChainDesignLtlRatePreparationRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, projectId, createdAt])
+  @@index([tenantId, status])
+}
+
+model SupplyChainDesignNetworkScenarioComparisonRun {
+  id                        String                                           @id @default(cuid())
+  tenantId                  String
+  projectId                 String
+  status                    SupplyChainDesignNetworkScenarioComparisonStatus
+  calculationVersion        String
+  comparisonFingerprint     String
+  transportationFingerprint String
+  scenarioAName             String
+  scenarioBName             String
+  inputReferences           Json
+  scenarioInputs            Json
+  ratingEvidence            Json
+  fxInput                   Json?
+  resultSummary             Json?
+  errorMessage              String?
+  createdByUserId           String?
+  createdAt                 DateTime                                         @default(now())
+  updatedAt                 DateTime                                         @updatedAt
+
+  tenant    Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project   SupplyChainDesignProject @relation(fields: [tenantId, projectId], references: [tenantId, id], onDelete: Cascade)
+  createdBy User?                    @relation("SupplyChainDesignNetworkScenarioComparisonRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, id], map: "scds_nsc_run_tenant_id_key")
+  @@index([tenantId, projectId, createdAt], map: "scds_nsc_run_project_created_idx")
+  @@index([tenantId, status], map: "scds_nsc_run_status_idx")
+  @@index([tenantId, projectId, comparisonFingerprint], map: "scds_nsc_run_project_fp_idx")
 }
 
 model WebsiteGrowthOpportunity {
@@ -1686,18 +1953,22 @@ model AutomationJobRun {
 }
 
 model LtlBatchQuoteLane {
-  id                String   @id @default(cuid())
-  tenantId          String
-  jobRunId          String
-  laneIndex         Int
-  customerReference String
-  quoteCount        Int      @default(0)
-  errorCount        Int      @default(0)
-  requestJson       Json
-  quotesJson        Json?
-  errorsJson        Json?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  tenantId           String
+  jobRunId           String
+  laneIndex          Int
+  customerReference  String
+  quoteCount         Int      @default(0)
+  errorCount         Int      @default(0)
+  requestJson        Json
+  quotesJson         Json?
+  errorsJson         Json?
+  selectedQuoteJson  Json?
+  selectedRateSource String?
+  manualRateJson     Json?
+  exclusionJson      Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   jobRun AutomationJobRun @relation(fields: [jobRunId], references: [id], onDelete: Cascade)

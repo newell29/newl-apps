@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "NEXT_DIST_DIR=.next-dev next dev",
+    "dev": "cross-env NEXT_DIST_DIR=.next-dev next dev",
     "dev:fresh": "npm run sync:main && npm run dev",
     "ai:feature": "node --import tsx tools/ai-workflow/launcher-entry.mts",
     "ai:feature:ui": "node --import tsx tools/ai-workflow/ui-entry.mts",
@@ -66,6 +66,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
     "eslint": "^8.57.1",
     "eslint-config-next": "^15.0.3",
     "opencode-ai": "1.18.13",

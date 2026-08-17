@@ -23,7 +23,19 @@ function isCarrier(
 }
 
 export async function getLtlRatePortalShell(tenant: TenantContext) {
-  const [moduleAccess, credentials, localAccountNames, recentBulkJobs] = await Promise.all([
+  const [accountState, recentBulkJobs] = await Promise.all([
+    getLtlRatePortalAccounts(tenant),
+    getRecentLtlBulkQuoteJobs(tenant)
+  ]);
+
+  return {
+    ...accountState,
+    recentBulkJobs
+  };
+}
+
+export async function getLtlRatePortalAccounts(tenant: TenantContext) {
+  const [moduleAccess, credentials, localAccountNames] = await Promise.all([
     prisma.tenantModuleAccess.findFirst({
       where: {
         tenantId: tenant.tenantId,
@@ -40,8 +52,7 @@ export async function getLtlRatePortalShell(tenant: TenantContext) {
       }),
       orderBy: [{ status: "asc" }, { name: "asc" }]
     }),
-    getLocalSevenLAccountNames(),
-    getRecentLtlBulkQuoteJobs(tenant)
+    getLocalSevenLAccountNames()
   ]);
 
   const accounts = credentials
@@ -51,8 +62,7 @@ export async function getLtlRatePortalShell(tenant: TenantContext) {
   return {
     moduleEnabled: Boolean(moduleAccess),
     accounts,
-    hasActiveAccounts: accounts.some((account) => account.status === "ACTIVE"),
-    recentBulkJobs
+    hasActiveAccounts: accounts.some((account) => account.status === "ACTIVE")
   };
 }
 
@@ -123,12 +133,12 @@ function mapSevenLAccount(credential: {
           }
 
           const item = carrier as Record<string, unknown>;
-          const carrierHash = typeof item.carrierHash === "string" ? item.carrierHash : null;
-          const name = typeof item.name === "string" ? item.name : null;
-          const code = typeof item.code === "string" ? item.code : null;
-          const scac = typeof item.scac === "string" ? item.scac : null;
+          const carrierHash = typeof item.carrierHash === "string" ? item.carrierHash.trim() : null;
+          const name = typeof item.name === "string" ? item.name.trim() : "";
+          const code = typeof item.code === "string" ? item.code.trim() : "";
+          const scac = typeof item.scac === "string" ? item.scac.trim() : "";
 
-          if (!carrierHash || !name || !code || !scac) {
+          if (!carrierHash) {
             return null;
           }
 

@@ -1,0 +1,106 @@
+Record Type,Shipment / Order Reference,Shipment Date,Origin Facility ID,Destination Customer / Group,Destination ZIP / Postal Code,Destination City / Region,Destination Country,State/Province,Shipments,Pallets,Units,Weight,Weight Unit,Length,Width,Height,Dimension Unit,Hazardous Materials,Transportation Mode,Transportation Cost,Transit Days,Service Level,SKU / Item,Currency
+Aggregated Activity,LS-NE-001,,LS-SAMPLE,New York NY,10001,New York NY,US,NY,38,18,420,7200,lb,,,,,,Parcel,4100,,,,USD
+Aggregated Activity,LS-NE-002,,LS-SAMPLE,Hoboken NJ,07030,Hoboken NJ,US,NJ,22,14,260,5600,lb,,,,,,LTL,2800,,,,USD
+Individual Shipment,LS-NE-003,,LS-SAMPLE,Boston MA,02108,Boston MA,US,MA,1,1,12,420,lb,,,,,,Parcel,260,,,,USD
+Aggregated Activity,LS-NE-004,,LS-SAMPLE,Philadelphia PA,19103,Philadelphia PA,US,PA,16,8,160,3100,lb,,,,,,LTL,1450,,,,USD
+Individual Shipment,LS-NE-005,,LS-SAMPLE,Albany NY,12207,Albany NY,US,NY,1,1,10,360,lb,,,,,,Other,190,,,,USD
+Aggregated Activity,LS-SE-001,,LS-SAMPLE,Atlanta GA,30303,Atlanta GA,US,GA,54,28,600,11600,lb,,,,,,LTL,5300,,,,USD
+Individual Shipment,LS-SE-002,,LS-SAMPLE,Orlando FL,32801,Orlando FL,US,FL,1,1,9,300,lb,,,,,,Parcel,210,,,,USD
+Aggregated Activity,LS-SE-003,,LS-SAMPLE,Charlotte NC,28202,Charlotte NC,US,NC,19,10,210,4200,lb,,,,,,LTL,1650,,,,USD
+Individual Shipment,LS-SE-004,,LS-SAMPLE,Nashville TN,37219,Nashville TN,US,TN,1,1,14,520,lb,,,,,,Parcel,240,,,,USD
+Aggregated Activity,LS-SE-005,,LS-SAMPLE,Miami FL,33101,Miami FL,US,FL,12,7,120,2800,lb,,,,,,Other,1500,,,,USD
+Aggregated Activity,LS-MW-001,,LS-SAMPLE,Chicago IL,60601,Chicago IL,US,IL,30,34,280,22000,lb,,,,,,LTL,3900,,,,USD
+Aggregated Activity,LS-MW-002,,LS-SAMPLE,Indianapolis IN,46204,Indianapolis IN,US,IN,14,18,130,12800,lb,,,,,,LTL,1700,,,,USD
+Individual Shipment,LS-MW-003,,LS-SAMPLE,Columbus OH,43215,Columbus OH,US,OH,1,2,20,1100,lb,,,,,,Parcel,310,,,,USD
+Aggregated Activity,LS-MW-004,,LS-SAMPLE,Detroit MI,48226,Detroit MI,US,MI,11,15,105,9900,lb,,,,,,LTL,1450,,,,USD
+Individual Shipment,LS-MW-005,,LS-SAMPLE,Minneapolis MN,55401,Minneapolis MN,US,MN,1,1,8,500,lb,,,,,,Other,230,,,,USD
+Aggregated Activity,LS-TX-001,,LS-SAMPLE,Dallas TX,75201,Dallas TX,US,TX,42,22,460,9600,lb,,,,,,LTL,3600,,,,USD
+Aggregated Activity,LS-TX-002,,LS-SAMPLE,Houston TX,77002,Houston TX,US,TX,24,16,240,7000,lb,,,,,,LTL,2450,,,,USD
+Individual Shipment,LS-TX-003,,LS-SAMPLE,Austin TX,78701,Austin TX,US,TX,1,1,8,260,lb,,,,,,Parcel,160,,,,USD
+Aggregated Activity,LS-TX-004,,LS-SAMPLE,San Antonio TX,78205,San Antonio TX,US,TX,10,6,100,2500,lb,,,,,,Other,980,,,,USD
+Individual Shipment,LS-TX-005,,LS-SAMPLE,El Paso TX,79901,El Paso TX,US,TX,1,1,10,400,lb,,,,,,Parcel,280,,,,USD
+Aggregated Activity,LS-WC-001,,LS-SAMPLE,Los Angeles CA,90012,Los Angeles CA,US,CA,18,42,190,26500,lb,,,,,,LTL,5200,,,,USD
+Aggregated Activity,LS-WC-002,,LS-SAMPLE,Riverside CA,92501,Riverside CA,US,CA,20,55,210,34500,lb,,,,,,LTL,6100,,,,USD
+Individual Shipment,LS-WC-003,,LS-SAMPLE,San Francisco CA,94102,San Francisco CA,US,CA,1,1,9,380,lb,,,,,,Parcel,320,,,,USD
+Aggregated Activity,LS-WC-004,,LS-SAMPLE,Sacramento CA,95814,Sacramento CA,US,CA,9,16,90,9800,lb,,,,,,LTL,1550,,,,USD
+Individual Shipment,LS-WC-005,,LS-SAMPLE,Las Vegas NV,89101,Las Vegas NV,US,NV,1,1,7,320,lb,,,,,,Other,240,,,,USD
+Aggregated Activity,LS-PNW-001,,LS-SAMPLE,Seattle WA,98101,Seattle WA,US,WA,13,9,150,4200,lb,,,,,,Parcel,1800,,,,USD
+Aggregated Activity,LS-PNW-002,,LS-SAMPLE,Portland OR,97204,Portland OR,US,OR,10,8,110,3600,lb,,,,,,LTL,1350,,,,USD
+Individual Shipment,LS-PNW-003,,LS-SAMPLE,Spokane WA,99201,Spokane WA,US,WA,1,1,11,450,lb,,,,,,Parcel,260,,,,USD
+Aggregated Activity,LS-MTN-001,,LS-SAMPLE,Denver CO,80202,Denver CO,US,CO,15,20,160,14500,lb,,,,,,LTL,2400,,,,USD
+Individual Shipment,LS-MTN-002,,LS-SAMPLE,Salt Lake City UT,84101,Salt Lake City UT,US,UT,1,1,12,620,lb,,,,,,Parcel,340,,,,USD
+Aggregated Activity,LS-MTN-003,,LS-SAMPLE,Phoenix AZ,85004,Phoenix AZ,US,AZ,12,10,140,5000,lb,,,,,,Other,1900,,,,USD
+Aggregated Activity,LS-CA-ON-001,,LS-SAMPLE,Toronto ON,M5V,Toronto ON,CA,ON,34,19,360,8200,lb,,,,,,Parcel,4100,,,,CAD
+Aggregated Activity,LS-CA-ON-002,,LS-SAMPLE,Mississauga ON,L4W,Mississauga ON,CA,ON,28,18,300,7900,lb,,,,,,LTL,3500,,,,CAD
+Individual Shipment,LS-CA-ON-003,,LS-SAMPLE,Ottawa ON,K1P,Ottawa ON,CA,ON,1,1,8,380,lb,,,,,,Parcel,230,,,,CAD
+Aggregated Activity,LS-CA-QC-001,,LS-SAMPLE,Montreal QC,H3B,Montreal QC,CA,QC,22,12,240,5200,lb,,,,,,LTL,2900,,,,CAD
+Individual Shipment,LS-CA-QC-002,,LS-SAMPLE,Quebec City QC,G1R,Quebec City QC,CA,QC,1,1,7,300,lb,,,,,,Parcel,190,,,,CAD
+Aggregated Activity,LS-CA-WEST-001,,LS-SAMPLE,Vancouver BC,V6B,Vancouver BC,CA,BC,16,11,180,4900,lb,,,,,,LTL,2600,,,,CAD
+Aggregated Activity,LS-CA-WEST-002,,LS-SAMPLE,Calgary AB,T2P,Calgary AB,CA,AB,14,12,160,5600,lb,,,,,,LTL,2300,,,,CAD
+Individual Shipment,LS-CA-WEST-003,,LS-SAMPLE,Edmonton AB,T5J,Edmonton AB,CA,AB,1,1,9,410,lb,,,,,,Parcel,210,,,,CAD
+Aggregated Activity,LS-CA-ATL-001,,LS-SAMPLE,Halifax NS,B3J,Halifax NS,CA,NS,7,4,70,1800,lb,,,,,,Other,1200,,,,CAD
+Individual Shipment,LS-OUT-001,,LS-SAMPLE,Anchorage AK,99501,Anchorage AK,US,AK,1,1,6,500,lb,,,,,,Parcel,700,,,,USD
+Individual Shipment,LS-OUT-002,,LS-SAMPLE,Honolulu HI,96813,Honolulu HI,US,HI,1,1,5,420,lb,,,,,,Parcel,850,,,,USD
+Individual Shipment,LS-OUT-003,,LS-SAMPLE,Adjuntas PR,00601,Adjuntas PR,US,PR,1,1,4,300,lb,,,,,,Other,650,,,,USD
+Individual Shipment,LS-OUT-004,,LS-SAMPLE,Winnipeg MB,R2C,Winnipeg MB,CA,MB,1,1,7,360,lb,,,,,,Parcel,260,,,,CAD
+Aggregated Activity,LS-NE-006,,LS-SAMPLE,New York NY Repeat,10001,New York NY Repeat,US,NY,12,6,130,2600,lb,,,,,,Parcel,1150,,,,USD
+Aggregated Activity,LS-SE-006,,LS-SAMPLE,Atlanta GA Repeat,30303,Atlanta GA Repeat,US,GA,18,9,190,3600,lb,,,,,,Parcel,1500,,,,USD
+Aggregated Activity,LS-MW-006,,LS-SAMPLE,Chicago IL Repeat,60601,Chicago IL Repeat,US,IL,15,20,140,12800,lb,,,,,,LTL,1800,,,,USD
+Aggregated Activity,LS-TX-006,,LS-SAMPLE,Dallas TX Repeat,75201,Dallas TX Repeat,US,TX,16,8,170,3200,lb,,,,,,Parcel,1400,,,,USD
+Aggregated Activity,LS-WC-006,,LS-SAMPLE,Riverside CA Repeat,92501,Riverside CA Repeat,US,CA,11,31,120,19600,lb,,,,,,LTL,3400,,,,USD
+Individual Shipment,LS-PNW-004,,LS-SAMPLE,Seattle WA Repeat,98101,Seattle WA Repeat,US,WA,1,1,6,280,lb,,,,,,Parcel,160,,,,USD
+Aggregated Activity,LS-CA-ON-004,,LS-SAMPLE,Toronto ON Repeat,M5V,Toronto ON Repeat,CA,ON,11,6,120,2600,lb,,,,,,Parcel,1300,,,,CAD
+Aggregated Activity,LS-CA-QC-003,,LS-SAMPLE,Montreal QC Repeat,H3B,Montreal QC Repeat,CA,QC,9,5,95,2100,lb,,,,,,Parcel,1100,,,,CAD
+Individual Shipment,LS-LOW-001,,LS-SAMPLE,Pittsburgh PA,15222,Pittsburgh PA,US,PA,1,1,4,200,lb,,,,,,Parcel,120,,,,USD
+Individual Shipment,LS-LOW-002,,LS-SAMPLE,St Louis MO,63101,St Louis MO,US,MO,1,1,5,240,lb,,,,,,Parcel,130,,,,USD
+Individual Shipment,LS-LOW-003,,LS-SAMPLE,New Orleans LA,70112,New Orleans LA,US,LA,1,1,4,220,lb,,,,,,Other,140,,,,USD
+Individual Shipment,LS-LOW-004,,LS-SAMPLE,Albuquerque NM,87102,Albuquerque NM,US,NM,1,1,5,260,lb,,,,,,Parcel,150,,,,USD
+Individual Shipment,LS-LOW-005,,LS-SAMPLE,Boise ID,83702,Boise ID,US,ID,1,1,5,250,lb,,,,,,Parcel,145,,,,USD
+Individual Shipment,LS-LOW-006,,LS-SAMPLE,Moncton NB,E1C,Moncton NB,CA,NB,1,1,4,220,lb,,,,,,Parcel,160,,,,CAD
+Individual Shipment,LS-LOW-007,,LS-SAMPLE,Saskatoon SK,S7K,Saskatoon SK,CA,SK,1,1,4,230,lb,,,,,,Other,170,,,,CAD
+Individual Shipment,LS-LOW-008,,LS-SAMPLE,Charlottetown PE,C1A,Charlottetown PE,CA,PE,1,1,3,200,lb,,,,,,Parcel,150,,,,CAD
+Aggregated Activity,LS-NE-006,,LS-SAMPLE,New York NY Expansion,10001,New York NY Expansion,US,NY,24,12,240,4800,lb,,,,,,Parcel,2600,,,,USD
+Aggregated Activity,LS-NE-007,,LS-SAMPLE,Boston MA Expansion,02108,Boston MA Expansion,US,MA,18,9,180,3900,lb,,,,,,LTL,2100,,,,USD
+Aggregated Activity,LS-NE-008,,LS-SAMPLE,Philadelphia PA Expansion,19103,Philadelphia PA Expansion,US,PA,14,7,140,2800,lb,,,,,,Parcel,1350,,,,USD
+Aggregated Activity,LS-SE-008,,LS-SAMPLE,Atlanta GA Expansion,30303,Atlanta GA Expansion,US,GA,30,15,330,6600,lb,,,,,,LTL,3100,,,,USD
+Aggregated Activity,LS-SE-009,,LS-SAMPLE,Orlando FL Expansion,32801,Orlando FL Expansion,US,FL,20,10,210,4200,lb,,,,,,Parcel,2200,,,,USD
+Aggregated Activity,LS-SE-010,,LS-SAMPLE,Miami FL Expansion,33101,Miami FL Expansion,US,FL,16,8,160,3500,lb,,,,,,Parcel,1850,,,,USD
+Aggregated Activity,LS-MW-008,,LS-SAMPLE,Chicago IL Expansion,60601,Chicago IL Expansion,US,IL,28,14,310,6200,lb,,,,,,LTL,2900,,,,USD
+Aggregated Activity,LS-MW-009,,LS-SAMPLE,Detroit MI Expansion,48226,Detroit MI Expansion,US,MI,15,8,155,3200,lb,,,,,,LTL,1600,,,,USD
+Aggregated Activity,LS-MW-010,,LS-SAMPLE,Minneapolis MN Expansion,55401,Minneapolis MN Expansion,US,MN,13,7,130,3000,lb,,,,,,Parcel,1450,,,,USD
+Aggregated Activity,LS-TX-007,,LS-SAMPLE,Dallas TX Expansion,75201,Dallas TX Expansion,US,TX,26,13,285,5700,lb,,,,,,LTL,2750,,,,USD
+Aggregated Activity,LS-TX-008,,LS-SAMPLE,Houston TX Expansion,77002,Houston TX Expansion,US,TX,22,11,250,5000,lb,,,,,,LTL,2350,,,,USD
+Aggregated Activity,LS-TX-009,,LS-SAMPLE,San Antonio TX Expansion,78205,San Antonio TX Expansion,US,TX,12,6,125,2500,lb,,,,,,Parcel,1250,,,,USD
+Aggregated Activity,LS-W-008,,LS-SAMPLE,Los Angeles CA Expansion,90012,Los Angeles CA Expansion,US,CA,34,17,380,7600,lb,,,,,,LTL,3900,,,,USD
+Aggregated Activity,LS-W-009,,LS-SAMPLE,San Francisco CA Expansion,94105,San Francisco CA Expansion,US,CA,18,9,210,4200,lb,,,,,,Parcel,2300,,,,USD
+Aggregated Activity,LS-W-010,,LS-SAMPLE,Seattle WA Expansion,98101,Seattle WA Expansion,US,WA,16,8,180,3600,lb,,,,,,LTL,2050,,,,USD
+Aggregated Activity,LS-MTN-006,,LS-SAMPLE,Denver CO Expansion,80202,Denver CO Expansion,US,CO,20,10,215,4300,lb,,,,,,LTL,2150,,,,USD
+Aggregated Activity,LS-MTN-007,,LS-SAMPLE,Salt Lake City UT Expansion,84101,Salt Lake City UT Expansion,US,UT,11,6,120,2400,lb,,,,,,Parcel,1200,,,,USD
+Aggregated Activity,LS-MTN-008,,LS-SAMPLE,Phoenix AZ Expansion,85004,Phoenix AZ Expansion,US,AZ,17,9,185,3700,lb,,,,,,Parcel,1900,,,,USD
+Aggregated Activity,LS-CA-ON-005,,LS-SAMPLE,Toronto ON Expansion,M5V,Toronto ON Expansion,CA,ON,19,10,215,4400,lb,,,,,,LTL,2250,,,,CAD
+Aggregated Activity,LS-CA-ON-006,,LS-SAMPLE,Ottawa ON Expansion,K1P,Ottawa ON Expansion,CA,ON,8,4,86,1800,lb,,,,,,Parcel,900,,,,CAD
+Aggregated Activity,LS-CA-QC-004,,LS-SAMPLE,Montreal QC Expansion,H3B,Montreal QC Expansion,CA,QC,15,8,170,3500,lb,,,,,,LTL,1750,,,,CAD
+Aggregated Activity,LS-CA-QC-005,,LS-SAMPLE,Quebec City QC Expansion,G1R,Quebec City QC Expansion,CA,QC,7,4,78,1600,lb,,,,,,Parcel,820,,,,CAD
+Aggregated Activity,LS-CA-W-005,,LS-SAMPLE,Vancouver BC Expansion,V6B,Vancouver BC Expansion,CA,BC,14,7,160,3300,lb,,,,,,LTL,1700,,,,CAD
+Aggregated Activity,LS-CA-W-006,,LS-SAMPLE,Calgary AB Expansion,T2P,Calgary AB Expansion,CA,AB,12,6,140,2800,lb,,,,,,Parcel,1400,,,,CAD
+Aggregated Activity,LS-CA-W-007,,LS-SAMPLE,Winnipeg MB Expansion,R3C,Winnipeg MB Expansion,CA,MB,9,5,100,2100,lb,,,,,,Parcel,1050,,,,CAD
+Individual Shipment,LS-LOW-009,,LS-SAMPLE,Pittsburgh PA Repeat,15222,Pittsburgh PA Repeat,US,PA,1,1,4,210,lb,,,,,,Parcel,125,,,,USD
+Individual Shipment,LS-LOW-010,,LS-SAMPLE,St Louis MO Repeat,63101,St Louis MO Repeat,US,MO,1,1,5,245,lb,,,,,,Parcel,135,,,,USD
+Individual Shipment,LS-LOW-011,,LS-SAMPLE,New Orleans LA Repeat,70112,New Orleans LA Repeat,US,LA,1,1,4,225,lb,,,,,,Other,145,,,,USD
+Individual Shipment,LS-LOW-012,,LS-SAMPLE,Albuquerque NM Repeat,87102,Albuquerque NM Repeat,US,NM,1,1,5,265,lb,,,,,,Parcel,155,,,,USD
+Individual Shipment,LS-LOW-013,,LS-SAMPLE,Boise ID Repeat,83702,Boise ID Repeat,US,ID,1,1,5,255,lb,,,,,,Parcel,150,,,,USD
+Individual Shipment,LS-LOW-014,,LS-SAMPLE,Anchorage AK Satellite,99501,Anchorage AK Satellite,US,AK,1,1,5,300,lb,,,,,,Other,240,,,,USD
+Individual Shipment,LS-LOW-015,,LS-SAMPLE,Honolulu HI Satellite,96813,Honolulu HI Satellite,US,HI,1,1,5,310,lb,,,,,,Other,260,,,,USD
+Individual Shipment,LS-LOW-016,,LS-SAMPLE,Bangor ME Satellite,04401,Bangor ME Satellite,US,ME,1,1,4,205,lb,,,,,,Parcel,130,,,,USD
+Individual Shipment,LS-LOW-017,,LS-SAMPLE,Fargo ND Satellite,58102,Fargo ND Satellite,US,ND,1,1,4,215,lb,,,,,,Parcel,135,,,,USD
+Individual Shipment,LS-LOW-018,,LS-SAMPLE,Bozeman MT Satellite,59715,Bozeman MT Satellite,US,MT,1,1,4,225,lb,,,,,,Parcel,145,,,,USD
+Individual Shipment,LS-LOW-019,,LS-SAMPLE,Reno NV Satellite,89501,Reno NV Satellite,US,NV,1,1,5,235,lb,,,,,,Parcel,150,,,,USD
+Individual Shipment,LS-LOW-020,,LS-SAMPLE,Moncton NB Repeat,E1C,Moncton NB Repeat,CA,NB,1,1,4,225,lb,,,,,,Parcel,165,,,,CAD
+Individual Shipment,LS-LOW-021,,LS-SAMPLE,Saskatoon SK Repeat,S7K,Saskatoon SK Repeat,CA,SK,1,1,4,235,lb,,,,,,Other,175,,,,CAD
+Individual Shipment,LS-LOW-022,,LS-SAMPLE,Charlottetown PE Repeat,C1A,Charlottetown PE Repeat,CA,PE,1,1,3,205,lb,,,,,,Parcel,155,,,,CAD
+Individual Shipment,LS-LOW-023,,LS-SAMPLE,St Johns NL Satellite,A1C,St Johns NL Satellite,CA,NL,1,1,4,220,lb,,,,,,Parcel,170,,,,CAD
+Individual Shipment,LS-LOW-024,,LS-SAMPLE,Toronto ON Small Parcel,M5V,Toronto ON Small Parcel,CA,ON,1,1,4,260,lb,,,,,,Other,240,,,,CAD
+Individual Shipment,LS-LOW-025,,LS-SAMPLE,Montreal QC Small Parcel,H3B,Montreal QC Small Parcel,CA,QC,1,1,4,250,lb,,,,,,Other,230,,,,CAD
+Individual Shipment,LS-LOW-026,,LS-SAMPLE,Victoria BC Satellite,V8W,Victoria BC Satellite,CA,BC,1,1,4,230,lb,,,,,,Parcel,180,,,,CAD
+Individual Shipment,LS-LOW-027,,LS-SAMPLE,Halifax NS Satellite,B3J,Halifax NS Satellite,CA,NS,1,1,4,225,lb,,,,,,Parcel,175,,,,CAD
+Individual Shipment,LS-LOW-028,,LS-SAMPLE,Regina SK Satellite,S4P,Regina SK Satellite,CA,SK,1,1,4,215,lb,,,,,,Parcel,165,,,,CAD
