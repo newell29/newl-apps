@@ -1,6 +1,7 @@
 import type { WebsiteInboundFieldValue } from "@/modules/website-inbound/types";
 
 const honeypotFields = new Set(["_gotcha", "companyUrlConfirm", "faxNumber"]);
+const ignoredContentSpamFieldPrefixes = ["Attribution - "];
 
 const spamPatterns = [
   /backlink/i,
@@ -17,8 +18,16 @@ const spamPatterns = [
   /adult\s+traffic/i
 ];
 
+function isIgnoredContentSpamField(fieldName: string) {
+  return ignoredContentSpamFieldPrefixes.some((prefix) => fieldName.startsWith(prefix));
+}
+
 function flattenFields(fields: Record<string, WebsiteInboundFieldValue>) {
   return Object.entries(fields).flatMap(([key, value]) => {
+    if (isIgnoredContentSpamField(key)) {
+      return [];
+    }
+
     if (Array.isArray(value)) {
       return [key, ...value];
     }
