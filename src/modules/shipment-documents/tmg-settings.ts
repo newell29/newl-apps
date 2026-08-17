@@ -11,6 +11,7 @@ export type TmgOrderIntakeSettings = {
   mailboxAddress: string | null;
   allowedSenderAddresses: string[];
   requiredRecipientAddresses: string[];
+  additionalInternalRecipientDomains: string[];
   subjectPrefix: string;
   lookbackDays: number;
   maxMessagesPerScan: number;
@@ -25,6 +26,7 @@ export type TmgOrderIntakeSettingsInput = {
   mailboxAddress: string;
   allowedSenderAddresses: string[];
   requiredRecipientAddresses: string[];
+  additionalInternalRecipientDomains: string[];
   subjectPrefix: string;
   lookbackDays: number;
   maxMessagesPerScan: number;
@@ -54,6 +56,7 @@ export function parseTmgOrderIntakeSettings(credential?: { status: IntegrationSt
     mailboxAddress: readEmail(config.mailboxAddress),
     allowedSenderAddresses: readEmailArray(config.allowedSenderAddresses),
     requiredRecipientAddresses: readEmailArray(config.requiredRecipientAddresses),
+    additionalInternalRecipientDomains: readDomainArray(config.additionalInternalRecipientDomains),
     subjectPrefix: readString(config.subjectPrefix) ?? "",
     lookbackDays: readInteger(config.lookbackDays, 14, 1, 90),
     maxMessagesPerScan: readInteger(config.maxMessagesPerScan, 50, 1, 250),
@@ -81,8 +84,18 @@ export async function saveTmgOrderIntakeSettings({
   const issues = validateSettings(normalized);
   if (issues.length > 0) throw new Error(issues.join(" "));
   await assertMailboxIsTenantConfigured(tenantId, normalized.mailboxAddress!);
-  assertInternalRecipients(normalized.mailboxAddress!, normalized.requiredRecipientAddresses, "required To/CC recipients");
-  assertInternalRecipients(normalized.mailboxAddress!, normalized.internalSummaryRecipients, "summary recipients");
+  assertInternalRecipients(
+    normalized.mailboxAddress!,
+    normalized.additionalInternalRecipientDomains,
+    normalized.requiredRecipientAddresses,
+    "required To/CC recipients"
+  );
+  assertInternalRecipients(
+    normalized.mailboxAddress!,
+    normalized.additionalInternalRecipientDomains,
+    normalized.internalSummaryRecipients,
+    "summary recipients"
+  );
   const existing = await prisma.integrationCredential.findFirst({
     where: { tenantId, provider: IntegrationProvider.TEAMSHIP, name: TMG_ORDER_INTAKE_CREDENTIAL_NAME },
     select: { id: true, status: true, publicConfig: true }
@@ -94,6 +107,7 @@ export async function saveTmgOrderIntakeSettings({
       mailboxAddress: normalized.mailboxAddress,
       allowedSenderAddresses: normalized.allowedSenderAddresses,
       requiredRecipientAddresses: normalized.requiredRecipientAddresses,
+      additionalInternalRecipientDomains: normalized.additionalInternalRecipientDomains,
       subjectPrefix: normalized.subjectPrefix,
       lookbackDays: normalized.lookbackDays,
       maxMessagesPerScan: normalized.maxMessagesPerScan,
@@ -132,6 +146,7 @@ export async function saveTmgOrderIntakeSettings({
         mailboxConfigured: true,
         senderCount: normalized.allowedSenderAddresses.length,
         requiredRecipientCount: normalized.requiredRecipientAddresses.length,
+        additionalInternalRecipientDomainCount: normalized.additionalInternalRecipientDomains.length,
         internalRecipientCount: normalized.internalSummaryRecipients.length,
         teamshipProfileConfigured: true
       }
@@ -146,6 +161,7 @@ function normalizeSettingsInput(input: TmgOrderIntakeSettingsInput) {
     mailboxAddress: readEmail(input.mailboxAddress),
     allowedSenderAddresses: readEmailArray(input.allowedSenderAddresses),
     requiredRecipientAddresses: readEmailArray(input.requiredRecipientAddresses),
+    additionalInternalRecipientDomains: readDomainArray(input.additionalInternalRecipientDomains),
     subjectPrefix: readString(input.subjectPrefix) ?? "",
     lookbackDays: readInteger(input.lookbackDays, 14, 1, 90),
     maxMessagesPerScan: readInteger(input.maxMessagesPerScan, 50, 1, 250),
@@ -158,6 +174,7 @@ function validateSettings(settings: {
   mailboxAddress: string | null;
   allowedSenderAddresses: string[];
   requiredRecipientAddresses: string[];
+  additionalInternalRecipientDomains: string[];
   subjectPrefix: string;
   internalSummaryRecipients: string[];
   teamship: TmgTeamshipProfile | null;
@@ -168,6 +185,30 @@ function validateSettings(settings: {
   if (settings.requiredRecipientAddresses.length === 0) issues.push("At least one exact TMG To/CC recipient address is required.");
   if (!settings.subjectPrefix.trim()) issues.push("A TMG subject prefix is required.");
   if (settings.internalSummaryRecipients.length === 0) issues.push("At least one internal TMG summary recipient is required.");
+  if (settings.mailboxAddress && settings.requiredRecipientAddresses.length > 0) {
+    try {
+      assertInternalRecipients(
+        settings.mailboxAddress,
+        settings.additionalInternalRecipientDomains,
+        settings.requiredRecipientAddresses,
+        "required To/CC recipients"
+      );
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "TMG required To/CC recipients are not internal.");
+    }
+  }
+  if (settings.mailboxAddress && settings.internalSummaryRecipients.length > 0) {
+    try {
+      assertInternalRecipients(
+        settings.mailboxAddress,
+        settings.additionalInternalRecipientDomains,
+        settings.internalSummaryRecipients,
+        "summary recipients"
+      );
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "TMG summary recipients are not internal.");
+    }
+  }
   if (!settings.teamship) issues.push("The TMG Teamship customer, warehouse, inventory user, location, and carrier profile is incomplete.");
   return issues;
 }
@@ -184,10 +225,19 @@ async function assertMailboxIsTenantConfigured(tenantId: string, mailboxAddress:
   }
 }
 
-function assertInternalRecipients(mailboxAddress: string, recipients: string[], label: string) {
-  const domain = mailboxAddress.split("@")[1]?.toLowerCase();
-  if (!domain || recipients.some((recipient) => recipient.split("@")[1]?.toLowerCase() !== domain)) {
-    throw new Error(`TMG ${label} must use the same internal email domain as the configured mailbox.`);
+export function assertInternalRecipients(
+  mailboxAddress: string,
+  additionalDomains: string[],
+  recipients: string[],
+  label: string
+) {
+  const mailboxDomain = mailboxAddress.split("@")[1]?.toLowerCase();
+  const allowedDomains = new Set([mailboxDomain, ...readDomainArray(additionalDomains)].filter(Boolean));
+  if (
+    !mailboxDomain ||
+    recipients.some((recipient) => !allowedDomains.has(recipient.split("@")[1]?.toLowerCase()))
+  ) {
+    throw new Error(`TMG ${label} must use the mailbox domain or an explicitly approved additional internal domain.`);
   }
 }
 
@@ -225,6 +275,13 @@ function readEmail(value: unknown) {
 function readEmailArray(value: unknown) {
   const candidates = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[\n,;]/) : [];
   return Array.from(new Set(candidates.map(readEmail).filter((entry): entry is string => Boolean(entry))));
+}
+
+function readDomainArray(value: unknown) {
+  const candidates = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[\n,;]/) : [];
+  return Array.from(new Set(candidates
+    .map((entry) => readString(entry)?.toLowerCase() ?? null)
+    .filter((entry): entry is string => Boolean(entry && /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(entry)))));
 }
 
 function readInteger(value: unknown, fallback: number, min: number, max: number) {

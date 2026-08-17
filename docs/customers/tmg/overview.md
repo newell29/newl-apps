@@ -25,7 +25,7 @@
 
 ## Configuration and operation
 
-The `TMG Order Intake` tenant integration record stores non-secret mailbox rules, exact required To/CC recipients, internal summary recipients, and Teamship scope identifiers. Microsoft Graph and Teamship credentials continue to use the existing tenant integration mechanisms. Required employee recipients and internal summary recipients must share the configured mailbox domain. Live customer and employee addresses remain tenant configuration and must not be committed to source code, tests, or documentation.
+The `TMG Order Intake` tenant integration record stores non-secret mailbox rules, exact required To/CC recipients, internal summary recipients, explicitly approved additional internal recipient domains, and Teamship scope identifiers. Microsoft Graph and Teamship credentials continue to use the existing tenant integration mechanisms. Required employee recipients and internal summary recipients must use either the configured mailbox domain or an administrator-approved additional internal domain. Live customer and employee addresses and organization domains remain tenant configuration and must not be committed to source code, tests, or documentation.
 
 The authenticated Operations Tools page is `/operations/tmg-order-intake`. Vercel calls `GET /api/operations/tmg-order-intake/scheduled` every five minutes and authenticates it with the existing `CRON_SECRET`; the existing machine-triggered `POST` remains available under ingestion authentication. Both paths bind the run to the configured ingestion tenant. A disabled or incomplete TMG configuration is a successful no-op.
 
