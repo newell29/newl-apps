@@ -629,6 +629,10 @@ model Tenant {
   garlandSourceEmails                     GarlandSourceEmail[]
   garlandSourceAttachments                GarlandSourceAttachment[]
   garlandEmailSyncRuns                    GarlandEmailSyncRun[]
+  tmgOrderIntakeBatches                   TmgOrderIntakeBatch[]
+  tmgOrderIntakeAttachments               TmgOrderIntakeAttachment[]
+  tmgOrderIntakeOrders                    TmgOrderIntakeOrder[]
+  tmgTeamshipExecutionJobs                TmgTeamshipExecutionJob[]
   cashflowCustomers                       CashflowCustomer[]
   cashflowCustomerAliases                 CashflowCustomerAlias[]
   cashflowFiles                           CashflowFile[]
@@ -691,6 +695,9 @@ model User {
   teamshipPrintBatchesApproved       TeamshipPrintBatch[]                @relation("TeamshipPrintBatchApprovedBy")
   teamshipPrintJobsRequested         TeamshipPrintJob[]                  @relation("TeamshipPrintJobRequestedBy")
   teamshipPrintJobsApproved          TeamshipPrintJob[]                  @relation("TeamshipPrintJobApprovedBy")
+  tmgOrderIntakeBatchesCreated       TmgOrderIntakeBatch[]               @relation("TmgOrderIntakeBatchCreatedBy")
+  tmgOrderIntakeBatchesApproved      TmgOrderIntakeBatch[]               @relation("TmgOrderIntakeBatchApprovedBy")
+  tmgTeamshipJobsApproved            TmgTeamshipExecutionJob[]           @relation("TmgTeamshipExecutionJobApprovedBy")
 
   @@unique([microsoftEntraTenantId, microsoftEntraObjectId])
 }
@@ -1396,6 +1403,140 @@ model GarlandSourceAttachment {
   @@index([tenantId, sourceEmailId])
   @@index([tenantId, contentHash])
   @@index([tenantId, intakeStatus])
+}
+
+model TmgOrderIntakeBatch {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  mailboxAddress           String
+  graphMessageId           String
+  internetMessageId        String?
+  conversationId           String?
+  subject                  String
+  fromAddress              String
+  receivedAt               DateTime
+  sourceWebLink            String?
+  sourceBodyHash           String?
+  status                   String    @default("RECEIVED")
+  attachmentCount          Int       @default(0)
+  duplicateAttachmentCount Int       @default(0)
+  orderCount               Int       @default(0)
+  readyOrderCount          Int       @default(0)
+  invalidOrderCount        Int       @default(0)
+  approvalRequestHash      String?
+  approvedByUserId         String?
+  approvedAt               DateTime?
+  summaryStatus            String    @default("NOT_READY")
+  summaryResult            Json?
+  errorMessage             String?
+  createdByUserId          String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  tenant       Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy    User?                      @relation("TmgOrderIntakeBatchCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction)
+  approvedBy   User?                      @relation("TmgOrderIntakeBatchApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+  attachments  TmgOrderIntakeAttachment[]
+  orders       TmgOrderIntakeOrder[]
+  executionJob TmgTeamshipExecutionJob?
+
+  @@unique([tenantId, mailboxAddress, graphMessageId])
+  @@unique([tenantId, id])
+  @@index([tenantId, status, receivedAt])
+  @@index([tenantId, conversationId, receivedAt])
+  @@index([tenantId, createdAt])
+}
+
+model TmgOrderIntakeAttachment {
+  id                String   @id @default(cuid())
+  tenantId          String
+  batchId           String
+  graphAttachmentId String
+  fileName          String
+  contentType       String?
+  sizeBytes         Int
+  contentHash       String
+  documentRole      String   @default("UNKNOWN")
+  isDuplicate       Boolean  @default(false)
+  fileBytes         Bytes
+  createdAt         DateTime @default(now())
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  batch  TmgOrderIntakeBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, batchId, graphAttachmentId])
+  @@index([tenantId, batchId, documentRole])
+  @@index([tenantId, contentHash])
+}
+
+model TmgOrderIntakeOrder {
+  id                                String   @id @default(cuid())
+  tenantId                          String
+  batchId                           String
+  customerReference                 String
+  status                            String   @default("NEEDS_REVIEW")
+  packingSlip                       Json
+  picklist                          Json?
+  bol                               Json?
+  label                             Json?
+  warehouseInstructions             String?
+  deliveryNotesExcludedFromTeamship Boolean  @default(true)
+  validationIssues                  Json
+  combinedPdfFileName               String?
+  combinedPdfHash                   String?
+  combinedPdfBytes                  Bytes?
+  teamshipPlan                      Json?
+  planRequestHash                   String?
+  teamshipCreateStatus              String   @default("NOT_STARTED")
+  teamshipOrderId                   String?
+  teamshipOrderNumber               String?
+  teamshipUrl                       String?
+  teamshipCreateEvidence            Json?
+  documentUploadStatus              String   @default("NOT_STARTED")
+  documentUploadEvidence            Json?
+  errorMessage                      String?
+  createdAt                         DateTime @default(now())
+  updatedAt                         DateTime @updatedAt
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  batch  TmgOrderIntakeBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, batchId, customerReference])
+  @@unique([tenantId, id])
+  @@index([tenantId, batchId, status])
+  @@index([tenantId, customerReference])
+  @@index([tenantId, teamshipOrderId])
+  @@index([tenantId, documentUploadStatus])
+}
+
+model TmgTeamshipExecutionJob {
+  id               String    @id @default(cuid())
+  tenantId         String
+  batchId          String
+  workflowKey      String    @default("TMG_TEAMSHIP_CREATE_AND_UPLOAD_V1")
+  status           String    @default("PENDING_APPROVAL")
+  selectedOrderIds Json
+  requestHash      String
+  approvedByUserId String?
+  approvedAt       DateTime?
+  workerId         String?
+  claimedAt        DateTime?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  result           Json?
+  errorMessage     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  batch      TmgOrderIntakeBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Cascade)
+  approvedBy User?               @relation("TmgTeamshipExecutionJobApprovedBy", fields: [approvedByUserId], references: [id], onDelete: NoAction)
+
+  @@unique([tenantId, batchId])
+  @@unique([tenantId, id])
+  @@unique([tenantId, requestHash])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, workerId, claimedAt])
 }
 
 model GarlandProductDimensionObservation {

@@ -45,7 +45,8 @@
     "openclaw:teamship-read": "tsx scripts/openclaw-teamship-read.ts",
     "worker:teamship-sr810465-vm": "tsx scripts/teamship-phase2-sr810465-vm.ts",
     "worker:teamship-browser-read": "tsx scripts/teamship-browser-read-worker.ts",
-    "worker:teamship-print": "tsx scripts/teamship-print-worker.ts"
+    "worker:teamship-print": "tsx scripts/teamship-print-worker.ts",
+    "worker:tmg-order-intake": "tsx scripts/tmg-teamship-order-worker.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

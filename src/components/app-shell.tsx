@@ -97,6 +97,12 @@ const navEntries: NavNode[] = [
           }
         ]
       },
+      {
+        id: "tmg-order-intake",
+        href: "/operations/tmg-order-intake",
+        label: "TMG Order Intake",
+        moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
+      },
       { id: "ups-tools", href: "/ups-tools", label: "UPS Tools", moduleKey: "UPS_TOOLS" as ModuleKey },
       { id: "ltl-rate-portal", href: "/ltl-rate-portal", label: "LTL Rate Portal", moduleKey: "LTL_RATE_PORTAL" as ModuleKey },
       {
