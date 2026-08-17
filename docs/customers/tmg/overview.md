@@ -4,7 +4,7 @@
 
 ## Confirmed business rules
 
-- Microsoft Graph reads the tenant-configured mailbox. A message is eligible only when its sender is on the exact allowlist, its subject starts with the configured prefix, it has attachments, and at least one attachment is a PDF.
+- Microsoft Graph reads the tenant-configured mailbox. A message is eligible only when its sender is on the exact allowlist, at least one exact tenant-configured employee address appears in To or CC, its normalized subject starts with the configured prefix, it has attachments, and at least one attachment is a PDF. Standard `RE:`, `FW:`, and `FWD:` prefixes are ignored; other subject text is not rewritten.
 - The packing slip is the primary order source. Ship-to, customer reference, date, SKU, and quantity come from the packing slip.
 - The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary.
 - The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip.
@@ -25,11 +25,11 @@
 
 ## Configuration and operation
 
-The `TMG Order Intake` tenant integration record stores non-secret mailbox rules, internal recipients, and Teamship scope identifiers. Microsoft Graph and Teamship credentials continue to use the existing tenant integration mechanisms. Internal recipients must share the configured mailbox domain.
+The `TMG Order Intake` tenant integration record stores non-secret mailbox rules, exact required To/CC recipients, internal summary recipients, and Teamship scope identifiers. Microsoft Graph and Teamship credentials continue to use the existing tenant integration mechanisms. Required employee recipients and internal summary recipients must share the configured mailbox domain. Live customer and employee addresses remain tenant configuration and must not be committed to source code, tests, or documentation.
 
-The authenticated Operations Tools page is `/operations/tmg-order-intake`. Scheduled ingestion is exposed at `POST /api/operations/tmg-order-intake/scheduled` and uses ingestion authentication. A scheduler still needs to call that route at the approved cadence.
+The authenticated Operations Tools page is `/operations/tmg-order-intake`. Vercel calls `GET /api/operations/tmg-order-intake/scheduled` every five minutes and authenticates it with the existing `CRON_SECRET`; the existing machine-triggered `POST` remains available under ingestion authentication. Both paths bind the run to the configured ingestion tenant. A disabled or incomplete TMG configuration is a successful no-op.
 
-The external worker is started with `npm run worker:tmg-order-intake`. Live operation additionally requires the ingestion credential, worker base URL, explicit `TMG_ALLOW_LIVE_WRITES=true` flag, and a configured browser executable. It only claims CSR-approved jobs.
+The external worker is started with `npm run worker:tmg-order-intake` and polls continuously by default. `TMG_WORKER_POLL_INTERVAL_MS` can set a bounded 5-second to 5-minute interval; `TMG_WORKER_RUN_ONCE=true` is reserved for supervised one-shot diagnostics. Live operation additionally requires the ingestion credential, worker base URL, explicit `TMG_ALLOW_LIVE_WRITES=true` flag, and a configured browser executable. It only claims CSR-approved jobs and must run under an approved process supervisor on the browser-worker host.
 
 ## Data and status flow
 
@@ -60,5 +60,5 @@ The external worker is started with `npm run worker:tmg-order-intake`. Live oper
 ## Business questions requiring review
 
 - In a partially invalid email, the implementation approves and creates only fully valid orders while invalid rows remain blocked. This follows the requested no-manual-row-approval direction but remains an inferred batch policy requiring owner confirmation.
-- The scheduler cadence and browser-worker hosting location require an operations decision.
+- The browser-worker hosting location and process supervisor require an operations decision before live activation.
 - Removing CSR approval after the observation period requires a separate explicit owner decision; it is not a configuration toggle in this version.

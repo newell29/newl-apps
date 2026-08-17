@@ -81,6 +81,7 @@ export function TmgOrderIntakeClient({
       enabled: formData.get("enabled") === "on",
       mailboxAddress: String(formData.get("mailboxAddress") ?? ""),
       allowedSenderAddresses: splitLines(formData.get("allowedSenderAddresses")),
+      requiredRecipientAddresses: splitLines(formData.get("requiredRecipientAddresses")),
       subjectPrefix: String(formData.get("subjectPrefix") ?? ""),
       lookbackDays: Number(formData.get("lookbackDays")),
       maxMessagesPerScan: Number(formData.get("maxMessagesPerScan")),
@@ -218,6 +219,7 @@ export function TmgOrderIntakeClient({
               <Field label="Mailbox address" name="mailboxAddress" defaultValue={settings.mailboxAddress ?? ""} />
               <Field label="Subject prefix" name="subjectPrefix" defaultValue={settings.subjectPrefix} />
               <TextArea label="Exact allowed sender addresses" name="allowedSenderAddresses" defaultValue={settings.allowedSenderAddresses.join("\n")} />
+              <TextArea label="Required To/CC recipient addresses" name="requiredRecipientAddresses" defaultValue={settings.requiredRecipientAddresses.join("\n")} />
               <TextArea label="Internal summary recipients" name="internalSummaryRecipients" defaultValue={settings.internalSummaryRecipients.join("\n")} />
               <Field label="Lookback days" name="lookbackDays" type="number" defaultValue={String(settings.lookbackDays)} />
               <Field label="Maximum messages per scan" name="maxMessagesPerScan" type="number" defaultValue={String(settings.maxMessagesPerScan)} />

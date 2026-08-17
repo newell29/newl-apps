@@ -11,6 +11,7 @@ describe("TMG order intake settings", () => {
         enabled: true,
         mailboxAddress: "warehouse@example.com",
         allowedSenderAddresses: ["orders@customer.example"],
+        requiredRecipientAddresses: ["csr@example.com"],
         subjectPrefix: "TMG synthetic shipment",
         internalSummaryRecipients: ["csr@example.com", "warehouse@example.com"],
         teamship: {
@@ -36,6 +37,6 @@ describe("TMG order intake settings", () => {
     });
 
     expect(settings.configured).toBe(false);
-    expect(settings.configurationIssues).toHaveLength(4);
+    expect(settings.configurationIssues).toHaveLength(5);
   });
 });

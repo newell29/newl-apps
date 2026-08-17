@@ -26,6 +26,27 @@ export async function authenticateIngestionRequest(request: Request): Promise<Te
     throw new IngestionAuthError("Invalid ingestion credentials.");
   }
 
+  return resolveIngestionTenantContext();
+}
+
+export async function authenticateIngestionCronRequest(request: Request): Promise<TenantContext> {
+  const expectedToken = process.env.CRON_SECRET;
+
+  if (!expectedToken) {
+    throw new IngestionAuthError("Cron secret is not configured.", 503);
+  }
+
+  const providedToken = getBearerToken(request);
+
+  if (!providedToken || !safeTokenEquals(providedToken, expectedToken)) {
+    throw new IngestionAuthError("Invalid cron credentials.");
+  }
+
+  return resolveIngestionTenantContext();
+}
+
+async function resolveIngestionTenantContext(): Promise<TenantContext> {
+
   const tenantSlug = process.env.INGESTION_TENANT_SLUG ?? process.env.DEFAULT_TENANT_SLUG;
 
   if (!tenantSlug) {

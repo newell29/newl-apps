@@ -25,6 +25,9 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Manual Email Intake review tests require the exact confirmation, reject cross-tenant or stale PS-range selections, audit both request and outcome, process only deduplicated selected attachment identifiers, and allow an operator-selected retry-pending batch to bypass the scheduled retry delay without consuming other queued PDFs.
 - Targeted Teamship retrieval tests prove that exact PS/SR lookup can continue beyond the ordinary daily-list page ceiling while retaining the bounded limit and early exit after the exact pair is found.
 - Microsoft Graph mail regression tests retry transient attachment metadata and raw-download failures, recover within the three-attempt bound, and do not retry permanent authorization failures.
+- TMG mail-filter regression tests require the exact configured sender plus an exact configured To/CC recipient, allow only standard reply/forward subject prefixes, and reject unrelated messages before attachment retrieval.
+- TMG scheduling tests keep ingestion-token POST calls separate from `CRON_SECRET` GET calls, bind cron execution to the configured tenant, and treat disabled tenant configuration as a safe no-op.
+- TMG worker-runtime tests cover continuous polling, bounded intervals, transient claim failures, and an explicit one-shot diagnostic mode. These tests do not perform Teamship writes or browser uploads.
 
 ## Data model
 

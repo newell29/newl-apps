@@ -10,6 +10,7 @@ export type TmgOrderIntakeSettings = {
   enabled: boolean;
   mailboxAddress: string | null;
   allowedSenderAddresses: string[];
+  requiredRecipientAddresses: string[];
   subjectPrefix: string;
   lookbackDays: number;
   maxMessagesPerScan: number;
@@ -23,6 +24,7 @@ export type TmgOrderIntakeSettingsInput = {
   enabled: boolean;
   mailboxAddress: string;
   allowedSenderAddresses: string[];
+  requiredRecipientAddresses: string[];
   subjectPrefix: string;
   lookbackDays: number;
   maxMessagesPerScan: number;
@@ -51,6 +53,7 @@ export function parseTmgOrderIntakeSettings(credential?: { status: IntegrationSt
     enabled: credential?.status === IntegrationStatus.ACTIVE && config.enabled === true,
     mailboxAddress: readEmail(config.mailboxAddress),
     allowedSenderAddresses: readEmailArray(config.allowedSenderAddresses),
+    requiredRecipientAddresses: readEmailArray(config.requiredRecipientAddresses),
     subjectPrefix: readString(config.subjectPrefix) ?? "",
     lookbackDays: readInteger(config.lookbackDays, 14, 1, 90),
     maxMessagesPerScan: readInteger(config.maxMessagesPerScan, 50, 1, 250),
@@ -78,7 +81,8 @@ export async function saveTmgOrderIntakeSettings({
   const issues = validateSettings(normalized);
   if (issues.length > 0) throw new Error(issues.join(" "));
   await assertMailboxIsTenantConfigured(tenantId, normalized.mailboxAddress!);
-  assertInternalRecipients(normalized.mailboxAddress!, normalized.internalSummaryRecipients);
+  assertInternalRecipients(normalized.mailboxAddress!, normalized.requiredRecipientAddresses, "required To/CC recipients");
+  assertInternalRecipients(normalized.mailboxAddress!, normalized.internalSummaryRecipients, "summary recipients");
   const existing = await prisma.integrationCredential.findFirst({
     where: { tenantId, provider: IntegrationProvider.TEAMSHIP, name: TMG_ORDER_INTAKE_CREDENTIAL_NAME },
     select: { id: true, status: true, publicConfig: true }
@@ -89,6 +93,7 @@ export async function saveTmgOrderIntakeSettings({
       enabled: normalized.enabled,
       mailboxAddress: normalized.mailboxAddress,
       allowedSenderAddresses: normalized.allowedSenderAddresses,
+      requiredRecipientAddresses: normalized.requiredRecipientAddresses,
       subjectPrefix: normalized.subjectPrefix,
       lookbackDays: normalized.lookbackDays,
       maxMessagesPerScan: normalized.maxMessagesPerScan,
@@ -126,6 +131,7 @@ export async function saveTmgOrderIntakeSettings({
         enabled: normalized.enabled,
         mailboxConfigured: true,
         senderCount: normalized.allowedSenderAddresses.length,
+        requiredRecipientCount: normalized.requiredRecipientAddresses.length,
         internalRecipientCount: normalized.internalSummaryRecipients.length,
         teamshipProfileConfigured: true
       }
@@ -139,6 +145,7 @@ function normalizeSettingsInput(input: TmgOrderIntakeSettingsInput) {
     enabled: input.enabled,
     mailboxAddress: readEmail(input.mailboxAddress),
     allowedSenderAddresses: readEmailArray(input.allowedSenderAddresses),
+    requiredRecipientAddresses: readEmailArray(input.requiredRecipientAddresses),
     subjectPrefix: readString(input.subjectPrefix) ?? "",
     lookbackDays: readInteger(input.lookbackDays, 14, 1, 90),
     maxMessagesPerScan: readInteger(input.maxMessagesPerScan, 50, 1, 250),
@@ -150,6 +157,7 @@ function normalizeSettingsInput(input: TmgOrderIntakeSettingsInput) {
 function validateSettings(settings: {
   mailboxAddress: string | null;
   allowedSenderAddresses: string[];
+  requiredRecipientAddresses: string[];
   subjectPrefix: string;
   internalSummaryRecipients: string[];
   teamship: TmgTeamshipProfile | null;
@@ -157,6 +165,7 @@ function validateSettings(settings: {
   const issues: string[] = [];
   if (!settings.mailboxAddress) issues.push("A TMG mailbox address is required.");
   if (settings.allowedSenderAddresses.length === 0) issues.push("At least one exact TMG sender address is required.");
+  if (settings.requiredRecipientAddresses.length === 0) issues.push("At least one exact TMG To/CC recipient address is required.");
   if (!settings.subjectPrefix.trim()) issues.push("A TMG subject prefix is required.");
   if (settings.internalSummaryRecipients.length === 0) issues.push("At least one internal TMG summary recipient is required.");
   if (!settings.teamship) issues.push("The TMG Teamship customer, warehouse, inventory user, location, and carrier profile is incomplete.");
@@ -175,10 +184,10 @@ async function assertMailboxIsTenantConfigured(tenantId: string, mailboxAddress:
   }
 }
 
-function assertInternalRecipients(mailboxAddress: string, recipients: string[]) {
+function assertInternalRecipients(mailboxAddress: string, recipients: string[], label: string) {
   const domain = mailboxAddress.split("@")[1]?.toLowerCase();
   if (!domain || recipients.some((recipient) => recipient.split("@")[1]?.toLowerCase() !== domain)) {
-    throw new Error("TMG summary recipients must use the same internal email domain as the configured mailbox.");
+    throw new Error(`TMG ${label} must use the same internal email domain as the configured mailbox.`);
   }
 }
 

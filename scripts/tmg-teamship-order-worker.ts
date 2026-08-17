@@ -4,6 +4,10 @@ import {
   type TmgTeamshipCreatePlan
 } from "@/modules/shipment-documents/tmg-teamship-create";
 import { executeTmgTeamshipDocumentUpload } from "@/modules/shipment-documents/tmg-teamship-document-upload";
+import {
+  readTmgWorkerRuntimeSettings,
+  runTmgWorkerLoop
+} from "@/modules/shipment-documents/tmg-worker-runtime";
 import type { TeamshipRuntimeCredentials } from "@/server/integrations/teamship";
 
 type ClaimedJob = {
@@ -27,11 +31,22 @@ async function main() {
   if (process.env.TMG_ALLOW_LIVE_WRITES !== "true") {
     throw new Error("Set TMG_ALLOW_LIVE_WRITES=true only on the approved TMG worker before live Teamship writes can run.");
   }
+
+  const runtimeSettings = readTmgWorkerRuntimeSettings(process.env);
+  await runTmgWorkerLoop({
+    settings: runtimeSettings,
+    runOnce: () => runOnce({ baseUrl, token, workerId }),
+    onIterationError: (error) => {
+      console.error(error instanceof Error ? error.message : "Unknown TMG worker polling failure.");
+    }
+  });
+}
+
+async function runOnce({ baseUrl, token, workerId }: { baseUrl: string; token: string; workerId: string }) {
   const claim = await api<{ job: ClaimedJob | null; teamshipCredentials: TeamshipRuntimeCredentials | null }>(
     `${baseUrl}/api/operations/tmg-order-intake/worker/next`, token, workerId
   );
   if (!claim.job || !claim.teamshipCredentials) {
-    console.log("No approved TMG Teamship job is waiting.");
     return;
   }
   const job = claim.job;

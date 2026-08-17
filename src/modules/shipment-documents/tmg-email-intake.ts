@@ -338,18 +338,33 @@ async function planPreparedOrder({
   }
 }
 
-function isTmgCandidateMessage(
+export function isTmgCandidateMessage(
   message: MicrosoftGraphMailMessage,
-  settings: Awaited<ReturnType<typeof getTmgOrderIntakeSettings>>
+  settings: Pick<
+    Awaited<ReturnType<typeof getTmgOrderIntakeSettings>>,
+    "allowedSenderAddresses" | "requiredRecipientAddresses" | "subjectPrefix"
+  >
 ) {
   const sender = message.from?.emailAddress?.address?.trim().toLowerCase();
-  const subject = message.subject?.trim().toLowerCase() ?? "";
+  const subject = normalizeTmgSubject(message.subject);
+  const recipients = [...(message.toRecipients ?? []), ...(message.ccRecipients ?? [])]
+    .map((recipient) => recipient.emailAddress?.address?.trim().toLowerCase())
+    .filter((address): address is string => Boolean(address));
   return Boolean(
     message.hasAttachments &&
     sender &&
     settings.allowedSenderAddresses.includes(sender) &&
+    settings.requiredRecipientAddresses.some((address) => recipients.includes(address)) &&
     subject.startsWith(settings.subjectPrefix.toLowerCase())
   );
+}
+
+export function normalizeTmgSubject(subject: string | null | undefined) {
+  let normalized = subject?.trim() ?? "";
+  while (/^(?:re|fw|fwd)\s*:\s*/i.test(normalized)) {
+    normalized = normalized.replace(/^(?:re|fw|fwd)\s*:\s*/i, "").trim();
+  }
+  return normalized.toLowerCase();
 }
 
 function readAttachmentRole(sourceId: string, orders: PlannedPreparedOrder[]) {

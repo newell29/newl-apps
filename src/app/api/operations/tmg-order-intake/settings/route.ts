@@ -45,6 +45,7 @@ function parseSettingsInput(value: unknown): TmgOrderIntakeSettingsInput {
     enabled: record.enabled === true,
     mailboxAddress: readString(record.mailboxAddress),
     allowedSenderAddresses: readStringArray(record.allowedSenderAddresses),
+    requiredRecipientAddresses: readStringArray(record.requiredRecipientAddresses),
     subjectPrefix: readString(record.subjectPrefix),
     lookbackDays: readNumber(record.lookbackDays),
     maxMessagesPerScan: readNumber(record.maxMessagesPerScan),
