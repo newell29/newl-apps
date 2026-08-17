@@ -28,6 +28,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - TMG mail-filter regression tests require the exact configured sender plus an exact configured To/CC recipient, allow only standard reply/forward subject prefixes, and reject unrelated messages before attachment retrieval.
 - TMG scheduling tests keep ingestion-token POST calls separate from `CRON_SECRET` GET calls, bind cron execution to the configured tenant, and treat disabled tenant configuration as a safe no-op.
 - TMG worker-runtime tests cover continuous polling, bounded intervals, transient claim failures, and an explicit one-shot diagnostic mode. These tests do not perform Teamship writes or browser uploads.
+- TMG settings tests allow summary recipients only on the mailbox domain or an administrator-approved additional internal domain, and reject unapproved customer domains.
 
 ## Data model
 
