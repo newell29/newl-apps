@@ -1,4 +1,4 @@
-# Shipment documents and Garland Teamship review: Overview
+# Shipment documents, Garland Teamship review, and TMG order intake: Overview
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- TMG email intake is a separate Operations Tools workflow. It creates approved shipping orders through the Teamship API and uploads each consolidated packing-slip/BOL/label PDF through its own browser worker. See `docs/customers/tmg/overview.md`.
 - Garland carrier manifests support Midland, Speedy, Suretrack, Clarke, Guilbault Transport, and Rosedale. The printed `GUILBAULT TRANSPORT` value is normalized to the internal `GUILBAULT` carrier key, and the printed `ROSEDALE` value is normalized to `ROSEDALE`. Each detected carrier receives its own editable Excel workbook and saved-history download.
 - Every carrier workbook includes blank **Driver's time in** and **Driver's time out** columns for employee or driver completion.
 
