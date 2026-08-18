@@ -29,7 +29,9 @@ The `TMG Order Intake` tenant integration record stores non-secret mailbox rules
 
 The authenticated Operations Tools page is `/operations/tmg-order-intake`. Vercel calls `GET /api/operations/tmg-order-intake/scheduled` every five minutes and authenticates it with the existing `CRON_SECRET`; the existing machine-triggered `POST` remains available under ingestion authentication. Both paths bind the run to the configured ingestion tenant. A disabled or incomplete TMG configuration is a successful no-op.
 
-The external worker is started with `npm run worker:tmg-order-intake` and polls continuously by default. `TMG_WORKER_POLL_INTERVAL_MS` can set a bounded 5-second to 5-minute interval; `TMG_WORKER_RUN_ONCE=true` is reserved for supervised one-shot diagnostics. Live operation additionally requires the ingestion credential, worker base URL, explicit `TMG_ALLOW_LIVE_WRITES=true` flag, and a configured browser executable. It only claims CSR-approved jobs and must run under an approved process supervisor on the browser-worker host.
+The external worker is started with `npm run worker:tmg-order-intake` and polls continuously by default. `TMG_WORKER_POLL_INTERVAL_MS` can set a bounded 5-second to 5-minute interval; `TMG_WORKER_RUN_ONCE=true` is reserved for supervised one-shot diagnostics. Live operation additionally requires the ingestion credential, worker base URL, explicit `TMG_ALLOW_LIVE_WRITES=true` flag, and a configured browser executable. It only claims CSR-approved jobs.
+
+The approved production host is the existing Teamship Phase 2 VM. TMG shares the VM checkout, Chrome installation, outbound network path, and Tailscale-supported administration with Garland, but it does not share Garland's process, environment file, queue, browser worker, or service lifecycle. The dedicated `newl-tmg-order-intake-worker.service` uses `.env.tmg-order-intake-worker`, runs at a lower process priority, and processes one approved TMG job at a time. The VM installer places the unit and a live-write-disabled environment template but deliberately does not enable or start TMG; live activation remains a separate supervised production action.
 
 ## Data and status flow
 
@@ -60,5 +62,4 @@ The external worker is started with `npm run worker:tmg-order-intake` and polls 
 ## Business questions requiring review
 
 - In a partially invalid email, the implementation approves and creates only fully valid orders while invalid rows remain blocked. This follows the requested no-manual-row-approval direction but remains an inferred batch policy requiring owner confirmation.
-- The browser-worker hosting location and process supervisor require an operations decision before live activation.
 - Removing CSR approval after the observation period requires a separate explicit owner decision; it is not a configuration toggle in this version.

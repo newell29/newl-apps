@@ -1,6 +1,6 @@
 # Shipment documents, Garland Teamship review, and TMG order intake: Source Map
 
-TMG order intake is documented separately at `docs/customers/tmg/overview.md`. Its implementation is under `src/app/(authenticated)/operations/tmg-order-intake`, `src/app/api/operations/tmg-order-intake`, `src/modules/shipment-documents/tmg-*`, and `scripts/tmg-teamship-order-worker.ts`.
+TMG order intake is documented separately at `docs/customers/tmg/overview.md`. Its implementation is under `src/app/(authenticated)/operations/tmg-order-intake`, `src/app/api/operations/tmg-order-intake`, `src/modules/shipment-documents/tmg-*`, and `scripts/tmg-teamship-order-worker.ts`. Its isolated VM runtime is defined by `ops/teamship-phase2-vm/newl-tmg-order-intake-worker.service`, `ops/teamship-phase2-vm/tmg-order-intake-worker.env.example`, and the shared VM installer/updater scripts.
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
