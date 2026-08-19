@@ -29,6 +29,8 @@ The `TMG Order Intake` tenant integration record stores non-secret mailbox rules
 
 The authenticated Operations Tools page is `/operations/tmg-order-intake`. Vercel calls `GET /api/operations/tmg-order-intake/scheduled` every five minutes and authenticates it with the existing `CRON_SECRET`; the existing machine-triggered `POST` remains available under ingestion authentication. Both paths bind the run to the configured ingestion tenant. A disabled or incomplete TMG configuration is a successful no-op.
 
+The scheduled endpoint and `/api/operations/tmg-order-intake/worker/*` bypass browser-session middleware so their route handlers can enforce `CRON_SECRET` or ingestion-token authentication directly. The TMG settings, batch-list, and approval APIs are not exempt and continue to require an authenticated employee session and their existing permission checks.
+
 The external worker is started with `npm run worker:tmg-order-intake` and polls continuously by default. `TMG_WORKER_POLL_INTERVAL_MS` can set a bounded 5-second to 5-minute interval; `TMG_WORKER_RUN_ONCE=true` is reserved for supervised one-shot diagnostics. Live operation additionally requires the ingestion credential, worker base URL, explicit `TMG_ALLOW_LIVE_WRITES=true` flag, and a configured browser executable. It only claims CSR-approved jobs.
 
 The approved production host is the existing Teamship Phase 2 VM. TMG shares the VM checkout, Chrome installation, outbound network path, and Tailscale-supported administration with Garland, but it does not share Garland's process, environment file, queue, browser worker, or service lifecycle. The dedicated `newl-tmg-order-intake-worker.service` uses `.env.tmg-order-intake-worker`, runs at a lower process priority, and processes one approved TMG job at a time. The VM installer places the unit and a live-write-disabled environment template but deliberately does not enable or start TMG; live activation remains a separate supervised production action.
@@ -58,6 +60,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
 - Tenant-scoped CSR approval, stale-plan rejection, valid-only partial-batch selection, and exact-reference recheck.
 - Tenant settings validation and internal summary content.
+- Middleware regression coverage that admits only the TMG scheduled/worker machine routes while keeping settings, batches, and the Operations Tools page session-protected.
 
 ## Business questions requiring review
 
