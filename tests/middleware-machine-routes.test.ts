@@ -54,6 +54,21 @@ describe("middleware machine route exemptions", () => {
     expect(matcher.test("/lead-gen/hunter")).toBe(true);
   });
 
+  it("lets only TMG machine routes enforce cron and ingestion authentication", () => {
+    expect(config.matcher[0]).toContain("api/operations/tmg-order-intake/");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+
+    expect(matcher.test("/api/operations/tmg-order-intake/scheduled")).toBe(false);
+    expect(matcher.test("/api/operations/tmg-order-intake/worker/next")).toBe(false);
+    expect(matcher.test("/api/operations/tmg-order-intake/worker/job-example/checkpoint")).toBe(false);
+    expect(matcher.test("/api/operations/tmg-order-intake/worker/job-example/complete")).toBe(false);
+
+    expect(matcher.test("/api/operations/tmg-order-intake/settings")).toBe(true);
+    expect(matcher.test("/api/operations/tmg-order-intake/batches")).toBe(true);
+    expect(matcher.test("/api/operations/tmg-order-intake/workers")).toBe(true);
+    expect(matcher.test("/operations/tmg-order-intake")).toBe(true);
+  });
+
   it("lets the Hunter signal scout enforce tenant-bound ingestion authentication", () => {
     expect(config.matcher[0]).toContain("api/lead-gen/hunter/signal-scout");
     const matcher = new RegExp(`^${config.matcher[0]}$`);
