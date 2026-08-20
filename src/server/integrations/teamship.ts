@@ -36,6 +36,7 @@ type TeamshipShippingOrderSearchOptions = {
   orderIdentifier: string;
   preferUiPallets?: boolean;
   credentials?: TeamshipRuntimeCredentials | null;
+  readSession?: TeamshipReadSession;
   fetchImpl?: typeof fetch;
 };
 
@@ -43,6 +44,13 @@ export type TeamshipRuntimeCredentials = {
   email: string;
   password: string;
   apiBaseUrl?: string | null;
+};
+
+export type TeamshipReadSession = {
+  readonly apiBaseUrl: string;
+  readonly credentials: TeamshipRuntimeCredentials | null;
+  readonly fetchImpl: typeof fetch;
+  token: string;
 };
 
 type TeamshipLoginResponse = {
@@ -112,6 +120,29 @@ export type TeamshipShippingProductSearchRow = {
   }> | null;
   customAttributes?: TeamshipShippingProductSearchRow["custom_attributes"];
 };
+
+/**
+ * Creates a reusable, read-only Teamship API session. The session is opt-in so
+ * existing Garland callers retain their current authentication behavior.
+ */
+export async function createTeamshipReadSession({
+  tenantId,
+  credentials = null,
+  fetchImpl = fetch
+}: {
+  tenantId?: string | null;
+  credentials?: TeamshipRuntimeCredentials | null;
+  fetchImpl?: typeof fetch;
+}): Promise<TeamshipReadSession> {
+  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  return {
+    apiBaseUrl,
+    credentials: resolvedCredentials,
+    fetchImpl,
+    token: await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl)
+  };
+}
 
 type TeamshipProductSearchResponse = {
   data?: TeamshipShippingProductSearchRow[];
@@ -467,6 +498,7 @@ export async function searchTeamshipProductsForShipping({
   locationId,
   search,
   credentials = null,
+  readSession,
   fetchImpl = fetch
 }: {
   tenantId?: string | null;
@@ -474,20 +506,27 @@ export async function searchTeamshipProductsForShipping({
   locationId: number | string;
   search: string;
   credentials?: TeamshipRuntimeCredentials | null;
+  readSession?: TeamshipReadSession;
   fetchImpl?: typeof fetch;
 }): Promise<TeamshipShippingProductSearchRow[]> {
-  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
-  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
-  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
-  const response = await fetchImpl(`${apiBaseUrl}/v1/ship-inventories/search-products`, {
+  const resolvedCredentials = readSession?.credentials ?? credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = readSession?.apiBaseUrl ?? resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const effectiveFetch = readSession?.fetchImpl ?? fetchImpl;
+  const token = readSession?.token ?? await loginToTeamship(effectiveFetch, resolvedCredentials, apiBaseUrl);
+  const response = await fetchAuthorizedTeamshipRead({
+    url: `${apiBaseUrl}/v1/ship-inventories/search-products`,
+    token,
+    readSession,
+    fetchImpl: effectiveFetch,
+    init: {
     method: "POST",
-    headers: buildTeamshipHeaders(token),
     body: JSON.stringify({
       user_id: userId,
       location_id: locationId,
       search
     }),
     cache: "no-store"
+    }
   });
   const json = (await response.json().catch(() => null)) as TeamshipProductSearchResponse | null;
 
@@ -511,12 +550,14 @@ export async function findTeamshipShippingOrders({
   orderIdentifier,
   preferUiPallets = false,
   credentials = null,
+  readSession,
   fetchImpl = fetch
 }: TeamshipShippingOrderSearchOptions): Promise<TeamshipShippingOrderDetail[]> {
-  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
-  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const resolvedCredentials = readSession?.credentials ?? credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = readSession?.apiBaseUrl ?? resolveTeamshipApiBaseUrl(resolvedCredentials);
   const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
-  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
+  const effectiveFetch = readSession?.fetchImpl ?? fetchImpl;
+  const token = readSession?.token ?? await loginToTeamship(effectiveFetch, resolvedCredentials, apiBaseUrl);
   const normalizedTarget = normalizeIdentifier(orderIdentifier);
   const matches: TeamshipShippingOrderDetail[] = [];
   const pageLimit = getTeamshipPageLimit();
@@ -527,9 +568,10 @@ export async function findTeamshipShippingOrders({
     const rows = await listTeamshipShippingOrders({
       apiBaseUrl,
       token,
+      readSession,
       limit: pageLimit,
       offset: pageIndex * pageLimit,
-      fetchImpl
+      fetchImpl: effectiveFetch
     });
 
     for (const row of rows) {
@@ -542,14 +584,20 @@ export async function findTeamshipShippingOrders({
         continue;
       }
 
-      const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
+      const detail = await getTeamshipShippingOrder({
+        apiBaseUrl,
+        token: readSession?.token ?? token,
+        readSession,
+        id: String(id),
+        fetchImpl: effectiveFetch
+      });
       const merged = mergeTeamshipDetailWithSummary(detail, row);
       const apiPallets = readAuthoritativeTeamshipPallets(detail);
       let uiPallets: ReturnType<typeof readAuthoritativeTeamshipPallets> = undefined;
 
       if (preferUiPallets || !apiPallets) {
         if (webSession === undefined) {
-          webSession = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
+          webSession = await loginToTeamshipWeb(effectiveFetch, resolvedCredentials, webBaseUrl).catch(() => null);
         }
 
         if (webSession) {
@@ -557,7 +605,7 @@ export async function findTeamshipShippingOrders({
             webBaseUrl,
             webCookieHeader: webSession.cookieHeader,
             id: String(id),
-            fetchImpl
+            fetchImpl: effectiveFetch
           }).catch(() => null);
           uiPallets = readAuthoritativeTeamshipPallets(uiDetail);
         }
@@ -753,12 +801,14 @@ async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipRun
 async function listTeamshipShippingOrders({
   apiBaseUrl,
   token,
+  readSession,
   limit,
   offset,
   fetchImpl
 }: {
   apiBaseUrl: string;
   token: string;
+  readSession?: TeamshipReadSession;
   limit: number;
   offset: number;
   fetchImpl: typeof fetch;
@@ -769,9 +819,12 @@ async function listTeamshipShippingOrders({
   url.searchParams.set("order_by", "created_at");
   url.searchParams.set("order", "DESC");
 
-  const response = await fetchImpl(url, {
-    headers: buildTeamshipHeaders(token),
-    cache: "no-store"
+  const response = await fetchAuthorizedTeamshipRead({
+    url,
+    token,
+    readSession,
+    fetchImpl,
+    init: { cache: "no-store" }
   });
   const json = (await response.json().catch(() => null)) as TeamshipListResponse | null;
 
@@ -843,17 +896,22 @@ async function listTeamshipDashboardShippingOrders({
 async function getTeamshipShippingOrder({
   apiBaseUrl,
   token,
+  readSession,
   id,
   fetchImpl
 }: {
   apiBaseUrl: string;
   token: string;
+  readSession?: TeamshipReadSession;
   id: string;
   fetchImpl: typeof fetch;
 }) {
-  const response = await fetchImpl(`${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(id)}`, {
-    headers: buildTeamshipHeaders(token),
-    cache: "no-store"
+  const response = await fetchAuthorizedTeamshipRead({
+    url: `${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(id)}`,
+    token,
+    readSession,
+    fetchImpl,
+    init: { cache: "no-store" }
   });
   const json = (await response.json().catch(() => null)) as TeamshipDetailResponse | null;
 
@@ -862,6 +920,38 @@ async function getTeamshipShippingOrder({
   }
 
   return json.data;
+}
+
+async function fetchAuthorizedTeamshipRead({
+  url,
+  token,
+  readSession,
+  fetchImpl,
+  init
+}: {
+  url: string | URL;
+  token: string;
+  readSession?: TeamshipReadSession;
+  fetchImpl: typeof fetch;
+  init: RequestInit;
+}) {
+  const send = (authorizationToken: string) => fetchImpl(url, {
+    ...init,
+    headers: buildTeamshipHeaders(authorizationToken)
+  });
+  const response = await send(token);
+  if (response.status !== 401 || !readSession) return response;
+
+  // Teamship can invalidate an API token while a batch is still reading. Only
+  // opt-in read sessions recover, and the exact read is retried at most once.
+  if (readSession.token === token) {
+    readSession.token = await loginToTeamship(
+      readSession.fetchImpl,
+      readSession.credentials,
+      readSession.apiBaseUrl
+    );
+  }
+  return send(readSession.token);
 }
 
 function buildTeamshipHeaders(token: string) {

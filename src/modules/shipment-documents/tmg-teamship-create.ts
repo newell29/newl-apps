@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import type { TeamshipShippingProductSearchRow, TeamshipRuntimeCredentials } from "@/server/integrations/teamship";
+import type {
+  TeamshipReadSession,
+  TeamshipShippingProductSearchRow,
+  TeamshipRuntimeCredentials
+} from "@/server/integrations/teamship";
 import {
   findTeamshipShippingOrders,
   searchTeamshipProductsForShipping
@@ -95,6 +99,7 @@ export async function buildTmgTeamshipCreatePlan({
   order,
   profile,
   credentials = null,
+  readSession,
   fetchImpl = fetch,
   searchProducts = searchTeamshipProductsForShipping
 }: {
@@ -102,6 +107,7 @@ export async function buildTmgTeamshipCreatePlan({
   order: TmgTeamshipPlanOrder;
   profile: TmgTeamshipProfile;
   credentials?: TeamshipRuntimeCredentials | null;
+  readSession?: TeamshipReadSession;
   fetchImpl?: typeof fetch;
   searchProducts?: typeof searchTeamshipProductsForShipping;
 }): Promise<TmgTeamshipCreatePlan> {
@@ -123,6 +129,7 @@ export async function buildTmgTeamshipCreatePlan({
       locationId: profile.inventoryLocationId,
       search: item.sku,
       credentials,
+      readSession,
       fetchImpl
     });
     const match = selectExactTeamshipProduct({ rows, sku: item.sku, quantity: item.quantity, profile });

@@ -18,7 +18,11 @@ import {
   fetchMicrosoftGraphMessageAttachments,
   type MicrosoftGraphMailMessage
 } from "@/server/integrations/microsoft-graph-mail";
-import { findTeamshipShippingOrders } from "@/server/integrations/teamship";
+import {
+  createTeamshipReadSession,
+  findTeamshipShippingOrders,
+  type TeamshipReadSession
+} from "@/server/integrations/teamship";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
 export const TMG_EMAIL_TRIGGER_MANUAL = "MANUAL";
@@ -175,8 +179,18 @@ async function ingestTmgMessage({
 
   const prepared = await prepareTmgEmailBatch(sourceAttachments);
   const plannedOrders: PlannedPreparedOrder[] = [];
+  let teamshipReadSessionPromise: Promise<TeamshipReadSession> | null = null;
+  const getTeamshipReadSession = () => {
+    teamshipReadSessionPromise ??= createTeamshipReadSession({ tenantId: context.tenantId });
+    return teamshipReadSessionPromise;
+  };
   for (const order of prepared.orders) {
-    plannedOrders.push(await planPreparedOrder({ tenantId: context.tenantId, order, teamshipProfile: settings.teamship }));
+    plannedOrders.push(await planPreparedOrder({
+      tenantId: context.tenantId,
+      order,
+      teamshipProfile: settings.teamship,
+      getTeamshipReadSession
+    }));
   }
   const receivedAt = readMessageReceivedAt(message);
   const fromAddress = message.from?.emailAddress?.address?.trim().toLowerCase();
@@ -311,16 +325,23 @@ async function ingestTmgMessage({
 async function planPreparedOrder({
   tenantId,
   order,
-  teamshipProfile
+  teamshipProfile,
+  getTeamshipReadSession
 }: {
   tenantId: string;
   order: TmgPreparedOrder;
   teamshipProfile: NonNullable<Awaited<ReturnType<typeof getTmgOrderIntakeSettings>>["teamship"]>;
+  getTeamshipReadSession: () => Promise<TeamshipReadSession>;
 }): Promise<PlannedPreparedOrder> {
   if (!order.readyForApproval || !order.combinedPdfHash) return { prepared: order, plan: null };
   const issues = order.validationIssues;
   try {
-    const existing = await findTeamshipShippingOrders({ tenantId, orderIdentifier: order.customerReference });
+    const readSession = await getTeamshipReadSession();
+    const existing = await findTeamshipShippingOrders({
+      tenantId,
+      orderIdentifier: order.customerReference,
+      readSession
+    });
     if (existing.some((candidate) => hasExactTmgTeamshipReference(candidate as Record<string, unknown>, order.customerReference))) {
       issues.push({
         code: "TEAMSHIP_ORDER_EXISTS",
@@ -332,6 +353,7 @@ async function planPreparedOrder({
     const plan = await buildTmgTeamshipCreatePlan({
       tenantId,
       profile: teamshipProfile,
+      readSession,
       order: {
         customerReference: order.customerReference,
         orderDate: requireValue(order.packingSlip.orderDate, "packing-slip order date"),

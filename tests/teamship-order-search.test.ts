@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { findTeamshipShippingOrders, parseTeamshipShippingOrderUiPage } from "@/server/integrations/teamship";
+import {
+  createTeamshipReadSession,
+  findTeamshipShippingOrders,
+  parseTeamshipShippingOrderUiPage,
+  searchTeamshipProductsForShipping
+} from "@/server/integrations/teamship";
 
 describe("Teamship shipping-order search identity", () => {
   afterEach(() => {
@@ -223,5 +228,91 @@ describe("Teamship shipping-order search identity", () => {
       pallets: [],
       pallet_dims: []
     })]);
+  });
+
+  it("reuses one opt-in read session and renews it once after an unauthorized read", async () => {
+    vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    let loginCount = 0;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      const authorization = (init?.headers as Record<string, string> | undefined)?.authorization;
+
+      if (url.endsWith("/v1/login")) {
+        loginCount += 1;
+        return Response.json({ data: { token: `test-token-${loginCount}` } });
+      }
+      if (url.includes("/v1/ship-inventories?")) {
+        if (authorization === "Bearer test-token-1") {
+          return Response.json({ message: "Unauthorized" }, { status: 401 });
+        }
+        expect(authorization).toBe("Bearer test-token-2");
+        return Response.json({ data: [{ id: 31064, order_number: "PS123456" }] });
+      }
+      if (url.endsWith("/v1/ship-inventories/31064")) {
+        expect(authorization).toBe("Bearer test-token-2");
+        return Response.json({ data: { id: 31064, order_number: "PS123456", pallets: [{ quantity: 1 }] } });
+      }
+      if (url.endsWith("/v1/ship-inventories/search-products")) {
+        expect(authorization).toBe("Bearer test-token-2");
+        return Response.json({ data: [{ id: 101, sku: "SYNTHETIC-SKU" }] });
+      }
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+    const credentials = {
+      email: "employee@example.com",
+      password: "not-a-live-password",
+      apiBaseUrl: "https://members.fulfillit.io/api"
+    };
+    const readSession = await createTeamshipReadSession({
+      credentials,
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    const orders = await findTeamshipShippingOrders({
+      orderIdentifier: "PS123456",
+      credentials,
+      readSession,
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+    const products = await searchTeamshipProductsForShipping({
+      userId: 1,
+      locationId: 2,
+      search: "SYNTHETIC-SKU",
+      credentials,
+      readSession,
+      fetchImpl: fetchMock as unknown as typeof fetch
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(products).toEqual([{ id: 101, sku: "SYNTHETIC-SKU" }]);
+    expect(loginCount).toBe(2);
+  });
+
+  it("does not add unauthorized-read retries to existing callers", async () => {
+    vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    let loginCount = 0;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url.endsWith("/v1/login")) {
+        loginCount += 1;
+        return Response.json({ data: { token: "test-token" } });
+      }
+      if (url.includes("/v1/ship-inventories?")) {
+        return Response.json({ message: "Unauthorized" }, { status: 401 });
+      }
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    await expect(findTeamshipShippingOrders({
+      orderIdentifier: "PS123456",
+      credentials: {
+        email: "employee@example.com",
+        password: "not-a-live-password",
+        apiBaseUrl: "https://members.fulfillit.io/api"
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch
+    })).rejects.toThrow("Unable to list Teamship shipping orders. Teamship returned status 401.");
+
+    expect(loginCount).toBe(1);
   });
 });
