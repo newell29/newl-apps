@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   isTmgCandidateMessage,
-  normalizeTmgSubject
+  normalizeTmgSubject,
+  selectTmgCandidateMessagesForSync,
+  TMG_MAX_NEW_BATCHES_PER_SYNC
 } from "@/modules/shipment-documents/tmg-email-intake";
 import type { MicrosoftGraphMailMessage } from "@/server/integrations/microsoft-graph-mail";
 
@@ -31,6 +33,21 @@ describe("TMG email candidate filtering", () => {
     expect(normalizeTmgSubject("External: TMG synthetic shipment-2026-08-18")).toBe(
       "external: tmg synthetic shipment-2026-08-18"
     );
+  });
+
+  it("bounds a large mailbox backlog to the oldest unsaved candidate", () => {
+    const messages = Array.from({ length: 250 }, (_, index) => message({
+      id: `message-${String(index).padStart(3, "0")}`,
+      receivedDateTime: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString()
+    })).reverse();
+    const existingIds = new Set(["message-000", "message-001"]);
+
+    const result = selectTmgCandidateMessagesForSync(messages, existingIds);
+
+    expect(TMG_MAX_NEW_BATCHES_PER_SYNC).toBe(1);
+    expect(result.selectedMessages.map((candidate) => candidate.id)).toEqual(["message-002"]);
+    expect(result.existingMessageCount).toBe(2);
+    expect(result.deferredMessageCount).toBe(247);
   });
 });
 
