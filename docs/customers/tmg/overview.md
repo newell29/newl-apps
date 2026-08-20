@@ -31,6 +31,8 @@ The authenticated Operations Tools page is `/operations/tmg-order-intake`. Verce
 
 The maximum-messages setting is a bounded Microsoft Graph search window, not the number of email batches parsed in one request. Each scan filters message metadata first, removes messages that already have a tenant-and-mailbox-scoped batch, and parses at most one new eligible email. The oldest unsaved candidate is processed first so a 14-day backlog drains across five-minute scheduler runs without older messages aging out. The authenticated manual scan and scheduled scan routes allow up to five minutes for that single email's PDF packet; no scan bypasses CSR approval.
 
+Planning reuses one opt-in Teamship API read session for the email batch instead of logging in again for every duplicate and SKU lookup. If Teamship returns `401` during one of those reads, TMG renews the session and retries that exact read once. This recovery is read-only: it is not enabled for Teamship create/update requests and does not change the existing Garland authentication path.
+
 The scheduled endpoint and `/api/operations/tmg-order-intake/worker/*` bypass browser-session middleware so their route handlers can enforce `CRON_SECRET` or ingestion-token authentication directly. The TMG settings, batch-list, and approval APIs are not exempt and continue to require an authenticated employee session and their existing permission checks.
 
 The external worker is started with `npm run worker:tmg-order-intake` and polls continuously by default. `TMG_WORKER_POLL_INTERVAL_MS` can set a bounded 5-second to 5-minute interval; `TMG_WORKER_RUN_ONCE=true` is reserved for supervised one-shot diagnostics. Live operation additionally requires the ingestion credential, worker base URL, explicit `TMG_ALLOW_LIVE_WRITES=true` flag, and a configured browser executable. It only claims CSR-approved jobs.
@@ -51,6 +53,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 
 - Missing or ambiguous documents, products, inventory, or ship-to fields: correct the source/configuration and ingest a new message; do not force the row through.
 - Exact Teamship duplicate: reconcile the existing Teamship order manually.
+- Repeated Teamship `401` after the single read-session renewal: leave the order in `NEEDS_REVIEW` and verify the configured account's API access with Teamship. Do not approve the batch until validation succeeds.
 - Create request without confirmed response/readback: inspect Teamship for the exact customer reference; do not retry automatically.
 - Upload without exact filename confirmation after reload: inspect the order documents manually; do not retry automatically.
 - Summary failure: the batch records `summaryStatus=NEEDS_REVIEW`; check recipients before any manual resend.
@@ -61,6 +64,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 - PDF classification, parsing, packet order, deduplication, and warehouse-note extraction.
 - Large-mailbox intake selects only the oldest unsaved eligible email for each scan and reports the remaining deferred candidate count.
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
+- TMG read-session reuse, one-time unauthorized-read recovery, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.
 - Tenant-scoped CSR approval, stale-plan rejection, valid-only partial-batch selection, and exact-reference recheck.
 - Tenant settings validation and internal summary content.
 - Middleware regression coverage that admits only the TMG scheduled/worker machine routes while keeping settings, batches, and the Operations Tools page session-protected.
