@@ -23,6 +23,7 @@ import type { AuthenticatedContext } from "@/server/tenant-context";
 
 export const TMG_EMAIL_TRIGGER_MANUAL = "MANUAL";
 export const TMG_EMAIL_TRIGGER_SCHEDULED = "SCHEDULED";
+export const TMG_MAX_NEW_BATCHES_PER_SYNC = 1;
 
 type PlannedPreparedOrder = {
   prepared: TmgPreparedOrder;
@@ -43,10 +44,24 @@ export async function syncTmgEmailIntake(
     maxMessagesPerMailbox: settings.maxMessagesPerScan
   });
   const candidates = messages.filter((message) => isTmgCandidateMessage(message, settings));
+  const existingBatches = candidates.length > 0
+    ? await prisma.tmgOrderIntakeBatch.findMany({
+        where: {
+          tenantId: context.tenantId,
+          mailboxAddress: settings.mailboxAddress,
+          graphMessageId: { in: candidates.map((message) => message.id) }
+        },
+        select: { graphMessageId: true }
+      })
+    : [];
+  const selection = selectTmgCandidateMessagesForSync(
+    candidates,
+    new Set(existingBatches.map((batch) => batch.graphMessageId))
+  );
   const results: Array<{ batchId: string; status: string; created: boolean }> = [];
   const failures: string[] = [];
 
-  for (const message of candidates) {
+  for (const message of selection.selectedMessages) {
     try {
       results.push(await ingestTmgMessage({ context, accessToken, message, triggerSource }));
     } catch (error) {
@@ -64,12 +79,23 @@ export async function syncTmgEmailIntake(
         triggerSource,
         scannedMessageCount: messages.length,
         candidateMessageCount: candidates.length,
+        existingCandidateCount: selection.existingMessageCount,
+        selectedCandidateCount: selection.selectedMessages.length,
+        deferredCandidateCount: selection.deferredMessageCount,
         createdBatchCount: results.filter((result) => result.created).length,
         failureCount: failures.length
       }
     }
   });
-  return { scannedMessageCount: messages.length, candidateMessageCount: candidates.length, results, failures };
+  return {
+    scannedMessageCount: messages.length,
+    candidateMessageCount: candidates.length,
+    existingCandidateCount: selection.existingMessageCount,
+    selectedCandidateCount: selection.selectedMessages.length,
+    deferredCandidateCount: selection.deferredMessageCount,
+    results,
+    failures
+  };
 }
 
 export async function listTmgOrderIntakeBatches(tenantId: string, limit = 25) {
@@ -359,6 +385,21 @@ export function isTmgCandidateMessage(
   );
 }
 
+export function selectTmgCandidateMessagesForSync(
+  candidates: MicrosoftGraphMailMessage[],
+  existingGraphMessageIds: ReadonlySet<string>
+) {
+  const pendingMessages = candidates
+    .filter((message) => !existingGraphMessageIds.has(message.id))
+    .sort(compareTmgMessagesOldestFirst);
+
+  return {
+    selectedMessages: pendingMessages.slice(0, TMG_MAX_NEW_BATCHES_PER_SYNC),
+    existingMessageCount: candidates.length - pendingMessages.length,
+    deferredMessageCount: Math.max(0, pendingMessages.length - TMG_MAX_NEW_BATCHES_PER_SYNC)
+  };
+}
+
 export function normalizeTmgSubject(subject: string | null | undefined) {
   let normalized = subject?.trim() ?? "";
   while (/^(?:re|fw|fwd)\s*:\s*/i.test(normalized)) {
@@ -396,6 +437,14 @@ function readMessageReceivedAt(message: MicrosoftGraphMailMessage) {
   const date = new Date(message.receivedDateTime ?? "");
   if (Number.isNaN(date.getTime())) throw new Error("A candidate TMG email did not contain a valid received date.");
   return date;
+}
+
+function compareTmgMessagesOldestFirst(left: MicrosoftGraphMailMessage, right: MicrosoftGraphMailMessage) {
+  const leftTimestamp = Date.parse(left.receivedDateTime ?? "");
+  const rightTimestamp = Date.parse(right.receivedDateTime ?? "");
+  const normalizedLeft = Number.isFinite(leftTimestamp) ? leftTimestamp : Number.NEGATIVE_INFINITY;
+  const normalizedRight = Number.isFinite(rightTimestamp) ? rightTimestamp : Number.NEGATIVE_INFINITY;
+  return normalizedLeft - normalizedRight || left.id.localeCompare(right.id);
 }
 
 function requireValue(value: string | null | undefined, label: string) {

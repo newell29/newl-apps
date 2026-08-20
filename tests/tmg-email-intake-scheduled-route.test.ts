@@ -25,7 +25,7 @@ vi.mock("@/modules/shipment-documents/tmg-settings", () => ({
   getTmgOrderIntakeSettings: getTmgOrderIntakeSettingsMock
 }));
 
-import { GET, POST } from "@/app/api/operations/tmg-order-intake/scheduled/route";
+import { GET, POST, maxDuration } from "@/app/api/operations/tmg-order-intake/scheduled/route";
 
 const tenant = { tenantId: "tenant-1", tenantSlug: "synthetic", tenantName: "Synthetic Tenant" };
 
@@ -41,6 +41,10 @@ describe("scheduled TMG email intake route", () => {
       results: [],
       failures: []
     });
+  });
+
+  it("allows one bounded TMG batch enough time to parse its PDF packet", () => {
+    expect(maxDuration).toBe(300);
   });
 
   it("keeps the existing POST route on ingestion authentication", async () => {

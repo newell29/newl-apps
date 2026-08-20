@@ -9,7 +9,7 @@ import { requireModule, requireMutationAccess } from "@/server/auth/authorizatio
 import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const context = await getAuthenticatedContext();
