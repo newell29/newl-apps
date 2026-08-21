@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildTmgCombinedOrderPdf,
   parseTmgPackingSlipPage,
-  parseTmgPicklistPage
+  parseTmgPicklistPage,
+  prepareTmgEmailBatch
 } from "@/modules/shipment-documents/tmg-pdf-intake";
 
 describe("TMG PDF intake", () => {
@@ -81,6 +82,7 @@ describe("TMG PDF intake", () => {
     expect(orders).toEqual([
       {
         customerReference: "US19999",
+        fulfillmentType: "FREIGHT",
         sku: "TMG-EXAMPLE-1",
         quantity: 2,
         trackingNumber: "010-1234567",
@@ -91,6 +93,7 @@ describe("TMG PDF intake", () => {
       },
       {
         customerReference: "US18888",
+        fulfillmentType: "FREIGHT",
         sku: "TMG-EXAMPLE-2",
         quantity: 1,
         trackingNumber: "010-7654321",
@@ -116,6 +119,43 @@ describe("TMG PDF intake", () => {
 
     expect(packet.getPages().map((page) => page.getWidth())).toEqual([101, 200, 300]);
   });
+
+  it("accepts an explicit self-pickup packet without a BOL, label, or PRO number", async () => {
+    const pickupPacket = await selfPickupPacketPdf("US19999");
+    const picklist = await picklistPdf({ reference: "US19999", selfPickup: true });
+    const prepared = await prepareTmgEmailBatch([
+      { sourceId: "picklist", fileName: "picklist.pdf", contentType: "application/pdf", bytes: picklist },
+      { sourceId: "pickup", fileName: "self-pickup US19999.pdf", contentType: "application/pdf", bytes: pickupPacket }
+    ]);
+
+    expect(prepared.orders).toHaveLength(1);
+    expect(prepared.orders[0]).toMatchObject({
+      customerReference: "US19999",
+      fulfillmentType: "SELF_PICKUP",
+      bol: null,
+      label: null,
+      validationIssues: [],
+      readyForApproval: true,
+      combinedPdfFileName: "TMG US19999.pdf"
+    });
+    expect(prepared.orders[0]!.combinedPdfBytes).toEqual(pickupPacket);
+    expect((await PDFDocument.load(prepared.orders[0]!.combinedPdfBytes!)).getPageCount()).toBe(3);
+  });
+
+  it("keeps an ordinary freight order blocked when its BOL and label are missing", async () => {
+    const packingSlip = await packingSlipPdf("US19999");
+    const picklist = await picklistPdf({ reference: "US19999", selfPickup: false });
+    const prepared = await prepareTmgEmailBatch([
+      { sourceId: "picklist", fileName: "picklist.pdf", contentType: "application/pdf", bytes: picklist },
+      { sourceId: "packing", fileName: "order.pdf", contentType: "application/pdf", bytes: packingSlip }
+    ]);
+
+    expect(prepared.orders[0]).toMatchObject({ fulfillmentType: "FREIGHT", readyForApproval: false });
+    expect(prepared.orders[0]!.validationIssues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      "MISSING_BOL",
+      "MISSING_LABEL"
+    ]));
+  });
 });
 
 function word(text: string, x: number, y: number) {
@@ -125,5 +165,51 @@ function word(text: string, x: number, y: number) {
 async function pdfWithPageWidths(widths: number[]) {
   const pdf = await PDFDocument.create();
   for (const width of widths) pdf.addPage([width, 400]);
+  return new Uint8Array(await pdf.save());
+}
+
+async function selfPickupPacketPdf(reference: string) {
+  const pdf = await PDFDocument.create();
+  pdf.addPage([612, 792]).drawText(`Self-pickup (NC) Order Numbers: #${reference}`, { x: 60, y: 700 });
+  pdf.addPage([612, 792]).drawText(`Customer Self Pickup Form Order Number #${reference}`, { x: 60, y: 700 });
+  drawPackingSlip(pdf.addPage([612, 792]), reference);
+  return new Uint8Array(await pdf.save());
+}
+
+async function packingSlipPdf(reference: string) {
+  const pdf = await PDFDocument.create();
+  drawPackingSlip(pdf.addPage([612, 792]), reference);
+  return new Uint8Array(await pdf.save());
+}
+
+function drawPackingSlip(page: ReturnType<PDFDocument["addPage"]>, reference: string) {
+  page.drawText("TMG INDUSTRIAL USA", { x: 60, y: 740 });
+  page.drawText(`Order #${reference}`, { x: 350, y: 740 });
+  page.drawText("August 18, 2026", { x: 350, y: 720 });
+  page.drawText("SHIP TO", { x: 60, y: 700 });
+  page.drawText("BILL TO", { x: 320, y: 700 });
+  page.drawText("Synthetic Recipient", { x: 60, y: 680 });
+  page.drawText("123 Example Way", { x: 60, y: 660 });
+  page.drawText("Example City NY 12345", { x: 60, y: 640 });
+  page.drawText("United States", { x: 60, y: 620 });
+  page.drawText("+1 212-555-0100", { x: 60, y: 600 });
+  page.drawText("ITEMS", { x: 60, y: 540 });
+  page.drawText("TMG-EXAMPLE-1 1 of 1", { x: 60, y: 500 });
+  page.drawText("NOTES Pickup from Charlotte NC", { x: 60, y: 460 });
+  page.drawText("Thank you for shopping with us!", { x: 60, y: 440 });
+}
+
+async function picklistPdf({ reference, selfPickup }: { reference: string; selfPickup: boolean }) {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([612, 792]);
+  page.drawText("Order Number", { x: 40, y: 720 });
+  page.drawText("SKU", { x: 120, y: 720 });
+  page.drawText("Unit Qty", { x: 230, y: 720 });
+  page.drawText("Tracking number", { x: 380, y: 720 });
+  page.drawText("Notes", { x: 520, y: 720 });
+  if (selfPickup) page.drawText("Self-pickup:", { x: 40, y: 690 });
+  page.drawText(reference, { x: 40, y: 650 });
+  page.drawText("TMG-EXAMPLE-1", { x: 120, y: 650 });
+  page.drawText("1", { x: 230, y: 650 });
   return new Uint8Array(await pdf.save());
 }

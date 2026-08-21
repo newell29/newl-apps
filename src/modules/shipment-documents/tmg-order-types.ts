@@ -21,6 +21,8 @@ export type TmgOrderItem = {
   quantity: number | null;
 };
 
+export type TmgFulfillmentType = "FREIGHT" | "SELF_PICKUP";
+
 export type TmgPackingSlipOrder = {
   customerReference: string;
   orderDate: string | null;
@@ -35,6 +37,7 @@ export type TmgPackingSlipOrder = {
 
 export type TmgPicklistOrder = {
   customerReference: string;
+  fulfillmentType: TmgFulfillmentType;
   sku: string | null;
   quantity: number | null;
   trackingNumber: string | null;
@@ -85,6 +88,7 @@ export type TmgOrderValidationIssue = {
 
 export type TmgPreparedOrder = {
   customerReference: string;
+  fulfillmentType: TmgFulfillmentType;
   packingSlip: TmgPackingSlipOrder;
   picklist: TmgPicklistOrder | null;
   bol: TmgBolEvidence | null;
