@@ -19,6 +19,7 @@ const profile: TmgTeamshipProfile = {
 
 const order: TmgTeamshipPlanOrder = {
   customerReference: "US19999",
+  fulfillmentType: "FREIGHT",
   orderDate: "2026-08-18",
   proNumber: "010-1234567",
   packetHash: "a".repeat(64),
@@ -55,6 +56,33 @@ describe("TMG Teamship create planning", () => {
     });
     expect(plan.payload).not.toHaveProperty("shippingServiceLevel");
     expect(plan.requestHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("builds a self-pickup plan with no freight PRO number", async () => {
+    const plan = await buildTmgTeamshipCreatePlan({
+      tenantId: "tenant-example",
+      order: { ...order, fulfillmentType: "SELF_PICKUP", proNumber: null },
+      profile,
+      searchProducts: vi.fn(async () => [productRow(5001)])
+    });
+
+    expect(plan).toMatchObject({ fulfillmentType: "SELF_PICKUP" });
+    expect(plan.payload).toMatchObject({
+      shippingMethod: "ltl",
+      carrier_value: "P/U",
+      proNumber: "",
+      ltlShipmentID: "US19999",
+      poNumber: "US19999"
+    });
+  });
+
+  it("continues to require a PRO number for freight orders", async () => {
+    await expect(buildTmgTeamshipCreatePlan({
+      tenantId: "tenant-example",
+      order: { ...order, proNumber: null },
+      profile,
+      searchProducts: vi.fn(async () => [productRow(5001)])
+    })).rejects.toThrow("requires a BOL PRO number");
   });
 
   it("rejects ambiguous exact stock matches", async () => {

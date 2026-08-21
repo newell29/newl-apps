@@ -74,6 +74,24 @@ export function TmgOrderIntakeClient({
     }
   }
 
+  async function reprocessBatch(batch: TmgBatch) {
+    setBatchAction(batch.id);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/operations/tmg-order-intake/batches/${encodeURIComponent(batch.id)}/reprocess`, {
+        method: "POST"
+      });
+      const json = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(json.error ?? "Unable to reprocess the TMG batch.");
+      await loadBatches();
+      setMessage("TMG documents reprocessed. Review the refreshed order plan before approval.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to reprocess the TMG batch.");
+    } finally {
+      setBatchAction(null);
+    }
+  }
+
   async function saveSettings(formData: FormData) {
     setSaving(true);
     setMessage(null);
@@ -175,16 +193,18 @@ export function TmgOrderIntakeClient({
                 <Metric label="Summary" value={labelStatus(batch.summaryStatus)} />
               </div>
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="text-xs uppercase text-mutedForeground"><tr><th className="pb-2">Customer ref.</th><th className="pb-2">Ship to</th><th className="pb-2">Products</th><th className="pb-2">PRO</th><th className="pb-2">Warehouse notes</th><th className="pb-2">Status</th></tr></thead>
+                <table className="w-full min-w-[860px] text-left text-sm">
+                  <thead className="text-xs uppercase text-mutedForeground"><tr><th className="pb-2">Customer ref.</th><th className="pb-2">Fulfillment</th><th className="pb-2">Ship to</th><th className="pb-2">Products</th><th className="pb-2">PRO</th><th className="pb-2">Warehouse notes</th><th className="pb-2">Status</th></tr></thead>
                   <tbody className="divide-y divide-border">
                     {batch.orders.map((order) => {
                       const packing = order.packingSlip;
+                      const isSelfPickup = packing.fulfillmentType === "SELF_PICKUP";
                       return <tr key={order.id} className="align-top">
                         <td className="py-3 font-medium">{order.customerReference}</td>
+                        <td className="py-3">{isSelfPickup ? "Self-pickup" : "Freight"}</td>
                         <td className="py-3">{packing.shipTo.name}<br /><span className="text-mutedForeground">{packing.shipTo.city}, {packing.shipTo.state}</span></td>
                         <td className="py-3">{packing.items.map((item) => `${item.sku} × ${item.quantity}`).join(", ")}</td>
-                        <td className="py-3">{order.bol?.proNumber ?? "—"}</td>
+                        <td className="py-3">{order.bol?.proNumber ?? (isSelfPickup ? "Not required" : "—")}</td>
                         <td className="max-w-xs py-3">{order.warehouseInstructions ?? "—"}</td>
                         <td className="py-3">
                           <span>{labelStatus(order.status)}</span>
@@ -201,6 +221,12 @@ export function TmgOrderIntakeClient({
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted p-3">
                   <p className="text-sm">Approve {batch.readyOrderCount} validated order{batch.readyOrderCount === 1 ? "" : "s"}. {batch.invalidOrderCount > 0 ? `${batch.invalidOrderCount} invalid order(s) remain blocked.` : ""}</p>
                   <button type="button" onClick={() => void approveBatch(batch)} disabled={batchAction !== null} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground disabled:opacity-50">{batchAction === batch.id ? "Approving..." : "Approve TMG orders"}</button>
+                </div>
+              ) : null}
+              {canApprove && !batch.executionJob && ["NEEDS_REVIEW", "PARTIALLY_READY"].includes(batch.status) ? (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
+                  <p className="text-sm text-mutedForeground">Re-run the saved PDFs through the latest TMG validation rules. This does not create or change a Teamship order.</p>
+                  <button type="button" onClick={() => void reprocessBatch(batch)} disabled={batchAction !== null} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold disabled:opacity-50">{batchAction === batch.id ? "Reprocessing..." : "Reprocess documents"}</button>
                 </div>
               ) : null}
             </article>
@@ -286,7 +312,7 @@ type TmgBatch = {
     id: string;
     customerReference: string;
     status: string;
-    packingSlip: { shipTo: { name: string; city: string; state: string }; items: Array<{ sku: string; quantity: number }> };
+    packingSlip: { fulfillmentType?: "FREIGHT" | "SELF_PICKUP"; shipTo: { name: string; city: string; state: string }; items: Array<{ sku: string; quantity: number }> };
     bol: { proNumber?: string } | null;
     warehouseInstructions: string | null;
     validationIssues: Array<{ code: string; message: string }>;

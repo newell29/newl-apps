@@ -8,6 +8,8 @@
 - The packing slip is the primary order source. Ship-to, customer reference, date, SKU, and quantity come from the packing slip.
 - The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary.
 - The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip.
+- A self-pickup exception is allowed only when the same order is identified as self-pickup on the picklist and its source order PDF contains both a `Customer Self Pickup Form` and self-pickup wording for the exact customer reference. Missing freight documents alone never classify an order as pickup.
+- A validated self-pickup order does not require a BOL, freight label, or PRO number. Its complete source pickup packet (warehouse release sheet, customer pickup form, and packing slip) is preserved as the one Teamship upload document. Ordinary freight orders remain blocked when a BOL, label, or PRO number is missing.
 - Carrier delivery notes are intentionally excluded from Teamship.
 - Each order gets one consolidated PDF in packing-slip, BOL, label order. The exact file is uploaded to the Teamship Document control after order creation.
 - A CSR must approve the immutable batch plan before any Teamship create or document upload. Removing this approval later is a separate owner decision and code change.
@@ -28,6 +30,10 @@
 The `TMG Order Intake` tenant integration record stores non-secret mailbox rules, exact required To/CC recipients, internal summary recipients, explicitly approved additional internal recipient domains, and Teamship scope identifiers. Microsoft Graph and Teamship credentials continue to use the existing tenant integration mechanisms. Required employee recipients and internal summary recipients must use either the configured mailbox domain or an administrator-approved additional internal domain. Live customer and employee addresses and organization domains remain tenant configuration and must not be committed to source code, tests, or documentation.
 
 The authenticated Operations Tools page is `/operations/tmg-order-intake`. Vercel calls `GET /api/operations/tmg-order-intake/scheduled` every five minutes and authenticates it with the existing `CRON_SECRET`; the existing machine-triggered `POST` remains available under ingestion authentication. Both paths bind the run to the configured ingestion tenant. A disabled or incomplete TMG configuration is a successful no-op.
+
+For self-pickup plans, the Teamship API payload retains the existing LTL order contract, uses `P/U` as the carrier value, and leaves the PRO number blank. This exact transport-field mapping is inferred from the existing Teamship pickup normalization and requires owner confirmation against a manually created pickup order before unattended pickup creation is enabled.
+
+An unapproved saved batch that has no approval plan can be run through newer parsing rules with **Reprocess documents**. This replaces only its unapproved Newl Apps evidence, records an audit entry, and never creates or changes a Teamship order. The CSR must review the refreshed row and use the separate **Approve TMG orders** action. A batch with an approval plan, approval, claim, or started work cannot be reprocessed.
 
 The maximum-messages setting is a bounded Microsoft Graph search window, not the number of email batches parsed in one request. Each scan filters message metadata first, removes messages that already have a tenant-and-mailbox-scoped batch, and parses at most one new eligible email. The oldest unsaved candidate is processed first so a 14-day backlog drains across five-minute scheduler runs without older messages aging out. The authenticated manual scan and scheduled scan routes allow up to five minutes for that single email's PDF packet; no scan bypasses CSR approval.
 
@@ -62,6 +68,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 ## Test coverage
 
 - PDF classification, parsing, packet order, deduplication, and warehouse-note extraction.
+- Explicit self-pickup classification, intact three-page pickup packets, pickup Teamship payload mapping, and regression coverage that incomplete freight still cannot bypass BOL/label/PRO validation.
 - Large-mailbox intake selects only the oldest unsaved eligible email for each scan and reports the remaining deferred candidate count.
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
 - TMG read-session reuse, one-time unauthorized-read recovery, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.

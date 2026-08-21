@@ -10,8 +10,10 @@ import {
   searchTeamshipProductsForShipping
 } from "@/server/integrations/teamship";
 import { resolveTenantTeamshipCredentials } from "@/server/integrations/teamship-settings";
+import type { TmgFulfillmentType } from "@/modules/shipment-documents/tmg-order-types";
 
 const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
+const TEAMSHIP_SELF_PICKUP_CARRIER = "P/U";
 
 export type TmgTeamshipProfile = {
   customerId: string;
@@ -25,8 +27,9 @@ export type TmgTeamshipProfile = {
 
 export type TmgTeamshipPlanOrder = {
   customerReference: string;
+  fulfillmentType: TmgFulfillmentType;
   orderDate: string;
-  proNumber: string;
+  proNumber: string | null;
   packetHash: string;
   shipTo: {
     name: string;
@@ -68,6 +71,7 @@ export type TmgTeamshipCreatePayload = {
 export type TmgTeamshipCreatePlan = {
   workflowKey: "TMG_TEAMSHIP_CREATE_V1";
   customerReference: string;
+  fulfillmentType: TmgFulfillmentType;
   packetHash: string;
   payload: TmgTeamshipCreatePayload;
   products: Array<{
@@ -148,8 +152,8 @@ export async function buildTmgTeamshipCreatePlan({
     shippingMethod: "ltl",
     ltlShipmentID: order.customerReference,
     spdShipmentID: "",
-    carrier_value: profile.carrierName,
-    proNumber: order.proNumber,
+    carrier_value: order.fulfillmentType === "SELF_PICKUP" ? TEAMSHIP_SELF_PICKUP_CARRIER : profile.carrierName,
+    proNumber: order.fulfillmentType === "SELF_PICKUP" ? "" : requireFreightProNumber(order.proNumber),
     poNumber: order.customerReference,
     pickETA_date: formatTeamshipDate(order.orderDate),
     ship_first_name: order.shipTo.name,
@@ -165,6 +169,7 @@ export async function buildTmgTeamshipCreatePlan({
   const requestHash = hashTmgTeamshipRequest({
     workflowKey: "TMG_TEAMSHIP_CREATE_V1",
     customerReference: order.customerReference,
+    fulfillmentType: order.fulfillmentType,
     packetHash: order.packetHash,
     payload,
     products
@@ -173,6 +178,7 @@ export async function buildTmgTeamshipCreatePlan({
   return {
     workflowKey: "TMG_TEAMSHIP_CREATE_V1",
     customerReference: order.customerReference,
+    fulfillmentType: order.fulfillmentType,
     packetHash: order.packetHash,
     payload,
     products,
@@ -295,6 +301,7 @@ function assertApprovalMatchesPlan(plan: TmgTeamshipCreatePlan, approval: TmgTea
   const computed = hashTmgTeamshipRequest({
     workflowKey: plan.workflowKey,
     customerReference: plan.customerReference,
+    fulfillmentType: plan.fulfillmentType,
     packetHash: plan.packetHash,
     payload: plan.payload,
     products: plan.products
@@ -337,6 +344,11 @@ function formatTeamshipDate(value: string) {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) throw new Error("TMG order date must use YYYY-MM-DD format.");
   return `${match[2]}/${match[3]}/${match[1]}`;
+}
+
+function requireFreightProNumber(value: string | null) {
+  if (!value?.trim()) throw new Error("A freight TMG order requires a BOL PRO number.");
+  return value.trim();
 }
 
 function assertPositiveInteger(value: string, label: string) {

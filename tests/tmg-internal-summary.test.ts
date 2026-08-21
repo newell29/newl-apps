@@ -26,4 +26,25 @@ describe("TMG internal summary", () => {
     expect(messages[0]!.body).toContain("Delivery notes from the packing slip were intentionally excluded");
     expect(messages[0]!.body).not.toContain("Appointment required");
   });
+
+  it("labels the PRO number as not required for a self-pickup order", () => {
+    const [message] = buildTmgInternalSummaryMessages({
+      recipients: ["csr@example.com"],
+      receivedAt: "2026-08-18T14:00:00.000Z",
+      sourceSubject: "TMG synthetic pickup",
+      orders: [{
+        teamshipOrderNumber: "612345",
+        customerReference: "US19999",
+        shipToName: "Synthetic Recipient",
+        shipToCity: "Example City",
+        shipToState: "NY",
+        items: [{ sku: "TMG-EXAMPLE-1", quantity: 1 }],
+        proNumber: "Not required (self-pickup)",
+        documentUploadStatus: "UPLOADED",
+        warehouseInstructions: null
+      }]
+    });
+
+    expect(message!.body).toContain("PRO: Not required (self-pickup)");
+  });
 });

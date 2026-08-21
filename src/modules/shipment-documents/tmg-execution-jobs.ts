@@ -305,7 +305,11 @@ async function sendTmgInternalSummary(
     receivedAt: batch.receivedAt.toISOString(),
     sourceSubject: batch.subject,
     orders: orders.map((order) => {
-      const packing = order.packingSlip as unknown as { shipTo: { name: string; city: string; state: string }; items: Array<{ sku: string; quantity: number }> };
+      const packing = order.packingSlip as unknown as {
+        fulfillmentType?: "FREIGHT" | "SELF_PICKUP";
+        shipTo: { name: string; city: string; state: string };
+        items: Array<{ sku: string; quantity: number }>;
+      };
       const bol = order.bol as unknown as { proNumber?: string } | null;
       return {
         teamshipOrderNumber: order.teamshipOrderNumber!,
@@ -314,7 +318,7 @@ async function sendTmgInternalSummary(
         shipToCity: packing.shipTo.city,
         shipToState: packing.shipTo.state,
         items: packing.items,
-        proNumber: bol?.proNumber ?? "Not available",
+        proNumber: packing.fulfillmentType === "SELF_PICKUP" ? "Not required (self-pickup)" : bol?.proNumber ?? "Not available",
         documentUploadStatus: order.documentUploadStatus as "UPLOADED" | "ALREADY_PRESENT",
         warehouseInstructions: order.warehouseInstructions
       };

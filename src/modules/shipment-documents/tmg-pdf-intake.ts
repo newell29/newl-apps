@@ -4,6 +4,7 @@ import { PDFDocument } from "pdf-lib";
 
 import type {
   TmgBolEvidence,
+  TmgFulfillmentType,
   TmgLabelEvidence,
   TmgOrderValidationIssue,
   TmgPackingSlipOrder,
@@ -162,6 +163,9 @@ export function parseTmgPicklistPage(
   }
 
   const notesHeading = page.words.find((word) => /^Notes$/i.test(word.text));
+  const fulfillmentType: TmgFulfillmentType = /\bSelf[-\s]?pickup\s*:/i.test(page.text)
+    ? "SELF_PICKUP"
+    : "FREIGHT";
   const referenceWords = page.words
     .filter((word) => /^US\d{4,}$/i.test(word.text))
     .sort((left, right) => right.y - left.y);
@@ -179,6 +183,7 @@ export function parseTmgPicklistPage(
 
     return {
       customerReference: referenceWord.text.toUpperCase(),
+      fulfillmentType,
       sku,
       quantity,
       trackingNumber,
@@ -208,12 +213,18 @@ async function prepareOrder({
   const matchingLabels = labelEvidence.filter((label) => label.customerReference === packingSlip.customerReference);
   const bol = matchingBols.length === 1 ? matchingBols[0]! : null;
   const label = matchingLabels.length === 1 ? matchingLabels[0]! : null;
-  const validationIssues = validatePreparedOrder({ packingSlip, picklist, matchingBols, matchingLabels });
+  const pickupAttachment = findSelfPickupPacket({ packingSlip, picklist, attachments });
+  const fulfillmentType: TmgFulfillmentType = pickupAttachment ? "SELF_PICKUP" : "FREIGHT";
+  const validationIssues = validatePreparedOrder({ packingSlip, picklist, matchingBols, matchingLabels, fulfillmentType });
   let combinedPdfBytes: Uint8Array | null = null;
   let combinedPdfHash: string | null = null;
   let combinedPdfFileName: string | null = null;
 
-  if (bol && label) {
+  if (fulfillmentType === "SELF_PICKUP" && pickupAttachment) {
+    combinedPdfBytes = new Uint8Array(pickupAttachment.bytes);
+    combinedPdfHash = createHash("sha256").update(combinedPdfBytes).digest("hex");
+    combinedPdfFileName = `TMG ${packingSlip.customerReference}.pdf`;
+  } else if (bol && label) {
     const packingAttachment = attachments.find((attachment) => attachment.sourceId === packingSlip.sourceAttachmentId);
     const bolAttachment = attachments.find((attachment) => attachment.sourceId === bol.sourceAttachmentId);
     const labelAttachment = attachments.find((attachment) => attachment.sourceId === label.sourceAttachmentId);
@@ -226,17 +237,19 @@ async function prepareOrder({
       });
       combinedPdfHash = createHash("sha256").update(combinedPdfBytes).digest("hex");
       combinedPdfFileName = `TMG ${packingSlip.customerReference}.pdf`;
-      if (combinedPdfBytes.byteLength > MAX_TEAMSHIP_DOCUMENT_BYTES) {
-        validationIssues.push({
-          code: "PACKET_TOO_LARGE",
-          message: `${combinedPdfFileName} exceeds Teamship's 2 MB document-upload limit.`
-        });
-      }
     }
+  }
+
+  if (combinedPdfBytes && combinedPdfFileName && combinedPdfBytes.byteLength > MAX_TEAMSHIP_DOCUMENT_BYTES) {
+    validationIssues.push({
+      code: "PACKET_TOO_LARGE",
+      message: `${combinedPdfFileName} exceeds Teamship's 2 MB document-upload limit.`
+    });
   }
 
   return {
     customerReference: packingSlip.customerReference,
+    fulfillmentType,
     packingSlip,
     picklist,
     bol,
@@ -288,21 +301,23 @@ function validatePreparedOrder({
   packingSlip,
   picklist,
   matchingBols,
-  matchingLabels
+  matchingLabels,
+  fulfillmentType
 }: {
   packingSlip: TmgPackingSlipOrder;
   picklist: TmgPicklistOrder | null;
   matchingBols: TmgBolEvidence[];
   matchingLabels: TmgLabelEvidence[];
+  fulfillmentType: TmgFulfillmentType;
 }) {
   const issues: TmgOrderValidationIssue[] = [];
-  if (matchingBols.length === 0) issues.push({ code: "MISSING_BOL", message: "No BOL contains this customer reference." });
+  if (fulfillmentType === "FREIGHT" && matchingBols.length === 0) issues.push({ code: "MISSING_BOL", message: "No BOL contains this customer reference." });
   if (matchingBols.length > 1) issues.push({ code: "DUPLICATE_BOL", message: "More than one BOL contains this customer reference." });
-  if (matchingLabels.length === 0) issues.push({ code: "MISSING_LABEL", message: "No label contains this customer reference." });
+  if (fulfillmentType === "FREIGHT" && matchingLabels.length === 0) issues.push({ code: "MISSING_LABEL", message: "No label contains this customer reference." });
   if (matchingLabels.length > 1) issues.push({ code: "DUPLICATE_LABEL", message: "More than one label contains this customer reference." });
   if (!picklist) issues.push({ code: "MISSING_PICKLIST_ORDER", message: "The customer reference is not present on the picklist." });
   if (!packingSlip.orderDate) issues.push({ code: "MISSING_ORDER_DATE", message: "The packing-slip order date could not be read." });
-  if (matchingBols.length === 1 && !matchingBols[0]!.proNumber) {
+  if (fulfillmentType === "FREIGHT" && matchingBols.length === 1 && !matchingBols[0]!.proNumber) {
     issues.push({ code: "MISSING_PRO_NUMBER", message: "The BOL PRO number could not be read." });
   }
   if (packingSlip.items.length === 0) issues.push({ code: "MISSING_PRODUCT", message: "No TMG SKU was found on the packing slip." });
@@ -319,6 +334,25 @@ function validatePreparedOrder({
     issues.push({ code: "PICKLIST_QUANTITY_MISMATCH", message: "The picklist quantity does not match the packing-slip quantity." });
   }
   return issues;
+}
+
+function findSelfPickupPacket({
+  packingSlip,
+  picklist,
+  attachments
+}: {
+  packingSlip: TmgPackingSlipOrder;
+  picklist: TmgPicklistOrder | null;
+  attachments: ExtractedAttachment[];
+}) {
+  if (picklist?.fulfillmentType !== "SELF_PICKUP") return null;
+  const attachment = attachments.find((candidate) => candidate.sourceId === packingSlip.sourceAttachmentId);
+  if (!attachment) return null;
+  const text = attachment.pages.map((page) => page.text).join("\n");
+  const referencePattern = new RegExp(`\\b${escapeRegExp(packingSlip.customerReference)}\\b`, "i");
+  const hasPickupForm = /Customer\s+Self\s+Pickup\s+Form/i.test(text);
+  const hasPickupHeading = /\bSelf[-\s]?pickup\b/i.test(text) || /self[-\s]?pickup/i.test(attachment.fileName);
+  return hasPickupForm && hasPickupHeading && referencePattern.test(text) ? attachment : null;
 }
 
 function parseTmgBolAttachment(attachment: ExtractedAttachment): TmgBolEvidence[] {
@@ -481,6 +515,10 @@ function findDuplicateValues(values: string[]) {
     seen.add(value);
   }
   return duplicates;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function extractPositionedPdfPages(fileBytes: Uint8Array): Promise<PositionedPage[]> {
