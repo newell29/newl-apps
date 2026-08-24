@@ -1,6 +1,7 @@
 import {
   describeIncompleteBolCleanup,
   executeTeamshipPhase2BolCleanupJob,
+  preflightTeamshipBolCleanupBrowser,
   type TeamshipBolCleanupJobResult
 } from "@/modules/shipment-documents/teamship-browser-update-execution";
 import {
@@ -13,6 +14,10 @@ import {
   readWorkerFailureStage,
   TeamshipWorkerStageError
 } from "@/modules/shipment-documents/teamship-worker-failure";
+import {
+  executeTeamshipApiAfterBrowserPreflight,
+  requiresTeamshipBolCleanupBrowserPreflight
+} from "@/modules/shipment-documents/teamship-worker-browser-preflight";
 
 type WorkerOptions = {
   baseUrl: string;
@@ -135,26 +140,38 @@ async function executeJob({
     throw new Error("This approved job requires live mode, but the VM worker is running in dry-run mode.");
   }
 
-  let result: TeamshipPhase2ExecutionResult;
+  const browserPreflightRequired = requiresTeamshipBolCleanupBrowserPreflight({
+    plan: claimed.executionPayload,
+    enabled:
+      claimed.job.agentMode === "LIVE_API" &&
+      options.mode === "live-api" &&
+      options.browserBolCleanupEnabled
+  });
 
-  try {
-    result = await executeTeamshipPhase2Job({
-      job: {
-        id: claimed.job.id,
-        agentMode: claimed.job.agentMode,
-        dryRun: claimed.job.dryRun
-      },
-      plan: claimed.executionPayload,
-      credentials: claimed.teamshipCredentials!,
-      options: {
-        agentId: options.agentId,
-        allowLiveUpdates: options.allowLiveUpdates,
-        liveAllowlistSrNumbers: options.liveAllowlistSrNumbers
-      }
-    });
-  } catch (error) {
-    throw new TeamshipWorkerStageError("TEAMSHIP_API", error);
-  }
+  const result: TeamshipPhase2ExecutionResult = await executeTeamshipApiAfterBrowserPreflight({
+    required: browserPreflightRequired,
+    preflightBrowser: () =>
+      preflightTeamshipBolCleanupBrowser({
+        browserExecutablePath: options.browserExecutablePath,
+        headed: options.browserHeaded,
+        slowMoMs: options.browserSlowMoMs
+      }),
+    executeApi: () =>
+      executeTeamshipPhase2Job({
+        job: {
+          id: claimed.job.id,
+          agentMode: claimed.job.agentMode,
+          dryRun: claimed.job.dryRun
+        },
+        plan: claimed.executionPayload,
+        credentials: claimed.teamshipCredentials!,
+        options: {
+          agentId: options.agentId,
+          allowLiveUpdates: options.allowLiveUpdates,
+          liveAllowlistSrNumbers: options.liveAllowlistSrNumbers
+        }
+      })
+  });
 
   if (claimed.job.agentMode === "LIVE_API" && options.mode === "live-api" && options.browserBolCleanupEnabled) {
     try {

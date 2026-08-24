@@ -8,6 +8,15 @@ TMG_ENV_FILE="$APP_DIR/.env.tmg-order-intake-worker"
 
 cd "$APP_DIR"
 
+if [[ ! -x /usr/bin/xvfb-run ]]; then
+  cat >&2 <<'MSG'
+The Garland Teamship worker requires /usr/bin/xvfb-run so Chrome can use a private virtual display.
+Install it first with: sudo apt-get update && sudo apt-get install -y xvfb xauth
+No services were installed or changed.
+MSG
+  exit 1
+fi
+
 mkdir -p "$SYSTEMD_USER_DIR"
 cp ops/teamship-phase2-vm/newl-teamship-phase2-worker.service "$SYSTEMD_USER_DIR/"
 cp ops/teamship-phase2-vm/newl-tmg-order-intake-worker.service "$SYSTEMD_USER_DIR/"
@@ -16,12 +25,6 @@ cp ops/teamship-phase2-vm/newl-apps-auto-update.timer "$SYSTEMD_USER_DIR/"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cp ops/teamship-phase2-vm/teamship-phase2-worker.env.example "$ENV_FILE"
-  if [[ -n "${DISPLAY:-}" ]]; then
-    sed -i "s|# DISPLAY=:1|DISPLAY=${DISPLAY}|" "$ENV_FILE"
-  fi
-  if [[ -n "${XAUTHORITY:-}" ]]; then
-    printf 'XAUTHORITY=%s\n' "$XAUTHORITY" >> "$ENV_FILE"
-  fi
   chmod 600 "$ENV_FILE"
   cat <<MSG
 Created $ENV_FILE.

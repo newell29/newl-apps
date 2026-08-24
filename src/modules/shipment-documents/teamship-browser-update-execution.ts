@@ -104,6 +104,40 @@ const DEFAULT_TEAMSHIP_APP_BASE_URL = "https://app.teamshipos.com";
 const DEFAULT_ALLOWED_HOSTS = ["app.teamshipos.com", "members.fulfillit.io", "staging.teamshipos.com", "dev.teamshipos.com"];
 const DEFAULT_BOL_CLEANUP_BROWSER_RESTARTS = 1;
 
+export async function preflightTeamshipBolCleanupBrowser(
+  options: Pick<TeamshipBrowserExecutionOptions, "browserExecutablePath" | "headed" | "slowMoMs">
+) {
+  let browser: Browser | null = null;
+
+  try {
+    browser = await launchBrowser(options);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+    await page.close();
+  } catch (error) {
+    throw new Error(describeTeamshipBrowserPreflightFailure(error));
+  } finally {
+    await browser?.close().catch(() => undefined);
+  }
+}
+
+export function describeTeamshipBrowserPreflightFailure(error: unknown) {
+  const message = describeBrowserError(error);
+
+  if (
+    /MIT-MAGIC-COOKIE|Missing X server|XServer running|\$DISPLAY|ozone_platform_x11|platform failed to initialize/i.test(
+      message
+    )
+  ) {
+    return "BROWSER_DISPLAY_UNAVAILABLE: Chrome could not connect to the worker's private virtual display. No Teamship API updates were attempted.";
+  }
+
+  if (/Unable to find Chrome|executable doesn't exist|browser executable/i.test(message)) {
+    return "BROWSER_EXECUTABLE_UNAVAILABLE: Chrome is not installed at the configured worker path. No Teamship API updates were attempted.";
+  }
+
+  return "BROWSER_PREFLIGHT_FAILED: Chrome could not start for editable-BOL cleanup. No Teamship API updates were attempted.";
+}
+
 const PALLET_DOM_HELPERS = String.raw`
   function collectPalletControls() {
     const heading = findTextElement("Pallets");

@@ -16,6 +16,8 @@ The services are user-level `systemd` units for the `newln8n` user. Secrets stay
 From the VM:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y xvfb xauth
 cd ~/newl-apps
 git pull origin main
 bash scripts/install-teamship-phase2-vm-services.sh
@@ -41,7 +43,7 @@ Use `ops/teamship-phase2-vm/teamship-phase2-worker.env.example` as the template.
 - `TEAMSHIP_BROWSER_EXECUTABLE_PATH`: usually `/usr/bin/google-chrome`.
 - `TEAMSHIP_LIVE_ALLOWLIST_SR_NUMBERS`: optional comma-separated SR list for limited rollout testing. Set it to `*` only when the VM should process every approved Newl Apps job. Leave it unset/blank to block live jobs until an explicit rollout choice is made.
 
-Use `DISPLAY=:0` or `DISPLAY=:1` if headed Chrome needs the VNC display. The installer tries to copy the current shell's `DISPLAY` into the env file automatically.
+The Garland worker runs headed Chrome through `xvfb-run` with a private display. Do not configure Garland `DISPLAY` or `XAUTHORITY` from the VNC session; those session values can become invalid after a reboot or VNC login. The installer stops before changing services when `/usr/bin/xvfb-run` is missing.
 
 ## TMG Environment And Activation
 
@@ -65,7 +67,7 @@ Before enabling it, set the real ingestion token, change `TMG_ALLOW_LIVE_WRITES=
 
 For `TEAMSHIP_AGENT_MODE=live-api`, the worker runs the Teamship API update first, including approved field updates and `pallets[]` rows for pallet quantity, DIMS, weight, unit, and commodity text. Browser automation is no longer used for pallet rows. When one SKU has multiple serials, the commodity line is grouped as `SKU: <sku> SN: <serial>, <serial>, <serial>`; non-serialized lines use `SKU: <sku> QTY: <quantity>`.
 
-After each successful API update, the worker automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
+Before an API update that includes planned editable-BOL cleanup, the worker launches and closes a blank Chrome page inside the private Xvfb display. A failed preflight stops the job before any Teamship write and reports `BROWSER_DISPLAY_UNAVAILABLE`, `BROWSER_EXECUTABLE_UNAVAILABLE`, or `BROWSER_PREFLIGHT_FAILED` without returning raw Chrome logs. After each successful API update, the worker automatically opens the editable BOL in the VM browser for every successfully updated order that has planned BOL cleanup. The cleanup removes Teamship-generated weight values from the Customer Order Information weight column and records screenshots/readback evidence with the job.
 
 The worker uses a bounded browser recovery policy for this post-API step:
 
