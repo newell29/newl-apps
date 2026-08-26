@@ -1,5 +1,6 @@
 import { chromium, type Page } from "playwright-core";
 
+import { hasExactTmgTeamshipReference } from "@/modules/shipment-documents/tmg-teamship-create";
 import type { TeamshipRuntimeCredentials } from "@/server/integrations/teamship";
 
 const DEFAULT_TEAMSHIP_APP_BASE_URL = "https://app.teamshipos.com";
@@ -68,8 +69,20 @@ export async function executeTmgTeamshipDocumentUpload({
 
     const input = page.locator('input[type="file"]#box-labels');
     if (await input.count() !== 1) throw new Error("Expected exactly one Teamship Document upload file control.");
+    const uploadResponsePromise = page
+      .waitForResponse(isDocumentUploadResponse, { timeout: 45_000 })
+      .catch(() => null);
     await input.setInputFiles({ name: job.fileName, mimeType: "application/pdf", buffer: Buffer.from(job.fileBytes) });
     await page.getByText(job.fileName, { exact: true }).waitFor({ state: "visible", timeout: 30_000 });
+    const uploadResponse = await uploadResponsePromise;
+    if (!uploadResponse) {
+      throw new Error("Teamship did not start a document upload request after the file was selected. Do not retry automatically.");
+    }
+    if (uploadResponse.status() >= 400) {
+      throw new Error(`Teamship rejected the document upload with status ${uploadResponse.status()}. Do not retry automatically.`);
+    }
+    await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_000);
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForIdle(page);
     await assertExactOrderReference(page, job.customerReference);
@@ -104,9 +117,19 @@ async function assertExactOrderReference(page: Page, expected: string) {
       values.push(await candidate.first().getAttribute("value") ?? "");
     }
   }
-  if (!values.some((value) => value.trim().toUpperCase() === expected.trim().toUpperCase())) {
+  if (!values.some((value) => hasExactTmgTeamshipReference({ poNumber: value }, expected))) {
     throw new Error("The exact TMG customer reference was not confirmed on the Teamship order page.");
   }
+}
+
+function isDocumentUploadResponse(response: { request(): { method(): string; headers(): Record<string, string> }; url(): string }) {
+  const request = response.request();
+  if (!["POST", "PUT", "PATCH"].includes(request.method().toUpperCase())) return false;
+  const contentType = request.headers()["content-type"]?.toLowerCase() ?? "";
+  const path = new URL(response.url()).pathname.toLowerCase();
+  return contentType.includes("multipart/form-data") ||
+    contentType.includes("application/pdf") ||
+    /document|attachment|upload|label/.test(path);
 }
 
 async function maybeLogin(page: Page, credentials: TeamshipRuntimeCredentials) {
