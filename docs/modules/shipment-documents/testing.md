@@ -33,6 +33,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - TMG scheduling tests keep ingestion-token POST calls separate from `CRON_SECRET` GET calls, bind cron execution to the configured tenant, and treat disabled tenant configuration as a safe no-op.
 - TMG middleware tests exempt the scheduled intake and worker endpoints so their machine credentials reach the route handlers, while preserving session middleware for TMG settings, batch review, and CSR approval APIs.
 - TMG worker-runtime tests cover continuous polling, bounded intervals, transient claim failures, and an explicit one-shot diagnostic mode. These tests do not perform Teamship writes or browser uploads.
+- TMG Teamship-create tests require warehouse instructions to be appended to both Shipment ID and PO Number, keep plain references when instructions are absent, and preserve exact-reference matching for duplicate and readback checks. TMG document-upload tests require the asynchronous upload response and network-idle wait before reload, and fail closed when file selection does not start an upload request.
 - TMG VM-service tests require a dedicated systemd unit and protected environment file, confirm the committed template keeps live writes disabled, ensure the installer does not enable or start TMG, and verify the updater restarts only Garland/TMG workers that were active before an update.
 - TMG settings tests allow summary recipients only on the mailbox domain or an administrator-approved additional internal domain, and reject unapproved customer domains.
 

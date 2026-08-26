@@ -27,6 +27,7 @@ export type TmgTeamshipProfile = {
 
 export type TmgTeamshipPlanOrder = {
   customerReference: string;
+  warehouseInstructions: string | null;
   fulfillmentType: TmgFulfillmentType;
   orderDate: string;
   proNumber: string | null;
@@ -143,6 +144,10 @@ export async function buildTmgTeamshipCreatePlan({
     products.push({ sku: item.sku, productId: match.productId, stockId: match.stockId, quantity: item.quantity });
   }
 
+  const teamshipReference = buildTmgTeamshipReference(
+    order.customerReference,
+    order.warehouseInstructions
+  );
   const payload: TmgTeamshipCreatePayload = {
     customer_id: Number(profile.customerId),
     status: "requested",
@@ -150,11 +155,11 @@ export async function buildTmgTeamshipCreatePlan({
     selectedProducts,
     warehouse_id: Number(profile.warehouseId),
     shippingMethod: "ltl",
-    ltlShipmentID: order.customerReference,
+    ltlShipmentID: teamshipReference,
     spdShipmentID: "",
     carrier_value: order.fulfillmentType === "SELF_PICKUP" ? TEAMSHIP_SELF_PICKUP_CARRIER : profile.carrierName,
     proNumber: order.fulfillmentType === "SELF_PICKUP" ? "" : requireFreightProNumber(order.proNumber),
-    poNumber: order.customerReference,
+    poNumber: teamshipReference,
     pickETA_date: formatTeamshipDate(order.orderDate),
     ship_first_name: order.shipTo.name,
     ship_last_name: null,
@@ -320,7 +325,22 @@ export function hasExactTmgTeamshipReference(order: Record<string, unknown>, exp
     order.amazon_shipment_id1,
     order.shipment_id,
     order.shipmentId
-  ].some((value) => String(value ?? "").trim().toUpperCase() === normalized);
+  ].some((value) => {
+    const reference = String(value ?? "")
+      .split(";", 1)[0]
+      ?.trim()
+      .toUpperCase();
+    return reference === normalized;
+  });
+}
+
+export function buildTmgTeamshipReference(customerReference: string, warehouseInstructions: string | null) {
+  const reference = customerReference.trim();
+  const instructions = warehouseInstructions
+    ?.trim()
+    .replace(/^\*+\s*/, "")
+    .trim();
+  return instructions ? `${reference}; ${instructions}` : reference;
 }
 
 async function login(fetchImpl: typeof fetch, credentials: TeamshipRuntimeCredentials, apiBaseUrl: string) {

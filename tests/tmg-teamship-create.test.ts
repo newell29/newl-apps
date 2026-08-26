@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildTmgTeamshipCreatePlan,
   executeApprovedTmgTeamshipCreatePlan,
+  hasExactTmgTeamshipReference,
   type TmgTeamshipPlanOrder,
   type TmgTeamshipProfile
 } from "@/modules/shipment-documents/tmg-teamship-create";
@@ -19,6 +20,7 @@ const profile: TmgTeamshipProfile = {
 
 const order: TmgTeamshipPlanOrder = {
   customerReference: "US19999",
+  warehouseInstructions: "*5 sides 5 layers shrink wrap",
   fulfillmentType: "FREIGHT",
   orderDate: "2026-08-18",
   proNumber: "010-1234567",
@@ -47,8 +49,8 @@ describe("TMG Teamship create planning", () => {
       orderType: "unit",
       selectedProducts: { "4001-5001": { stock_id: 5001, quantity: 2 } },
       shippingMethod: "ltl",
-      ltlShipmentID: "US19999",
-      poNumber: "US19999",
+      ltlShipmentID: "US19999; 5 sides 5 layers shrink wrap",
+      poNumber: "US19999; 5 sides 5 layers shrink wrap",
       proNumber: "010-1234567",
       pickETA_date: "08/18/2026",
       ship_first_name: "Synthetic Recipient",
@@ -71,8 +73,8 @@ describe("TMG Teamship create planning", () => {
       shippingMethod: "ltl",
       carrier_value: "P/U",
       proNumber: "",
-      ltlShipmentID: "US19999",
-      poNumber: "US19999"
+      ltlShipmentID: "US19999; 5 sides 5 layers shrink wrap",
+      poNumber: "US19999; 5 sides 5 layers shrink wrap"
     });
   });
 
@@ -162,6 +164,31 @@ describe("TMG Teamship create planning", () => {
     })).rejects.toThrow("already exists");
 
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain customer reference when the picklist has no warehouse instructions", async () => {
+    const plan = await buildTmgTeamshipCreatePlan({
+      tenantId: "tenant-example",
+      order: { ...order, warehouseInstructions: null },
+      profile,
+      searchProducts: vi.fn(async () => [productRow(5001)])
+    });
+
+    expect(plan.payload).toMatchObject({
+      ltlShipmentID: "US19999",
+      poNumber: "US19999"
+    });
+  });
+
+  it("recognizes a customer reference followed by warehouse instructions without partial matches", () => {
+    expect(hasExactTmgTeamshipReference(
+      { poNumber: "US19999; 5 sides 5 layers shrink wrap" },
+      "US19999"
+    )).toBe(true);
+    expect(hasExactTmgTeamshipReference(
+      { poNumber: "US199990; 5 sides 5 layers shrink wrap" },
+      "US19999"
+    )).toBe(false);
   });
 });
 

@@ -7,6 +7,7 @@
 - Microsoft Graph reads the tenant-configured mailbox. A message is eligible only when its sender is on the exact allowlist, at least one exact tenant-configured employee address appears in To or CC, its normalized subject starts with the configured prefix, it has attachments, and at least one attachment is a PDF. Standard `RE:`, `FW:`, and `FWD:` prefixes are ignored; other subject text is not rewritten.
 - The packing slip is the primary order source. Ship-to, customer reference, date, SKU, and quantity come from the packing slip.
 - The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary.
+- When picklist warehouse instructions are present, Teamship receives `<customer reference>; <warehouse instructions>` in both Shipment ID and PO Number. Leading picklist asterisks are removed from the Teamship value. Orders without warehouse instructions retain the plain customer reference in both fields.
 - The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip.
 - A self-pickup exception is allowed only when the same order is identified as self-pickup on the picklist and its source order PDF contains both a `Customer Self Pickup Form` and self-pickup wording for the exact customer reference. Missing freight documents alone never classify an order as pickup.
 - A validated self-pickup order does not require a BOL, freight label, or PRO number. Its complete source pickup packet (warehouse release sheet, customer pickup form, and packing slip) is preserved as the one Teamship upload document. Ordinary freight orders remain blocked when a BOL, label, or PRO number is missing.
@@ -22,7 +23,7 @@
 - Only fully validated orders are selected for approval. Orders with missing or conflicting evidence remain in `NEEDS_REVIEW`.
 - Teamship is checked for an exact customer reference during planning, again immediately before approval, and again before the create request.
 - The worker checkpoints `CREATE_STARTED` before the API write and `UPLOAD_STARTED` before browser upload. An interruption after either checkpoint is not retried automatically.
-- The worker never clicks Teamship Print, Delete, or order Save controls. It uses only the exact Document file input and verifies the filename after reload.
+- The worker never clicks Teamship Print, Delete, or order Save controls. It uses only the exact Document file input, begins listening for Teamship's asynchronous upload response before selecting the file, requires that upload response to complete successfully, waits for browser network activity to settle, and verifies the exact filename after reload.
 - No migration is applied by feature code. The migration must be reviewed and run through the repository preview migration process.
 
 ## Configuration and operation
@@ -71,6 +72,8 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 - Explicit self-pickup classification, intact three-page pickup packets, pickup Teamship payload mapping, and regression coverage that incomplete freight still cannot bypass BOL/label/PRO validation.
 - Large-mailbox intake selects only the oldest unsaved eligible email for each scan and reports the remaining deferred candidate count.
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
+- Teamship mapping regression coverage includes warehouse instructions in both Shipment ID and PO Number while preserving exact-reference duplicate and readback checks.
+- Document-upload regression coverage requires the upload response and network-idle wait to finish before reload, and fails closed without reloading when Teamship does not start an upload request.
 - TMG read-session reuse, one-time unauthorized-read recovery, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.
 - Tenant-scoped CSR approval, stale-plan rejection, valid-only partial-batch selection, and exact-reference recheck.
 - Tenant settings validation and internal summary content.

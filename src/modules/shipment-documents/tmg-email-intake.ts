@@ -405,6 +405,7 @@ async function planPreparedOrder({
       readSession,
       order: {
         customerReference: order.customerReference,
+        warehouseInstructions: order.warehouseInstructions,
         fulfillmentType: order.fulfillmentType,
         orderDate: requireValue(order.packingSlip.orderDate, "packing-slip order date"),
         proNumber: order.fulfillmentType === "SELF_PICKUP"
