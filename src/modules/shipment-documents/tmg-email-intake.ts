@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { prepareTmgEmailBatch } from "@/modules/shipment-documents/tmg-pdf-intake";
+import { getNextTmgPickupDate } from "@/modules/shipment-documents/tmg-business-days";
 import type { TmgPreparedOrder, TmgSourcePdfAttachment } from "@/modules/shipment-documents/tmg-order-types";
 import { getTmgOrderIntakeSettings } from "@/modules/shipment-documents/tmg-settings";
 import {
@@ -159,7 +160,8 @@ export async function reprocessTmgOrderIntakeBatch(context: AuthenticatedContext
   const plannedOrders = await planTmgPreparedOrders({
     tenantId: context.tenantId,
     preparedOrders: prepared.orders,
-    teamshipProfile: settings.teamship
+    teamshipProfile: settings.teamship,
+    receivedAt: batch.receivedAt
   });
 
   return prisma.$transaction(async (transaction) => {
@@ -280,12 +282,13 @@ async function ingestTmgMessage({
   }
 
   const prepared = await prepareTmgEmailBatch(sourceAttachments);
+  const receivedAt = readMessageReceivedAt(message);
   const plannedOrders = await planTmgPreparedOrders({
     tenantId: context.tenantId,
     preparedOrders: prepared.orders,
-    teamshipProfile: settings.teamship
+    teamshipProfile: settings.teamship,
+    receivedAt
   });
-  const receivedAt = readMessageReceivedAt(message);
   const fromAddress = message.from?.emailAddress?.address?.trim().toLowerCase();
   if (!fromAddress) throw new Error("A candidate TMG email did not contain a sender address.");
 
@@ -375,12 +378,14 @@ async function planPreparedOrder({
   tenantId,
   order,
   teamshipProfile,
-  getTeamshipReadSession
+  getTeamshipReadSession,
+  pickupEtaDate
 }: {
   tenantId: string;
   order: TmgPreparedOrder;
   teamshipProfile: NonNullable<Awaited<ReturnType<typeof getTmgOrderIntakeSettings>>["teamship"]>;
   getTeamshipReadSession: () => Promise<TeamshipReadSession>;
+  pickupEtaDate: string;
 }): Promise<PlannedPreparedOrder> {
   if (!order.readyForApproval || !order.combinedPdfHash) return { prepared: order, plan: null };
   const issues = order.validationIssues;
@@ -407,7 +412,7 @@ async function planPreparedOrder({
         customerReference: order.customerReference,
         warehouseInstructions: order.warehouseInstructions,
         fulfillmentType: order.fulfillmentType,
-        orderDate: requireValue(order.packingSlip.orderDate, "packing-slip order date"),
+        pickupEtaDate,
         proNumber: order.fulfillmentType === "SELF_PICKUP"
           ? null
           : requireValue(order.bol?.proNumber, "BOL PRO number"),
@@ -442,11 +447,13 @@ async function planPreparedOrder({
 async function planTmgPreparedOrders({
   tenantId,
   preparedOrders,
-  teamshipProfile
+  teamshipProfile,
+  receivedAt
 }: {
   tenantId: string;
   preparedOrders: TmgPreparedOrder[];
   teamshipProfile: NonNullable<Awaited<ReturnType<typeof getTmgOrderIntakeSettings>>["teamship"]>;
+  receivedAt: Date;
 }) {
   const plannedOrders: PlannedPreparedOrder[] = [];
   let teamshipReadSessionPromise: Promise<TeamshipReadSession> | null = null;
@@ -454,8 +461,9 @@ async function planTmgPreparedOrders({
     teamshipReadSessionPromise ??= createTeamshipReadSession({ tenantId });
     return teamshipReadSessionPromise;
   };
+  const pickupEtaDate = getNextTmgPickupDate(receivedAt);
   for (const order of preparedOrders) {
-    plannedOrders.push(await planPreparedOrder({ tenantId, order, teamshipProfile, getTeamshipReadSession }));
+    plannedOrders.push(await planPreparedOrder({ tenantId, order, teamshipProfile, getTeamshipReadSession, pickupEtaDate }));
   }
   return plannedOrders;
 }

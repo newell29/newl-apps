@@ -29,7 +29,7 @@ export type TmgTeamshipPlanOrder = {
   customerReference: string;
   warehouseInstructions: string | null;
   fulfillmentType: TmgFulfillmentType;
-  orderDate: string;
+  pickupEtaDate: string;
   proNumber: string | null;
   packetHash: string;
   shipTo: {
@@ -160,7 +160,7 @@ export async function buildTmgTeamshipCreatePlan({
     carrier_value: order.fulfillmentType === "SELF_PICKUP" ? TEAMSHIP_SELF_PICKUP_CARRIER : profile.carrierName,
     proNumber: order.fulfillmentType === "SELF_PICKUP" ? "" : requireFreightProNumber(order.proNumber),
     poNumber: teamshipReference,
-    pickETA_date: formatTeamshipDate(order.orderDate),
+    pickETA_date: formatTeamshipDate(order.pickupEtaDate),
     ship_first_name: order.shipTo.name,
     ship_last_name: null,
     ship_address: order.shipTo.address,
@@ -362,7 +362,7 @@ function buildHeaders(token: string) {
 
 function formatTeamshipDate(value: string) {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) throw new Error("TMG order date must use YYYY-MM-DD format.");
+  if (!match) throw new Error("TMG pickup ETA must use YYYY-MM-DD format.");
   return `${match[2]}/${match[3]}/${match[1]}`;
 }
 

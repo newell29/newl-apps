@@ -6,6 +6,7 @@
 
 - Microsoft Graph reads the tenant-configured mailbox. A message is eligible only when its sender is on the exact allowlist, at least one exact tenant-configured employee address appears in To or CC, its normalized subject starts with the configured prefix, it has attachments, and at least one attachment is a PDF. Standard `RE:`, `FW:`, and `FWD:` prefixes are ignored; other subject text is not rewritten.
 - The packing slip is the primary order source. Ship-to, customer reference, date, SKU, and quantity come from the packing slip.
+- Teamship Pickup ETA is the next US business day after the email is received. The calculation uses the US Eastern calendar date and skips weekends and observed US federal holidays.
 - The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary.
 - When picklist warehouse instructions are present, Teamship receives `<customer reference>; <warehouse instructions>` in both Shipment ID and PO Number. Leading picklist asterisks are removed from the Teamship value. Orders without warehouse instructions retain the plain customer reference in both fields.
 - The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip.
@@ -23,7 +24,7 @@
 - Only fully validated orders are selected for approval. Orders with missing or conflicting evidence remain in `NEEDS_REVIEW`.
 - Teamship is checked for an exact customer reference during planning, again immediately before approval, and again before the create request.
 - The worker checkpoints `CREATE_STARTED` before the API write and `UPLOAD_STARTED` before browser upload. An interruption after either checkpoint is not retried automatically.
-- The worker never clicks Teamship Print, Delete, or order Save controls. It uses only the exact Document file input, begins listening for Teamship's asynchronous upload response before selecting the file, requires that upload response to complete successfully, waits for browser network activity to settle, and verifies the exact filename after reload.
+- The worker never clicks Teamship Print, Delete, Ship, Release, or similarly named controls. It uses only the exact Document file input and listens for Teamship's asynchronous upload response before selecting the file. If Teamship stages the filename without uploading, the worker requires exactly one visible, enabled control named `Save`, `Update`, `Save Changes`, `Upload`, or `Upload Document`, listens for the upload response, and clicks that control once. It then requires a successful upload response, waits for browser network activity to settle, reloads, rechecks the exact order reference, and verifies the exact filename.
 - No migration is applied by feature code. The migration must be reviewed and run through the repository preview migration process.
 
 ## Configuration and operation
@@ -31,6 +32,8 @@
 The `TMG Order Intake` tenant integration record stores non-secret mailbox rules, exact required To/CC recipients, internal summary recipients, explicitly approved additional internal recipient domains, and Teamship scope identifiers. Microsoft Graph and Teamship credentials continue to use the existing tenant integration mechanisms. Required employee recipients and internal summary recipients must use either the configured mailbox domain or an administrator-approved additional internal domain. Live customer and employee addresses and organization domains remain tenant configuration and must not be committed to source code, tests, or documentation.
 
 The authenticated Operations Tools page is `/operations/tmg-order-intake`. Vercel calls `GET /api/operations/tmg-order-intake/scheduled` every five minutes and authenticates it with the existing `CRON_SECRET`; the existing machine-triggered `POST` remains available under ingestion authentication. Both paths bind the run to the configured ingestion tenant. A disabled or incomplete TMG configuration is a successful no-op.
+
+Each saved order row includes an authenticated **Review consolidated PDF** link. The download remains tenant- and batch-scoped, is served inline without browser caching, and is returned only when its PDF signature and saved SHA-256 hash both verify.
 
 For self-pickup plans, the Teamship API payload retains the existing LTL order contract, uses `P/U` as the carrier value, and leaves the PRO number blank. This exact transport-field mapping is inferred from the existing Teamship pickup normalization and requires owner confirmation against a manually created pickup order before unattended pickup creation is enabled.
 
@@ -73,7 +76,9 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 - Large-mailbox intake selects only the oldest unsaved eligible email for each scan and reports the remaining deferred candidate count.
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
 - Teamship mapping regression coverage includes warehouse instructions in both Shipment ID and PO Number while preserving exact-reference duplicate and readback checks.
-- Document-upload regression coverage requires the upload response and network-idle wait to finish before reload, and fails closed without reloading when Teamship does not start an upload request.
+- Pickup-ETA regression coverage includes ordinary weekdays, weekends, US federal holidays, observed holidays across year boundaries, and US Eastern calendar-date conversion.
+- Document-upload regression coverage handles both Teamship auto-upload and the staged-file Save/Upload flow. It fails closed without reloading when the safe submit control is missing or ambiguous, Teamship starts no upload request, or Teamship rejects the upload.
+- Consolidated-PDF review-route coverage requires employee authentication and module access, exact tenant/batch/order scoping, PDF-signature validation, and SHA-256 integrity verification.
 - TMG read-session reuse, one-time unauthorized-read recovery, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.
 - Tenant-scoped CSR approval, stale-plan rejection, valid-only partial-batch selection, and exact-reference recheck.
 - Tenant settings validation and internal summary content.
