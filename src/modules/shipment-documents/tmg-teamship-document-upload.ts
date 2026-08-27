@@ -69,15 +69,13 @@ export async function executeTmgTeamshipDocumentUpload({
 
     const input = page.locator('input[type="file"]#box-labels');
     if (await input.count() !== 1) throw new Error("Expected exactly one Teamship Document upload file control.");
-    const uploadResponsePromise = page
-      .waitForResponse(isDocumentUploadResponse, { timeout: 45_000 })
+    const automaticUploadResponsePromise = page
+      .waitForResponse(isDocumentUploadResponse, { timeout: 1_500 })
       .catch(() => null);
     await input.setInputFiles({ name: job.fileName, mimeType: "application/pdf", buffer: Buffer.from(job.fileBytes) });
     await page.getByText(job.fileName, { exact: true }).waitFor({ state: "visible", timeout: 30_000 });
-    const uploadResponse = await uploadResponsePromise;
-    if (!uploadResponse) {
-      throw new Error("Teamship did not start a document upload request after the file was selected. Do not retry automatically.");
-    }
+    let uploadResponse = await automaticUploadResponsePromise;
+    if (!uploadResponse) uploadResponse = await submitStagedDocument(page);
     if (uploadResponse.status() >= 400) {
       throw new Error(`Teamship rejected the document upload with status ${uploadResponse.status()}. Do not retry automatically.`);
     }
@@ -93,6 +91,31 @@ export async function executeTmgTeamshipDocumentUpload({
   } finally {
     await browser.close().catch(() => undefined);
   }
+}
+
+async function submitStagedDocument(page: Page) {
+  const saveButtons = page.getByRole("button", { name: /^(save|update|save changes|upload|upload document)$/i });
+  const visibleButtons = [];
+  for (let index = 0; index < await saveButtons.count(); index += 1) {
+    const button = saveButtons.nth(index);
+    if (await button.isVisible().catch(() => false) && await button.isEnabled().catch(() => false)) {
+      visibleButtons.push(button);
+    }
+  }
+  if (visibleButtons.length !== 1) {
+    throw new Error("Teamship staged the document but did not expose exactly one safe Save, Update, or Upload button. Do not retry automatically.");
+  }
+
+  const uploadResponsePromise = page
+    .waitForResponse(isDocumentUploadResponse, { timeout: 45_000 })
+    .catch(() => null);
+  await visibleButtons[0]!.scrollIntoViewIfNeeded();
+  await visibleButtons[0]!.click();
+  const uploadResponse = await uploadResponsePromise;
+  if (!uploadResponse) {
+    throw new Error("Teamship did not start a document upload request after the staged document was submitted. Do not retry automatically.");
+  }
+  return uploadResponse;
 }
 
 function resultFor(job: TmgDocumentUploadJob, status: TmgDocumentUploadResult["status"]): TmgDocumentUploadResult {

@@ -210,6 +210,7 @@ export function TmgOrderIntakeClient({
                           <span>{labelStatus(order.status)}</span>
                           {order.validationIssues.length > 0 ? <ul className="mt-1 text-xs text-red-700">{order.validationIssues.map((issue) => <li key={`${issue.code}-${issue.message}`}>{issue.message}</li>)}</ul> : null}
                           {order.teamshipUrl ? <a className="mt-1 block text-primary underline" href={order.teamshipUrl} target="_blank" rel="noreferrer">Open Teamship {order.teamshipOrderNumber}</a> : null}
+                          {order.combinedPdfFileName ? <a className="mt-1 block text-primary underline" href={`/api/operations/tmg-order-intake/batches/${encodeURIComponent(batch.id)}/orders/${encodeURIComponent(order.id)}/document`} target="_blank" rel="noreferrer">Review consolidated PDF</a> : null}
                           {order.errorMessage ? <span className="mt-1 block text-xs text-red-700">{order.errorMessage}</span> : null}
                         </td>
                       </tr>;
@@ -318,6 +319,7 @@ type TmgBatch = {
     validationIssues: Array<{ code: string; message: string }>;
     teamshipOrderNumber: string | null;
     teamshipUrl: string | null;
+    combinedPdfFileName: string | null;
     errorMessage: string | null;
   }>;
 };

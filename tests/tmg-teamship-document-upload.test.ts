@@ -47,8 +47,9 @@ describe("TMG Teamship document upload", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when selecting the file does not start an upload request", async () => {
-    const page = buildPage({ events: [], uploadStarts: false });
+  it("submits the staged document when file selection does not auto-upload", async () => {
+    const events: string[] = [];
+    const page = buildPage({ events, automaticUploadStarts: false });
     playwrightMocks.launch.mockResolvedValue({
       newPage: vi.fn(async () => page),
       close: vi.fn(async () => undefined)
@@ -62,9 +63,20 @@ describe("TMG Teamship document upload", () => {
         browserExecutablePath: "/usr/bin/google-chrome",
         headed: false
       }
-    })).rejects.toThrow("did not start a document upload request");
+    })).resolves.toMatchObject({ status: "UPLOADED" });
 
-    expect(page.reload).not.toHaveBeenCalled();
+    expect(events).toEqual([
+      "listen-for-upload",
+      "select-file",
+      "filename-visible",
+      "listen-for-upload",
+      "scroll-submit",
+      "click-submit",
+      "read-upload-status",
+      "network-idle",
+      "settle-upload",
+      "reload"
+    ]);
   });
 
   it("fails closed when Teamship rejects the upload request", async () => {
@@ -86,16 +98,64 @@ describe("TMG Teamship document upload", () => {
 
     expect(page.reload).not.toHaveBeenCalled();
   });
+
+  it("fails closed without clicking when the safe submit control is ambiguous", async () => {
+    const events: string[] = [];
+    const page = buildPage({ events, automaticUploadStarts: false, submitButtonCount: 2 });
+    playwrightMocks.launch.mockResolvedValue({
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => undefined)
+    });
+
+    await expect(executeTmgTeamshipDocumentUpload({
+      credentials: credentials(),
+      job: job(),
+      options: {
+        allowLiveUpload: true,
+        browserExecutablePath: "/usr/bin/google-chrome",
+        headed: false
+      }
+    })).rejects.toThrow("did not expose exactly one safe");
+
+    expect(events).not.toContain("click-submit");
+    expect(page.reload).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when submitting the staged document starts no upload request", async () => {
+    const events: string[] = [];
+    const page = buildPage({ events, automaticUploadStarts: false, submittedUploadStarts: false });
+    playwrightMocks.launch.mockResolvedValue({
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => undefined)
+    });
+
+    await expect(executeTmgTeamshipDocumentUpload({
+      credentials: credentials(),
+      job: job(),
+      options: {
+        allowLiveUpload: true,
+        browserExecutablePath: "/usr/bin/google-chrome",
+        headed: false
+      }
+    })).rejects.toThrow("after the staged document was submitted");
+
+    expect(events).toContain("click-submit");
+    expect(page.reload).not.toHaveBeenCalled();
+  });
 });
 
 function buildPage({
   events,
-  uploadStarts = true,
-  uploadStatus = 200
+  automaticUploadStarts = true,
+  submittedUploadStarts = true,
+  uploadStatus = 200,
+  submitButtonCount = 1
 }: {
   events: string[];
-  uploadStarts?: boolean;
+  automaticUploadStarts?: boolean;
+  submittedUploadStarts?: boolean;
   uploadStatus?: number;
+  submitButtonCount?: number;
 }) {
   let reloaded = false;
   const emptyLocator = {
@@ -133,6 +193,17 @@ function buildPage({
       return uploadStatus;
     }
   };
+  const submitButton = {
+    isVisible: vi.fn(async () => true),
+    isEnabled: vi.fn(async () => true),
+    scrollIntoViewIfNeeded: vi.fn(async () => { events.push("scroll-submit"); }),
+    click: vi.fn(async () => { events.push("click-submit"); })
+  };
+  const submitButtons = {
+    count: vi.fn(async () => submitButtonCount),
+    nth: vi.fn(() => submitButton)
+  };
+  let responseListenerCount = 0;
   const page = {
     goto: vi.fn(async () => undefined),
     locator: vi.fn((selector: string) => {
@@ -141,10 +212,13 @@ function buildPage({
       return emptyLocator;
     }),
     getByText: vi.fn(() => fileText),
+    getByRole: vi.fn(() => submitButtons),
     waitForResponse: vi.fn((predicate: (response: typeof uploadResponse) => boolean) => {
       events.push("listen-for-upload");
       expect(predicate(uploadResponse)).toBe(true);
-      return uploadStarts
+      responseListenerCount += 1;
+      const starts = responseListenerCount === 1 ? automaticUploadStarts : submittedUploadStarts;
+      return starts
         ? Promise.resolve(uploadResponse)
         : new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 10));
     }),

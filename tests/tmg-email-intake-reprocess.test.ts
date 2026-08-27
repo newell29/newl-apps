@@ -93,6 +93,9 @@ describe("TMG saved-batch reprocessing", () => {
     expect(jobTable.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ tenantId: "tenant-example", batchId: "batch-example", status: "PENDING_APPROVAL" })
     }));
+    expect(buildPlan).toHaveBeenCalledWith(expect.objectContaining({
+      order: expect.objectContaining({ pickupEtaDate: "2026-08-19" })
+    }));
   });
 
   it("does not reprocess a batch that already has an approval plan", async () => {
@@ -110,6 +113,7 @@ function savedBatch() {
     tenantId: "tenant-example",
     status: "NEEDS_REVIEW",
     approvedAt: null,
+    receivedAt: new Date("2026-08-18T14:00:00.000Z"),
     updatedAt: new Date("2026-08-18T14:00:00.000Z"),
     readyOrderCount: 0,
     invalidOrderCount: 1,

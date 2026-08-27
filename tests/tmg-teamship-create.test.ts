@@ -22,7 +22,7 @@ const order: TmgTeamshipPlanOrder = {
   customerReference: "US19999",
   warehouseInstructions: "*5 sides 5 layers shrink wrap",
   fulfillmentType: "FREIGHT",
-  orderDate: "2026-08-18",
+  pickupEtaDate: "2026-08-19",
   proNumber: "010-1234567",
   packetHash: "a".repeat(64),
   shipTo: {
@@ -52,7 +52,7 @@ describe("TMG Teamship create planning", () => {
       ltlShipmentID: "US19999; 5 sides 5 layers shrink wrap",
       poNumber: "US19999; 5 sides 5 layers shrink wrap",
       proNumber: "010-1234567",
-      pickETA_date: "08/18/2026",
+      pickETA_date: "08/19/2026",
       ship_first_name: "Synthetic Recipient",
       ship_address: "123 Example Way"
     });
