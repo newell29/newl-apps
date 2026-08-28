@@ -6,6 +6,7 @@ import type {
   TeamshipRuntimeCredentials
 } from "@/server/integrations/teamship";
 import {
+  createTeamshipReadSession,
   findTeamshipShippingOrders,
   searchTeamshipProductsForShipping
 } from "@/server/integrations/teamship";
@@ -207,18 +208,24 @@ export async function executeApprovedTmgTeamshipCreatePlan({
   findExistingOrders?: typeof findTeamshipShippingOrders;
 }): Promise<TmgTeamshipCreateEvidence> {
   assertApprovalMatchesPlan(plan, approval);
+  const resolvedCredentials = credentials ?? await resolveTenantTeamshipCredentials({ tenantId });
+  if (!resolvedCredentials) throw new Error("Teamship credentials are not configured for this tenant.");
+  const readSession = await createTeamshipReadSession({
+    tenantId,
+    credentials: resolvedCredentials,
+    fetchImpl
+  });
   const existing = await findExistingOrders({
     tenantId,
     orderIdentifier: plan.customerReference,
-    credentials,
+    credentials: resolvedCredentials,
+    readSession,
     fetchImpl
   });
   if (existing.some((order) => hasExactTmgTeamshipReference(order as Record<string, unknown>, plan.customerReference))) {
     throw new Error("An exact Teamship order already exists for this TMG customer reference. No create request was sent.");
   }
 
-  const resolvedCredentials = credentials ?? await resolveTenantTeamshipCredentials({ tenantId });
-  if (!resolvedCredentials) throw new Error("Teamship credentials are not configured for this tenant.");
   const apiBaseUrl = resolvedCredentials.apiBaseUrl?.trim().replace(/\/$/, "") || DEFAULT_TEAMSHIP_API_BASE_URL;
   const token = await login(fetchImpl, resolvedCredentials, apiBaseUrl);
   let response: Response;

@@ -150,9 +150,59 @@ describe("TMG Teamship create planning", () => {
     expect(fetchImpl.mock.calls.filter(([input, init]) => String(input).endsWith("/v1/ship-inventories") && init?.method === "POST")).toHaveLength(1);
   });
 
+  it("renews one unauthorized duplicate-check read before creating exactly once", async () => {
+    const plan = await buildPlan();
+    let loginCount = 0;
+    let listCount = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const authorization = new Headers(init?.headers).get("authorization");
+      if (url.endsWith("/v1/login")) {
+        loginCount += 1;
+        return jsonResponse({ data: { token: `test-token-${loginCount}` } });
+      }
+      if (url.includes("/v1/ship-inventories?") && (!init?.method || init.method === "GET")) {
+        listCount += 1;
+        if (authorization === "Bearer test-token-1") {
+          return jsonResponse({ message: "Unauthorized" }, 401);
+        }
+        expect(authorization).toBe("Bearer test-token-2");
+        return jsonResponse({ data: [] });
+      }
+      if (url.endsWith("/v1/ship-inventories") && init?.method === "POST") {
+        expect(authorization).toBe("Bearer test-token-3");
+        return jsonResponse({ data: { id: 812345, order_number: 612345 } }, 201);
+      }
+      if (url.endsWith("/v1/ship-inventories/812345")) {
+        expect(authorization).toBe("Bearer test-token-3");
+        return jsonResponse({ data: { id: 812345, poNumber: "US19999", ltlShipmentID: "US19999" } });
+      }
+      throw new Error(`Unexpected test URL ${url}`);
+    });
+
+    const evidence = await executeApprovedTmgTeamshipCreatePlan({
+      tenantId: "tenant-example",
+      plan,
+      approval: approval(plan.requestHash),
+      credentials: credentials(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    });
+
+    expect(evidence).toMatchObject({ teamshipOrderId: "812345", responseStatus: 201 });
+    expect(loginCount).toBe(3);
+    expect(listCount).toBe(2);
+    expect(fetchImpl.mock.calls.filter(([input, init]) => String(input).endsWith("/v1/ship-inventories") && init?.method === "POST")).toHaveLength(1);
+  });
+
   it("blocks an exact duplicate before the create request", async () => {
     const plan = await buildPlan();
-    const fetchImpl = vi.fn();
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/v1/login")) {
+        expect(init?.method).toBe("POST");
+        return jsonResponse({ data: { token: "test-token" } });
+      }
+      throw new Error(`Unexpected test URL ${String(input)}`);
+    });
 
     await expect(executeApprovedTmgTeamshipCreatePlan({
       tenantId: "tenant-example",
@@ -163,7 +213,8 @@ describe("TMG Teamship create planning", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch
     })).rejects.toThrow("already exists");
 
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls.some(([input, init]) => String(input).endsWith("/v1/ship-inventories") && init?.method === "POST")).toBe(false);
   });
 
   it("keeps the plain customer reference when the picklist has no warehouse instructions", async () => {
