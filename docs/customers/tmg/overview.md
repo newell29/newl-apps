@@ -41,7 +41,7 @@ An unapproved saved batch that has no approval plan can be run through newer par
 
 The maximum-messages setting is a bounded Microsoft Graph search window, not the number of email batches parsed in one request. Each scan filters message metadata first, removes messages that already have a tenant-and-mailbox-scoped batch, and parses at most one new eligible email. The oldest unsaved candidate is processed first so a 14-day backlog drains across five-minute scheduler runs without older messages aging out. The authenticated manual scan and scheduled scan routes allow up to five minutes for that single email's PDF packet; no scan bypasses CSR approval.
 
-Planning reuses one opt-in Teamship API read session for the email batch instead of logging in again for every duplicate and SKU lookup. If Teamship returns `401` during one of those reads, TMG renews the session and retries that exact read once. This recovery is read-only: it is not enabled for Teamship create/update requests and does not change the existing Garland authentication path.
+Planning reuses one opt-in Teamship API read session for the email batch instead of logging in again for every duplicate and SKU lookup. The execution worker also uses an opt-in read session for its final exact-reference duplicate check immediately before creation. If Teamship returns `401` during one of those reads, TMG renews the session and retries that exact read once. This recovery is read-only: it is not enabled for Teamship create/update requests and does not change the existing Garland authentication path.
 
 The scheduled endpoint and `/api/operations/tmg-order-intake/worker/*` bypass browser-session middleware so their route handlers can enforce `CRON_SECRET` or ingestion-token authentication directly. The TMG settings, batch-list, and approval APIs are not exempt and continue to require an authenticated employee session and their existing permission checks.
 
@@ -79,7 +79,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 - Pickup-ETA regression coverage includes ordinary weekdays, weekends, US federal holidays, observed holidays across year boundaries, and US Eastern calendar-date conversion.
 - Document-upload regression coverage handles both Teamship auto-upload and the staged-file Save/Upload flow. It fails closed without reloading when the safe submit control is missing or ambiguous, Teamship starts no upload request, or Teamship rejects the upload.
 - Consolidated-PDF review-route coverage requires employee authentication and module access, exact tenant/batch/order scoping, PDF-signature validation, and SHA-256 integrity verification.
-- TMG read-session reuse, one-time unauthorized-read recovery, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.
+- TMG planning-session reuse, one-time unauthorized-read recovery during both planning and the execution duplicate check, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.
 - Tenant-scoped CSR approval, stale-plan rejection, valid-only partial-batch selection, and exact-reference recheck.
 - Tenant settings validation and internal summary content.
 - Middleware regression coverage that admits only the TMG scheduled/worker machine routes while keeping settings, batches, and the Operations Tools page session-protected.
