@@ -48,6 +48,7 @@ agent_error_path="${temporary_directory}/agent-error.log"
 summary_request_path="${temporary_directory}/summary-request.json"
 summary_response_path="${temporary_directory}/summary-response.json"
 summary_message_path="${temporary_directory}/summary-message.txt"
+model_status_path="${temporary_directory}/model-status.json"
 cleanup() {
   rm -rf "${temporary_directory}"
 }
@@ -57,14 +58,32 @@ run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 session_key="agent:scout:backlink-outreach-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 agent_status=0
 
-"${openclaw_command}" agent \
-  --agent scout \
-  --model "openai/gpt-5.4-mini" \
-  --thinking high \
-  --timeout 1500 \
-  --session-key "${session_key}" \
-  --message-file "${prompt_path}" \
-  --json > "${agent_output_path}" 2> "${agent_error_path}" || agent_status=$?
+if ! "${openclaw_command}" models status --agent scout --json > "${model_status_path}" 2> "${agent_error_path}"; then
+  agent_status=71
+elif ! /usr/bin/python3 - "${model_status_path}" >> "${agent_error_path}" 2>&1 <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    status = json.load(handle)
+providers = ((status.get("auth") or {}).get("oauth") or {}).get("providers") or []
+openai = next((row for row in providers if row.get("provider") == "openai"), None)
+effective = (openai or {}).get("effectiveProfiles") or []
+if not any(row.get("type") == "oauth" and row.get("status") == "ok" for row in effective):
+    raise SystemExit("Scout does not have an effective OpenAI OAuth profile. API-key fallback is disabled for Website Growth.")
+PY
+then
+  agent_status=71
+fi
+
+if [[ "${agent_status}" -eq 0 ]]; then
+  "${openclaw_command}" agent \
+    --agent scout \
+    --model "openai/gpt-5.4-mini" \
+    --thinking high \
+    --timeout 1500 \
+    --session-key "${session_key}" \
+    --message-file "${prompt_path}" \
+    --json > "${agent_output_path}" 2>> "${agent_error_path}" || agent_status=$?
+fi
 
 if [[ "${agent_status}" -eq 0 ]]; then
   if ! /usr/bin/python3 "${validator_path}" \

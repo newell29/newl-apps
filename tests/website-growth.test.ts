@@ -314,7 +314,12 @@ describe("website growth Scout workspace", () => {
       phase: "AWAITING_HUMAN_REVIEW",
       draftIds: ["draft-1", "draft-2"],
       semrushRowCount: 24,
-      completedAt: null
+      completedAt: null,
+      semrushMailStatus: null,
+      semrushReportsImported: 0,
+      semrushReportsFailed: 0,
+      semrushCachedReportCount: 0,
+      semrushCacheObservedAt: null
     });
   });
 
@@ -464,6 +469,33 @@ describe("website growth weekly planning lanes", () => {
 });
 
 describe("website growth Codex Scout completion", () => {
+  it("accepts an explicit not-run backlink result for a content-only cycle", () => {
+    const completion = parseWebsiteGrowthScoutCompletion({
+      runSummary: "Content review completed independently from backlink discovery.",
+      semrush: {
+        queried: false,
+        source: "UNAVAILABLE",
+        observedAt: "2026-09-04T15:00:00.000Z",
+        summary: "No SEMrush evidence was available.",
+        rows: [],
+        tracking: semrushTrackingSnapshot()
+      },
+      backlinks: {
+        queried: false,
+        source: "NOT_RUN",
+        observedAt: "2026-09-04T15:00:00.000Z",
+        summary: "Backlink discovery runs independently.",
+        rawProspectsReviewed: 0,
+        duplicatesRejected: 0,
+        qualityRejected: 0,
+        prospects: []
+      },
+      drafts: []
+    });
+
+    expect(completion.backlinks.source).toBe("NOT_RUN");
+  });
+
   it("accepts official SEMrush MCP evidence and a schema-complete draft", () => {
     const draft = buildTemplateWebsiteGrowthContentDraft({
       action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,

@@ -4,6 +4,7 @@ import {
   BACKLINK_DISCOVERY_DOMAIN_LIMIT,
   BACKLINK_DISCOVERY_QUERY_LIMIT,
   BACKLINK_DISCOVERY_RESULT_LIMIT,
+  WEBSITE_GROWTH_SCOUT_JOB_TYPE,
   buildWebsiteGrowthBacklinkDiscoveryQueries,
   buildWebsiteGrowthDiscoveryUrlHash,
   canonicalizeWebsiteGrowthDiscoveryUrl,
@@ -11,6 +12,9 @@ import {
 } from "@/modules/website-growth/backlink-discovery";
 
 describe("Website Growth bounded backlink discovery", () => {
+  it("uses an independent job ledger so backlink failures cannot lock content research", () => {
+    expect(WEBSITE_GROWTH_SCOUT_JOB_TYPE).toBe("WEBSITE_GROWTH_BACKLINK_DISCOVERY");
+  });
   it("rotates twelve bounded queries instead of repeating the same weekly plan", () => {
     const first = buildWebsiteGrowthBacklinkDiscoveryQueries(
       new Date("2026-07-27T12:00:00.000Z")

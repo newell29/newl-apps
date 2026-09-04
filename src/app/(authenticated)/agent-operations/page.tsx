@@ -41,8 +41,8 @@ export default async function AgentOperationsPage() {
         <MetricCard label="Running now" value={dashboard.summary.runningCount} tone="success" />
         <MetricCard label="Runs today" value={dashboard.summary.todayRunCount} />
         <MetricCard
-          label={dashboard.summary.attentionCount === 0 ? "All systems healthy" : "Need attention"}
-          value={dashboard.summary.attentionCount === 0 ? "Healthy" : dashboard.summary.attentionCount}
+          label={dashboard.summary.attentionCount === 0 ? "No recent failures" : "Need attention"}
+          value={dashboard.summary.attentionCount === 0 ? "Clear" : dashboard.summary.attentionCount}
           tone={dashboard.summary.attentionCount === 0 ? "success" : "danger"}
         />
       </section>
@@ -52,7 +52,7 @@ export default async function AgentOperationsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Upcoming schedule</h2>
-              <p className="mt-1 text-sm text-mutedForeground">Declared application and local-worker schedules.</p>
+              <p className="mt-1 text-sm text-mutedForeground">Expected application and local-worker schedules. Recent runs below are the execution record.</p>
             </div>
             <span className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-mutedForeground">
               {formatDate(dashboard.updatedAt, dashboard.timezone)}

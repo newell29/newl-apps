@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from collections import Counter
@@ -19,10 +21,10 @@ sys.path.insert(0, str(HUNTER_DIRECTORY))
 from hunter_company_research import fetch_page_evidence, search_web  # noqa: E402
 
 
-DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M"
-QWEN_BATCH_SIZE = 10
-QWEN_MAX_ATTEMPTS = 2
+DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
+DEFAULT_CODEX_REASONING_EFFORT = "medium"
+CODEX_BATCH_SIZE = 10
+CODEX_MAX_ATTEMPTS = 2
 ALLOWED_CATEGORIES = [
     "DIRECTORY_CITATION",
     "LINK_RECLAMATION",
@@ -118,16 +120,16 @@ def api_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def ollama_request(
+def codex_request(
     schema: dict[str, Any],
     system_prompt: str,
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     decisions: list[dict[str, Any]] = []
-    for batch_number, start in enumerate(range(0, len(rows), QWEN_BATCH_SIZE), start=1):
-        batch = rows[start : start + QWEN_BATCH_SIZE]
+    for batch_number, start in enumerate(range(0, len(rows), CODEX_BATCH_SIZE), start=1):
+        batch = rows[start : start + CODEX_BATCH_SIZE]
         decisions.extend(
-            _ollama_batch_with_recovery(
+            _codex_batch_with_recovery(
                 schema,
                 system_prompt,
                 batch,
@@ -137,7 +139,7 @@ def ollama_request(
     return decisions
 
 
-def _ollama_batch_with_recovery(
+def _codex_batch_with_recovery(
     schema: dict[str, Any],
     system_prompt: str,
     rows: list[dict[str, Any]],
@@ -146,33 +148,33 @@ def _ollama_batch_with_recovery(
 ) -> list[dict[str, Any]]:
     expected_ids = [str(row.get("id") or "") for row in rows]
     if any(not row_id for row_id in expected_ids) or len(set(expected_ids)) != len(expected_ids):
-        raise RuntimeError("Local Qwen backlink triage received invalid candidate IDs.")
+        raise RuntimeError("Codex backlink triage received invalid candidate IDs.")
 
     collected: dict[str, dict[str, Any]] = {}
     remaining = list(rows)
     last_error: RuntimeError | None = None
-    for _attempt in range(QWEN_MAX_ATTEMPTS):
+    for _attempt in range(CODEX_MAX_ATTEMPTS):
         if not remaining:
             break
         remaining_ids = {str(row["id"]) for row in remaining}
         try:
-            batch_decisions = _ollama_batch(schema, system_prompt, remaining)
+            batch_decisions = _codex_batch(schema, system_prompt, remaining)
             actual_ids: list[str] = []
             for decision in batch_decisions:
                 if not isinstance(decision, dict):
-                    raise RuntimeError("Local Qwen backlink triage returned an invalid decision.")
+                    raise RuntimeError("Codex backlink triage returned an invalid decision.")
                 decision_id = str(decision.get("id") or "")
                 if not decision_id or decision_id not in remaining_ids:
-                    raise RuntimeError("Local Qwen backlink triage returned an unexpected candidate ID.")
+                    raise RuntimeError("Codex backlink triage returned an unexpected candidate ID.")
                 actual_ids.append(decision_id)
             if len(set(actual_ids)) != len(actual_ids):
-                raise RuntimeError("Local Qwen backlink triage returned duplicate candidate IDs.")
+                raise RuntimeError("Codex backlink triage returned duplicate candidate IDs.")
             for decision in batch_decisions:
                 collected[str(decision["id"])] = decision
             remaining = [row for row in remaining if str(row["id"]) not in collected]
             if remaining:
                 last_error = RuntimeError(
-                    "Local Qwen backlink triage did not return one decision per candidate."
+                    "Codex backlink triage did not return one decision per candidate."
                 )
             else:
                 last_error = None
@@ -181,22 +183,22 @@ def _ollama_batch_with_recovery(
 
     if remaining:
         if len(remaining) == 1:
-            fallback = _safe_qwen_fallback(schema, remaining[0])
+            fallback = _safe_codex_fallback(schema, remaining[0])
             collected[str(remaining[0]["id"])] = fallback
             print(
-                f"Local Qwen backlink triage used a fail-closed fallback for batch {batch_label}.",
+                f"Codex backlink triage used a fail-closed fallback for batch {batch_label}.",
                 file=sys.stderr,
             )
         else:
             midpoint = max(1, len(remaining) // 2)
             recovered = [
-                *_ollama_batch_with_recovery(
+                *_codex_batch_with_recovery(
                     schema,
                     system_prompt,
                     remaining[:midpoint],
                     batch_label=f"{batch_label}.1",
                 ),
-                *_ollama_batch_with_recovery(
+                *_codex_batch_with_recovery(
                     schema,
                     system_prompt,
                     remaining[midpoint:],
@@ -207,12 +209,12 @@ def _ollama_batch_with_recovery(
 
     if len(collected) != len(expected_ids):
         raise RuntimeError(
-            f"Local Qwen backlink triage batch {batch_label} could not be recovered."
+            f"Codex backlink triage batch {batch_label} could not be recovered."
         ) from last_error
     return [collected[row_id] for row_id in expected_ids]
 
 
-def _safe_qwen_fallback(
+def _safe_codex_fallback(
     schema: dict[str, Any],
     row: dict[str, Any],
 ) -> dict[str, Any]:
@@ -238,7 +240,7 @@ def _safe_qwen_fallback(
             "category": lane_categories.get(str(row.get("queryLane") or "").upper(), "RESOURCE_PAGE"),
             "confidence": 0,
             "reason": (
-                "Local Qwen could not complete a structured classification; forwarded through the "
+                "Codex could not complete a structured classification; forwarded through the "
                 "bounded public-page fetch for Codex review."
             ),
         }
@@ -252,53 +254,71 @@ def _safe_qwen_fallback(
         "category": category,
         "confidence": 0,
         "reason": (
-            "Local Qwen could not complete a structured finalist review; forwarded to Codex for the "
+            "The first Codex pass could not complete a structured finalist review; forwarded to the final Codex pass for the "
             "final bounded quality decision."
         ),
         "pageSummary": bounded_text(
             row.get("pageExcerpt"),
-            "The public page was retrieved, but local Qwen did not return a structured summary.",
+            "The public page was retrieved, but the first Codex pass did not return a structured summary.",
             3_000,
         ),
     }
 
 
-def _ollama_batch(
+def _codex_batch(
     schema: dict[str, Any],
     system_prompt: str,
     rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    request = urllib.request.Request(
-        f"{os.environ.get('WEBSITE_GROWTH_QWEN_URL', DEFAULT_OLLAMA_URL).rstrip('/')}/api/chat",
-        data=json.dumps(
-            {
-                "model": os.environ.get("WEBSITE_GROWTH_QWEN_MODEL", DEFAULT_QWEN_MODEL),
-                "stream": False,
-                "think": False,
-                "format": schema,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": json.dumps(rows, ensure_ascii=False),
-                    },
-                ],
-                "options": {"temperature": 0, "num_predict": 7000},
-            },
-            ensure_ascii=False,
-        ).encode("utf-8"),
-        method="POST",
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    codex_bin = required_env("WEBSITE_GROWTH_CODEX_BIN")
+    model = os.environ.get("WEBSITE_GROWTH_SCOUT_TRIAGE_MODEL", DEFAULT_CODEX_MODEL).strip()
+    effort = os.environ.get(
+        "WEBSITE_GROWTH_SCOUT_TRIAGE_REASONING_EFFORT",
+        DEFAULT_CODEX_REASONING_EFFORT,
+    ).strip()
+    prompt = (
+        f"{system_prompt}\n\nReturn JSON matching the supplied schema exactly.\n\n"
+        f"CANDIDATES_JSON:\n{json.dumps(rows, ensure_ascii=False)}\n"
     )
     try:
-        with urllib.request.urlopen(request, timeout=900) as response:
-            envelope = json.loads(response.read().decode("utf-8", "replace"))
-        parsed = json.loads(envelope["message"]["content"])
+        with tempfile.TemporaryDirectory(prefix="newl-backlink-codex-") as temporary_directory:
+            schema_path = Path(temporary_directory) / "schema.json"
+            result_path = Path(temporary_directory) / "result.json"
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            subprocess.run(
+                [
+                    codex_bin,
+                    "exec",
+                    "--ephemeral",
+                    "--model",
+                    model,
+                    "--config",
+                    f'model_reasoning_effort="{effort}"',
+                    "--sandbox",
+                    "read-only",
+                    "--cd",
+                    str(Path(__file__).resolve().parent),
+                    "--output-schema",
+                    str(schema_path),
+                    "--output-last-message",
+                    str(result_path),
+                    "--color",
+                    "never",
+                    "-",
+                ],
+                input=prompt,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                timeout=900,
+                check=True,
+            )
+            parsed = json.loads(result_path.read_text(encoding="utf-8"))
         decisions = parsed["decisions"]
-    except (KeyError, TypeError, ValueError, urllib.error.URLError) as error:
-        raise RuntimeError("Local Qwen backlink triage returned an invalid response.") from error
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("Subscription-backed Codex backlink triage returned an invalid response.") from error
     if not isinstance(decisions, list):
-        raise RuntimeError("Local Qwen backlink triage did not return decisions.")
+        raise RuntimeError("Subscription-backed Codex backlink triage did not return decisions.")
     return decisions
 
 
@@ -344,7 +364,7 @@ def discover(packet: dict[str, Any]) -> dict[str, Any]:
         return complete
 
     triage_prompt = (
-        "You are the cheap first-pass backlink opportunity classifier for Newl Group, a Canadian and "
+        "You are the bounded first-pass backlink opportunity classifier for Newl Group, a Canadian and "
         "US logistics, warehousing, fulfillment, kitting, retail-compliance, freight, and Teamship WMS "
         "provider. Use only the supplied search-result title and snippet. FETCH only a plausible, legitimate "
         "directory/citation, link-reclamation, partner, content-contribution, resource-page, digital-PR, "
@@ -354,7 +374,7 @@ def discover(packet: dict[str, Any]) -> dict[str, Any]:
         "Do not browse, invent contacts, or treat ranking enthusiasm as evidence. Return one decision for "
         "every supplied id."
     )
-    triage = ollama_request(TRIAGE_SCHEMA, triage_prompt, candidates)
+    triage = codex_request(TRIAGE_SCHEMA, triage_prompt, candidates)
     candidate_by_id = {row["id"]: row for row in candidates}
     fetchable = [
         row for row in triage
@@ -379,7 +399,7 @@ def discover(packet: dict[str, Any]) -> dict[str, Any]:
             "disposition": "REJECT",
             "category": row.get("category"),
             "confidence": bounded_score(row.get("confidence")),
-            "reason": bounded_text(row.get("reason"), "Rejected by initial Qwen triage.", 1_000),
+            "reason": bounded_text(row.get("reason"), "Rejected by initial Codex triage.", 1_000),
             "pageSummary": None,
             "fetchError": None,
         }
@@ -411,12 +431,12 @@ def discover(packet: dict[str, Any]) -> dict[str, Any]:
         "a specific, credible way for Newl Group to earn a relevant citation through a legitimate listing, "
         "membership, editorial source request, useful content contribution, partner/resource relationship, "
         "podcast, digital PR, reclamation, or transparent paid research placement. Do not approve outreach; "
-        "Codex will perform the final review. Reject link schemes, competitors, generic search lists, stale "
+        "A separate Codex pass will perform the final review. Reject link schemes, competitors, generic search lists, stale "
         "or irrelevant pages, pages with no submission/contact path, and paid dofollow offers. Summarize the "
         "page without inventing contacts, prices, authority metrics, or acceptance terms. Return one decision "
         "for every supplied id."
     )
-    final_decisions = ollama_request(FINALIST_SCHEMA, final_prompt, fetched) if fetched else []
+    final_decisions = codex_request(FINALIST_SCHEMA, final_prompt, fetched) if fetched else []
     normalized_final = []
     finalist_count = 0
     for row in sorted(
@@ -436,7 +456,7 @@ def discover(packet: dict[str, Any]) -> dict[str, Any]:
                 "disposition": disposition,
                 "category": row.get("category"),
                 "confidence": bounded_score(row.get("confidence")),
-                "reason": bounded_text(row.get("reason"), "Reviewed by Qwen.", 1_000),
+                "reason": bounded_text(row.get("reason"), "Reviewed by Codex.", 1_000),
                 "pageSummary": bounded_text(row.get("pageSummary"), "No summary supplied.", 3_000),
                 "fetchError": None,
             }

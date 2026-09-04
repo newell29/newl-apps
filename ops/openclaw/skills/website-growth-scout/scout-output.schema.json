@@ -82,7 +82,7 @@
       "required": ["queried", "source", "observedAt", "summary", "rawProspectsReviewed", "duplicatesRejected", "qualityRejected", "prospects"],
       "properties": {
         "queried": { "type": "boolean" },
-        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE", "WEB_DISCOVERY"] },
+        "source": { "type": "string", "enum": ["LIVE_MCP", "CACHE", "WEB_DISCOVERY", "NOT_RUN"] },
         "observedAt": { "type": "string", "format": "date-time" },
         "summary": { "type": "string", "minLength": 1 },
         "rawProspectsReviewed": { "type": "integer", "minimum": 0 },

@@ -9,6 +9,7 @@ import {
 } from "@/server/spreadsheet";
 
 const SCOUT_JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKLY";
+const BACKLINK_DISCOVERY_JOB_TYPE = "WEBSITE_GROWTH_BACKLINK_DISCOVERY";
 const DOWNLOAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type WebsiteGrowthReportName =
@@ -115,7 +116,7 @@ export async function getWebsiteGrowthScoutReport({
     where: {
       id: runId,
       tenantId,
-      jobType: SCOUT_JOB_TYPE,
+      jobType: { in: [SCOUT_JOB_TYPE, BACKLINK_DISCOVERY_JOB_TYPE] },
       status: "SUCCESS"
     },
     select: { output: true }

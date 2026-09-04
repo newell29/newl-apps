@@ -39,7 +39,7 @@ export type WebsiteGrowthBacklinkProspect = {
 
 export type WebsiteGrowthBacklinkReview = {
   queried: boolean;
-  source: "LIVE_MCP" | "CACHE" | "WEB_DISCOVERY";
+  source: "LIVE_MCP" | "CACHE" | "WEB_DISCOVERY" | "NOT_RUN";
   observedAt: string;
   summary: string;
   rawProspectsReviewed: number;
@@ -76,7 +76,7 @@ export function parseWebsiteGrowthBacklinkReview(value: unknown): WebsiteGrowthB
   const observedAt = readRequiredTimestamp(record.observedAt);
   if (
     typeof record.queried !== "boolean" ||
-    (source !== "LIVE_MCP" && source !== "CACHE" && source !== "WEB_DISCOVERY") ||
+    (source !== "LIVE_MCP" && source !== "CACHE" && source !== "WEB_DISCOVERY" && source !== "NOT_RUN") ||
     !prospects
   ) {
     throw new Error("Scout completion is missing the required backlink review.");
@@ -89,6 +89,9 @@ export function parseWebsiteGrowthBacklinkReview(value: unknown): WebsiteGrowthB
   }
   if (source === "WEB_DISCOVERY" && record.queried !== true) {
     throw new Error("A web backlink review must report that public search was queried.");
+  }
+  if (source === "NOT_RUN" && (record.queried !== false || prospects.length > 0)) {
+    throw new Error("A skipped backlink review must be unqueried and contain no prospects.");
   }
   if (prospects.length > MAX_BACKLINK_PROSPECTS_PER_RUN) {
     throw new Error(`Scout may return at most ${MAX_BACKLINK_PROSPECTS_PER_RUN} backlink prospects.`);
@@ -184,7 +187,7 @@ export async function persistWebsiteGrowthBacklinkReview({
     const evidence = {
       transport:
         review.source === "WEB_DISCOVERY"
-          ? "brave_search_qwen_codex"
+          ? "brave_search_codex_subscription"
           : "official_mcp_oauth",
       runId,
       reviewedAt: now.toISOString(),
@@ -343,6 +346,9 @@ export function buildWebsiteGrowthBacklinkTeamsLines({
   persisted: WebsiteGrowthBacklinkPersistenceSummary;
   reviewBaseUrl: string;
 }) {
+  if (review.source === "NOT_RUN") {
+    return "\nBacklink Scout: not run in this content-only cycle. Backlink discovery runs separately so it cannot block website recommendations.";
+  }
   if (review.source === "CACHE") {
     return [
       "",

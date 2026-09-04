@@ -56,6 +56,7 @@ import { createWeeklyWebsiteGrowthPlanForTenant } from "@/modules/website-growth
 import { prisma } from "@/server/db";
 
 const JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKLY";
+const BACKLINK_DISCOVERY_JOB_TYPE = "WEBSITE_GROWTH_BACKLINK_DISCOVERY";
 const CHECK_IN_JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKDAY_CHECKIN";
 const DEFAULT_MODEL = "gpt-5.6-sol";
 const DEFAULT_REASONING_EFFORT = "high";
@@ -66,6 +67,7 @@ const SEMRUSH_CACHE_TTL_DAYS = 8;
 const SEMRUSH_CACHE_TTL_MS = SEMRUSH_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
 
 export type WebsiteGrowthScoutResearchScope = "WEEKLY" | "MONTHLY";
+export type WebsiteGrowthScoutRunLane = "CONTENT" | "BACKLINKS";
 export type WebsiteGrowthSemrushSource = "LIVE_MCP" | "CACHE" | "UNAVAILABLE";
 
 export type WebsiteGrowthSemrushCache = {
@@ -146,16 +148,19 @@ export function selectWebsiteGrowthScoutPacketCandidates<
 export async function prepareWebsiteGrowthScoutRun({
   tenantId,
   tenantSlug,
+  runLane = "CONTENT",
   researchScope = "WEEKLY"
 }: {
   tenantId: string;
   tenantSlug: string;
+  runLane?: WebsiteGrowthScoutRunLane;
   researchScope?: WebsiteGrowthScoutResearchScope;
 }) {
+  const jobType = runLane === "BACKLINKS" ? BACKLINK_DISCOVERY_JOB_TYPE : JOB_TYPE;
   const active = await prisma.automationJobRun.findFirst({
     where: {
       tenantId,
-      jobType: JOB_TYPE,
+      jobType,
       status: { in: [JobStatus.QUEUED, JobStatus.RUNNING] },
       startedAt: { gte: new Date(Date.now() - RUN_LOCK_MS) }
     },
@@ -176,7 +181,7 @@ export async function prepareWebsiteGrowthScoutRun({
   const job = await prisma.automationJobRun.create({
     data: {
       tenantId,
-      jobType: JOB_TYPE,
+      jobType,
       status: JobStatus.RUNNING,
       input: {
         version: 2,
@@ -184,6 +189,7 @@ export async function prepareWebsiteGrowthScoutRun({
         model,
         reasoningEffort,
         maxCandidates,
+        runLane,
         researchScope,
         semrushTransport: "official_mcp_oauth"
       }
@@ -226,10 +232,9 @@ export async function prepareWebsiteGrowthScoutRun({
       }),
       loadWebsiteGrowthSemrushCache(tenantId)
     ]);
-    const opportunities = selectWebsiteGrowthScoutPacketCandidates(
-      opportunityPool,
-      maxCandidates
-    );
+    const opportunities = runLane === "CONTENT"
+      ? selectWebsiteGrowthScoutPacketCandidates(opportunityPool, maxCandidates)
+      : [];
     const candidateIds = opportunities.map((opportunity) => opportunity.id);
     const questionCandidateIds = opportunities
       .filter(isWebsiteGrowthQuestionOpportunity)
@@ -288,6 +293,7 @@ export async function prepareWebsiteGrowthScoutRun({
       version: 2,
       runId: job.id,
       tenantSlug,
+      runLane,
       model,
       reasoningEffort,
       semrush: {
@@ -348,10 +354,10 @@ export async function prepareWebsiteGrowthScoutRun({
       },
       backlinkDiscovery: {
         provider: "BRAVE",
-        classifier: "QWEN_LOCAL",
+        classifier: "CODEX_SUBSCRIPTION",
         finalReviewer: "CODEX",
         rotation: backlinkDiscovery.rotation,
-        queries: backlinkDiscovery.queries,
+        queries: runLane === "BACKLINKS" ? backlinkDiscovery.queries : [],
         limits: {
           queries: BACKLINK_DISCOVERY_QUERY_LIMIT,
           resultsPerQuery: BACKLINK_DISCOVERY_RESULTS_PER_QUERY,
@@ -362,11 +368,14 @@ export async function prepareWebsiteGrowthScoutRun({
           promotionsToNewlApps: BACKLINK_DISCOVERY_PROMOTION_LIMIT
         },
         rules: [
-          "Search results are registered in the tenant-scoped Scout job ledger before Qwen reviews them.",
+          "Search results are registered in the tenant-scoped Scout job ledger before Codex reviews them.",
           "Previously seen canonical URLs are excluded before page retrieval and cannot be re-added as new opportunities.",
           "Never crawl recursively or follow arbitrary page links.",
-          "Qwen performs advisory bulk triage. Codex makes the final promotion decision.",
-          "Raw results and rejected URLs remain in the automation ledger and are not shown in the normal Backlinks workspace."
+          "A bounded ChatGPT-subscription Codex pass performs advisory bulk triage. Codex makes the final promotion decision.",
+          "Raw results and rejected URLs remain in the automation ledger and are not shown in the normal Backlinks workspace.",
+          runLane === "CONTENT"
+            ? "Backlink discovery is deliberately skipped in this content-only run."
+            : "This backlink-only run must not create page drafts."
         ]
       },
       evidenceRefresh,
@@ -401,6 +410,7 @@ export async function prepareWebsiteGrowthScoutRun({
           model,
           reasoningEffort,
           maxCandidates,
+          runLane,
           researchScope,
           semrushTransport: "official_mcp_oauth",
           candidateIds,
@@ -409,7 +419,7 @@ export async function prepareWebsiteGrowthScoutRun({
           semrushCacheObservedAt: semrushCache.observedAt
         },
         output: {
-          phase: "AWAITING_CODEX",
+          phase: runLane === "CONTENT" ? "AWAITING_CODEX_CONTENT" : "AWAITING_CODEX_BACKLINKS",
           evidenceRefresh,
           weeklyPlan,
           researchInventory,
@@ -580,11 +590,19 @@ export async function completeWebsiteGrowthScoutRun({
 }) {
   const parsed = parseWebsiteGrowthScoutCompletion(completion);
   const job = await prisma.automationJobRun.findFirst({
-    where: { id: runId, tenantId, jobType: JOB_TYPE, status: JobStatus.RUNNING }
+    where: {
+      id: runId,
+      tenantId,
+      jobType: { in: [JOB_TYPE, BACKLINK_DISCOVERY_JOB_TYPE] },
+      status: JobStatus.RUNNING
+    }
   });
   if (!job) throw new Error("The Website Growth Scout run is not active or does not belong to this tenant.");
 
   const candidateIds = readStringArray(readRecord(job.input).candidateIds);
+  const runLane = readOptionalString(readRecord(job.input).runLane, 20) === "BACKLINKS"
+    ? "BACKLINKS"
+    : "CONTENT";
   const questionCandidateIds = new Set(
     readStringArray(readRecord(job.input).questionCandidateIds)
   );
@@ -592,6 +610,16 @@ export async function completeWebsiteGrowthScoutRun({
     readStringArray(readRecord(job.input).recoveryCandidateIds)
   );
   const allowed = new Set(candidateIds);
+
+  if (runLane === "CONTENT" && parsed.backlinks.source !== "NOT_RUN") {
+    throw new Error("A content-only Scout run must not perform or persist backlink research.");
+  }
+  if (runLane === "BACKLINKS" && parsed.drafts.length > 0) {
+    throw new Error("A backlink-only Scout run must not create website page drafts.");
+  }
+  if (runLane === "BACKLINKS" && parsed.backlinks.source !== "WEB_DISCOVERY") {
+    throw new Error("A backlink-only Scout run must report its bounded public-web discovery result.");
+  }
 
   for (const item of parsed.drafts) {
     if (!allowed.has(item.opportunityId)) throw new Error("Scout returned a draft outside its candidate scope.");
@@ -606,7 +634,7 @@ export async function completeWebsiteGrowthScoutRun({
   });
 
   const semrushImport = await persistSemrushEvidence(tenantId, runId, parsed.semrush, allowed);
-  const backlinkSummary = parsed.backlinks.source === "CACHE"
+  const backlinkSummary = parsed.backlinks.source === "CACHE" || parsed.backlinks.source === "NOT_RUN"
     ? await summarizeCachedWebsiteGrowthBacklinks(tenantId, parsed.backlinks)
     : await persistWebsiteGrowthBacklinkReview({
         tenantId,
@@ -824,12 +852,22 @@ export async function failWebsiteGrowthScoutRun({
   message: string;
 }) {
   const active = await prisma.automationJobRun.findFirst({
-    where: { id: runId, tenantId, jobType: JOB_TYPE, status: JobStatus.RUNNING },
+    where: {
+      id: runId,
+      tenantId,
+      jobType: { in: [JOB_TYPE, BACKLINK_DISCOVERY_JOB_TYPE] },
+      status: JobStatus.RUNNING
+    },
     select: { output: true }
   });
   if (!active) return false;
   const result = await prisma.automationJobRun.updateMany({
-    where: { id: runId, tenantId, jobType: JOB_TYPE, status: JobStatus.RUNNING },
+    where: {
+      id: runId,
+      tenantId,
+      jobType: { in: [JOB_TYPE, BACKLINK_DISCOVERY_JOB_TYPE] },
+      status: JobStatus.RUNNING
+    },
     data: {
       status: JobStatus.ERROR,
       finishedAt: new Date(),
@@ -893,7 +931,7 @@ function validateWebsiteGrowthWebDiscoveryReview({
       .filter((value): value is string => Boolean(value))
   );
   if (allowedHashes.size === 0 && review.prospects.length > 0) {
-    throw new Error("Scout may not promote a public-web backlink when Qwen returned no finalists.");
+    throw new Error("Scout may not promote a public-web backlink when subscription-backed Codex triage returned no finalists.");
   }
   for (const prospect of review.prospects) {
     const canonical = prospect.sourceUrl
@@ -1163,7 +1201,7 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
     mailLine,
     `Backlinks: ${backlinkReviewCount} curated prospect${backlinkReviewCount === 1 ? "" : "s"} currently need review.`,
     `Review page: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth`,
-    "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday and Wednesday deep Scout runs."
+    "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday and Wednesday content Scout runs."
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
