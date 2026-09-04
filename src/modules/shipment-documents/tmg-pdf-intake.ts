@@ -158,7 +158,12 @@ export function parseTmgPicklistPage(
   page: PositionedPage,
   attachment: Pick<TmgSourcePdfAttachment, "sourceId" | "fileName"> = { sourceId: "unknown", fileName: "unknown.pdf" }
 ): TmgPicklistOrder[] {
-  if (!/Order\s+Number/i.test(page.text) || !/Tracking\s+number/i.test(page.text) || !/\bNotes\b/i.test(page.text)) {
+  const hasLegacyOrderHeading = /Order\s+Number/i.test(page.text);
+  const hasShippingColumns = /\bSKU\b/i.test(page.text) &&
+    /Shipping\s+Name/i.test(page.text) &&
+    /Ship\s+City/i.test(page.text) &&
+    /\bState\b/i.test(page.text);
+  if ((!hasLegacyOrderHeading && !hasShippingColumns) || !/Tracking\s+number/i.test(page.text) || !/\bNotes\b/i.test(page.text)) {
     return [];
   }
 
@@ -405,8 +410,14 @@ function readNearestPicklistNotes(
   reference: PositionedWord,
   notesHeading: PositionedWord
 ) {
+  const trackingWord = page.words.find((word) =>
+    Math.abs(word.y - reference.y) <= 3 && TRACKING_PATTERN.test(word.text)
+  );
+  const notesStartX = trackingWord && trackingWord.x < notesHeading.x
+    ? trackingWord.x + ((notesHeading.x - trackingWord.x) / 2)
+    : notesHeading.x - 60;
   const notesWords = page.words.filter((word) => {
-    if (word.x < notesHeading.x - 60 || word.y >= notesHeading.y - 4 || /^Notes$/i.test(word.text)) return false;
+    if (word.x < notesStartX || word.y >= notesHeading.y - 4 || /^Notes$/i.test(word.text)) return false;
     const nearest = references.reduce((best, candidate) =>
       Math.abs(candidate.y - word.y) < Math.abs(best.y - word.y) ? candidate : best
     );

@@ -49,6 +49,44 @@ describe("TMG email candidate filtering", () => {
     expect(result.existingMessageCount).toBe(2);
     expect(result.deferredMessageCount).toBe(247);
   });
+
+  it("deduplicates stable internet-message identities when Graph IDs change", () => {
+    const messages = [
+      message({
+        id: "graph-message-new",
+        internetMessageId: " <synthetic-message@example.com> ",
+        receivedDateTime: "2026-09-03T17:00:00.000Z"
+      }),
+      message({
+        id: "graph-message-other",
+        internetMessageId: "<OTHER-MESSAGE@example.com>",
+        receivedDateTime: "2026-09-03T18:00:00.000Z"
+      })
+    ];
+
+    const result = selectTmgCandidateMessagesForSync(
+      messages,
+      new Set(["graph-message-old"]),
+      new Set(["<SYNTHETIC-MESSAGE@example.com>"])
+    );
+
+    expect(result.selectedMessages.map((candidate) => candidate.id)).toEqual(["graph-message-other"]);
+    expect(result.existingMessageCount).toBe(1);
+    expect(result.deferredMessageCount).toBe(0);
+  });
+
+  it("keeps only the oldest copy when one mailbox scan returns duplicate internet messages", () => {
+    const messages = [
+      message({ id: "graph-message-later", internetMessageId: "<same-message@example.com>", receivedDateTime: "2026-09-03T18:00:00.000Z" }),
+      message({ id: "graph-message-first", internetMessageId: "<same-message@example.com>", receivedDateTime: "2026-09-03T17:00:00.000Z" })
+    ];
+
+    const result = selectTmgCandidateMessagesForSync(messages, new Set());
+
+    expect(result.selectedMessages.map((candidate) => candidate.id)).toEqual(["graph-message-first"]);
+    expect(result.existingMessageCount).toBe(1);
+    expect(result.deferredMessageCount).toBe(0);
+  });
 });
 
 function message(overrides: Partial<MicrosoftGraphMailMessage> = {}): MicrosoftGraphMailMessage {
