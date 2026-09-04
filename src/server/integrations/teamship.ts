@@ -9,6 +9,7 @@ const DEFAULT_PAGE_LIMIT = 500;
 const DEFAULT_MAX_PAGES = 30;
 const DEFAULT_TARGETED_MAX_PAGES = 100;
 const TEAMSHIP_DASHBOARD_PAGE_LIMIT = 100;
+const TEAMSHIP_READ_RETRY_DELAYS_MS = [100, 300] as const;
 
 type TeamshipFetchOptions = {
   tenantId?: string | null;
@@ -50,6 +51,7 @@ export type TeamshipReadSession = {
   readonly apiBaseUrl: string;
   readonly credentials: TeamshipRuntimeCredentials | null;
   readonly fetchImpl: typeof fetch;
+  readonly waitForRetry: (milliseconds: number) => Promise<void>;
   token: string;
 };
 
@@ -128,11 +130,13 @@ export type TeamshipShippingProductSearchRow = {
 export async function createTeamshipReadSession({
   tenantId,
   credentials = null,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  waitForRetry = waitForTeamshipReadRetry
 }: {
   tenantId?: string | null;
   credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
+  waitForRetry?: (milliseconds: number) => Promise<void>;
 }): Promise<TeamshipReadSession> {
   const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
   const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
@@ -140,6 +144,7 @@ export async function createTeamshipReadSession({
     apiBaseUrl,
     credentials: resolvedCredentials,
     fetchImpl,
+    waitForRetry,
     token: await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl)
   };
 }
@@ -939,19 +944,55 @@ async function fetchAuthorizedTeamshipRead({
     ...init,
     headers: buildTeamshipHeaders(authorizationToken)
   });
-  const response = await send(token);
-  if (response.status !== 401 || !readSession) return response;
+  if (!readSession) return send(token);
 
-  // Teamship can invalidate an API token while a batch is still reading. Only
-  // opt-in read sessions recover, and the exact read is retried at most once.
-  if (readSession.token === token) {
-    readSession.token = await loginToTeamship(
-      readSession.fetchImpl,
-      readSession.credentials,
-      readSession.apiBaseUrl
-    );
+  let authorizationToken = token;
+  let unauthorizedReadRetried = false;
+  let transientRetryIndex = 0;
+  while (true) {
+    let response: Response;
+    try {
+      response = await send(authorizationToken);
+    } catch (error) {
+      if (transientRetryIndex >= TEAMSHIP_READ_RETRY_DELAYS_MS.length) throw error;
+      await readSession.waitForRetry(TEAMSHIP_READ_RETRY_DELAYS_MS[transientRetryIndex]!);
+      transientRetryIndex += 1;
+      authorizationToken = readSession.token;
+      continue;
+    }
+
+    // Teamship can invalidate an API token while a batch is still reading.
+    // Renew once independently from the bounded transient-read retries.
+    if (response.status === 401 && !unauthorizedReadRetried) {
+      unauthorizedReadRetried = true;
+      if (readSession.token === authorizationToken) {
+        readSession.token = await loginToTeamship(
+          readSession.fetchImpl,
+          readSession.credentials,
+          readSession.apiBaseUrl
+        );
+      }
+      authorizationToken = readSession.token;
+      continue;
+    }
+
+    if (isRetryableTeamshipReadStatus(response.status) && transientRetryIndex < TEAMSHIP_READ_RETRY_DELAYS_MS.length) {
+      await readSession.waitForRetry(TEAMSHIP_READ_RETRY_DELAYS_MS[transientRetryIndex]!);
+      transientRetryIndex += 1;
+      authorizationToken = readSession.token;
+      continue;
+    }
+
+    return response;
   }
-  return send(readSession.token);
+}
+
+function isRetryableTeamshipReadStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function waitForTeamshipReadRetry(milliseconds: number) {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function buildTeamshipHeaders(token: string) {

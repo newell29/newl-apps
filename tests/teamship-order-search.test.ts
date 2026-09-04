@@ -288,6 +288,74 @@ describe("Teamship shipping-order search identity", () => {
     expect(loginCount).toBe(2);
   });
 
+  it("retries bounded transient HTTP and transport failures for opt-in read sessions", async () => {
+    vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    let listCount = 0;
+    const waitForRetry = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url.endsWith("/v1/login")) {
+        return Response.json({ data: { token: "test-token" } });
+      }
+      if (url.includes("/v1/ship-inventories?")) {
+        listCount += 1;
+        if (listCount === 1) throw new TypeError("synthetic network interruption");
+        if (listCount === 2) return Response.json({ message: "Bad gateway" }, { status: 502 });
+        return Response.json({ data: [] });
+      }
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+    const readSession = await createTeamshipReadSession({
+      credentials: {
+        email: "employee@example.com",
+        password: "not-a-live-password",
+        apiBaseUrl: "https://members.fulfillit.io/api"
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      waitForRetry
+    });
+
+    await expect(findTeamshipShippingOrders({
+      orderIdentifier: "PS123456",
+      readSession
+    })).resolves.toEqual([]);
+
+    expect(listCount).toBe(3);
+    expect(waitForRetry.mock.calls).toEqual([[100], [300]]);
+  });
+
+  it("stops after two transient read retries", async () => {
+    vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    let listCount = 0;
+    const waitForRetry = vi.fn(async () => undefined);
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url.endsWith("/v1/login")) return Response.json({ data: { token: "test-token" } });
+      if (url.includes("/v1/ship-inventories?")) {
+        listCount += 1;
+        return Response.json({ message: "Unavailable" }, { status: 503 });
+      }
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+    const readSession = await createTeamshipReadSession({
+      credentials: {
+        email: "employee@example.com",
+        password: "not-a-live-password",
+        apiBaseUrl: "https://members.fulfillit.io/api"
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      waitForRetry
+    });
+
+    await expect(findTeamshipShippingOrders({
+      orderIdentifier: "PS123456",
+      readSession
+    })).rejects.toThrow("Unable to list Teamship shipping orders. Teamship returned status 503.");
+
+    expect(listCount).toBe(3);
+    expect(waitForRetry).toHaveBeenCalledTimes(2);
+  });
+
   it("does not add unauthorized-read retries to existing callers", async () => {
     vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
     let loginCount = 0;
@@ -314,5 +382,31 @@ describe("Teamship shipping-order search identity", () => {
     })).rejects.toThrow("Unable to list Teamship shipping orders. Teamship returned status 401.");
 
     expect(loginCount).toBe(1);
+  });
+
+  it("does not add transient-read retries to callers without an opt-in session", async () => {
+    vi.stubEnv("TEAMSHIP_MAX_LIST_PAGES", "1");
+    let listCount = 0;
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = String(input);
+      if (url.endsWith("/v1/login")) return Response.json({ data: { token: "test-token" } });
+      if (url.includes("/v1/ship-inventories?")) {
+        listCount += 1;
+        return Response.json({ message: "Bad gateway" }, { status: 502 });
+      }
+      throw new Error(`Unexpected Teamship fetch: ${url}`);
+    });
+
+    await expect(findTeamshipShippingOrders({
+      orderIdentifier: "PS123456",
+      credentials: {
+        email: "employee@example.com",
+        password: "not-a-live-password",
+        apiBaseUrl: "https://members.fulfillit.io/api"
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch
+    })).rejects.toThrow("Unable to list Teamship shipping orders. Teamship returned status 502.");
+
+    expect(listCount).toBe(1);
   });
 });

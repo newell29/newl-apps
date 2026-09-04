@@ -9,7 +9,7 @@
 - Teamship Pickup ETA is the next US business day after the email is received. The calculation uses the US Eastern calendar date and skips weekends and observed US federal holidays.
 - The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary. Both the original `Order Number` heading and the observed `SKU Shipping Name Ship City State` heading identify the supported TMG picklist table when the tracking-number and notes columns are also present.
 - When picklist warehouse instructions are present, Teamship receives `<customer reference>; <warehouse instructions>` in both Shipment ID and PO Number. Leading picklist asterisks are removed from the Teamship value. Orders without warehouse instructions retain the plain customer reference in both fields.
-- The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip.
+- The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip. BOL extraction tolerates fragmented embedded text such as spaced Estes headings and identifiers. If the BOL customer reference cannot be extracted, it may be associated only when its normalized PRO number exactly matches the same order's picklist tracking number; a conflicting readable reference is never overridden.
 - A self-pickup exception is allowed only when the same order is identified as self-pickup on the picklist and its source order PDF contains both a `Customer Self Pickup Form` and self-pickup wording for the exact customer reference. Missing freight documents alone never classify an order as pickup.
 - A validated self-pickup order does not require a BOL, freight label, or PRO number. Its complete source pickup packet (warehouse release sheet, customer pickup form, and packing slip) is preserved as the one Teamship upload document. Ordinary freight orders remain blocked when a BOL, label, or PRO number is missing.
 - Carrier delivery notes are intentionally excluded from Teamship.
@@ -41,7 +41,7 @@ An unapproved saved batch that has no approval plan can be run through newer par
 
 The maximum-messages setting is a bounded Microsoft Graph search window, not the number of email batches parsed in one request. Each scan filters message metadata first, removes messages that already have a tenant-and-mailbox-scoped batch, and parses at most one new eligible email. The oldest unsaved candidate is processed first so a 14-day backlog drains across five-minute scheduler runs without older messages aging out. The authenticated manual scan and scheduled scan routes allow up to five minutes for that single email's PDF packet; no scan bypasses CSR approval.
 
-Planning reuses one opt-in Teamship API read session for the email batch instead of logging in again for every duplicate and SKU lookup. The execution worker also uses an opt-in read session for its final exact-reference duplicate check immediately before creation. If Teamship returns `401` during one of those reads, TMG renews the session and retries that exact read once. This recovery is read-only: it is not enabled for Teamship create/update requests and does not change the existing Garland authentication path.
+Planning reuses one opt-in Teamship API read session for the email batch instead of logging in again for every duplicate and SKU lookup. The execution worker also uses an opt-in read session for its final exact-reference duplicate check immediately before creation. If Teamship returns `401` during one of those reads, TMG renews the session and retries that exact read once. Transport failures plus HTTP `408`, `429`, and `5xx` responses receive at most two short, bounded retries. This recovery is read-only: it is not enabled for Teamship create/update requests or browser uploads and does not change the existing Garland authentication path.
 
 The scheduled endpoint and `/api/operations/tmg-order-intake/worker/*` bypass browser-session middleware so their route handlers can enforce `CRON_SECRET` or ingestion-token authentication directly. The TMG settings, batch-list, and approval APIs are not exempt and continue to require an authenticated employee session and their existing permission checks.
 
@@ -62,8 +62,10 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 ## Failure recovery
 
 - Missing or ambiguous documents, products, inventory, or ship-to fields: correct the source/configuration and ingest a new message; do not force the row through.
+- A fragmented BOL reference is normalized before validation. When no BOL reference is readable, the order remains blocked unless one exact BOL PRO matches the same order's picklist tracking number.
 - Exact Teamship duplicate: reconcile the existing Teamship order manually.
 - Repeated Teamship `401` after the single read-session renewal: leave the order in `NEEDS_REVIEW` and verify the configured account's API access with Teamship. Do not approve the batch until validation succeeds.
+- Exhausted transient Teamship reads after two retries remain `NEEDS_REVIEW`; do not reinterpret them as missing stock or bypass duplicate validation.
 - Create request without confirmed response/readback: inspect Teamship for the exact customer reference; do not retry automatically.
 - Upload without exact filename confirmation after reload: inspect the order documents manually; do not retry automatically.
 - Summary failure: the batch records `summaryStatus=NEEDS_REVIEW`; check recipients before any manual resend.
@@ -71,7 +73,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 
 ## Test coverage
 
-- PDF classification, both observed picklist headers, parsing, packet order, deduplication, and warehouse-note extraction.
+- PDF classification, both observed picklist headers, fragmented Estes BOL text, exact PRO-to-picklist fallback matching, conflicting-reference rejection, packet order, deduplication, and warehouse-note extraction.
 - Explicit self-pickup classification, intact three-page pickup packets, pickup Teamship payload mapping, and regression coverage that incomplete freight still cannot bypass BOL/label/PRO validation.
 - Large-mailbox intake selects only the oldest unsaved eligible email for each scan, deduplicates different Graph records with the same internet message ID, and reports the remaining deferred candidate count.
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
@@ -79,7 +81,7 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 - Pickup-ETA regression coverage includes ordinary weekdays, weekends, US federal holidays, observed holidays across year boundaries, and US Eastern calendar-date conversion.
 - Document-upload regression coverage handles both Teamship auto-upload and the staged-file Save/Upload flow. It fails closed without reloading when the safe submit control is missing or ambiguous, Teamship starts no upload request, or Teamship rejects the upload.
 - Consolidated-PDF review-route coverage requires employee authentication and module access, exact tenant/batch/order scoping, PDF-signature validation, and SHA-256 integrity verification.
-- TMG planning-session reuse, one-time unauthorized-read recovery during both planning and the execution duplicate check, and a regression assertion that existing non-TMG callers keep the original no-retry behavior.
+- TMG planning-session reuse, one-time unauthorized-read recovery, bounded transient read recovery during both planning and the execution duplicate check, and regression assertions that existing non-session callers keep the original no-retry behavior and create requests are never retried.
 - Tenant-scoped CSR approval, stale-plan rejection, valid-only partial-batch selection, and exact-reference recheck.
 - Tenant settings validation and internal summary content.
 - Middleware regression coverage that admits only the TMG scheduled/worker machine routes while keeping settings, batches, and the Operations Tools page session-protected.
