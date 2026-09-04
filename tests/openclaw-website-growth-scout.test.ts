@@ -513,7 +513,7 @@ exit 2
       openclawPath,
       `#!/bin/zsh
 if [[ "$1" == "models" && "$2" == "status" ]]; then
-  print -r -- '{"auth":{"oauth":{"providers":[{"provider":"openai","effectiveProfiles":[{"type":"oauth","status":"ok"}]}]}}}'
+  print -r -- '{"auth":{"oauth":{"providers":[{"provider":"openai","effectiveProfiles":[{"type":"token","status":"static"}]}]}}}'
   exit 0
 fi
 if [[ "$1" == "agent" ]]; then
@@ -798,6 +798,9 @@ print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
 
     expect(runner).toContain("models status --agent scout --json");
     expect(runner).toContain("effectiveProfiles");
+    expect(runner).toContain('row.get("type") in ("oauth", "token")');
+    expect(runner).toContain('row.get("status") in ("ok", "static")');
+    expect(installer).toContain('row.get("type") in ("oauth", "token")');
     expect(runner).toContain("API-key fallback is disabled");
     expect(installer).toContain("preserve_executor_enabled");
     expect(installer).toContain('openclaw cron enable "${canonical_executor_job_id}"');
@@ -811,9 +814,9 @@ print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
     ]);
 
     expect(helper).toContain("send_website_growth_teams_message");
-    expect(runner).toContain("another Scout run is already active");
-    expect(runner).toContain("No website work was approved, merged, or published");
-    expect(runtimeRunner).toContain("The dedicated runtime did not reach the read-only Scout");
+    expect(runner).toContain("WEBSITE GROWTH SCOUT — ALREADY RUNNING");
+    expect(runner).toContain("Safety status: No website work was approved, merged, or published");
+    expect(runtimeRunner).toContain("Scout did not begin its read-only review");
   });
 
   it.each([

@@ -347,29 +347,56 @@ export function buildWebsiteGrowthBacklinkTeamsLines({
   reviewBaseUrl: string;
 }) {
   if (review.source === "NOT_RUN") {
-    return "\nBacklink Scout: not run in this content-only cycle. Backlink discovery runs separately so it cannot block website recommendations.";
+    return "Backlink discovery: not run today. It runs separately every Tuesday at 10:15 AM ET.";
   }
   if (review.source === "CACHE") {
     return [
-      "",
-      `Backlink Scout: reused the curated SEMrush cache from ${formatObservedDate(review.observedAt)}; no live backlink API units were used.`,
-      `${persisted.activeQueueCount} active curated item${persisted.activeQueueCount === 1 ? "" : "s"} remain in the bounded queue; cached evidence never creates or refreshes a prospect.`,
+      `Backlink evidence: reused the curated cache from ${formatObservedDate(review.observedAt)}; no live backlink search was run.`,
+      `Review queue: ${persisted.activeQueueCount} active curated item${persisted.activeQueueCount === 1 ? "" : "s"}. Cached evidence did not create or refresh a prospect.`,
       review.summary,
       `${normalizeBaseUrl(reviewBaseUrl)}/website-growth/backlinks`
     ].join("\n");
   }
   const lines = [
-    "",
     review.source === "WEB_DISCOVERY"
-      ? `Backlink Scout: bounded public-web research reviewed ${persisted.rawProspectsReviewed} search results; ${review.duplicatesRejected} previously seen or duplicate URLs and ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects were removed.`
-      : `Backlink Scout: ${persisted.rawProspectsReviewed} prospects reviewed; ${review.duplicatesRejected} duplicates and ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects removed.`,
-    `${persisted.created} new curated prospect${persisted.created === 1 ? "" : "s"} need review; ${persisted.refreshed} existing prospect${persisted.refreshed === 1 ? "" : "s"} refreshed; ${persisted.activeQueueCount} active items remain in the bounded queue.`,
+      ? `Backlink search: ${persisted.rawProspectsReviewed} public results reviewed; ${review.duplicatesRejected} previously seen or duplicate URLs removed; ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky results removed.`
+      : `Backlink review: ${persisted.rawProspectsReviewed} prospects reviewed; ${review.duplicatesRejected} duplicates removed; ${review.qualityRejected + persisted.skippedByQualityGate} weak or risky prospects removed.`,
+    `Queue changes: ${persisted.created} new; ${persisted.refreshed} refreshed; ${persisted.activeQueueCount} active curated prospect${persisted.activeQueueCount === 1 ? "" : "s"} total.`,
     review.summary,
     persisted.created > 0
-      ? `${normalizeBaseUrl(reviewBaseUrl)}/website-growth/backlinks`
-      : "No new backlink decision is required this week."
+      ? `Review: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth/backlinks`
+      : "Action required: none. No new backlink opportunity needs review."
   ];
   return lines.join("\n");
+}
+
+export function buildWebsiteGrowthBacklinkScoutTeamsMessage({
+  review,
+  persisted,
+  reviewBaseUrl
+}: {
+  review: WebsiteGrowthBacklinkReview;
+  persisted: WebsiteGrowthBacklinkPersistenceSummary;
+  reviewBaseUrl: string;
+}) {
+  const action = persisted.created > 0
+    ? `Review and approve or reject ${persisted.created} new prospect${persisted.created === 1 ? "" : "s"}: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth/backlinks`
+    : "None. No new backlink opportunity needs your review.";
+  return [
+    "BACKLINK SCOUT — COMPLETED",
+    `Result: ${persisted.created} new prospect${persisted.created === 1 ? "" : "s"} added; ${persisted.refreshed} existing prospect${persisted.refreshed === 1 ? "" : "s"} refreshed.`,
+    `Action required: ${action}`,
+    "",
+    "WHAT HAPPENED",
+    `• Public search results reviewed: ${persisted.rawProspectsReviewed}`,
+    `• Duplicate or previously seen URLs removed: ${review.duplicatesRejected}`,
+    `• Weak, risky, or policy-rejected results removed: ${review.qualityRejected + persisted.skippedByQualityGate}`,
+    `• Active curated prospects in Newl Apps: ${persisted.activeQueueCount}`,
+    "",
+    `Scout note: ${review.summary}`,
+    "Outreach sent: none. Approving a prospect only makes it eligible for the separate weekday outreach job.",
+    "Next backlink search: Tuesday at 10:15 AM ET."
+  ].join("\n");
 }
 
 function formatObservedDate(value: string) {

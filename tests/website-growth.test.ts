@@ -689,13 +689,14 @@ describe("website growth Codex Scout completion", () => {
       reviewBaseUrl: "https://newl-apps.example.com/"
     });
 
-    expect(message).toContain("Search Console, GA4, first-party website forms, and live SEMrush MCP");
+    expect(message).toContain("WEBSITE CONTENT SCOUT — COMPLETED");
+    expect(message).toContain("Search Console, GA4, website forms, current website code, and live SEMrush MCP");
     expect(message).toContain("https://newl-apps.example.com/website-growth/drafts/draft_1");
-    expect(message).toContain("Approval starts the developer build automatically");
-    expect(message).toContain("6505 stored signals");
-    expect(message).toContain("6 sent to Codex; 1 promoted");
+    expect(message).toContain("Approval starts a developer build, but nothing is merged or published");
+    expect(message).toContain("Stored signals: 6505 total");
+    expect(message).toContain("6 deeply reviewed by Codex; 1 promoted");
     expect(message).toContain(
-      "Question and AI-answer lane: 2 question-led candidates reviewed; 1 promoted"
+      "Question and AI-answer candidates: 2 reviewed; 1 promoted"
     );
     expect(message).toContain("SEO recovery monitor: 157 to 140 clicks (-11%)");
     expect(message).toContain("SEO recovery lane: 2 candidates reviewed by Codex; 1 promoted");
@@ -743,9 +744,9 @@ describe("website growth Codex Scout completion", () => {
       reviewBaseUrl: "https://newl-apps.example.com"
     });
 
-    expect(message).toContain("0 ideas promoted");
-    expect(message).toContain("No new page brief needs your approval today");
-    expect(message).toContain("performance workbook is available from the secure download link");
+    expect(message).toContain("Result: No new website recommendation needs your review today");
+    expect(message).toContain("Action required: None");
+    expect(message).toContain("SEO performance: https://newl-apps.example.com/api/seo-performance.xlsx");
   });
 
   it("builds a lightweight weekday check-in without implying live SEMrush or Codex work", () => {
@@ -789,12 +790,15 @@ describe("website growth Codex Scout completion", () => {
       reviewBaseUrl: "https://newl-apps.example.com"
     });
 
-    expect(message).toContain("no SEMrush API units or Codex research were used");
+    expect(message).toContain("WEBSITE GROWTH CHECK-IN — COMPLETED");
+    expect(message).toContain("This was not a content-recommendation or backlink-search run");
+    expect(message).toContain("Codex research: not run");
+    expect(message).toContain("SEMrush API/MCP: not run");
     expect(message).toContain("SEMrush evidence cache: current");
     expect(message).toContain("SEMrush mailbox: 1 new report imported");
-    expect(message).toContain("4 curated prospects currently need review");
+    expect(message).toContain("Backlink prospects needing review: 4");
     expect(message).toContain(
-      "Question and AI-answer lane: 1 question-led candidate newly shortlisted"
+      "Question and AI-answer candidates newly shortlisted: 1"
     );
   });
 });

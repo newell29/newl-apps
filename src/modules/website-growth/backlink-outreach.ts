@@ -744,36 +744,61 @@ export async function buildWebsiteGrowthOutreachTeamsSummary({
 
   const blockedLines = blockedThisRun.slice(0, 5).map(({ title, blocker }) =>
     [
-      `Blocked: ${title}`,
-      `(${formatWebsiteGrowthBacklinkBlockerCategory(blocker.category)})`,
-      blocker.reason.replace(/\s+/g, " "),
-      `Next: ${blocker.nextAction}`,
-      `Retry: ${blocker.retryGuidance}`
-    ].join(" — ")
+      `• ${title}`,
+      `  Category: ${formatWebsiteGrowthBacklinkBlockerCategory(blocker.category)}`,
+      `  Reason: ${blocker.reason.replace(/\s+/g, " ")}`,
+      `  Next action: ${blocker.nextAction}`,
+      `  Will retrying help? ${blocker.retryGuidance}`
+    ].join("\n")
   );
+  const actionLines = [
+    needsReview > 0
+      ? `• Approve or reject ${needsReview} new prospect${needsReview === 1 ? "" : "s"} in Newl Apps.`
+      : null,
+    replied > 0
+      ? `• Review ${replied} publisher repl${replied === 1 ? "y" : "ies"}. Scout will not send another follow-up to replied contacts.`
+      : null,
+    blockedTotal > 0
+      ? `• Review ${blockedTotal} unresolved blocked item${blockedTotal === 1 ? "" : "s"}; the details below show whether retrying can help.`
+      : null
+  ].filter((line): line is string => Boolean(line));
   const message = [
     executionStatus === JobStatus.ERROR
-      ? "Website Growth outreach update — executor failed"
-      : "Website Growth outreach update",
+      ? "BACKLINK OUTREACH — FAILED"
+      : "BACKLINK OUTREACH — COMPLETED",
+    executionStatus === JobStatus.ERROR
+      ? "Result: The outreach work phase did not complete. No uncertain email or directory action was retried."
+      : `Result: ${contacted} contacted total; ${submitted} directory submissions total; ${live} verified live backlink${live === 1 ? "" : "s"}.`,
+    `Action required: ${actionLines.length > 0 ? "Yes — see OWNER ACTIONS below." : "None."}`,
     ...(executionStatus === JobStatus.ERROR
-      ? ["The constrained work phase did not complete successfully. No uncertain external action was retried; review the recorded run before the next cycle."]
+      ? ["Review the recorded run before enabling or retrying affected work."]
       : []),
-    `${needsReview} prospect${needsReview === 1 ? "" : "s"} need your approval; ${approved} approved item${approved === 1 ? "" : "s"} ${approved === 1 ? "is" : "are"} ready for Scout.`,
-    `${contacted} contacted; ${replied} replied; ${submitted} directory submissions; ${live} verified live; ${blockedThisRun.length} blocked this run; ${blockedTotal} blocked total.`,
-    `${humanDirectoryActions} directory account${humanDirectoryActions === 1 ? "" : "s"} need your help; ${pendingDirectoryVerifications} email verification${pendingDirectoryVerifications === 1 ? "" : "s"} pending.`,
+    "",
+    "THIS RUN AND CURRENT QUEUE",
+    `• Awaiting your approval: ${needsReview}`,
+    `• Approved and ready for Scout: ${approved}`,
+    `• Publisher replies: ${replied}`,
+    `• Blocked this run: ${blockedThisRun.length}`,
+    `• Blocked total: ${blockedTotal}`,
+    `• Directory accounts needing your help: ${humanDirectoryActions}`,
+    `• Email verifications pending: ${pendingDirectoryVerifications}`,
+    ...(actionLines.length > 0 ? ["", "OWNER ACTIONS", ...actionLines] : []),
     ...(blockedLines.length > 0
       ? [
-          "Blocked this run:",
+          "",
+          "BLOCKED THIS RUN",
           ...blockedLines,
           ...(blockedThisRun.length > blockedLines.length
             ? [`${blockedThisRun.length - blockedLines.length} more blocked item${blockedThisRun.length - blockedLines.length === 1 ? "" : "s"} are listed in Newl Apps.`]
             : [])
         ]
-      : ["No items were blocked in this run."]),
+      : ["", "BLOCKED THIS RUN", "None."]),
       ...(recentLines.length > 0
-        ? ["Recent directory and backlink results:", ...recentLines]
-        : ["No new directory accounts or verified backlinks in the last seven days."]),
-      `${baseUrl.replace(/\/+$/, "")}/website-growth/backlinks`
+        ? ["", "RECENT RESULTS", ...recentLines]
+        : ["", "RECENT RESULTS", "No new directory account or verified backlink was recorded in the last seven days."]),
+      "",
+      `Review workspace: ${baseUrl.replace(/\/+$/, "")}/website-growth/backlinks`,
+      "Next automatic outreach check: next weekday at 11:00 AM ET. Only previously approved free opportunities are eligible."
   ].join("\n");
   const output: Prisma.InputJsonObject = {
     runType: "website_growth_backlink_outreach",

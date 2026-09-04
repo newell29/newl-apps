@@ -72,12 +72,12 @@ describe("Website Growth backlink execution summary", () => {
 
     expect(result.blockedThisRun).toBe(1);
     expect(result.blockedTotal).toBe(5);
-    expect(result.message).toContain(
-      "1 blocked this run; 5 blocked total"
-    );
-    expect(result.message).toContain("(Manual setup)");
-    expect(result.message).toContain("Next:");
-    expect(result.message).toContain("Retry:");
+    expect(result.message).toContain("BACKLINK OUTREACH — COMPLETED");
+    expect(result.message).toContain("• Blocked this run: 1");
+    expect(result.message).toContain("• Blocked total: 5");
+    expect(result.message).toContain("Category: Manual setup");
+    expect(result.message).toContain("Next action:");
+    expect(result.message).toContain("Will retrying help?");
     expect(jobCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         tenantId: "tenant-1",
@@ -101,8 +101,8 @@ describe("Website Growth backlink execution summary", () => {
     });
 
     expect(result.needsAttention).toBe(true);
-    expect(result.message).toContain("executor failed");
-    expect(result.message).toContain("No uncertain external action was retried");
+    expect(result.message).toContain("BACKLINK OUTREACH — FAILED");
+    expect(result.message).toContain("No uncertain email or directory action was retried");
     expect(jobCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         status: JobStatus.ERROR,

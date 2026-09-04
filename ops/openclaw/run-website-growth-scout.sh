@@ -52,7 +52,11 @@ PY
         "${NEWL_APPS_URL%/}/api/website-growth/scout/fail" >/dev/null 2>&1 || true
     fi
     send_website_growth_teams_message \
-      "Website Growth Scout failed during ${failure_stage}. No website work was approved, merged, or published. Review the Website Growth job in Newl Apps and the OpenClaw worker log." \
+      "WEBSITE GROWTH SCOUT — FAILED
+Result: Scout stopped during ${failure_stage}.
+Action required: Review the Website Growth job in Newl Apps and the OpenClaw worker log before retrying.
+
+Safety status: No website work was approved, merged, or published." \
       >/dev/null 2>&1 || true
   fi
   cleanup
@@ -136,7 +140,11 @@ scout_state="$(sed -n '1p' "${temporary_directory}/state.txt")"
 run_id="$(sed -n '2p' "${temporary_directory}/state.txt")"
 if [[ "${scout_state}" == "already_running" ]]; then
   send_website_growth_teams_message \
-    "Website Growth Scout checked in, but another Scout run is already active. No duplicate run was started; the active run will send its own result when it finishes."
+    "WEBSITE GROWTH SCOUT — ALREADY RUNNING
+Result: Another Scout run is already active, so no duplicate run was started.
+Action required: None. The active run will send its own result when it finishes.
+
+Safety status: No second research or build action was started."
   completed=1
   exit 0
 fi

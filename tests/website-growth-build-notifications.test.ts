@@ -63,8 +63,10 @@ describe("Website Growth build Teams notifications", () => {
     expect(claim).toEqual(expect.objectContaining({
       requestId: "build-1",
       event: "DISPATCHED",
-      message: expect.stringContaining("Website Growth build started for /services/fulfillment-services")
+      message: expect.stringContaining("WEBSITE PAGE BUILD — STARTED")
     }));
+    expect(claim?.message).toContain("Codex started building the approved change for /services/fulfillment-services");
+    expect(claim?.message).toContain("Action required: None yet");
     expect(claim?.message).toContain("/website-growth/drafts/draft-1");
     expect(mocks.jobUpdate).toHaveBeenCalledWith({
       where: { id: "build-1" },
@@ -103,6 +105,8 @@ describe("Website Growth build Teams notifications", () => {
     });
 
     expect(claim?.event).toBe("PREVIEW_READY");
+    expect(claim?.message).toContain("WEBSITE PAGE BUILD — PREVIEW READY");
+    expect(claim?.message).toContain("Action required: Review the Vercel preview");
     expect(claim?.message).toContain("Preview: https://newl-website-preview.vercel.app/services/fulfillment-services");
     expect(claim?.message).toContain("Draft PR: https://github.com/newell29/newl_website/pull/12");
     expect(claim?.message).toContain("Nothing is live until you merge");
@@ -168,7 +172,8 @@ describe("Website Growth build Teams notifications", () => {
     });
 
     expect(claim?.event).toBe("FAILED");
-    expect(claim?.message).toContain("Website Growth build failed");
+    expect(claim?.message).toContain("WEBSITE PAGE BUILD — FAILED");
+    expect(claim?.message).toContain("Action required: Open the Newl Apps status page");
     expect(claim?.message).not.toContain("Synthetic build failure");
   });
 
