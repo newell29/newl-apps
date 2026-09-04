@@ -193,6 +193,59 @@ describe("TMG PDF intake", () => {
       "MISSING_LABEL"
     ]));
   });
+
+  it("recognizes fragmented Estes BOL text and builds the freight packet", async () => {
+    const reference = "US19999";
+    const proNumber = "010-1234567";
+    const prepared = await prepareTmgEmailBatch([
+      { sourceId: "picklist", fileName: "picklist.pdf", contentType: "application/pdf", bytes: await picklistPdf({ reference, selfPickup: false, trackingNumber: proNumber }) },
+      { sourceId: "packing", fileName: "order.pdf", contentType: "application/pdf", bytes: await packingSlipPdf(reference) },
+      { sourceId: "bol", fileName: "bol.pdf", contentType: "application/pdf", bytes: await fragmentedEstesBolPdf({ reference, proNumber }) },
+      { sourceId: "label", fileName: "label.pdf", contentType: "application/pdf", bytes: await labelPdf({ reference, proNumber }) }
+    ]);
+
+    expect(prepared.orders).toHaveLength(1);
+    expect(prepared.orders[0]).toMatchObject({
+      customerReference: reference,
+      bol: { customerReference: reference, proNumber, carrier: "Estes" },
+      validationIssues: [],
+      readyForApproval: true,
+      combinedPdfFileName: `TMG ${reference}.pdf`
+    });
+  });
+
+  it("cross-validates an unreadable BOL reference through the exact picklist PRO number", async () => {
+    const reference = "US19999";
+    const proNumber = "010-1234567";
+    const prepared = await prepareTmgEmailBatch([
+      { sourceId: "picklist", fileName: "picklist.pdf", contentType: "application/pdf", bytes: await picklistPdf({ reference, selfPickup: false, trackingNumber: proNumber }) },
+      { sourceId: "packing", fileName: "order.pdf", contentType: "application/pdf", bytes: await packingSlipPdf(reference) },
+      { sourceId: "bol", fileName: "bol.pdf", contentType: "application/pdf", bytes: await fragmentedEstesBolPdf({ reference: null, proNumber }) },
+      { sourceId: "label", fileName: "label.pdf", contentType: "application/pdf", bytes: await labelPdf({ reference, proNumber }) }
+    ]);
+
+    expect(prepared.orders[0]).toMatchObject({
+      bol: { customerReference: reference, proNumber },
+      validationIssues: [],
+      readyForApproval: true
+    });
+  });
+
+  it("does not override a conflicting BOL reference even when its PRO number matches", async () => {
+    const reference = "US19999";
+    const proNumber = "010-1234567";
+    const prepared = await prepareTmgEmailBatch([
+      { sourceId: "picklist", fileName: "picklist.pdf", contentType: "application/pdf", bytes: await picklistPdf({ reference, selfPickup: false, trackingNumber: proNumber }) },
+      { sourceId: "packing", fileName: "order.pdf", contentType: "application/pdf", bytes: await packingSlipPdf(reference) },
+      { sourceId: "bol", fileName: "bol.pdf", contentType: "application/pdf", bytes: await fragmentedEstesBolPdf({ reference: "US18888", proNumber }) },
+      { sourceId: "label", fileName: "label.pdf", contentType: "application/pdf", bytes: await labelPdf({ reference, proNumber }) }
+    ]);
+
+    expect(prepared.orders[0]).toMatchObject({ readyForApproval: false, bol: null });
+    expect(prepared.orders[0]!.validationIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "MISSING_BOL" })
+    ]));
+  });
 });
 
 function word(text: string, x: number, y: number) {
@@ -236,7 +289,15 @@ function drawPackingSlip(page: ReturnType<PDFDocument["addPage"]>, reference: st
   page.drawText("Thank you for shopping with us!", { x: 60, y: 440 });
 }
 
-async function picklistPdf({ reference, selfPickup }: { reference: string; selfPickup: boolean }) {
+async function picklistPdf({
+  reference,
+  selfPickup,
+  trackingNumber = null
+}: {
+  reference: string;
+  selfPickup: boolean;
+  trackingNumber?: string | null;
+}) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([612, 792]);
   page.drawText("Order Number", { x: 40, y: 720 });
@@ -248,5 +309,26 @@ async function picklistPdf({ reference, selfPickup }: { reference: string; selfP
   page.drawText(reference, { x: 40, y: 650 });
   page.drawText("TMG-EXAMPLE-1", { x: 120, y: 650 });
   page.drawText("1", { x: 230, y: 650 });
+  if (trackingNumber) page.drawText(trackingNumber, { x: 380, y: 650 });
+  return new Uint8Array(await pdf.save());
+}
+
+async function fragmentedEstesBolPdf({ reference, proNumber }: { reference: string | null; proNumber: string }) {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([612, 792]);
+  page.drawText("E S T E S", { x: 40, y: 740 });
+  page.drawText("B I L L O F L A D I N G", { x: 220, y: 700 });
+  if (reference) page.drawText(`M A S T E R B O L : ${reference.split("").join(" ")}`, { x: 220, y: 650 });
+  page.drawText(`P R O # ${proNumber.split("").join(" ")}`, { x: 220, y: 620 });
+  return new Uint8Array(await pdf.save());
+}
+
+async function labelPdf({ reference, proNumber }: { reference: string; proNumber: string }) {
+  const pdf = await PDFDocument.create();
+  const page = pdf.addPage([612, 792]);
+  page.drawText("SHIPPER", { x: 40, y: 740 });
+  page.drawText("CONSIGNEE", { x: 40, y: 700 });
+  page.drawText(`BOL#: ${reference}`, { x: 40, y: 660 });
+  page.drawText(`PRO# ${proNumber}`, { x: 40, y: 620 });
   return new Uint8Array(await pdf.save());
 }
