@@ -38,7 +38,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-openclaw cron list --json > "${jobs_path}"
+openclaw cron list --all --json > "${jobs_path}"
 outreach_job_id="$(/usr/bin/python3 - "${jobs_path}" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as handle:

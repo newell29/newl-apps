@@ -15,8 +15,8 @@ flowchart LR
   GSC[Search Console] --> Scout[Scout producer]
   GA4[GA4 landing pages] --> Scout
   Leads[First-party inbound] --> Scout
-  Brave[Bounded Brave Search] --> Qwen[Local Qwen triage]
-  Qwen --> Scout
+  Brave[Bounded Brave Search] --> CodexTriage[Subscription Codex triage]
+  CodexTriage --> Scout
   Semrush[Optional SEMrush MCP] --> Scout
   SemrushMail[Scheduled SEMrush PDFs in Inbox/Semrush] --> Cache[Sanitized tenant-scoped evidence cache]
   Cache --> Scout
@@ -49,7 +49,7 @@ The Website Growth UI intentionally separates two different kinds of records:
 
 - **Scout workspace** is the default view. It contains only AI-curated Scout briefs and groups them into `Needs your review`, `Approved and building`, `Preview ready`, and `Completed and closed`.
 - **Research signals** contains the full GA4, Search Console, Semrush, and first-party evidence inventory. These records are inputs to Scout, not a human work queue.
-- **Backlink Scout** contains only Codex-reviewed, deduplicated prospects that pass deterministic relevance, quality, and spam-risk gates. Raw public-web results, Qwen rejections, and raw Semrush rows are retained only in tenant-scoped automation history and are never presented as a work queue.
+- **Backlink Scout** contains only Codex-reviewed, deduplicated prospects that pass deterministic relevance, quality, and spam-risk gates. Raw public-web results, model rejections, and raw Semrush rows are retained only in tenant-scoped automation history and are never presented as a work queue.
 
 Every Scout card must state whether it proposes a **new page** or an **update to an existing page**, show the affected route, and summarize the primary proposed change. A draft created by the latest Scout run is labeled as new. The latest run summary remains visible even when no opportunities were selected.
 
@@ -66,9 +66,9 @@ This lane improves answer clarity and citation readiness; it does not claim to m
 | Work | Default | Reasoning | Notes |
 | --- | --- | --- | --- |
 | Imports, scoring, clustering, state checks | Deterministic code | N/A | No model should perform exact comparisons or status changes. |
-| Public-web backlink triage | Local Qwen `qwen3.5:35b` | Deterministic structured output | Monday and Wednesday deep runs only. Qwen is advisory and sees only bounded search snippets and at most 40 safely downloaded pages per run. |
-| Scout research, final backlink review, and page brief | Codex `gpt-5.6-sol` | `high` | Monday and Wednesday deep runs only. Search Console, GA4, forms, and the website repository remain primary; SEMrush is optional supporting evidence. |
-| Approved backlink executor | Dedicated Scout agent with OpenAI `gpt-5.4-mini` | `high` | Weekday tool orchestration only. This model is used because the current OpenClaw Codex `gpt-5.6-sol` harness lists plugin tools but does not invoke them. Scout receives only the browser and dedicated backlink tools; Newl Apps enforces approval, compliance, suppression, volume limits, idempotency, and tenant scope before every external action. |
+| Public-web backlink triage | Codex `gpt-5.4-mini` through ChatGPT OAuth | Deterministic structured output | Tuesday backlink-only run. The advisory pass sees only bounded search snippets and at most 40 safely downloaded pages per run. |
+| Scout content research and final backlink review | Codex `gpt-5.6-sol` through ChatGPT OAuth | `high` | Content runs Monday and Wednesday; backlink final review runs independently Tuesday. Search Console, GA4, forms, and the website repository remain primary; SEMrush is optional supporting evidence. |
+| Approved backlink executor | Dedicated Scout agent with OpenAI `gpt-5.4-mini` through OpenClaw OAuth | `high` | Weekday tool orchestration only. The runtime verifies an effective OpenAI OAuth profile and will not fall back to an API key. Scout receives only the browser and dedicated backlink tools; Newl Apps enforces approval, compliance, suppression, volume limits, idempotency, and tenant scope before every external action. |
 | Website developer | Codex `gpt-5.6-sol` | `high` | Runs only after approval, in the website repo, with tests and a draft PR. |
 | Kimi K3 `kimi-k3` | Optional shadow challenger | `high` | Runs only after brief approval, creates a separate verified patch and draft PR, and never replaces the primary Newl Apps build record. |
 
@@ -101,11 +101,11 @@ The initial repository research and evidence requests are recorded in `claims-re
 
 The developer run belongs in GitHub Actions rather than a Vercel function. Vercel serves the control plane and previews, while repository checkout, agent execution, lint, and production build run in GitHub. A successful comparison creates two Preview deployments per approved build request. They may queue when the Vercel account has one concurrent build slot, but neither preview is a production deployment. Weekly publish guides remain two core pages, four supporting items, and six quick optimizations; they are queue limits, not automatic publishing targets.
 
-At 9:15 AM `America/Toronto`, Monday and Wednesday run bounded Brave Search, local Qwen triage, and the read-only Codex Scout; Tuesday, Thursday, and Friday run a deterministic check-in that refreshes Search Console, GA4, forms, and queue state while reusing any stored SEMrush snapshot. Lightweight check-ins spend no Codex tokens, Brave queries, or SEMrush API units. Every trigger still sends a Teams outcome.
+At 9:15 AM `America/Toronto`, Monday and Wednesday run content-only read-only Codex review. Tuesday at 10:15 AM runs the independent bounded Brave and subscription-backed Codex backlink funnel. Tuesday, Thursday, and Friday at 9:15 AM run a deterministic check-in that refreshes Search Console, GA4, forms, and queue state while reusing any stored SEMrush snapshot. A Brave or backlink-model failure cannot cancel content review. Lightweight check-ins spend no Codex tokens, Brave queries, or SEMrush API units. Every trigger still sends a Teams outcome.
 
 Every weekday trigger first checks the dedicated SEMrush mailbox folder. New PDFs update the cache without using API units; duplicate PDFs are skipped. Position Tracking summary metrics refresh the observation date while the last complete tracked-keyword list is retained until a newer complete list exists. Site Audit, backlink, organic-position, and SEO-overview excerpts are supporting context only. When SEMrush API units are available, a deep read-only session may still refresh the complete Position Tracking snapshot. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Broad competitor-gap discovery remains monthly and optional.
 
-Each deep-run backlink funnel rotates through one of four 12-query plans. Each query returns at most 10 results; deterministic code accepts at most 120 rows, 60 unique domains, 40 full-page downloads, and two downloads per domain per run. Every canonical URL hash is written to the tenant-scoped Scout job ledger before Qwen runs. URLs seen in any prior Scout run or already promoted to the backlink queue are counted as duplicates and never downloaded or added again. Qwen returns at most 15 finalists; Codex may promote at most five. There is no recursive crawl. Newl Apps then applies its existing minimum relevance/quality score of 60, high-spam rejection, referring-domain/target-page dedupe, 50-item active-queue cap, and 45-day stale-review archive.
+Each Tuesday backlink funnel rotates through one of four 12-query plans. Each query returns at most 10 results; deterministic code accepts at most 120 rows, 60 unique domains, 40 full-page downloads, and two downloads per domain per run. Every canonical URL hash is written to the tenant-scoped backlink-discovery job ledger before Codex triage. URLs seen in any prior Scout run or already promoted to the backlink queue are counted as duplicates and never downloaded or added again. Triage returns at most 15 finalists; final Codex review may promote at most five. There is no recursive crawl. Newl Apps then applies its existing minimum relevance/quality score of 60, high-spam rejection, referring-domain/target-page dedupe, 50-item active-queue cap, and 45-day stale-review archive.
 
 Backlink approval is distinct from content approval and spending approval. Admin or Manager may approve an opportunity for execution. A dedicated executor token can claim approved free work and report submitted, contacted, blocked, live, or lost states. Paid placements are excluded from machine claims and never authorize a purchase or paid ranking link.
 

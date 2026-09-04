@@ -8,10 +8,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 
 ## Scout-specific failures
 
-- Truncated, invalid, or incomplete local-Qwen backlink JSON: retry only the affected IDs, split the batch recursively, then forward a persistent single-candidate failure with zero confidence through the existing fetch/finalist limits for Codex's final review. The content recommendation lane continues.
+- Truncated, invalid, or incomplete first-pass Codex backlink JSON: retry only the affected IDs, split the batch recursively, then forward a persistent single-candidate failure with zero confidence through the existing fetch/finalist limits for final Codex review. The separate content recommendation lane is unaffected.
 
 - Missing Google credentials: that source receives an error import, but other first-party sources continue.
-- Missing or expired SEMrush OAuth, or exhausted API units: a Monday or Wednesday deep worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, Brave/Qwen backlink discovery, website review, Teams reporting, and page briefs continue.
+- Missing or expired SEMrush OAuth, or exhausted API units: a content or backlink worker uses the exact fresh cache when available and otherwise records SEMrush as `UNAVAILABLE`. First-party evidence, bounded backlink discovery, website review, Teams reporting, and page briefs continue in their respective lanes.
 - Codex output outside the stored candidate IDs: completion is rejected.
 - Malformed or oversized SEMrush output: completion is rejected; at most 200 sanitized rows are accepted.
 - Missing `Inbox/Semrush`, mailbox-policy denial, or token failure: the importer records a bounded tenant-scoped error, the Teams check-in identifies the mailbox as unavailable, and Scout continues with retained evidence and first-party sources.
@@ -21,7 +21,7 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Teams delivery failure after drafts are saved: the command job fails and the links remain available in Newl Apps; the safe failure notice is attempted through the same configured Teams target and may also fail when the channel itself is unavailable.
 - Missing Scout executor tools or an incomplete required call sequence: the backlink wrapper still records and delivers the deterministic no-change summary, then exits non-zero. The Rivet failure monitor records the sanitized failure; the run can no longer appear successful after doing no work.
 - Missing or invalid backlink-skill metadata: OpenClaw omits the skill from Scout's model context. The repository skill must keep valid `name` and `description` frontmatter, while the runtime prompt repeats the critical no-customer-claims and no-signature copy rules so a missing skill cannot authorize unsafe or duplicate footer content.
-- Invalid or truncated local Qwen JSON: discovery processes no more than 30 candidates per local-model call and retries that same batch once. It does not repeat Brave Search, download additional pages, or perform outreach. A second invalid response fails the deep run and records the normal safe failure outcome.
+- Invalid or truncated Codex triage JSON: discovery processes no more than ten candidates per subscription-backed call, retries omitted IDs, and recursively isolates persistent failures. It does not repeat Brave Search, download additional pages, or perform outreach.
 - Build-notification delivery failure: the notification remains leased for 15 minutes and is then eligible for another deterministic claim. Build state remains authoritative in Newl Apps, GitHub, and Vercel; no build, merge, or deployment is retried by the notifier.
 - Teams/OneDrive file consent rejects Allow: Website Growth reports no longer use that transport. The Teams summary contains a signed Newl Apps download link instead.
 - Expired or modified Excel link: the download route returns no workbook. The next deep Scout report creates fresh seven-day links; changing the tenant, run, report name, expiry, or signature invalidates the link.
@@ -30,10 +30,11 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - No candidates: the job still refreshes Position Tracking and backlink research, succeeds, and sends a Teams report without a page-approval request.
 - No qualifying question candidates: the question/AI-answer lane reports zero and the remaining Scout workflow continues normally; it never creates a thin page to fill the lane.
 - Question already answered well on an existing page: Scout may return no draft. Existing-page coverage is preferred over a duplicate guide.
-- Missing Brave key or unavailable local Qwen: the deep run fails safely before Codex promotion and sends the normal failure notice. URL hashes already registered by ingest remain in the tenant job ledger.
+- Missing Brave key: only the Tuesday backlink run fails safely before promotion and sends the normal failure notice. Monday/Wednesday content review still runs. URL hashes already registered by ingest remain in the tenant discovery ledger.
+- Missing ChatGPT OAuth: content research, backlink research, or outreach fails closed before the relevant model action and sends the normal failure notice. Website Growth never falls back to an OpenAI API key; unrelated agents retain their own configuration.
 - Repeated search result: canonical host/path/query normalization removes tracking parameters, and the historical tenant job ledger prevents another fetch or queue addition even if Brave returns the page for a different query or week.
 - No backlink prospects: the job succeeds and the Teams summary explicitly reports zero new prospects.
-- Raw or oversized backlink output: ingest rejects more than 120 search rows, Qwen is limited to 15 finalists, and Codex may promote at most five public-web prospects.
+- Raw or oversized backlink output: ingest rejects more than 120 search rows, first-pass Codex is limited to 15 finalists, and final Codex review may promote at most five public-web prospects.
 - Duplicate or weak backlink prospect: Newl Apps refreshes the existing record or drops it through deterministic quality gates instead of adding another queue item.
 - Backlink queue growth: no new item is created after the 50-active-item cap; stale unrefreshed review items are archived after 45 days.
 - Missing backlink-executor token: discovery and approval continue, but approved work is not claimable.

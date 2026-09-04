@@ -70,6 +70,11 @@ export default async function WebsiteGrowthPage() {
         run={latestRun}
         draftCount={latestRunSummary.draftIds.length}
         semrushRowCount={latestRunSummary.semrushRowCount}
+        semrushMailStatus={latestRunSummary.semrushMailStatus}
+        semrushReportsImported={latestRunSummary.semrushReportsImported}
+        semrushReportsFailed={latestRunSummary.semrushReportsFailed}
+        semrushCachedReportCount={latestRunSummary.semrushCachedReportCount}
+        semrushCacheObservedAt={latestRunSummary.semrushCacheObservedAt}
         phase={latestRunSummary.phase}
       />
 
@@ -286,11 +291,21 @@ function LatestScoutRun({
   run,
   draftCount,
   semrushRowCount,
+  semrushMailStatus,
+  semrushReportsImported,
+  semrushReportsFailed,
+  semrushCachedReportCount,
+  semrushCacheObservedAt,
   phase
 }: {
   run: Awaited<ReturnType<typeof getWebsiteGrowthWorkspace>>["latestScoutRun"];
   draftCount: number;
   semrushRowCount: number;
+  semrushMailStatus: string | null;
+  semrushReportsImported: number;
+  semrushReportsFailed: number;
+  semrushCachedReportCount: number;
+  semrushCacheObservedAt: string | null;
   phase: string | null;
 }) {
   if (!run) {
@@ -340,9 +355,16 @@ function LatestScoutRun({
         <span className="rounded-full border border-border bg-background px-3 py-1">GA4 checked</span>
         <span className="rounded-full border border-border bg-background px-3 py-1">Forms checked</span>
         <span className="rounded-full border border-border bg-background px-3 py-1">
-          Semrush evidence: {semrushRowCount.toLocaleString("en-US")} rows
+          Semrush candidate rows: {semrushRowCount.toLocaleString("en-US")}
+        </span>
+        <span className="rounded-full border border-border bg-background px-3 py-1">
+          Semrush PDFs retained: {semrushCachedReportCount.toLocaleString("en-US")}
         </span>
       </div>
+      <p className="mt-3 text-xs leading-5 text-mutedForeground">
+        Semrush mailbox: {semrushMailStatus === "SUCCESS" ? "checked" : semrushMailStatus ? "check failed" : "not reported"}; {semrushReportsImported} new PDF{semrushReportsImported === 1 ? "" : "s"} imported and {semrushReportsFailed} failed this run
+        {semrushCacheObservedAt ? ` · latest retained evidence ${formatDateTime(new Date(semrushCacheObservedAt))}` : ""}.
+      </p>
     </section>
   );
 }

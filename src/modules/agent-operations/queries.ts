@@ -31,6 +31,7 @@ const AUTOMATION_JOB_ASSIGNMENTS: Record<string, { agentKey: AgentKey; assignmen
   HUNTER_QUALITY_INCIDENT: { agentKey: "rivet", assignment: "Review Hunter quality incident" },
   ASSISTANT_RIVET_DEVELOPMENT: { agentKey: "rivet", assignment: "Prepare an approved code change" },
   WEBSITE_GROWTH_SCOUT_WEEKLY: { agentKey: "website-scout", assignment: "Refresh growth opportunities" },
+  WEBSITE_GROWTH_BACKLINK_DISCOVERY: { agentKey: "website-scout", assignment: "Discover and review backlink opportunities" },
   WEBSITE_GROWTH_SCOUT_WEEKDAY_CHECKIN: { agentKey: "website-scout", assignment: "Refresh website growth evidence" },
   WEBSITE_GROWTH_BACKLINK_OUTREACH: { agentKey: "website-scout", assignment: "Process approved backlink outreach" },
   WEBSITE_GROWTH_BACKLINK_EXECUTOR_FAILURE: { agentKey: "website-scout", assignment: "Review backlink delivery failures" },
@@ -385,6 +386,17 @@ function buildAgentSchedules(data: AgentOperationData, runs: AgentRun[], now: Da
       now,
       activeRunKeys
     ),
+    {
+      id: "website-scout:backlink-discovery",
+      agentKey: "website-scout",
+      agentName: AGENT_CATALOG["website-scout"].name,
+      assignment: "Discover and review backlink opportunities",
+      cadence: "Tuesdays at 10:15",
+      timezone: DEFAULT_TIMEZONE,
+      nextRunAt: null,
+      status: activeRunKeys.has("website-scout") ? "RUNNING" : "SCHEDULED",
+      sourceNote: "Expected local runtime schedule; Rivet monitors failures and disabled state"
+    },
     declaredSchedule(
       "website-scout:outreach",
       "website-scout",

@@ -176,6 +176,10 @@ describe("agent operations", () => {
       {
         assignment: "Process approved backlink outreach",
         cadence: "Weekdays at 11:00"
+      },
+      {
+        assignment: "Discover and review backlink opportunities",
+        cadence: "Tuesdays at 10:15"
       }
     ]);
   });
