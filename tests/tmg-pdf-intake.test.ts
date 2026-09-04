@@ -105,6 +105,43 @@ describe("TMG PDF intake", () => {
     ]);
   });
 
+  it("accepts the TMG picklist layout that starts with SKU shipping columns", () => {
+    const orders = parseTmgPicklistPage({
+      pageNumber: 1,
+      width: 612,
+      height: 792,
+      text: "SKU Shipping Name Ship City State Tracking number Notes",
+      words: [
+        word("Notes", 634, 700),
+        word("US19999", 60, 650),
+        word("TMG-EXAMPLE-1", 105, 650),
+        word("2", 190, 650),
+        word("010-1234567", 490, 650),
+        word("5 layers shrink wrap", 571, 650)
+      ]
+    });
+
+    expect(orders).toEqual([
+      expect.objectContaining({
+        customerReference: "US19999",
+        sku: "TMG-EXAMPLE-1",
+        quantity: 2,
+        trackingNumber: "010-1234567",
+        warehouseInstructions: "5 layers shrink wrap"
+      })
+    ]);
+  });
+
+  it("does not classify an unrelated SKU table as a picklist", () => {
+    expect(parseTmgPicklistPage({
+      pageNumber: 1,
+      width: 612,
+      height: 792,
+      text: "SKU Tracking number Notes",
+      words: [word("US19999", 60, 650), word("TMG-EXAMPLE-1", 105, 650)]
+    })).toEqual([]);
+  });
+
   it("builds the consolidated packet in packing-slip, BOL, label order", async () => {
     const packing = await pdfWithPageWidths([100, 101]);
     const bol = await pdfWithPageWidths([200]);

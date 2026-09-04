@@ -4,10 +4,10 @@
 
 ## Confirmed business rules
 
-- Microsoft Graph reads the tenant-configured mailbox. A message is eligible only when its sender is on the exact allowlist, at least one exact tenant-configured employee address appears in To or CC, its normalized subject starts with the configured prefix, it has attachments, and at least one attachment is a PDF. Standard `RE:`, `FW:`, and `FWD:` prefixes are ignored; other subject text is not rewritten.
+- Microsoft Graph reads the tenant-configured mailbox. A message is eligible only when its sender is on the exact allowlist, at least one exact tenant-configured employee address appears in To or CC, its normalized subject starts with the configured prefix, it has attachments, and at least one attachment is a PDF. Standard `RE:`, `FW:`, and `FWD:` prefixes are ignored; other subject text is not rewritten. Intake deduplicates both the mailbox-scoped Graph record ID and the stable internet message ID so a moved or repeated Graph record is not saved as a second batch.
 - The packing slip is the primary order source. Ship-to, customer reference, date, SKU, and quantity come from the packing slip.
 - Teamship Pickup ETA is the next US business day after the email is received. The calculation uses the US Eastern calendar date and skips weekends and observed US federal holidays.
-- The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary.
+- The picklist is a validation source. Warehouse-only instructions from it are included in the internal completion summary. Both the original `Order Number` heading and the observed `SKU Shipping Name Ship City State` heading identify the supported TMG picklist table when the tracking-number and notes columns are also present.
 - When picklist warehouse instructions are present, Teamship receives `<customer reference>; <warehouse instructions>` in both Shipment ID and PO Number. Leading picklist asterisks are removed from the Teamship value. Orders without warehouse instructions retain the plain customer reference in both fields.
 - The BOL supplies the PRO number. The BOL and label must reference the same exact customer reference as the packing slip.
 - A self-pickup exception is allowed only when the same order is identified as self-pickup on the picklist and its source order PDF contains both a `Customer Self Pickup Form` and self-pickup wording for the exact customer reference. Missing freight documents alone never classify an order as pickup.
@@ -19,7 +19,7 @@
 
 ## Safety boundaries
 
-- Every database read and write is tenant-scoped. Message identity is unique within tenant and mailbox scope.
+- Every database read and write is tenant-scoped. Message identity checks use both the Graph record ID and the stable internet message ID within tenant and mailbox scope.
 - Source PDFs are deduplicated by SHA-256. The frozen Teamship payload and consolidated PDF hash are included in approval evidence.
 - Only fully validated orders are selected for approval. Orders with missing or conflicting evidence remain in `NEEDS_REVIEW`.
 - Teamship is checked for an exact customer reference during planning, again immediately before approval, and again before the create request.
@@ -71,9 +71,9 @@ The approved production host is the existing Teamship Phase 2 VM. TMG shares the
 
 ## Test coverage
 
-- PDF classification, parsing, packet order, deduplication, and warehouse-note extraction.
+- PDF classification, both observed picklist headers, parsing, packet order, deduplication, and warehouse-note extraction.
 - Explicit self-pickup classification, intact three-page pickup packets, pickup Teamship payload mapping, and regression coverage that incomplete freight still cannot bypass BOL/label/PRO validation.
-- Large-mailbox intake selects only the oldest unsaved eligible email for each scan and reports the remaining deferred candidate count.
+- Large-mailbox intake selects only the oldest unsaved eligible email for each scan, deduplicates different Graph records with the same internet message ID, and reports the remaining deferred candidate count.
 - Teamship mapping, exact stock selection, immutable approval hash, duplicate protection, single create, and exact readback.
 - Teamship mapping regression coverage includes warehouse instructions in both Shipment ID and PO Number while preserving exact-reference duplicate and readback checks.
 - Pickup-ETA regression coverage includes ordinary weekdays, weekends, US federal holidays, observed holidays across year boundaries, and US Eastern calendar-date conversion.

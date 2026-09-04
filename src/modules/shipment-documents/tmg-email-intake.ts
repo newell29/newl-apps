@@ -59,19 +59,31 @@ export async function syncTmgEmailIntake(
     maxMessagesPerMailbox: settings.maxMessagesPerScan
   });
   const candidates = messages.filter((message) => isTmgCandidateMessage(message, settings));
+  const candidateInternetMessageIds = candidates
+    .map((message) => message.internetMessageId?.trim())
+    .filter((messageId): messageId is string => Boolean(messageId));
   const existingBatches = candidates.length > 0
     ? await prisma.tmgOrderIntakeBatch.findMany({
         where: {
           tenantId: context.tenantId,
           mailboxAddress: settings.mailboxAddress,
-          graphMessageId: { in: candidates.map((message) => message.id) }
+          OR: [
+            { graphMessageId: { in: candidates.map((message) => message.id) } },
+            ...(candidateInternetMessageIds.length > 0
+              ? [{ internetMessageId: { in: candidateInternetMessageIds, mode: "insensitive" as const } }]
+              : [])
+          ]
         },
-        select: { graphMessageId: true }
+        select: { graphMessageId: true, internetMessageId: true }
       })
     : [];
   const selection = selectTmgCandidateMessagesForSync(
     candidates,
-    new Set(existingBatches.map((batch) => batch.graphMessageId))
+    new Set(existingBatches.map((batch) => batch.graphMessageId)),
+    new Set(existingBatches.flatMap((batch) => {
+      const internetMessageId = normalizeTmgInternetMessageId(batch.internetMessageId);
+      return internetMessageId ? [internetMessageId] : [];
+    }))
   );
   const results: Array<{ batchId: string; status: string; created: boolean }> = [];
   const failures: string[] = [];
@@ -241,13 +253,17 @@ async function ingestTmgMessage({
 }) {
   const settings = await getTmgOrderIntakeSettings(context.tenantId);
   if (!settings.mailboxAddress || !settings.teamship) throw new Error("TMG settings changed during message ingestion.");
-  const existing = await prisma.tmgOrderIntakeBatch.findUnique({
+  const internetMessageId = message.internetMessageId?.trim() || null;
+  const existing = await prisma.tmgOrderIntakeBatch.findFirst({
     where: {
-      tenantId_mailboxAddress_graphMessageId: {
-        tenantId: context.tenantId,
-        mailboxAddress: settings.mailboxAddress,
-        graphMessageId: message.id
-      }
+      tenantId: context.tenantId,
+      mailboxAddress: settings.mailboxAddress,
+      OR: [
+        { graphMessageId: message.id },
+        ...(internetMessageId
+          ? [{ internetMessageId: { equals: internetMessageId, mode: "insensitive" as const } }]
+          : [])
+      ]
     },
     select: { id: true, status: true }
   });
@@ -298,7 +314,7 @@ async function ingestTmgMessage({
         tenantId: context.tenantId,
         mailboxAddress: settings.mailboxAddress!,
         graphMessageId: message.id,
-        internetMessageId: message.internetMessageId,
+        internetMessageId,
         conversationId: message.conversationId,
         subject: message.subject?.trim() || "TMG shipment",
         fromAddress,
@@ -561,17 +577,33 @@ export function isTmgCandidateMessage(
 
 export function selectTmgCandidateMessagesForSync(
   candidates: MicrosoftGraphMailMessage[],
-  existingGraphMessageIds: ReadonlySet<string>
+  existingGraphMessageIds: ReadonlySet<string>,
+  existingInternetMessageIds: ReadonlySet<string> = new Set()
 ) {
-  const pendingMessages = candidates
-    .filter((message) => !existingGraphMessageIds.has(message.id))
-    .sort(compareTmgMessagesOldestFirst);
+  const seenGraphMessageIds = new Set(existingGraphMessageIds);
+  const seenInternetMessageIds = new Set(
+    Array.from(existingInternetMessageIds, normalizeTmgInternetMessageId).filter((value): value is string => Boolean(value))
+  );
+  const pendingMessages: MicrosoftGraphMailMessage[] = [];
+  for (const message of [...candidates].sort(compareTmgMessagesOldestFirst)) {
+    const internetMessageId = normalizeTmgInternetMessageId(message.internetMessageId);
+    if (seenGraphMessageIds.has(message.id) || (internetMessageId && seenInternetMessageIds.has(internetMessageId))) {
+      continue;
+    }
+    pendingMessages.push(message);
+    seenGraphMessageIds.add(message.id);
+    if (internetMessageId) seenInternetMessageIds.add(internetMessageId);
+  }
 
   return {
     selectedMessages: pendingMessages.slice(0, TMG_MAX_NEW_BATCHES_PER_SYNC),
     existingMessageCount: candidates.length - pendingMessages.length,
     deferredMessageCount: Math.max(0, pendingMessages.length - TMG_MAX_NEW_BATCHES_PER_SYNC)
   };
+}
+
+function normalizeTmgInternetMessageId(value: string | null | undefined) {
+  return value?.trim().toLowerCase() || null;
 }
 
 export function normalizeTmgSubject(subject: string | null | undefined) {
