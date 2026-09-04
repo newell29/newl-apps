@@ -194,6 +194,38 @@ describe("TMG Teamship create planning", () => {
     expect(fetchImpl.mock.calls.filter(([input, init]) => String(input).endsWith("/v1/ship-inventories") && init?.method === "POST")).toHaveLength(1);
   });
 
+  it("retries a transient duplicate-check read without retrying the create request", async () => {
+    const plan = await buildPlan();
+    let listCount = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/v1/login")) return jsonResponse({ data: { token: "test-token" } });
+      if (url.includes("/v1/ship-inventories?") && (!init?.method || init.method === "GET")) {
+        listCount += 1;
+        if (listCount === 1) return jsonResponse({ message: "Bad gateway" }, 502);
+        return jsonResponse({ data: [] });
+      }
+      if (url.endsWith("/v1/ship-inventories") && init?.method === "POST") {
+        return jsonResponse({ data: { id: 812345, order_number: 612345 } }, 201);
+      }
+      if (url.endsWith("/v1/ship-inventories/812345")) {
+        return jsonResponse({ data: { id: 812345, poNumber: "US19999", ltlShipmentID: "US19999" } });
+      }
+      throw new Error(`Unexpected test URL ${url}`);
+    });
+
+    await expect(executeApprovedTmgTeamshipCreatePlan({
+      tenantId: "tenant-example",
+      plan,
+      approval: approval(plan.requestHash),
+      credentials: credentials(),
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })).resolves.toMatchObject({ teamshipOrderId: "812345", responseStatus: 201 });
+
+    expect(listCount).toBe(2);
+    expect(fetchImpl.mock.calls.filter(([input, init]) => String(input).endsWith("/v1/ship-inventories") && init?.method === "POST")).toHaveLength(1);
+  });
+
   it("blocks an exact duplicate before the create request", async () => {
     const plan = await buildPlan();
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

@@ -39,6 +39,10 @@ type ExtractedAttachment = TmgSourcePdfAttachment & {
   pages: PositionedPage[];
 };
 
+type ParsedTmgBolEvidence = Omit<TmgBolEvidence, "customerReference"> & {
+  customerReference: string | null;
+};
+
 export async function prepareTmgEmailBatch(attachments: TmgSourcePdfAttachment[]): Promise<TmgPreparedBatch> {
   const pdfAttachments = attachments.filter(isPdfAttachment);
   const uniqueAttachments: ExtractedAttachment[] = [];
@@ -209,12 +213,16 @@ async function prepareOrder({
 }: {
   packingSlip: TmgPackingSlipOrder;
   picklistOrders: TmgPicklistOrder[];
-  bolEvidence: TmgBolEvidence[];
+  bolEvidence: ParsedTmgBolEvidence[];
   labelEvidence: TmgLabelEvidence[];
   attachments: ExtractedAttachment[];
 }): Promise<TmgPreparedOrder> {
   const picklist = picklistOrders.find((order) => order.customerReference === packingSlip.customerReference) ?? null;
-  const matchingBols = bolEvidence.filter((bol) => bol.customerReference === packingSlip.customerReference);
+  const matchingBols = matchTmgBolEvidence({
+    evidence: bolEvidence,
+    customerReference: packingSlip.customerReference,
+    trackingNumber: picklist?.trackingNumber ?? null
+  });
   const matchingLabels = labelEvidence.filter((label) => label.customerReference === packingSlip.customerReference);
   const bol = matchingBols.length === 1 ? matchingBols[0]! : null;
   const label = matchingLabels.length === 1 ? matchingLabels[0]! : null;
@@ -360,14 +368,15 @@ function findSelfPickupPacket({
   return hasPickupForm && hasPickupHeading && referencePattern.test(text) ? attachment : null;
 }
 
-function parseTmgBolAttachment(attachment: ExtractedAttachment): TmgBolEvidence[] {
+function parseTmgBolAttachment(attachment: ExtractedAttachment): ParsedTmgBolEvidence[] {
   const text = attachment.pages.map((page) => page.text).join("\n");
-  if (!/BILL\s+OF\s+LADING/i.test(text)) return [];
+  if (!isTmgBolText(text)) return [];
   const customerReference = readDocumentCustomerReference(text);
-  if (!customerReference) return [];
+  const proNumber = readDocumentProNumber(text);
+  if (!customerReference && !proNumber) return [];
   return [{
     customerReference,
-    proNumber: text.match(/PRO#\s*:?\s*([0-9-]+)/i)?.[1] ?? null,
+    proNumber,
     carrier: readBolCarrier(text),
     sourceAttachmentId: attachment.sourceId,
     sourceFileName: attachment.fileName,
@@ -491,11 +500,55 @@ function readDocumentCustomerReference(text: string) {
     const match = text.match(pattern)?.[1];
     if (match) return match.toUpperCase();
   }
+  const compact = compactDocumentText(text);
+  for (const label of ["MASTERBOL", "BOL", "PO"]) {
+    const match = compact.match(new RegExp(`${label}(US\\d{4,})`))?.[1];
+    if (match) return normalizeCustomerReference(match);
+  }
   return normalizeCustomerReference(text.match(CUSTOMER_REFERENCE_PATTERN)?.[0]);
 }
 
+function readDocumentProNumber(text: string) {
+  const direct = text.match(/PRO\s*#?\s*:?\s*([0-9]+(?:[\s-]*[0-9]+)+)/i)?.[1];
+  const normalizedDirect = normalizeProNumber(direct);
+  if (normalizedDirect) return normalizedDirect;
+  const compactMatch = compactDocumentText(text).match(/PRO(\d{3})(\d{7,})/);
+  return compactMatch ? `${compactMatch[1]}-${compactMatch[2]}` : null;
+}
+
+function matchTmgBolEvidence({
+  evidence,
+  customerReference,
+  trackingNumber
+}: {
+  evidence: ParsedTmgBolEvidence[];
+  customerReference: string;
+  trackingNumber: string | null;
+}): TmgBolEvidence[] {
+  const exact = evidence.filter((bol) => bol.customerReference === customerReference);
+  if (exact.length > 0) return exact.map((bol) => ({ ...bol, customerReference }));
+  const normalizedTrackingNumber = normalizeProNumber(trackingNumber);
+  if (!normalizedTrackingNumber) return [];
+  return evidence
+    .filter((bol) => bol.customerReference === null && normalizeProNumber(bol.proNumber) === normalizedTrackingNumber)
+    .map((bol) => ({ ...bol, customerReference }));
+}
+
+function isTmgBolText(text: string) {
+  return /BILL\s+OF\s+LADING/i.test(text) || compactDocumentText(text).includes("BILLOFLADING");
+}
+
+function compactDocumentText(text: string) {
+  return text.toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function normalizeProNumber(value: string | undefined | null) {
+  const digits = value?.replace(/\D/g, "") ?? "";
+  return /^\d{10,}$/.test(digits) ? `${digits.slice(0, 3)}-${digits.slice(3)}` : null;
+}
+
 function readBolCarrier(text: string) {
-  if (/\bEstes\b|\bEXLA\b/i.test(text)) return "Estes";
+  if (/\bEstes\b|\bEXLA\b/i.test(text) || /ESTES|EXLA/.test(compactDocumentText(text))) return "Estes";
   return null;
 }
 
