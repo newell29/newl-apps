@@ -29,6 +29,8 @@ An approved Phase 2 update that requires editable-BOL cleanup first proves that 
 
 Before any order write, the worker logs into Teamship. A transient network, rate-limit, or Teamship server failure at this login stage receives one safe login-only retry; authentication rejection is not retried. A terminal worker result records whether it stopped during worker preflight, Teamship login, Teamship API work, or editable-BOL cleanup. Newl Apps retains the sanitized top-level error and applies it to any order that never returned order-level evidence instead of reporting only a generic incomplete attempt.
 
+After Teamship processing finishes, the VM reports the immutable order result to Newl Apps separately from the external execution. A transient Newl Apps transport or 5xx failure retries only that result callback with capped backoff; it never reruns Teamship or editable-BOL work. A permanent callback rejection stops for review. The read-only tenant lookup used to authenticate the callback retries Prisma `P1017` once so a connection closed by PostgreSQL or its pool does not incorrectly turn a completed order into a worker-preflight failure.
+
 If a later batch or editable-BOL failure occurs after one or more order API updates, successful order evidence is preserved and Teamship is rescanned read-only. The job becomes `NEEDS_REVIEW` instead of erasing successful orders under a batch-wide failure. Only orders retained as successful are marked ready to print. A recovery action never automatically replays a successful Teamship write.
 
 Saved review-run totals describe the PDF-versus-Teamship comparison only. Live Teamship update, BOL cleanup, and verification status are shown separately in Bot drafts and run history and drive the post-run CSR email.

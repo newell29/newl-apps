@@ -29,6 +29,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 - TMG's opt-in API read session retries transport failures plus HTTP 408, 429, and 5xx responses at most twice with short backoff. It keeps the existing single token renewal for a 401. These retries cover only duplicate, shipping-order detail, and inventory reads; Teamship order creation, readback after creation, and document browser uploads are never replayed automatically.
 - TMG BOL validation normalizes fragmented embedded text. A BOL with no readable customer reference can match only through an exact normalized PRO-to-picklist-tracking-number comparison. A readable conflicting reference remains blocked, and an image-only BOL with neither readable reference nor PRO remains a missing-document failure.
 - A batch-level failure after recorded order updates preserves the successful per-order evidence, triggers a read-only verification scan, and leaves the batch in `NEEDS_REVIEW`. Successful Teamship writes are never replayed automatically.
+- A Newl Apps database or network failure while the VM reports a finished result is not a worker-preflight or Teamship failure. The VM keeps the exact result in memory and retries only the idempotent completion callback with capped backoff. It does not execute the Teamship update or editable-BOL cleanup again. Permanent callback failures stop for operator review rather than replacing real order evidence with a fabricated generic failure.
+- Prisma `P1017` during the read-only ingestion-tenant lookup receives one immediate retry so a pool-closed connection can be replaced before the request fails. Other Prisma errors are not retried automatically.
 
 ## Data model
 

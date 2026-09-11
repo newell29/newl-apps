@@ -46,21 +46,36 @@ export async function authenticateIngestionCronRequest(request: Request): Promis
 }
 
 async function resolveIngestionTenantContext(): Promise<TenantContext> {
-
   const tenantSlug = process.env.INGESTION_TENANT_SLUG ?? process.env.DEFAULT_TENANT_SLUG;
 
   if (!tenantSlug) {
     throw new IngestionAuthError("Ingestion tenant is not configured.", 503);
   }
 
-  const tenant = await prisma.tenant.findUnique({
-    where: { slug: tenantSlug },
-    select: {
-      id: true,
-      slug: true,
-      name: true
+  const findTenant = () =>
+    prisma.tenant.findUnique({
+      where: { slug: tenantSlug },
+      select: {
+        id: true,
+        slug: true,
+        name: true
+      }
+    });
+
+  let tenant;
+
+  try {
+    tenant = await findTenant();
+  } catch (error) {
+    if (!isClosedPrismaConnection(error)) {
+      throw error;
     }
-  });
+
+    // P1017 means the database or pool closed a previously established
+    // connection. This tenant lookup is read-only and safe to repeat once;
+    // Prisma opens a fresh connection for the second attempt.
+    tenant = await findTenant();
+  }
 
   if (!tenant) {
     throw new IngestionAuthError("Ingestion tenant was not found.", 503);
@@ -71,6 +86,10 @@ async function resolveIngestionTenantContext(): Promise<TenantContext> {
     tenantSlug: tenant.slug,
     tenantName: tenant.name
   };
+}
+
+function isClosedPrismaConnection(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P1017");
 }
 
 function getBearerToken(request: Request) {
