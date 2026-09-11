@@ -36,6 +36,8 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Saved Garland review totals are comparison results, not proof that the update worker completed. Bot drafts and run history separately show Teamship update evidence, editable-BOL cleanup, verification time, failure stage, and the sanitized exact error.
 - A live Garland update with planned editable-BOL cleanup launches and closes a Chrome page as a worker preflight before the Teamship API is called. The production service supplies a private Xvfb display, so browser availability does not depend on the VNC desktop's display number or Xauthority cookie. If the preflight fails, the approved job stops with no Teamship write.
 - The worker performs one login-only retry for transient Teamship login errors. If later processing fails, Newl Apps keeps completed order evidence and read-only rescans any batch that contains a recorded update; it does not automatically repeat Teamship writes.
+- The worker serializes the completed order evidence once before reporting it to Newl Apps. A transient result-callback transport error or HTTP 408, 425, 429, or 5xx response is retried with capped backoff using that same immutable payload; Teamship execution and editable-BOL work are never repeated. A permanent callback rejection stops the worker for operator review.
+- Ingestion and worker authentication retries the configured tenant lookup once when Prisma reports `P1017` (a connection closed by PostgreSQL or its pool). No mutating database operation is included in that retry.
 
 ## Data model
 

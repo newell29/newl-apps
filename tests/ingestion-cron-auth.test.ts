@@ -55,4 +55,34 @@ describe("tenant-scoped ingestion cron authentication", () => {
     await expect(authenticateIngestionCronRequest(request)).rejects.toBeInstanceOf(IngestionAuthError);
     expect(tenantFindUniqueMock).not.toHaveBeenCalled();
   });
+
+  it("retries one read-only tenant lookup after Prisma reports a closed connection", async () => {
+    tenantFindUniqueMock
+      .mockRejectedValueOnce(Object.assign(new Error("Server has closed the connection."), { code: "P1017" }))
+      .mockResolvedValueOnce({
+        id: "tenant-1",
+        slug: "synthetic-tenant",
+        name: "Synthetic Tenant"
+      });
+    const request = new Request("https://newl.test/api/shipment-documents/teamship-review/update-jobs/agent/next", {
+      headers: { authorization: "Bearer synthetic-cron-secret" }
+    });
+
+    await expect(authenticateIngestionCronRequest(request)).resolves.toEqual({
+      tenantId: "tenant-1",
+      tenantSlug: "synthetic-tenant",
+      tenantName: "Synthetic Tenant"
+    });
+    expect(tenantFindUniqueMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a non-connection database failure", async () => {
+    tenantFindUniqueMock.mockRejectedValueOnce(Object.assign(new Error("Synthetic database failure."), { code: "P2000" }));
+    const request = new Request("https://newl.test/api/shipment-documents/teamship-review/update-jobs/agent/next", {
+      headers: { authorization: "Bearer synthetic-cron-secret" }
+    });
+
+    await expect(authenticateIngestionCronRequest(request)).rejects.toThrow("Synthetic database failure.");
+    expect(tenantFindUniqueMock).toHaveBeenCalledTimes(1);
+  });
 });

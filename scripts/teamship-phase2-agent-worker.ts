@@ -18,6 +18,10 @@ import {
   executeTeamshipApiAfterBrowserPreflight,
   requiresTeamshipBolCleanupBrowserPreflight
 } from "@/modules/shipment-documents/teamship-worker-browser-preflight";
+import {
+  reportTeamshipWorkerResultWithRetry,
+  type TeamshipWorkerCompletionStatus
+} from "@/modules/shipment-documents/teamship-worker-result-reporting";
 
 type WorkerOptions = {
   baseUrl: string;
@@ -92,38 +96,51 @@ async function runOnce(options: WorkerOptions) {
     `Claimed Teamship Phase 2 job ${claimed.job.id} (${claimed.job.documentLabel}) with ${claimed.job.selectedSrNumbers.length} shipment(s).`
   );
 
+  let completionStatus: TeamshipWorkerCompletionStatus;
+  let completionResult: unknown;
+  let executionError: unknown = null;
+
   try {
     assertTeamshipCredentials(claimed);
     const result = await executeJob({ options, claimed });
     logExecutionSummary(result);
-    await completeJob({
-      options,
-      jobId: claimed.job.id,
-      status: result.hasFailures ? "NEEDS_REVIEW" : "SUCCESS",
-      result
-    });
-    console.log(
-      `Reported ${result.mode} ${result.hasFailures ? "needs-review" : "success"} completion for job ${claimed.job.id}.`
-    );
+    completionStatus = result.hasFailures ? "NEEDS_REVIEW" : "SUCCESS";
+    completionResult = result;
   } catch (error) {
+    executionError = error;
     const message = error instanceof Error ? error.message : "Unknown Teamship Phase 2 worker error.";
     const failureStage = readWorkerFailureStage(error, "WORKER_PREFLIGHT");
-    await completeJob({
-      options,
+    completionStatus = "FAILED";
+    completionResult = {
+      mode: options.mode === "dry-run" ? "DRY_RUN" : "LIVE_API",
+      dryRun: options.mode === "dry-run",
+      wouldUpdateTeamship: options.mode !== "dry-run",
+      executedAt: new Date().toISOString(),
+      agentId: options.agentId,
       jobId: claimed.job.id,
-      status: "FAILED",
-      result: {
-        mode: options.mode === "dry-run" ? "DRY_RUN" : "LIVE_API",
-        dryRun: options.mode === "dry-run",
-        wouldUpdateTeamship: options.mode !== "dry-run",
-        executedAt: new Date().toISOString(),
-        agentId: options.agentId,
-        jobId: claimed.job.id,
-        failureStage,
-        error: message
-      }
-    });
-    throw error;
+      failureStage,
+      error: message
+    };
+  }
+
+  await reportTeamshipWorkerResultWithRetry<CompleteResponse>({
+    baseUrl: options.baseUrl,
+    token: options.token,
+    agentId: options.agentId,
+    jobId: claimed.job.id,
+    status: completionStatus,
+    result: completionResult,
+    onRetry: ({ attempt, delayMs, error }) => {
+      console.error(
+        `Newl Apps did not accept the immutable result for job ${claimed.job.id} on attempt ${attempt}: ${error.message} Retrying the callback in ${delayMs} ms without rerunning Teamship.`
+      );
+    }
+  });
+
+  console.log(`Reported ${completionStatus.toLowerCase().replace("_", "-")} completion for job ${claimed.job.id}.`);
+
+  if (executionError) {
+    throw executionError;
   }
 
   return true;
@@ -302,41 +319,6 @@ async function claimNextJob(options: WorkerOptions): Promise<ClaimResponse> {
   if (!json) {
     throw new Error(
       `Unable to claim Teamship update job. Expected JSON but received HTTP ${response.status} ${describeResponseBody(responseText)}.`
-    );
-  }
-
-  return json;
-}
-
-async function completeJob({
-  options,
-  jobId,
-  status,
-  result
-}: {
-  options: WorkerOptions;
-  jobId: string;
-  status: "SUCCESS" | "FAILED" | "NEEDS_REVIEW";
-  result: unknown;
-}) {
-  const response = await fetch(`${options.baseUrl}/api/shipment-documents/teamship-review/update-jobs/agent/${jobId}`, {
-    method: "PATCH",
-    headers: {
-      ...buildAgentHeaders(options),
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({ status, result })
-  });
-  const responseText = await response.text();
-  const json = parseJsonResponse<CompleteResponse>(responseText);
-
-  if (!response.ok) {
-    throw new Error(json?.error ?? `Unable to complete Teamship update job ${jobId}. HTTP ${response.status}.`);
-  }
-
-  if (!json) {
-    throw new Error(
-      `Unable to complete Teamship update job ${jobId}. Expected JSON but received HTTP ${response.status} ${describeResponseBody(responseText)}.`
     );
   }
 
