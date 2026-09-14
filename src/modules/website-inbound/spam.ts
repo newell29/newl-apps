@@ -2,6 +2,7 @@ import type { WebsiteInboundFieldValue } from "@/modules/website-inbound/types";
 
 const honeypotFields = new Set(["_gotcha", "companyUrlConfirm", "faxNumber"]);
 const ignoredContentSpamFieldPrefixes = ["Attribution - "];
+const urlPattern = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
 
 const spamPatterns = [
   /backlink/i,
@@ -54,7 +55,7 @@ export function isLikelySpamWebsiteInboundSubmission(
   }
 
   const combined = flattenFields(fields).join(" ");
-  const urlCount = (combined.match(/https?:\/\/|www\./gi) ?? []).length;
+  const urlCount = (combined.match(urlPattern) ?? []).length;
 
   if (urlCount > 1) {
     return true;
