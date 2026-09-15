@@ -2,6 +2,7 @@ import type {
   NetworkScenarioComparisonRunDetail,
   NetworkScenarioComparisonRunListItem
 } from "@/modules/supply-chain-design/network-scenario-comparison-persistence";
+import { escapeSpreadsheetCsvCell } from "@/modules/supply-chain-design/csv-export";
 
 export type NetworkScenarioComparisonExportType =
   | "results"
@@ -515,12 +516,7 @@ function requiredResult(run: ComparisonRun) {
 }
 
 function toCsv(rows: string[][]) {
-  return `${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
-}
-
-function csvCell(value: string) {
-  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
+  return `${rows.map((row) => row.map(escapeSpreadsheetCsvCell).join(",")).join("\r\n")}\r\n`;
 }
 
 function csvNumber(value: unknown) {

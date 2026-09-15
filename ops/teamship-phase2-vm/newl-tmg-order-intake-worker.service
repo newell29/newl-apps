@@ -1,0 +1,19 @@
+[Unit]
+Description=Newl Apps TMG order-intake Teamship worker
+Documentation=See docs/teamship-phase2-vm-services.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=%h/newl-apps
+EnvironmentFile=%h/newl-apps/.env.tmg-order-intake-worker
+ExecStart=/usr/bin/npm run worker:tmg-order-intake
+Restart=always
+RestartSec=20
+Nice=5
+
+[Install]
+WantedBy=default.target

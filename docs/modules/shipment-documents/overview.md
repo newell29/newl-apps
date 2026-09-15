@@ -1,4 +1,4 @@
-# Shipment documents and Garland Teamship review: Overview
+# Shipment documents, Garland Teamship review, and TMG order intake: Overview
 
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
@@ -13,6 +13,7 @@ Shipment documents and Garland Teamship review is documented because code, route
 - Data persistence uses tenant-scoped Prisma models where a database model exists.
 - External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+- TMG email intake is a separate Operations Tools workflow. A five-minute tenant-scoped mail scan prepares CSR approval plans; after approval, it creates shipping orders through the Teamship API and uploads each consolidated packing-slip/BOL/label PDF through its own continuously polling browser worker. See `docs/customers/tmg/overview.md`.
 - Garland carrier manifests support Midland, Speedy, Suretrack, Clarke, Guilbault Transport, and Rosedale. The printed `GUILBAULT TRANSPORT` value is normalized to the internal `GUILBAULT` carrier key, and the printed `ROSEDALE` value is normalized to `ROSEDALE`. Each detected carrier receives its own editable Excel workbook and saved-history download.
 - Every carrier workbook includes blank **Driver's time in** and **Driver's time out** columns for employee or driver completion.
 
@@ -36,7 +37,7 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 
 Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
 
-For Garland Phase 2 jobs, a successful Teamship API update and its later editable-BOL cleanup are separate outcomes. The BOL cleanup worker may restart a closed Chrome session once and retry the interrupted order because clearing an already-empty generated weight field is idempotent. If the replacement browser also closes, the worker stops the cleanup batch, records the interrupted order as failed, records later orders as skipped because of the shared browser incident, and does not replay the successful API updates. A new production cleanup attempt still requires an explicit human-approved job or operational action.
+For Garland Phase 2 jobs that require editable-BOL cleanup, the worker must successfully launch Chrome in its private Xvfb display before it performs any Teamship API update. A browser-preflight failure records a worker-preflight error and performs no Teamship write. After the API update, the BOL cleanup worker may restart a closed Chrome session once and retry the interrupted order because clearing an already-empty generated weight field is idempotent. If the replacement browser also closes, the worker stops the cleanup batch, records the interrupted order as failed, records later orders as skipped because of the shared browser incident, and does not replay the successful API updates. A new production cleanup attempt still requires an explicit human-approved job or operational action.
 
 ## Testing
 

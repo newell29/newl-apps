@@ -117,6 +117,7 @@ HUNTER_COMPANY_RESEARCH_DAILY_TIME=09:15
 HUNTER_COMPANY_RESEARCH_TIMEZONE=America/Toronto
 HUNTER_RESEARCH_SEARCH_PROVIDER=BRAVE
 HUNTER_BRAVE_SEARCH_API_KEY=<dedicated read-only search key>
+HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED=false
 HUNTER_RESEARCH_QWEN_MODEL=qwen3.5:35b
 HUNTER_RESEARCH_QWEN_SHADOW_ENABLED=true
 HUNTER_KIMI_API_KEY=<dedicated Kimi key>
@@ -126,6 +127,12 @@ HUNTER_KIMI_VALIDATOR_MODEL=kimi-k3
 HUNTER_RESEARCH_K3_VALIDATOR_LIMIT=5
 HUNTER_RESEARCH_K3_REASONING_EFFORT=LOW
 ```
+
+To pause every Hunter path that spends Brave credits without stopping TradeMining or the outreach/status
+pollers, set all three protected local flags to `false`: `HUNTER_SIGNAL_SCOUT_ENABLED`,
+`HUNTER_COMPANY_RESEARCH_ENABLED`, and `HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED`. Preserve the Brave key so
+the pause is reversible. Restart the LaunchAgent only after confirming no TradeMining export, ingestion,
+company-research, or outreach-handoff subprocess is active.
 
 Luna primary synthesis is enabled only in the deployed Newl Apps environment:
 

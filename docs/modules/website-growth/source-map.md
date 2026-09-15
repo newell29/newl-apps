@@ -25,11 +25,12 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Read-only Codex/OpenClaw runtime | `ops/openclaw/run-website-growth-scout.sh` |
 | Safe environment and fixed-target Teams helpers | `ops/openclaw/lib/website-growth-scout-runtime.zsh` |
 | Official SEMrush OAuth setup | `ops/openclaw/configure-semrush-mcp.sh` |
-| Split Monday/Wednesday deep and Tuesday/Thursday/Friday cache-backed schedule, build notifications, and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
+| Split Monday/Wednesday content, Tuesday backlink discovery, Tuesday/Thursday/Friday cache-backed check-in, build notifications, and permanent worktree installation | `ops/openclaw/install-website-growth-scout.sh` |
 | Structured output contract | `ops/openclaw/skills/website-growth-scout/scout-output.schema.json` |
 | Backlink parsing, quality gates, dedupe, retention, workspace query | `src/modules/website-growth/backlinks.ts` |
-| Rotating public-web query plan, canonical URL history, ingest and Qwen-finalist scope | `src/modules/website-growth/backlink-discovery.ts`, `src/app/api/website-growth/scout/backlink-discovery/*` |
-| Brave Search, safe bounded page retrieval, and local Qwen triage worker | `ops/openclaw/website_growth_backlink_discovery.py` |
+| Rotating public-web query plan, canonical URL history, ingest and Codex-finalist scope | `src/modules/website-growth/backlink-discovery.ts`, `src/app/api/website-growth/scout/backlink-discovery/*` |
+| Brave Search, safe bounded page retrieval, and subscription-backed Codex triage worker | `ops/openclaw/website_growth_backlink_discovery.py` |
+| ChatGPT-subscription authentication guard | `ops/openclaw/lib/require-codex-subscription.zsh` |
 | Backlink approval actions | `src/modules/website-growth/actions.ts` |
 | Backlink review UI | `src/app/(authenticated)/website-growth/backlinks/page.tsx` |
 | Approved-work executor service | `src/modules/website-growth/backlink-executor.ts` |

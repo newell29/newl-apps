@@ -22,6 +22,10 @@ export async function POST(request: Request) {
     const result = await prepareWebsiteGrowthScoutRun({
       tenantId: tenant.id,
       tenantSlug: tenant.slug,
+      runLane:
+        request.headers.get("x-website-growth-run-lane")?.toLowerCase() === "backlinks"
+          ? "BACKLINKS"
+          : "CONTENT",
       researchScope:
         request.headers.get("x-website-growth-research-scope")?.toLowerCase() === "monthly"
           ? "MONTHLY"

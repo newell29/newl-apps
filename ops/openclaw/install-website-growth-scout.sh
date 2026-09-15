@@ -11,8 +11,10 @@ runtime_main_ref="refs/scout-runtime/website-growth-main"
 scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/.env}"
 hunter_env_file="${HUNTER_ENV_FILE:-${HOME}/.openclaw/agents/hunter/.env}"
 source "${script_directory}/lib/resolve-codex-cli.zsh"
+source "${script_directory}/lib/require-codex-subscription.zsh"
 resolve_codex_cli
 "${codex_bin}" --version >/dev/null
+require_codex_chatgpt_subscription
 
 if [[ ! -r "${scout_env_file}" ]]; then
   echo "Create the protected Scout environment file before installation." >&2
@@ -53,12 +55,28 @@ build_notification_runner_path="${runtime_repo_path}/ops/openclaw/run-website-gr
 openclaw cron add \
   --name "NEWL Website Growth Scout" \
   --display-name "NEWL Website Growth Scout" \
-  --description "Every Monday and Wednesday, run bounded Brave backlink discovery, local Qwen triage, and read-only Codex final review; send the approval/report package to Teams." \
+  --description "Every Monday and Wednesday, run the read-only Codex content review from first-party and retained SEMrush evidence; send the approval/report package to Teams. Backlink failures cannot block this job." \
   --declaration-key "newl.website-growth.scout.weekly.v1" \
   --cron "15 9 * * 1,3" \
   --tz "America/Toronto" \
   --exact \
   --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\"]" \
+  --command-cwd "${runtime_repo_path}" \
+  --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
+  --timeout-seconds 1800 \
+  --no-output-timeout-seconds 900 \
+  --output-max-bytes 100000 \
+  --no-deliver
+
+openclaw cron add \
+  --name "NEWL Website Growth backlink discovery" \
+  --display-name "NEWL Website Growth backlink discovery" \
+  --description "Every Tuesday, run bounded Brave discovery and ChatGPT-subscription Codex triage independently from website content research; send a Teams outcome even when no prospect qualifies." \
+  --declaration-key "newl.website-growth.backlink-discovery.weekly.v1" \
+  --cron "15 10 * * 2" \
+  --tz "America/Toronto" \
+  --exact \
+  --command-argv "[\"/bin/zsh\",\"${runtime_runner_path}\",\"--backlinks\"]" \
   --command-cwd "${runtime_repo_path}" \
   --command-env "WEBSITE_GROWTH_SCOUT_ENV_FILE=${scout_env_file}" \
   --timeout-seconds 1800 \
@@ -94,6 +112,6 @@ openclaw cron add \
   --timeout-seconds 90 \
   --no-deliver
 
-echo "Installed the bounded Website Growth Scout for Mondays and Wednesdays and the cache-backed check-in for Tuesday, Thursday, and Friday at 9:15 AM America/Toronto."
+echo "Installed content-only Website Growth Scout runs for Monday and Wednesday at 9:15 AM, an independent bounded backlink discovery run for Tuesday at 10:15 AM, and cache-backed check-ins for Tuesday, Thursday, and Friday at 9:15 AM America/Toronto."
 echo "Installed the deterministic Website Growth build notifier every two minutes."
 echo "Dedicated runtime: ${runtime_repo_path}"

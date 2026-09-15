@@ -8,7 +8,8 @@ import {
 
 import { prisma } from "@/server/db";
 
-export const WEBSITE_GROWTH_SCOUT_JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKLY";
+export const WEBSITE_GROWTH_SCOUT_JOB_TYPE = "WEBSITE_GROWTH_BACKLINK_DISCOVERY";
+const HISTORICAL_WEBSITE_GROWTH_SCOUT_JOB_TYPE = "WEBSITE_GROWTH_SCOUT_WEEKLY";
 export const BACKLINK_DISCOVERY_QUERY_LIMIT = 12;
 export const BACKLINK_DISCOVERY_RESULTS_PER_QUERY = 10;
 export const BACKLINK_DISCOVERY_RESULT_LIMIT =
@@ -240,7 +241,7 @@ export async function ingestWebsiteGrowthBacklinkDiscoveryResults({
   const historicalRuns = await prisma.automationJobRun.findMany({
     where: {
       tenantId,
-      jobType: WEBSITE_GROWTH_SCOUT_JOB_TYPE,
+      jobType: { in: [WEBSITE_GROWTH_SCOUT_JOB_TYPE, HISTORICAL_WEBSITE_GROWTH_SCOUT_JOB_TYPE] },
       id: { not: runId }
     },
     select: { output: true }
@@ -277,7 +278,7 @@ export async function ingestWebsiteGrowthBacklinkDiscoveryResults({
       output: {
         ...currentOutput,
         backlinkDiscovery: {
-          phase: "AWAITING_QWEN",
+          phase: "AWAITING_CODEX_TRIAGE",
           queries: parsedQueries,
           queryCount: parsedQueries.length,
           rawResultCount: selection.rawResultCount,
@@ -356,7 +357,7 @@ export async function completeWebsiteGrowthBacklinkDiscovery({
         ...currentOutput,
         backlinkDiscovery: {
           ...discovery,
-          phase: "AWAITING_CODEX",
+          phase: "AWAITING_CODEX_FINAL_REVIEW",
           ledger: ledger.map((item) => {
             const record = readRecord(item);
             return {
@@ -387,7 +388,7 @@ export async function completeWebsiteGrowthBacklinkDiscovery({
         item.disposition === "FETCHED" || item.disposition === "FINALIST"
       ).length,
       finalists: finalists.length,
-      qwenRejected: Math.max(
+      qualityRejected: Math.max(
         0,
         (readOptionalInteger(discovery.newCandidateCount) ?? 0) - finalists.length
       )
@@ -434,7 +435,7 @@ function parseResults(value: unknown, queries: DiscoveryQuery[]) {
 
 function parseDecisions(value: unknown, allowed: Set<string>): WebsiteGrowthBacklinkDiscoveryDecision[] {
   if (!Array.isArray(value) || value.length > BACKLINK_DISCOVERY_RESULT_LIMIT) {
-    throw new Error("Backlink discovery returned too many Qwen decisions.");
+    throw new Error("Backlink discovery returned too many model decisions.");
   }
   const seen = new Set<string>();
   return value.map((item) => {

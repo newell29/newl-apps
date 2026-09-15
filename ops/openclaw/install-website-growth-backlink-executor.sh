@@ -18,6 +18,7 @@ scout_agent_directory="${HOME}/.openclaw/agents/scout/agent"
 temporary_directory="$(mktemp -d)"
 executor_install_result="${temporary_directory}/executor-install-result.json"
 cron_snapshot="${temporary_directory}/cron-snapshot.json"
+model_status_snapshot="${temporary_directory}/model-status.json"
 cleanup() {
   rm -rf "${temporary_directory}"
 }
@@ -125,6 +126,17 @@ openclaw config set \
   "agents.list[${scout_agent_index}].model" \
   '"openai/gpt-5.4-mini"' \
   --strict-json
+openclaw models status --agent scout --json > "${model_status_snapshot}"
+/usr/bin/python3 - "${model_status_snapshot}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    status = json.load(handle)
+providers = ((status.get("auth") or {}).get("oauth") or {}).get("providers") or []
+openai = next((row for row in providers if row.get("provider") == "openai"), None)
+effective = (openai or {}).get("effectiveProfiles") or []
+if not any(row.get("type") == "oauth" and row.get("status") == "ok" for row in effective):
+    raise SystemExit("Scout needs a healthy effective OpenAI OAuth profile. API-key fallback is disabled for Website Growth.")
+PY
 scout_tools_policy="$(node -e '
 console.log(JSON.stringify({
   profile: "minimal",
@@ -152,6 +164,20 @@ openclaw config set \
 executor_argv="$(node -e '
 console.log(JSON.stringify(["/bin/zsh", process.argv[1]]));
 ' "${executor_runner_path}")"
+openclaw cron list --all --json > "${cron_snapshot}"
+preserve_executor_enabled="$(/usr/bin/python3 - "${cron_snapshot}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    payload = json.load(handle)
+jobs = payload.get("jobs") if isinstance(payload, dict) else payload
+jobs = jobs if isinstance(jobs, list) else []
+print("1" if any(
+    job.get("declarationKey") == "newl.website-growth.backlink-outreach.weekday.v1"
+    and job.get("enabled") is True
+    for job in jobs
+) else "0")
+PY
+)"
 openclaw cron add \
   --name "NEWL Website Growth Backlink Outreach" \
   --display-name "NEWL Website Growth Backlink Outreach" \
@@ -203,6 +229,9 @@ for job in jobs:
         print(job["id"])
 PY
 )
+if [[ "${preserve_executor_enabled}" == "1" ]]; then
+  openclaw cron enable "${canonical_executor_job_id}"
+fi
 
 failure_monitor_argv="$(node -e '
 console.log(JSON.stringify(["/bin/zsh", process.argv[1]]));
@@ -220,5 +249,9 @@ openclaw cron add \
   --timeout-seconds 120 \
   --no-deliver
 
-echo "Installed the dedicated Scout agent, Website Growth plugin, protected profile, Rivet failure monitor and disabled weekday outreach job."
-echo "After the supervised send succeeds, run ops/openclaw/enable-website-growth-backlink-executor.sh once."
+if [[ "${preserve_executor_enabled}" == "1" ]]; then
+  echo "Installed the dedicated Scout agent, Website Growth plugin, protected profile, Rivet failure monitor and preserved the enabled weekday outreach job."
+else
+  echo "Installed the dedicated Scout agent, Website Growth plugin, protected profile, Rivet failure monitor and disabled weekday outreach job."
+  echo "After the supervised send succeeds, run ops/openclaw/enable-website-growth-backlink-executor.sh once."
+fi

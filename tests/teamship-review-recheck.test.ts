@@ -71,6 +71,7 @@ describe("saved Garland Teamship recheck", () => {
     expect(fetchTeamshipOrdersMock).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       shipmentDate: "2026-08-11",
+      includeCompletedArchive: true,
       orderReferences: [{ psNumber: "PS123456", srNumber: "SR812345" }]
     });
     expect(updateReviewMock).toHaveBeenCalledWith({ context, runId: "run-1", review: refreshedReview });

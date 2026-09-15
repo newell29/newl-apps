@@ -144,7 +144,7 @@ This inventory is organized model-first: model/tool -> data it uses -> calculati
 - Proposed tab: Project Data.
 - Business question: Which files are uploaded, how are they mapped and which workflows use them?
 - Current result: shared upload list now shows filename, mapped logical table, readiness status, model usage, upload date and cleanup guidance.
-- Cleanup status: destructive delete and same-name replacement are not implemented in this pass because dependency-safe invalidation/versioning needs product confirmation.
+- Cleanup status: project deletion is transactionally audited. Unreferenced files and mappings can be deleted after explicit confirmation; deletion fails closed when any saved SCDS run or scenario references that evidence. Deleting referenced evidence and same-name replacement remain deferred pending product confirmation for invalidation/versioning behavior.
 
 ## Run History
 
@@ -205,7 +205,7 @@ XLSX upload is deferred. No Excel parser was found in `package.json`, `package-l
 
 ## Deferred Cleanup
 
-- Dependency-safe delete for files, mappings and runs.
+- Product-approved invalidation/versioning behavior for deleting referenced files or mappings. The current conservative guard blocks those deletions.
 - Same-name replacement/versioning with affected mapping review and old-run invalidation.
 - Customer template file generation.
 - Product confirmation for whether internal benchmark mode should be gated by role, feature flag or environment.

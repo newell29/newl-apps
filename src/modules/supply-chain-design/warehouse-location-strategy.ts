@@ -1,4 +1,5 @@
 import { parseCsvRows } from "@/modules/supply-chain-design/csv-intake";
+import { escapeSpreadsheetCsvCell } from "@/modules/supply-chain-design/csv-export";
 import {
   CENSUS_ZCTA_2025_COORDINATE_SOURCE,
   normalizeUsZipCode,
@@ -376,7 +377,7 @@ export function exportWarehouseLocationStrategyCsv(result: WarehouseLocationStra
       String(assignment.distanceToCenter)
     ])
   );
-  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return [headers, ...rows].map((row) => row.map(escapeSpreadsheetCsvCell).join(",")).join("\n");
 }
 
 function parseDemandProfiles(input: WarehouseLocationStrategyInput) {
@@ -1150,8 +1151,4 @@ function round6(value: number) {
 
 function formatPercentValue(value: number | null) {
   return value === null ? "not available" : `${round1(value)}%`;
-}
-
-function csvCell(value: string) {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }

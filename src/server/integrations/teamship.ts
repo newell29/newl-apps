@@ -8,12 +8,15 @@ const DEFAULT_TEAMSHIP_API_BASE_URL = "https://app.teamshipos.com/api";
 const DEFAULT_PAGE_LIMIT = 500;
 const DEFAULT_MAX_PAGES = 30;
 const DEFAULT_TARGETED_MAX_PAGES = 100;
+const TEAMSHIP_DASHBOARD_PAGE_LIMIT = 100;
+const TEAMSHIP_READ_RETRY_DELAYS_MS = [100, 300] as const;
 
 type TeamshipFetchOptions = {
   tenantId?: string | null;
   shipmentDate?: string | null;
   srNumbers?: string[];
   orderReferences?: TeamshipOrderReference[];
+  includeCompletedArchive?: boolean;
   credentials?: TeamshipRuntimeCredentials | null;
   fetchImpl?: typeof fetch;
 };
@@ -34,6 +37,7 @@ type TeamshipShippingOrderSearchOptions = {
   orderIdentifier: string;
   preferUiPallets?: boolean;
   credentials?: TeamshipRuntimeCredentials | null;
+  readSession?: TeamshipReadSession;
   fetchImpl?: typeof fetch;
 };
 
@@ -41,6 +45,14 @@ export type TeamshipRuntimeCredentials = {
   email: string;
   password: string;
   apiBaseUrl?: string | null;
+};
+
+export type TeamshipReadSession = {
+  readonly apiBaseUrl: string;
+  readonly credentials: TeamshipRuntimeCredentials | null;
+  readonly fetchImpl: typeof fetch;
+  readonly waitForRetry: (milliseconds: number) => Promise<void>;
+  token: string;
 };
 
 type TeamshipLoginResponse = {
@@ -52,6 +64,17 @@ type TeamshipLoginResponse = {
 
 type TeamshipListResponse = {
   data?: TeamshipShippingOrderSummary[];
+};
+
+type TeamshipDashboardListResponse = {
+  result?: TeamshipShippingOrderSummary[];
+  data?: TeamshipShippingOrderSummary[];
+  count?: number;
+};
+
+type TeamshipWebSession = {
+  cookieHeader: string;
+  csrfToken: string | null;
 };
 
 type TeamshipDetailResponse = {
@@ -100,6 +123,32 @@ export type TeamshipShippingProductSearchRow = {
   customAttributes?: TeamshipShippingProductSearchRow["custom_attributes"];
 };
 
+/**
+ * Creates a reusable, read-only Teamship API session. The session is opt-in so
+ * existing Garland callers retain their current authentication behavior.
+ */
+export async function createTeamshipReadSession({
+  tenantId,
+  credentials = null,
+  fetchImpl = fetch,
+  waitForRetry = waitForTeamshipReadRetry
+}: {
+  tenantId?: string | null;
+  credentials?: TeamshipRuntimeCredentials | null;
+  fetchImpl?: typeof fetch;
+  waitForRetry?: (milliseconds: number) => Promise<void>;
+}): Promise<TeamshipReadSession> {
+  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  return {
+    apiBaseUrl,
+    credentials: resolvedCredentials,
+    fetchImpl,
+    waitForRetry,
+    token: await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl)
+  };
+}
+
 type TeamshipProductSearchResponse = {
   data?: TeamshipShippingProductSearchRow[];
   products?: TeamshipShippingProductSearchRow[];
@@ -136,6 +185,7 @@ export async function fetchTeamshipShippingOrdersForReview({
   shipmentDate,
   srNumbers = [],
   orderReferences = [],
+  includeCompletedArchive = false,
   credentials = null,
   fetchImpl = fetch
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
@@ -146,17 +196,158 @@ export async function fetchTeamshipShippingOrdersForReview({
   const targetOrderReferences = normalizeTeamshipOrderReferences(orderReferences, srNumbers);
   const shouldEnrichFromUiPage = targetOrderReferences.length > 0;
   const matchedTargetReferenceKeys = new Set<string>();
-  let webCookieHeader: string | null | undefined;
+  let webSession: TeamshipWebSession | null | undefined;
   const details = new Map<string, TeamshipShippingOrderDetail>();
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages(targetOrderReferences.length > 0);
+  const legacyActiveFallbackRowLimit = targetOrderReferences.length > 0 ? 1_000 : null;
+  const legacyActiveFallbackMaxPages =
+    legacyActiveFallbackRowLimit !== null
+      ? Math.min(maxPages, Math.max(1, Math.ceil(legacyActiveFallbackRowLimit / pageLimit)))
+      : maxPages;
   const seenPageFingerprints = new Set<string>();
   let offset = 0;
   let scannedRowCount = 0;
   let stopReason: "ALL_MATCHES_FOUND" | "EMPTY_PAGE" | "REPEATED_PAGE" | "MAX_PAGES" = "MAX_PAGES";
 
-  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const rows = await listTeamshipShippingOrders({ apiBaseUrl, token, limit: pageLimit, offset, fetchImpl });
+  const collectTargetedDashboardMatches = async (statusSearch: "requested" | "shipped") => {
+    if (webSession === undefined) {
+      webSession = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl);
+    }
+    if (!webSession) {
+      throw new Error("Teamship web login did not return a usable session.");
+    }
+
+    const dashboardFingerprints = new Set<string>();
+    let dashboardOffset = 0;
+    let dashboardRowCount = 0;
+
+    for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+      const rows = await listTeamshipDashboardShippingOrders({
+        webBaseUrl,
+        webSession,
+        statusSearch,
+        limit: pageLimit,
+        offset: dashboardOffset,
+        fetchImpl
+      });
+      if (rows.length === 0) {
+        break;
+      }
+
+      const pageFingerprint = buildTeamshipListPageFingerprint(rows);
+      if (dashboardFingerprints.has(pageFingerprint)) {
+        break;
+      }
+      dashboardFingerprints.add(pageFingerprint);
+      dashboardRowCount += rows.length;
+
+      for (const row of rows) {
+        const matchingTargetReferences = targetOrderReferences.filter(
+          (reference) =>
+            !matchedTargetReferenceKeys.has(reference.key) &&
+            teamshipOrderMatchesReference(row, reference)
+        );
+        if (matchingTargetReferences.length === 0) {
+          continue;
+        }
+
+        const orderId = row.id ?? row.order_id;
+        if (!orderId) {
+          continue;
+        }
+
+        const detail = await getTeamshipShippingOrder({
+          apiBaseUrl,
+          token,
+          id: String(orderId),
+          fetchImpl
+        });
+        let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
+        mergedDetail = {
+          ...mergedDetail,
+          teamship_internal_id: String(orderId),
+          url: buildTeamshipOrderUrl(webBaseUrl, String(orderId))
+        };
+
+        const confirmedTargetReferences = matchingTargetReferences.filter((reference) =>
+          teamshipOrderMatchesReference(mergedDetail, reference)
+        );
+        if (confirmedTargetReferences.length !== 1) {
+          continue;
+        }
+
+        if (
+          !hasTeamshipSerialEvidence(mergedDetail) ||
+          hasIncompleteTeamshipShipToEvidence(mergedDetail)
+        ) {
+          const uiDetail = await getTeamshipShippingOrderUiDetail({
+            webBaseUrl,
+            webCookieHeader: webSession.cookieHeader,
+            id: String(orderId),
+            fetchImpl
+          }).catch(() => null);
+
+          if (uiDetail) {
+            mergedDetail = mergeTeamshipUiDetail(mergedDetail, uiDetail);
+          }
+        }
+
+        const reference = confirmedTargetReferences[0];
+        details.set(reference.key, mergedDetail);
+        matchedTargetReferenceKeys.add(reference.key);
+      }
+
+      if (matchedTargetReferenceKeys.size === targetOrderReferences.length) {
+        break;
+      }
+
+      dashboardOffset += rows.length;
+    }
+
+    return {
+      scannedPageCount: dashboardFingerprints.size,
+      scannedRowCount: dashboardRowCount
+    };
+  };
+
+  let usedTargetedActiveDashboard = false;
+  if (targetOrderReferences.length > 0) {
+    try {
+      const activeDashboardScan = await collectTargetedDashboardMatches("requested");
+      usedTargetedActiveDashboard = true;
+      scannedRowCount = activeDashboardScan.scannedRowCount;
+      stopReason =
+        matchedTargetReferenceKeys.size === targetOrderReferences.length
+          ? "ALL_MATCHES_FOUND"
+          : "EMPTY_PAGE";
+    } catch (error) {
+      console.warn("Teamship targeted active-dashboard lookup failed; using the legacy active API scan.", {
+        requestedReferenceCount: targetOrderReferences.length,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  for (
+    let pageIndex = 0;
+    !usedTargetedActiveDashboard && pageIndex < legacyActiveFallbackMaxPages;
+    pageIndex += 1
+  ) {
+    const remainingLegacyRows =
+      legacyActiveFallbackRowLimit === null
+        ? pageLimit
+        : Math.max(0, legacyActiveFallbackRowLimit - scannedRowCount);
+    if (remainingLegacyRows === 0) {
+      break;
+    }
+    const rows = await listTeamshipShippingOrders({
+      apiBaseUrl,
+      token,
+      limit: Math.min(pageLimit, remainingLegacyRows),
+      offset,
+      fetchImpl
+    });
     if (rows.length === 0) {
       stopReason = "EMPTY_PAGE";
       break;
@@ -216,14 +407,14 @@ export async function fetchTeamshipShippingOrdersForReview({
         shouldEnrichFromUiPage &&
         (!hasTeamshipSerialEvidence(mergedDetail) || hasIncompleteTeamshipShipToEvidence(mergedDetail))
       ) {
-        if (webCookieHeader === undefined) {
-          webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
+        if (webSession === undefined) {
+          webSession = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
         }
 
-        if (webCookieHeader) {
+        if (webSession) {
           const uiDetail = await getTeamshipShippingOrderUiDetail({
             webBaseUrl,
-            webCookieHeader,
+            webCookieHeader: webSession.cookieHeader,
             id: String(orderId),
             fetchImpl
           }).catch(() => null);
@@ -258,11 +449,27 @@ export async function fetchTeamshipShippingOrdersForReview({
     offset += rows.length;
   }
 
+  if (
+    includeCompletedArchive &&
+    targetOrderReferences.length > 0 &&
+    matchedTargetReferenceKeys.size < targetOrderReferences.length
+  ) {
+    try {
+      await collectTargetedDashboardMatches("shipped");
+    } catch (error) {
+      console.warn("Teamship completed-order archive lookup failed.", {
+        requestedReferenceCount: targetOrderReferences.length,
+        matchedReferenceCount: matchedTargetReferenceKeys.size,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   if (targetOrderReferences.length > 0 && matchedTargetReferenceKeys.size === 0) {
     console.warn("Teamship targeted order lookup returned no exact matches.", {
       requestedReferenceCount: targetOrderReferences.length,
       requestedPageLimit: pageLimit,
-      configuredMaxPages: maxPages,
+      configuredMaxPages: usedTargetedActiveDashboard ? maxPages : legacyActiveFallbackMaxPages,
       scannedPageCount: seenPageFingerprints.size,
       scannedRowCount,
       stopReason
@@ -296,6 +503,7 @@ export async function searchTeamshipProductsForShipping({
   locationId,
   search,
   credentials = null,
+  readSession,
   fetchImpl = fetch
 }: {
   tenantId?: string | null;
@@ -303,20 +511,27 @@ export async function searchTeamshipProductsForShipping({
   locationId: number | string;
   search: string;
   credentials?: TeamshipRuntimeCredentials | null;
+  readSession?: TeamshipReadSession;
   fetchImpl?: typeof fetch;
 }): Promise<TeamshipShippingProductSearchRow[]> {
-  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
-  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
-  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
-  const response = await fetchImpl(`${apiBaseUrl}/v1/ship-inventories/search-products`, {
+  const resolvedCredentials = readSession?.credentials ?? credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = readSession?.apiBaseUrl ?? resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const effectiveFetch = readSession?.fetchImpl ?? fetchImpl;
+  const token = readSession?.token ?? await loginToTeamship(effectiveFetch, resolvedCredentials, apiBaseUrl);
+  const response = await fetchAuthorizedTeamshipRead({
+    url: `${apiBaseUrl}/v1/ship-inventories/search-products`,
+    token,
+    readSession,
+    fetchImpl: effectiveFetch,
+    init: {
     method: "POST",
-    headers: buildTeamshipHeaders(token),
     body: JSON.stringify({
       user_id: userId,
       location_id: locationId,
       search
     }),
     cache: "no-store"
+    }
   });
   const json = (await response.json().catch(() => null)) as TeamshipProductSearchResponse | null;
 
@@ -340,25 +555,28 @@ export async function findTeamshipShippingOrders({
   orderIdentifier,
   preferUiPallets = false,
   credentials = null,
+  readSession,
   fetchImpl = fetch
 }: TeamshipShippingOrderSearchOptions): Promise<TeamshipShippingOrderDetail[]> {
-  const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
-  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const resolvedCredentials = readSession?.credentials ?? credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
+  const apiBaseUrl = readSession?.apiBaseUrl ?? resolveTeamshipApiBaseUrl(resolvedCredentials);
   const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
-  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
+  const effectiveFetch = readSession?.fetchImpl ?? fetchImpl;
+  const token = readSession?.token ?? await loginToTeamship(effectiveFetch, resolvedCredentials, apiBaseUrl);
   const normalizedTarget = normalizeIdentifier(orderIdentifier);
   const matches: TeamshipShippingOrderDetail[] = [];
   const pageLimit = getTeamshipPageLimit();
   const maxPages = getTeamshipMaxPages();
-  let webCookieHeader: string | null | undefined;
+  let webSession: TeamshipWebSession | null | undefined;
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const rows = await listTeamshipShippingOrders({
       apiBaseUrl,
       token,
+      readSession,
       limit: pageLimit,
       offset: pageIndex * pageLimit,
-      fetchImpl
+      fetchImpl: effectiveFetch
     });
 
     for (const row of rows) {
@@ -371,22 +589,28 @@ export async function findTeamshipShippingOrders({
         continue;
       }
 
-      const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(id), fetchImpl });
+      const detail = await getTeamshipShippingOrder({
+        apiBaseUrl,
+        token: readSession?.token ?? token,
+        readSession,
+        id: String(id),
+        fetchImpl: effectiveFetch
+      });
       const merged = mergeTeamshipDetailWithSummary(detail, row);
       const apiPallets = readAuthoritativeTeamshipPallets(detail);
       let uiPallets: ReturnType<typeof readAuthoritativeTeamshipPallets> = undefined;
 
       if (preferUiPallets || !apiPallets) {
-        if (webCookieHeader === undefined) {
-          webCookieHeader = await loginToTeamshipWeb(fetchImpl, resolvedCredentials, webBaseUrl).catch(() => null);
+        if (webSession === undefined) {
+          webSession = await loginToTeamshipWeb(effectiveFetch, resolvedCredentials, webBaseUrl).catch(() => null);
         }
 
-        if (webCookieHeader) {
+        if (webSession) {
           const uiDetail = await getTeamshipShippingOrderUiDetail({
             webBaseUrl,
-            webCookieHeader,
+            webCookieHeader: webSession.cookieHeader,
             id: String(id),
-            fetchImpl
+            fetchImpl: effectiveFetch
           }).catch(() => null);
           uiPallets = readAuthoritativeTeamshipPallets(uiDetail);
         }
@@ -582,12 +806,14 @@ async function loginToTeamship(fetchImpl: typeof fetch, credentials: TeamshipRun
 async function listTeamshipShippingOrders({
   apiBaseUrl,
   token,
+  readSession,
   limit,
   offset,
   fetchImpl
 }: {
   apiBaseUrl: string;
   token: string;
+  readSession?: TeamshipReadSession;
   limit: number;
   offset: number;
   fetchImpl: typeof fetch;
@@ -598,9 +824,12 @@ async function listTeamshipShippingOrders({
   url.searchParams.set("order_by", "created_at");
   url.searchParams.set("order", "DESC");
 
-  const response = await fetchImpl(url, {
-    headers: buildTeamshipHeaders(token),
-    cache: "no-store"
+  const response = await fetchAuthorizedTeamshipRead({
+    url,
+    token,
+    readSession,
+    fetchImpl,
+    init: { cache: "no-store" }
   });
   const json = (await response.json().catch(() => null)) as TeamshipListResponse | null;
 
@@ -611,20 +840,83 @@ async function listTeamshipShippingOrders({
   return json.data;
 }
 
+async function listTeamshipDashboardShippingOrders({
+  webBaseUrl,
+  webSession,
+  statusSearch,
+  limit,
+  offset,
+  fetchImpl
+}: {
+  webBaseUrl: string;
+  webSession: TeamshipWebSession;
+  statusSearch: "requested" | "shipped";
+  limit: number;
+  offset: number;
+  fetchImpl: typeof fetch;
+}) {
+  const url = new URL(`${webBaseUrl}/api/ship-inventories/dashboard`);
+  const requestBody = {
+    requiresCounts: true,
+    search: [
+      {
+        fields: [],
+        operator: "contains",
+        key: "Garland Canada Distribution",
+        ignoreCase: true
+      }
+    ],
+    skip: offset,
+    take: Math.min(limit, TEAMSHIP_DASHBOARD_PAGE_LIMIT),
+    statusSearch
+  };
+
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "content-type": "application/json",
+    cookie: webSession.cookieHeader
+  };
+  if (webSession.csrfToken) {
+    headers["x-csrf-token"] = webSession.csrfToken;
+  }
+
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody),
+    cache: "no-store"
+  });
+  const json = (await response.json().catch(() => null)) as TeamshipDashboardListResponse | null;
+  const rows = json?.result ?? json?.data;
+
+  if (!response.ok || !Array.isArray(rows)) {
+    throw new Error(
+      `Unable to list ${statusSearch === "shipped" ? "completed" : "active"} Teamship shipping orders. Teamship dashboard POST returned status ${response.status}.`
+    );
+  }
+
+  return rows;
+}
+
 async function getTeamshipShippingOrder({
   apiBaseUrl,
   token,
+  readSession,
   id,
   fetchImpl
 }: {
   apiBaseUrl: string;
   token: string;
+  readSession?: TeamshipReadSession;
   id: string;
   fetchImpl: typeof fetch;
 }) {
-  const response = await fetchImpl(`${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(id)}`, {
-    headers: buildTeamshipHeaders(token),
-    cache: "no-store"
+  const response = await fetchAuthorizedTeamshipRead({
+    url: `${apiBaseUrl}/v1/ship-inventories/${encodeURIComponent(id)}`,
+    token,
+    readSession,
+    fetchImpl,
+    init: { cache: "no-store" }
   });
   const json = (await response.json().catch(() => null)) as TeamshipDetailResponse | null;
 
@@ -633,6 +925,74 @@ async function getTeamshipShippingOrder({
   }
 
   return json.data;
+}
+
+async function fetchAuthorizedTeamshipRead({
+  url,
+  token,
+  readSession,
+  fetchImpl,
+  init
+}: {
+  url: string | URL;
+  token: string;
+  readSession?: TeamshipReadSession;
+  fetchImpl: typeof fetch;
+  init: RequestInit;
+}) {
+  const send = (authorizationToken: string) => fetchImpl(url, {
+    ...init,
+    headers: buildTeamshipHeaders(authorizationToken)
+  });
+  if (!readSession) return send(token);
+
+  let authorizationToken = token;
+  let unauthorizedReadRetried = false;
+  let transientRetryIndex = 0;
+  while (true) {
+    let response: Response;
+    try {
+      response = await send(authorizationToken);
+    } catch (error) {
+      if (transientRetryIndex >= TEAMSHIP_READ_RETRY_DELAYS_MS.length) throw error;
+      await readSession.waitForRetry(TEAMSHIP_READ_RETRY_DELAYS_MS[transientRetryIndex]!);
+      transientRetryIndex += 1;
+      authorizationToken = readSession.token;
+      continue;
+    }
+
+    // Teamship can invalidate an API token while a batch is still reading.
+    // Renew once independently from the bounded transient-read retries.
+    if (response.status === 401 && !unauthorizedReadRetried) {
+      unauthorizedReadRetried = true;
+      if (readSession.token === authorizationToken) {
+        readSession.token = await loginToTeamship(
+          readSession.fetchImpl,
+          readSession.credentials,
+          readSession.apiBaseUrl
+        );
+      }
+      authorizationToken = readSession.token;
+      continue;
+    }
+
+    if (isRetryableTeamshipReadStatus(response.status) && transientRetryIndex < TEAMSHIP_READ_RETRY_DELAYS_MS.length) {
+      await readSession.waitForRetry(TEAMSHIP_READ_RETRY_DELAYS_MS[transientRetryIndex]!);
+      transientRetryIndex += 1;
+      authorizationToken = readSession.token;
+      continue;
+    }
+
+    return response;
+  }
+}
+
+function isRetryableTeamshipReadStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function waitForTeamshipReadRetry(milliseconds: number) {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function buildTeamshipHeaders(token: string) {
@@ -664,14 +1024,15 @@ async function loginToTeamshipWeb(
   });
   mergeSetCookies(cookieJar, readSetCookies(loginPageResponse.headers));
   const loginPageHtml = await loginPageResponse.text().catch(() => "");
-  const csrfToken = readHtmlFormValueByName(loginPageHtml, "_token") ?? readMetaContentByName(loginPageHtml, "csrf-token");
+  const loginCsrfToken =
+    readHtmlFormValueByName(loginPageHtml, "_token") ?? readMetaContentByName(loginPageHtml, "csrf-token");
   const body = new URLSearchParams({
     email,
     password
   });
 
-  if (csrfToken) {
-    body.set("_token", csrfToken);
+  if (loginCsrfToken) {
+    body.set("_token", loginCsrfToken);
   }
 
   const loginResponse = await fetchImpl(`${webBaseUrl}/login`, {
@@ -687,12 +1048,31 @@ async function loginToTeamshipWeb(
   });
   mergeSetCookies(cookieJar, readSetCookies(loginResponse.headers));
 
+  const authenticatedPageResponse = await fetchImpl(`${webBaseUrl}/ship-inventories`, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      cookie: serializeCookies(cookieJar)
+    },
+    cache: "no-store",
+    redirect: "manual"
+  }).catch(() => null);
+  if (authenticatedPageResponse) {
+    mergeSetCookies(cookieJar, readSetCookies(authenticatedPageResponse.headers));
+  }
+
+  const authenticatedPageHtml = authenticatedPageResponse?.ok
+    ? await authenticatedPageResponse.text().catch(() => "")
+    : "";
+  const authenticatedCsrfToken = readMetaContentByName(authenticatedPageHtml, "csrf-token");
   const cookieHeader = serializeCookies(cookieJar);
   if (!cookieHeader) {
     throw new Error(`Teamship web login did not return a session cookie. Teamship returned status ${loginResponse.status}.`);
   }
 
-  return cookieHeader;
+  return {
+    cookieHeader,
+    csrfToken: authenticatedCsrfToken ?? loginCsrfToken
+  };
 }
 
 async function getTeamshipShippingOrderUiDetail({

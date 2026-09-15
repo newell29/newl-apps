@@ -138,7 +138,7 @@ function mapSevenLAccount(credential: {
           const code = typeof item.code === "string" ? item.code.trim() : "";
           const scac = typeof item.scac === "string" ? item.scac.trim() : "";
 
-          if (!carrierHash) {
+          if (!carrierHash || !name || !code || !scac) {
             return null;
           }
 

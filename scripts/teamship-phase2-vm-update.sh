@@ -2,10 +2,15 @@
 set -euo pipefail
 
 APP_DIR="${NEWL_APPS_DIR:-$HOME/newl-apps}"
-WORKER_SERVICE="${TEAMSHIP_WORKER_SERVICE_NAME:-newl-teamship-phase2-worker.service}"
 BRANCH="${NEWL_APPS_UPDATE_BRANCH:-main}"
 REMOTE="${NEWL_APPS_UPDATE_REMOTE:-origin}"
-WORKER_STOPPED=0
+DEFAULT_WORKER_SERVICES="newl-teamship-phase2-worker.service newl-tmg-order-intake-worker.service"
+WORKER_SERVICES_VALUE="${TEAMSHIP_WORKER_SERVICE_NAMES:-$DEFAULT_WORKER_SERVICES}"
+if [[ -n "${TEAMSHIP_WORKER_SERVICE_NAME:-}" && -z "${TEAMSHIP_WORKER_SERVICE_NAMES:-}" ]]; then
+  WORKER_SERVICES_VALUE="$TEAMSHIP_WORKER_SERVICE_NAME"
+fi
+read -r -a WORKER_SERVICES <<< "$WORKER_SERVICES_VALUE"
+STOPPED_WORKER_SERVICES=()
 
 cd "$APP_DIR"
 
@@ -47,22 +52,38 @@ if ! git merge-base --is-ancestor "$before_sha" "$after_sha"; then
 fi
 
 package_before="$(git rev-parse HEAD:package-lock.json 2>/dev/null || true)"
-log "Stopping $WORKER_SERVICE before update..."
-systemctl --user stop "$WORKER_SERVICE" || true
-WORKER_STOPPED=1
 
-restart_worker_on_failure() {
+for worker_service in "${WORKER_SERVICES[@]}"; do
+  if systemctl --user is-active --quiet "$worker_service"; then
+    log "Stopping active worker $worker_service before update..."
+    systemctl --user stop "$worker_service"
+    STOPPED_WORKER_SERVICES+=("$worker_service")
+  else
+    log "Leaving inactive worker $worker_service stopped."
+  fi
+done
+
+restart_stopped_workers() {
+  local worker_service
+
+  for worker_service in "${STOPPED_WORKER_SERVICES[@]}"; do
+    log "Restarting $worker_service..."
+    systemctl --user restart "$worker_service"
+  done
+}
+
+restart_workers_on_failure() {
   local status=$?
 
-  if [[ "$status" -ne 0 && "$WORKER_STOPPED" -eq 1 ]]; then
-    log "Update failed; restarting $WORKER_SERVICE so job polling continues."
-    systemctl --user restart "$WORKER_SERVICE" || true
+  if [[ "$status" -ne 0 && "${#STOPPED_WORKER_SERVICES[@]}" -gt 0 ]]; then
+    log "Update failed; restarting workers that were active before the update."
+    restart_stopped_workers || true
   fi
 
   exit "$status"
 }
 
-trap restart_worker_on_failure EXIT
+trap restart_workers_on_failure EXIT
 
 git merge --ff-only "$REMOTE/$BRANCH"
 
@@ -72,6 +93,6 @@ if [[ "$package_before" != "$package_after" ]]; then
   npm install
 fi
 
-log "Restarting $WORKER_SERVICE at $(git rev-parse --short HEAD)..."
-systemctl --user restart "$WORKER_SERVICE"
-WORKER_STOPPED=0
+log "Restarting workers that were active at $(git rev-parse --short HEAD)..."
+restart_stopped_workers
+STOPPED_WORKER_SERVICES=()

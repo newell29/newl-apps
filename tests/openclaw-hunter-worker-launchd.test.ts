@@ -45,4 +45,10 @@ describe("Hunter launchd runtime", () => {
     expect(installer).toContain("HUNTER_TEAMS_TARGET=");
     expect(runner).toContain("HUNTER_TEAMS_TARGET|HUNTER_TEAMS_ACCOUNT");
   });
+
+  it("loads the independent Apollo-exception Brave pause flag", async () => {
+    const runner = await readFile(runnerPath, "utf8");
+
+    expect(runner).toContain("HUNTER_APOLLO_EXCEPTION_AUTOPILOT_ENABLED");
+  });
 });

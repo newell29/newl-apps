@@ -7,6 +7,7 @@ import {
   type SupplyChainDesignLtlPreparedRequest,
   type SupplyChainDesignLtlRatePreparationResultSummary
 } from "@/modules/supply-chain-design/candidate-ltl-rate-preparation";
+import { escapeSpreadsheetCsvCell } from "@/modules/supply-chain-design/csv-export";
 import { pickPreferredLiveSevenLAccount } from "@/modules/ltl-rate-portal/account-selection";
 import { LTL_BULK_CHUNK_SIZE } from "@/modules/ltl-rate-portal/bulk-jobs";
 import { getLtlRatePortalAccounts } from "@/modules/ltl-rate-portal/queries";
@@ -957,7 +958,7 @@ export async function exportSupplyChainDesignLtlRateBatchCsv(context: Authentica
       lane.selectedRateSource
     ];
   });
-  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return [headers, ...rows].map((row) => row.map(escapeSpreadsheetCsvCell).join(",")).join("\n");
 }
 
 export async function exportSupplyChainDesignShipmentComparisonCsv(
@@ -1055,7 +1056,7 @@ export async function exportSupplyChainDesignShipmentComparisonCsv(
       lane.selectedQuote ? batch.finishedAt?.toISOString() ?? batch.startedAt.toISOString() : ""
     ];
   });
-  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return [headers, ...rows].map((row) => row.map(escapeSpreadsheetCsvCell).join(",")).join("\n");
 }
 
 export async function exportSupplyChainDesignCandidateSummaryCsv(
@@ -1098,7 +1099,7 @@ export async function exportSupplyChainDesignCandidateSummaryCsv(
     String(candidate.coveragePercentage),
     candidate.warning ?? ""
   ]);
-  return [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return [headers, ...rows].map((row) => row.map(escapeSpreadsheetCsvCell).join(",")).join("\n");
 }
 
 export function selectLowestLtlQuote(quotes: LtlQuoteResult[]) {
@@ -1782,10 +1783,6 @@ async function mapWithConcurrency<T>(values: T[], concurrency: number, worker: (
       }
     })
   );
-}
-
-function csvCell(value: string) {
-  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
 function roundCurrency(value: number) {

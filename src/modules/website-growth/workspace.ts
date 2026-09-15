@@ -131,11 +131,18 @@ export function readScoutRunId(draftJson: unknown) {
 
 export function readScoutRunSummary(output: unknown) {
   const record = readRecord(output);
+  const semrushMailSync = readRecord(record.semrushMailSync);
+  const semrushCache = readRecord(record.semrushCache);
   return {
     phase: readString(record.phase),
     draftIds: readStringArray(record.draftIds),
     semrushRowCount: readNumber(record.semrushRowCount),
-    completedAt: readString(record.completedAt)
+    completedAt: readString(record.completedAt),
+    semrushMailStatus: readString(semrushMailSync.status),
+    semrushReportsImported: readNumber(semrushMailSync.imported),
+    semrushReportsFailed: readNumber(semrushMailSync.failed),
+    semrushCachedReportCount: readNumber(semrushCache.reportCount),
+    semrushCacheObservedAt: readString(semrushCache.observedAt)
   };
 }
 

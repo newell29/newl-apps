@@ -9,6 +9,10 @@ import { describe, expect, it } from "vitest";
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
 const helperPath = path.join(repoRoot, "ops/openclaw/lib/resolve-codex-cli.zsh");
+const subscriptionHelperPath = path.join(
+  repoRoot,
+  "ops/openclaw/lib/require-codex-subscription.zsh",
+);
 const runtimeHelperPath = path.join(
   repoRoot,
   "ops/openclaw/lib/website-growth-scout-runtime.zsh",
@@ -73,6 +77,29 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(helper).toContain("/Applications/ChatGPT.app/Contents/Resources/codex");
   });
 
+  it("requires ChatGPT subscription authentication and rejects API-key fallback", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-codex-auth-"));
+    const fakeCodex = path.join(directory, "codex");
+    await writeFile(fakeCodex, '#!/bin/zsh\nprint -r -- "${CODEX_STATUS}"\n');
+    await chmod(fakeCodex, 0o700);
+
+    try {
+      await expect(execFileAsync("/bin/zsh", [
+        "-c",
+        `codex_bin=${JSON.stringify(fakeCodex)}; source ${JSON.stringify(subscriptionHelperPath)}; require_codex_chatgpt_subscription`,
+      ], { env: { ...process.env, CODEX_STATUS: "Logged in using ChatGPT" } })).resolves.toBeDefined();
+
+      await expect(execFileAsync("/bin/zsh", [
+        "-c",
+        `codex_bin=${JSON.stringify(fakeCodex)}; source ${JSON.stringify(subscriptionHelperPath)}; require_codex_chatgpt_subscription`,
+      ], { env: { ...process.env, CODEX_STATUS: "Logged in using an API key" } })).rejects.toMatchObject({
+        stderr: expect.stringContaining("API-key fallback is disabled"),
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     "configure-semrush-mcp.sh",
     "install-website-growth-scout.sh",
@@ -84,19 +111,22 @@ describe("Website Growth Scout OpenClaw scripts", () => {
     expect(script).toContain("${codex_bin}");
   });
 
-  it("splits Monday and Wednesday deep runs from cache-backed weekday check-ins", async () => {
+  it("separates Monday and Wednesday content runs, Tuesday backlink discovery, and weekday check-ins", async () => {
     const installer = await readFile(installerPath, "utf8");
 
     expect(installer).toContain('--cron "15 9 * * 1,3"');
     expect(installer).toContain('--cron "15 9 * * 2,4-5"');
+    expect(installer).toContain('--cron "15 10 * * 2"');
     expect(installer).toContain("NEWL_APPS_SCOUT_RUNTIME_REPO_PATH");
     expect(installer).toContain("run-website-growth-scout-runtime.sh");
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekly.v1"');
     expect(installer).toContain('--declaration-key "newl.website-growth.scout.weekday-checkin.v1"');
+    expect(installer).toContain('--declaration-key "newl.website-growth.backlink-discovery.weekly.v1"');
     expect(installer).toContain(
       '--declaration-key "newl.website-growth.build-notifications.v1"'
     );
     expect(installer).toContain('--every "2m"');
+    expect(installer).toContain("--backlinks");
     expect(installer).toContain('\\"--light\\"');
   });
 
@@ -143,6 +173,7 @@ describe("Website Growth Scout OpenClaw scripts", () => {
       "/api/website-growth/backlinks/executor/failures"
     );
     expect(monitor).toContain("openclaw cron disable");
+    expect(monitor).toContain("cron list --all --json");
     expect(monitor).toContain("send_website_growth_teams_message");
   });
 
@@ -481,6 +512,10 @@ exit 2
     await writeFile(
       openclawPath,
       `#!/bin/zsh
+if [[ "$1" == "models" && "$2" == "status" ]]; then
+  print -r -- '{"auth":{"oauth":{"providers":[{"provider":"openai","effectiveProfiles":[{"type":"oauth","status":"ok"}]}]}}}'
+  exit 0
+fi
 if [[ "$1" == "agent" ]]; then
   exit 9
 fi
@@ -590,7 +625,7 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     expect(skill).toContain("Do not recreate thin legacy pages");
   });
 
-  it("runs a bounded Brave, Qwen, then Codex backlink funnel", async () => {
+  it("runs a bounded Brave and subscription-backed Codex backlink funnel independently", async () => {
     const [runner, installer, discovery] = await Promise.all([
       readFile(runnerPath, "utf8"),
       readFile(installerPath, "utf8"),
@@ -598,7 +633,14 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     ]);
 
     expect(installer).toContain("HUNTER_BRAVE_SEARCH_API_KEY");
+    expect(installer).toContain("require_codex_chatgpt_subscription");
     expect(runner).toContain("website_growth_backlink_discovery.py");
+    expect(runner).toContain('if [[ "${run_lane}" == "backlinks" ]]');
+    expect(runner).toContain("x-website-growth-run-lane");
+    expect(runner).toContain("Do not perform backlink discovery or promote backlink prospects");
+    expect(runner).toContain("Return backlinks.source NOT_RUN");
+    expect(runner).toContain("This is a BACKLINK-only cycle");
+    expect(runner).toContain("Do not call SEMrush");
     expect(runner).toContain("no more than 5 high-quality");
     expect(runner).toContain("backlinks.source to WEB_DISCOVERY");
     expect(discovery).toContain('search_web("BRAVE", query, 10)');
@@ -607,7 +649,7 @@ print -r -- '{"data":{"message":"Deterministic summary after failure"}}'
     expect(discovery).toContain('limits.get("finalists") or 15');
   });
 
-  it("batches local Qwen review and retries one invalid batch without repeating search", async () => {
+  it("batches Codex review and retries one invalid batch without repeating search", async () => {
     const python = String.raw`
 import json, runpy, sys
 module = runpy.run_path(sys.argv[1])
@@ -626,9 +668,9 @@ def fake_batch(schema, prompt, rows):
         }
         for row in rows
     ]
-module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+module["codex_request"].__globals__["_codex_batch"] = fake_batch
 rows = [{"id": f"candidate-{index}"} for index in range(65)]
-decisions = module["ollama_request"]({}, "synthetic prompt", rows)
+decisions = module["codex_request"]({}, "synthetic prompt", rows)
 print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
 `;
 
@@ -644,7 +686,7 @@ print(json.dumps({"calls": calls, "decisionCount": len(decisions)}))
     });
   });
 
-  it("retries only omitted Qwen candidates and forwards one persistent omission safely", async () => {
+  it("retries only omitted Codex candidates and forwards one persistent omission safely", async () => {
     const python = String.raw`
 import json, runpy, sys
 module = runpy.run_path(sys.argv[1])
@@ -663,9 +705,9 @@ def fake_batch(schema, prompt, rows):
             "reason": "synthetic"
         })
     return returned
-module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
+module["codex_request"].__globals__["_codex_batch"] = fake_batch
 rows = [{"id": f"candidate-{index}"} for index in range(5)]
-decisions = module["ollama_request"](module["TRIAGE_SCHEMA"], "synthetic prompt", rows)
+decisions = module["codex_request"](module["TRIAGE_SCHEMA"], "synthetic prompt", rows)
 print(json.dumps({"calls": calls, "decisions": decisions}))
 `;
 
@@ -688,7 +730,7 @@ print(json.dumps({"calls": calls, "decisions": decisions}))
     });
   });
 
-  it("forwards persistent invalid Qwen output through the bounded Codex fallback", async () => {
+  it("forwards persistent invalid first-pass Codex output through the bounded final fallback", async () => {
     const python = String.raw`
 import json, runpy, sys
 module = runpy.run_path(sys.argv[1])
@@ -696,13 +738,13 @@ calls = []
 def fake_batch(schema, prompt, rows):
     calls.append([row["id"] for row in rows])
     raise RuntimeError("synthetic invalid JSON")
-module["ollama_request"].__globals__["_ollama_batch"] = fake_batch
-triage = module["ollama_request"](
+module["codex_request"].__globals__["_codex_batch"] = fake_batch
+triage = module["codex_request"](
     module["TRIAGE_SCHEMA"],
     "synthetic prompt",
     [{"id": "candidate-1", "queryLane": "DIRECTORY"}]
 )
-finalist = module["ollama_request"](
+finalist = module["codex_request"](
     module["FINALIST_SCHEMA"],
     "synthetic prompt",
     [{
@@ -740,11 +782,25 @@ print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
     });
   });
 
-  it("uses the installed Qwen 3.6 model as the default", async () => {
+  it("uses the subscription-backed Codex mini model as bounded triage default", async () => {
     const discovery = await readFile(backlinkDiscoveryPath, "utf8");
 
-    expect(discovery).toContain('DEFAULT_QWEN_MODEL = "qwen3.6:27b-q4_K_M"');
-    expect(discovery).toContain("QWEN_BATCH_SIZE = 10");
+    expect(discovery).toContain('DEFAULT_CODEX_MODEL = "gpt-5.4-mini"');
+    expect(discovery).toContain("CODEX_BATCH_SIZE = 10");
+    expect(discovery).toContain("WEBSITE_GROWTH_CODEX_BIN");
+  });
+
+  it("requires OAuth for outreach and preserves an already-enabled executor during reinstall", async () => {
+    const [runner, installer] = await Promise.all([
+      readFile(backlinkRunnerPath, "utf8"),
+      readFile(backlinkInstallerPath, "utf8"),
+    ]);
+
+    expect(runner).toContain("models status --agent scout --json");
+    expect(runner).toContain("effectiveProfiles");
+    expect(runner).toContain("API-key fallback is disabled");
+    expect(installer).toContain("preserve_executor_enabled");
+    expect(installer).toContain('openclaw cron enable "${canonical_executor_job_id}"');
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {

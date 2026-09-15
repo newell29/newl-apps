@@ -198,7 +198,7 @@ function jsonReferencesId(value: unknown, id: string): boolean {
 }
 
 async function countRunReferences(tenantId: string, projectId: string, id: string) {
-  const [modelRuns, scenarios, screeningRuns, ltlRatePreparationRuns] = await Promise.all([
+  const [modelRuns, scenarios, screeningRuns, ltlRatePreparationRuns, networkScenarioComparisonRuns] = await Promise.all([
     prisma.supplyChainDesignModelRun.findMany({
       where: { tenantId, projectId },
       select: { inputReferences: true }
@@ -214,12 +214,20 @@ async function countRunReferences(tenantId: string, projectId: string, id: strin
     prisma.supplyChainDesignLtlRatePreparationRun.findMany({
       where: { tenantId, projectId },
       select: { inputReferences: true }
+    }),
+    prisma.supplyChainDesignNetworkScenarioComparisonRun.findMany({
+      where: { tenantId, projectId },
+      select: { inputReferences: true }
     })
   ]);
 
-  return [...modelRuns, ...scenarios, ...screeningRuns, ...(ltlRatePreparationRuns ?? [])].filter((run) =>
-    jsonReferencesId(run.inputReferences, id)
-  ).length;
+  return [
+    ...modelRuns,
+    ...scenarios,
+    ...screeningRuns,
+    ...(ltlRatePreparationRuns ?? []),
+    ...networkScenarioComparisonRuns
+  ].filter((run) => jsonReferencesId(run.inputReferences, id)).length;
 }
 
 export async function createSupplyChainDesignProjectAction(formData: FormData) {
@@ -284,28 +292,31 @@ export async function deleteSupplyChainDesignProjectAction(formData: FormData) {
   }
 
   try {
-    const deleted = await prisma.supplyChainDesignProject.delete({
-      where: {
-        tenantId_id: {
+    const deleted = await prisma.$transaction(async (tx) => {
+      const project = await tx.supplyChainDesignProject.delete({
+        where: {
+          tenantId_id: {
+            tenantId: context.tenantId,
+            id: projectId
+          }
+        }
+      });
+      await tx.auditLog.create({
+        data: {
           tenantId: context.tenantId,
-          id: projectId
+          actorUserId: context.userId,
+          action: "supply-chain-design.project.deleted",
+          entityType: "SupplyChainDesignProject",
+          entityId: project.id,
+          before: {
+            moduleKey: ModuleKey.SUPPLY_CHAIN_DESIGN,
+            projectId: project.id,
+            name: project.name,
+            status: project.status
+          }
         }
-      }
-    });
-    await prisma.auditLog.create({
-      data: {
-        tenantId: context.tenantId,
-        actorUserId: context.userId,
-        action: "supply-chain-design.project.deleted",
-        entityType: "SupplyChainDesignProject",
-        entityId: deleted.id,
-        before: {
-          moduleKey: ModuleKey.SUPPLY_CHAIN_DESIGN,
-          projectId: deleted.id,
-          name: deleted.name,
-          status: deleted.status
-        }
-      }
+      });
+      return project;
     });
     revalidatePath("/supply-chain-design");
     return { ok: true, message: `${deleted.name} was deleted.` };
@@ -714,11 +725,17 @@ export async function deleteSupplyChainDesignProjectFileAction(
   }
 
   const referencingRuns = await countRunReferences(context.tenantId, projectId, fileId);
+  if (referencingRuns > 0) {
+    return {
+      ok: false,
+      message: `${file.originalFileName} cannot be deleted because it is referenced by ${referencingRuns} saved run/scenario record(s). Referenced source evidence is protected.`
+    };
+  }
   if (!confirmed) {
     const mapping = file.mappings[0];
     return {
       ok: false,
-      message: `Confirm delete for ${file.originalFileName}. Logical table: ${mapping?.tableType ?? "Not mapped"}. Saved mapping: ${mapping ? "yes" : "no"}. Referenced by ${referencingRuns} saved run/scenario record(s). Historical runs will not be deleted.`
+      message: `Confirm delete for ${file.originalFileName}. Logical table: ${mapping?.tableType ?? "Not mapped"}. Saved mapping: ${mapping ? "yes" : "no"}. No saved run/scenario records reference this file.`
     };
   }
 
@@ -770,6 +787,13 @@ export async function deleteSupplyChainDesignFileMappingAction(
   });
   if (!mapping || mapping.projectId !== projectId) {
     return { ok: false, message: "Mapping was not found for this project and tenant." };
+  }
+  const referencingRuns = await countRunReferences(context.tenantId, projectId, mappingId);
+  if (referencingRuns > 0) {
+    return {
+      ok: false,
+      message: `${mapping.tableType} mapping cannot be deleted because it is referenced by ${referencingRuns} saved run/scenario record(s). Referenced mapping evidence is protected.`
+    };
   }
   if (!confirmed) {
     return {

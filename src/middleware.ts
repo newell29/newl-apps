@@ -55,6 +55,10 @@ export const config = {
    *                                      (VM Teamship worker ingestion auth)
    *  - /api/shipment-documents/teamship-review/email-intake/scheduled
    *                                      (n8n Garland email intake ingestion auth)
+   *  - /api/operations/tmg-order-intake/scheduled
+   *                                      (Vercel cron or ingestion token auth)
+   *  - /api/operations/tmg-order-intake/worker/*
+   *                                      (TMG VM worker ingestion token auth)
    *  - /api/website-inbound              (website form ingestion auth)
    *  - /api/lead-gen/apollo/status-sync  (scheduler secret auth)
    *  - /api/lead-gen/hunter/daily-plan   (Vercel cron secret auth)
@@ -71,6 +75,6 @@ export const config = {
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/openclaw/development-jobs|api/assistant/openclaw/hunter-quality|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/lead-gen/apollo/status-sync|api/lead-gen/hunter/daily-plan|api/lead-gen/hunter/signal-scout|api/lead-gen/hunter/company-research|api/lead-gen/hunter/outreach-handoff|api/lead-gen/hunter/apollo-exceptions|api/website-growth/scout|api/website-growth/backlinks/executor|api/website-growth/weekly-plan|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/openclaw/development-jobs|api/assistant/openclaw/hunter-quality|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/operations/tmg-order-intake/(?:scheduled(?:/|$)|worker(?:/|$))|api/lead-gen/apollo/status-sync|api/lead-gen/hunter/daily-plan|api/lead-gen/hunter/signal-scout|api/lead-gen/hunter/company-research|api/lead-gen/hunter/outreach-handoff|api/lead-gen/hunter/apollo-exceptions|api/website-growth/scout|api/website-growth/backlinks/executor|api/website-growth/weekly-plan|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };

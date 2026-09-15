@@ -46,7 +46,8 @@ const getLtlQuotes = vi.fn();
 const prismaMock = vi.hoisted(() => {
   const tx = {
     supplyChainDesignProject: {
-      create: vi.fn()
+      create: vi.fn(),
+      delete: vi.fn()
     },
     supplyChainDesignProjectFile: {
       create: vi.fn(),
@@ -206,6 +207,7 @@ import {
   parseCsvRows,
   parseSupplyChainDesignCsvUpload
 } from "@/modules/supply-chain-design/csv-intake";
+import { escapeSpreadsheetCsvCell } from "@/modules/supply-chain-design/csv-export";
 import { SUPPLY_CHAIN_DESIGN_CSV_MAX_BYTES } from "@/modules/supply-chain-design/file-size";
 import {
   getSupplyChainDesignProject,
@@ -865,19 +867,19 @@ describe("Supply Chain Design Studio persistence", () => {
   it("deletes only the selected project after confirmation", async () => {
     const adminContext = context(PlatformRole.ADMIN);
     getAuthenticatedContext.mockResolvedValue(adminContext);
-    prismaMock.prisma.supplyChainDesignProject.delete.mockResolvedValue({
+    prismaMock.tx.supplyChainDesignProject.delete.mockResolvedValue({
       id: "project-1",
       tenantId: adminContext.tenantId,
       name: "Network baseline",
       status: SupplyChainDesignProjectStatus.DRAFT
     });
-    prismaMock.prisma.auditLog.create.mockResolvedValue({ id: "audit-1" });
+    prismaMock.tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
 
     await expect(
       deleteSupplyChainDesignProjectAction(form({ projectId: "project-1", confirmDelete: "on" }))
     ).resolves.toEqual({ ok: true, message: "Network baseline was deleted." });
 
-    expect(prismaMock.prisma.supplyChainDesignProject.delete).toHaveBeenCalledWith({
+    expect(prismaMock.tx.supplyChainDesignProject.delete).toHaveBeenCalledWith({
       where: {
         tenantId_id: {
           tenantId: adminContext.tenantId,
@@ -885,7 +887,7 @@ describe("Supply Chain Design Studio persistence", () => {
         }
       }
     });
-    expect(prismaMock.prisma.auditLog.create).toHaveBeenCalledWith({
+    expect(prismaMock.tx.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         tenantId: adminContext.tenantId,
         actorUserId: adminContext.userId,
@@ -893,7 +895,32 @@ describe("Supply Chain Design Studio persistence", () => {
         entityId: "project-1"
       })
     });
+    expect(prismaMock.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.prisma.supplyChainDesignProject.delete).not.toHaveBeenCalled();
     expect(revalidatePath).toHaveBeenCalledWith("/supply-chain-design");
+  });
+
+  it("keeps project deletion and its audit in one transaction so an audit failure can roll back", async () => {
+    const adminContext = context(PlatformRole.ADMIN);
+    getAuthenticatedContext.mockResolvedValue(adminContext);
+    prismaMock.tx.supplyChainDesignProject.delete.mockResolvedValue({
+      id: "project-1",
+      tenantId: adminContext.tenantId,
+      name: "Network baseline",
+      status: SupplyChainDesignProjectStatus.DRAFT
+    });
+    prismaMock.tx.auditLog.create.mockRejectedValueOnce(new Error("audit unavailable"));
+
+    await expect(
+      deleteSupplyChainDesignProjectAction(form({ projectId: "project-1", confirmDelete: "on" }))
+    ).resolves.toEqual({ ok: false, message: "Project could not be deleted for this project and tenant." });
+
+    expect(prismaMock.prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.tx.supplyChainDesignProject.delete).toHaveBeenCalledTimes(1);
+    expect(prismaMock.tx.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.prisma.supplyChainDesignProject.delete).not.toHaveBeenCalled();
+    expect(prismaMock.prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 
   it("does not delete a project without confirmation", async () => {
@@ -903,6 +930,8 @@ describe("Supply Chain Design Studio persistence", () => {
       ok: false,
       message: "Project deletion was not confirmed."
     });
+    expect(prismaMock.prisma.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.tx.supplyChainDesignProject.delete).not.toHaveBeenCalled();
     expect(prismaMock.prisma.supplyChainDesignProject.delete).not.toHaveBeenCalled();
   });
 
@@ -1481,7 +1510,7 @@ describe("Supply Chain Design Studio persistence", () => {
     expect(prismaMock.tx.supplyChainDesignProjectFile.create).not.toHaveBeenCalled();
   });
 
-  it("shows file dependency warning before deleting an uploaded file", async () => {
+  it("blocks confirmed deletion when a Network Scenario Comparison references an uploaded file", async () => {
     getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
     prismaMock.prisma.supplyChainDesignProjectFile.findUnique.mockResolvedValue({
       id: "file-1",
@@ -1490,19 +1519,21 @@ describe("Supply Chain Design Studio persistence", () => {
       originalFileName: "delivery-demand.csv",
       mappings: [{ id: "mapping-1", tableType: "DEMAND_POINTS" }]
     });
-    prismaMock.prisma.supplyChainDesignModelRun.findMany.mockResolvedValue([
-      { inputReferences: { demandPoints: { fileId: "file-1" } } }
+    prismaMock.prisma.supplyChainDesignNetworkScenarioComparisonRun.findMany.mockResolvedValue([
+      { inputReferences: { historicalShipments: { fileId: "file-1" } } }
     ]);
+    const deleteForm = form({ projectId: "project-1", fileId: "file-1" });
+    deleteForm.set("confirmDelete", "on");
 
     await expect(
       deleteSupplyChainDesignProjectFileAction(
         { ok: false, message: "" },
-        form({ projectId: "project-1", fileId: "file-1" })
+        deleteForm
       )
     ).resolves.toEqual({
       ok: false,
       message:
-        "Confirm delete for delivery-demand.csv. Logical table: DEMAND_POINTS. Saved mapping: yes. Referenced by 1 saved run/scenario record(s). Historical runs will not be deleted."
+        "delivery-demand.csv cannot be deleted because it is referenced by 1 saved run/scenario record(s). Referenced source evidence is protected."
     });
     expect(prismaMock.prisma.supplyChainDesignProjectFile.delete).not.toHaveBeenCalled();
   });
@@ -1567,6 +1598,28 @@ describe("Supply Chain Design Studio persistence", () => {
       where: { tenantId_id: { tenantId: "tenant-1", id: "mapping-1" } }
     });
     expect(prismaMock.prisma.supplyChainDesignProjectFile.delete).not.toHaveBeenCalled();
+  });
+
+  it("blocks confirmed mapping deletion when a saved run references the mapping", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    prismaMock.prisma.supplyChainDesignFileMapping.findUnique.mockResolvedValue({
+      id: "mapping-1",
+      projectId: "project-1",
+      tableType: "DEMAND_POINTS",
+      file: { originalFileName: "delivery-demand.csv" }
+    });
+    prismaMock.prisma.supplyChainDesignModelRun.findMany.mockResolvedValue([
+      { inputReferences: { demandPoints: { mappingId: "mapping-1" } } }
+    ]);
+    const deleteForm = form({ projectId: "project-1", mappingId: "mapping-1" });
+    deleteForm.set("confirmDelete", "on");
+
+    await expect(deleteSupplyChainDesignFileMappingAction({ ok: false, message: "" }, deleteForm)).resolves.toEqual({
+      ok: false,
+      message:
+        "DEMAND_POINTS mapping cannot be deleted because it is referenced by 1 saved run/scenario record(s). Referenced mapping evidence is protected."
+    });
+    expect(prismaMock.prisma.supplyChainDesignFileMapping.delete).not.toHaveBeenCalled();
   });
 
   it("deletes individual saved run records without deleting files or mappings", async () => {
@@ -1647,6 +1700,18 @@ describe("Supply Chain Design Studio persistence", () => {
       ["Origin City", "Destination"],
       ["Toronto, ON", "Chicago"]
     ]);
+  });
+
+  it("neutralizes untrusted spreadsheet formulas while preserving plain signed numbers", () => {
+    expect(escapeSpreadsheetCsvCell("=1+1")).toBe("'=1+1");
+    expect(escapeSpreadsheetCsvCell("+SUM(A1:A2)")).toBe("'+SUM(A1:A2)");
+    expect(escapeSpreadsheetCsvCell("-2+3")).toBe("'-2+3");
+    expect(escapeSpreadsheetCsvCell("@SUM(A1:A2)")).toBe("'@SUM(A1:A2)");
+    expect(escapeSpreadsheetCsvCell(" \t=WEBSERVICE(\"https://example.invalid\")")).toBe(
+      "\"' \t=WEBSERVICE(\"\"https://example.invalid\"\")\""
+    );
+    expect(escapeSpreadsheetCsvCell("-12.5")).toBe("-12.5");
+    expect(escapeSpreadsheetCsvCell("+12")).toBe("+12");
   });
 
   it("saves a valid facility mapping", async () => {
@@ -9051,14 +9116,18 @@ describe("3PL location screening proof", () => {
 
   it("reports unresolved Warehouse Location Strategy postal codes and exports assignments", () => {
     const result = runSupplyChainDesignWarehouseLocationStrategy(
-      locationStrategyInputFixture({ shipmentsCsv: locationStrategyShipmentsCsv().replace("60601", "99999") })
+      locationStrategyInputFixture({
+        shipmentsCsv: locationStrategyShipmentsCsv()
+          .replace("60601", "99999")
+          .replace("ORD-1001", "=1+1")
+      })
     );
     const csv = exportWarehouseLocationStrategyCsv(result);
 
     expect(result.excludedDestinationCount).toBe(1);
     expect(result.eligibleDestinationProfiles).toBe(2);
     expect(csv).toContain("Solution region count,Solution recommendation status,Assigned region,Recommended warehouse market");
-    expect(csv).toContain("ORD-1001,Individual Shipment,10001,US,40.750649,-73.997298,ZIP_ZCTA_CENTROID,1,20,1200,lb");
+    expect(csv).toContain("'=1+1,Individual Shipment,10001,US,40.750649,-73.997298,ZIP_ZCTA_CENTROID,1,20,1200,lb");
     expect(result.solutions[0].assignments[0]).toEqual(expect.objectContaining({
       destinationLatitude: expect.any(Number),
       destinationLongitude: expect.any(Number),
@@ -10537,6 +10606,12 @@ describe("3PL location screening proof", () => {
     expect(auditTable.rows[0]).toContain("Winning");
     expect(auditTable.rows.some((row) => row.includes("false"))).toBe(true);
     expect(auditTable.rows.some((row) => row.includes("Carrier A") && row.includes("428.97"))).toBe(true);
+
+    const formulaSafeCsv = exportNetworkScenarioComparisonCsv(
+      { ...run, scenarioAName: "@SUM(A1:A2)" },
+      "summary"
+    );
+    expect(formulaSafeCsv).toContain("'@SUM(A1:A2)");
   });
 
   it("compares current and candidate warehouse annual operating costs without inventing missing values", () => {
@@ -14049,6 +14124,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
   it("exports successful failed manual and excluded SCDS LTL rate rows", async () => {
     getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
     const batchInput = ltlBatchInputFixture();
+    batchInput.requests[0].sourceReference = "=WEBSERVICE(\"https://example.invalid\")";
     prismaMock.prisma.automationJobRun.findMany.mockResolvedValueOnce([
       {
         id: "batch-1",
@@ -14089,6 +14165,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
     expect(csv).toContain("Manual rate");
     expect(csv).toContain("Excluded");
     expect(csv).toContain("Carrier failed");
+    expect(csv).toContain("\"'=WEBSERVICE(\"\"https://example.invalid\"\")\"");
   });
 
   it("uses linked preparation source-row exclusions in completed Network Design summaries", async () => {
@@ -15604,7 +15681,7 @@ function sevenLAccountRecordsFixture() {
         dryRun: false,
         carriers: [
           { carrierHash: "carrier-a", name: "AAA Cooper", code: "AAA", scac: "AACT", enabled: true },
-          { carrierHash: "frontline-hash", name: "Frontline Freight", code: "FF", scac: "", enabled: true }
+          { carrierHash: "frontline-hash", name: "Frontline Freight", code: "FF", scac: "FRTF", enabled: true }
         ]
       }
     }
@@ -15624,7 +15701,7 @@ function sevenLAccountConfigFixture(): SevenLAccountConfig {
     carrierMode: "TENANT_SELECTED",
     carriers: [
       { carrierHash: "carrier-a", name: "AAA Cooper", code: "AAA", scac: "AACT", defaulted: false, enabled: true },
-      { carrierHash: "frontline-hash", name: "Frontline Freight", code: "FF", scac: "", defaulted: false, enabled: true }
+      { carrierHash: "frontline-hash", name: "Frontline Freight", code: "FF", scac: "FRTF", defaulted: false, enabled: true }
     ],
     secretConfigured: true
   };

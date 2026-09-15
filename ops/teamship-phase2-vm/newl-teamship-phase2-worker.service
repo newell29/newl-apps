@@ -15,7 +15,7 @@ Environment=TEAMSHIP_BROWSER_SLOW_MO_MS=350
 Environment=TEAMSHIP_BROWSER_PAUSE_ON_ERROR=true
 Environment=TEAMSHIP_BROWSER_EXECUTABLE_PATH=/usr/bin/google-chrome
 Environment=NEWL_APPS_BASE_URL=https://newl-apps.vercel.app
-ExecStart=/usr/bin/npm run worker:teamship-phase2 -- --loop
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1440x1100x24 -nolisten tcp" /usr/bin/npm run worker:teamship-phase2 -- --loop
 Restart=always
 RestartSec=20
 StartLimitIntervalSec=300
