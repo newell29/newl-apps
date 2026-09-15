@@ -1,0 +1,1 @@
+ALTER TYPE "SupplyChainDesignTableType" ADD VALUE 'FACILITY_COSTS';

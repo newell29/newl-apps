@@ -1,6 +1,7 @@
 import { AssistantSourceKind } from "@prisma/client";
 
 import { getLtlRatePortalShell } from "@/modules/ltl-rate-portal/queries";
+import { calculateLtlFreightClass } from "@/modules/ltl-rate-portal/freight-class";
 import type { LtlCountryCode, LtlQuoteRequest } from "@/modules/ltl-rate-portal/types";
 import { UPS_SERVICE_OPTIONS } from "@/modules/ups-tools/constants";
 import { inferCountryFromPostalCode } from "@/modules/ups-tools/engine";
@@ -402,6 +403,16 @@ async function runLtlAssistantRate(
     );
   }
 
+  const calculatedFreightClass = calculateLtlFreightClass({
+    totalWeight: parsed.weight!,
+    weightUnit: "lb",
+    quantity: parsed.quantity!,
+    length: parsed.length!,
+    width: parsed.width!,
+    height: parsed.height!,
+    dimensionUnit: "in"
+  });
+
   const request: LtlQuoteRequest = {
     customerReference: "assistant-chat",
     originCity: parsed.origin?.city ?? "",
@@ -424,7 +435,7 @@ async function runLtlAssistantRate(
         width: parsed.width!,
         height: parsed.height!,
         dimType: "PLT",
-        freightClass: "70",
+        freightClass: calculatedFreightClass.ok ? calculatedFreightClass.freightClass : "",
         hazmat: false,
         stack: true
       }

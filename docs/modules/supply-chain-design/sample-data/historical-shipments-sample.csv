@@ -1,0 +1,13 @@
+Record Type,Shipment / Order Reference,Shipment Date,Origin Facility ID,Destination Customer / Group,Destination ZIP / Postal Code,Destination City / Region,Destination Country,Shipments,Pallets,Inventory Dwell Time Days,Units,Weight,Weight Unit,Length,Width,Height,Dimension Unit,Hazardous Materials,Transportation Mode,Transportation Cost,Transit Days,Service Level,SKU / Item,Currency
+Aggregated Activity,ANN-1001,2026-01-15,TOR-01,Customer Northeast,10001,New York NY,US,12,24,15,480,14400,lb,48,40,60,in,No,LTL,6300,2,Standard,SKU-100,USD
+Aggregated Activity,ANN-1002,2026-02-10,TOR-01,Customer Boston,02108,Boston MA,US,8,12,30,240,7600,lb,48,40,50,in,No,LTL,4200,2,Standard,SKU-110,USD
+Aggregated Activity,ANN-1003,2026-03-12,TOR-01,Customer Philadelphia,19103,Philadelphia PA,US,10,18,45,360,10200,lb,48,40,58,in,No,LTL,5100,2,Standard,SKU-120,USD
+Aggregated Activity,ANN-2001,2026-04-18,DFW-01,Customer Atlanta,30303,Atlanta GA,US,14,28,15,560,16800,lb,48,40,60,in,No,LTL,6100,3,Standard,SKU-200,USD
+Aggregated Activity,ANN-2002,2026-05-22,DFW-01,Customer Miami,33101,Miami FL,US,9,16,61,320,9200,lb,48,40,54,in,No,LTL,5400,3,Standard,SKU-210,USD
+Aggregated Activity,ANN-2003,2026-06-14,DFW-01,Customer Denver,80202,Denver CO,US,11,20,30,410,11800,lb,48,40,56,in,No,LTL,4800,3,Standard,SKU-220,USD
+Aggregated Activity,ANN-3001,2026-07-09,TOR-01,Customer Chicago,60601,Chicago IL,US,15,30,45,600,18000,lb,48,40,62,in,No,LTL,5700,2,Standard,SKU-300,USD
+Aggregated Activity,ANN-3002,2026-08-03,DFW-01,Customer Los Angeles,90012,Los Angeles CA,US,13,26,90,520,15400,lb,48,40,64,in,No,LTL,7200,4,Standard,SKU-310,USD
+Aggregated Activity,ANN-3003,2026-09-19,DFW-01,Customer Seattle,98101,Seattle WA,US,7,14,61,280,8200,lb,48,40,52,in,No,LTL,6500,4,Standard,SKU-320,USD
+Aggregated Activity,ANN-3004,2026-10-11,TOR-01,Customer Phoenix,85004,Phoenix AZ,US,6,10,30,210,6400,lb,48,40,48,in,No,LTL,3900,4,Standard,SKU-330,USD
+Aggregated Activity,ANN-3005,2026-11-07,DFW-01,Customer Minneapolis,55401,Minneapolis MN,US,10,18,45,360,10400,lb,48,40,56,in,No,LTL,4300,3,Standard,SKU-340,USD
+Individual Shipment,ANN-PARCEL-1,2026-12-05,TOR-01,Customer Small Parcel,10001,New York NY,US,1,1,15,20,650,lb,24,20,18,in,No,Parcel,95,1,Ground,SKU-990,USD

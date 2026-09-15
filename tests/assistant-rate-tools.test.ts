@@ -153,6 +153,21 @@ describe("maybeRunAssistantRateRequest", () => {
 
     expect(getLtlRatePortalShell).toHaveBeenCalled();
     expect(getLtlQuotes).toHaveBeenCalled();
+    expect(getLtlQuotes).toHaveBeenCalledWith(
+      expect.anything(),
+      [
+        expect.objectContaining({
+          pieces: [
+            expect.objectContaining({
+              qty: 1,
+              weight: 500,
+              weightType: "each",
+              freightClass: "125"
+            })
+          ]
+        })
+      ]
+    );
     expect(response?.provider).toBe("SEVEN_L_TOOL");
     expect(response?.answer).toContain("7L returned 2 quote(s)");
     expect(response?.answer).toContain("Roadrunner");

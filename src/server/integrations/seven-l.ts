@@ -93,6 +93,14 @@ type ResolvedLocation = {
   zipcode: string;
 };
 
+export type SevenLLocationCache = Map<string, Promise<ResolvedLocation>>;
+
+type SevenLQuoteOptions = {
+  carrierConcurrency?: number;
+  locationCache?: SevenLLocationCache;
+  requestTimeoutMs?: number;
+};
+
 type TokenCacheEntry = {
   accessToken: string;
   exp: number;
@@ -101,11 +109,14 @@ type TokenCacheEntry = {
 let cachedAccountsFile: LocalSevenLCredential[] | null = null;
 let cachedEnvAccounts: LocalSevenLCredential[] | null = null;
 const tokenCache = new Map<string, TokenCacheEntry>();
+const tokenRequestCache = new Map<string, Promise<string>>();
+const DEFAULT_SEVEN_L_RATE_REQUEST_TIMEOUT_MS = 45_000;
 
 export function resetSevenLRuntimeCacheForTests() {
   cachedAccountsFile = null;
   cachedEnvAccounts = null;
   tokenCache.clear();
+  tokenRequestCache.clear();
 }
 
 export async function getLocalSevenLAccountNames(): Promise<Set<string>> {
@@ -119,7 +130,8 @@ export async function getLocalSevenLAccountNames(): Promise<Set<string>> {
 export async function getLtlQuotes(
   account: SevenLAccountConfig,
   requests: LtlQuoteRequest[],
-  carrierHashes?: string[]
+  carrierHashes?: string[],
+  options: SevenLQuoteOptions = {}
 ): Promise<{ data: LtlQuoteResult[]; errors: LtlCarrierErrorResult[] }> {
   if (requests.length === 0) {
     return { data: [], errors: [] };
@@ -138,34 +150,52 @@ export async function getLtlQuotes(
   }
 
   const accessToken = await getAccessToken(credential);
-  const locationCache = new Map<string, ResolvedLocation>();
+  const locationCache = options.locationCache ?? new Map<string, Promise<ResolvedLocation>>();
+  const carrierConcurrency = clampPositiveInteger(options.carrierConcurrency, 1, 20, 1);
+  const requestTimeoutMs = clampPositiveInteger(
+    options.requestTimeoutMs,
+    1,
+    120_000,
+    DEFAULT_SEVEN_L_RATE_REQUEST_TIMEOUT_MS
+  );
   const results: LtlQuoteResult[] = [];
   const errors: LtlCarrierErrorResult[] = [];
 
   for (const request of requests) {
     const resolvedRequest = await enrichRequestWithLocations(credential.baseUrl, accessToken, request, locationCache);
-    for (const carrier of selectedCarriers) {
+    const carrierOutcomes = await mapWithConcurrency(selectedCarriers, carrierConcurrency, async (carrier) => {
       try {
-        results.push(await getCarrierQuote(account, credential.baseUrl, accessToken, carrier, resolvedRequest));
+        return {
+          quote: await getCarrierQuote(account, credential.baseUrl, accessToken, carrier, resolvedRequest, requestTimeoutMs),
+          error: null
+        };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn("7L carrier quote skipped", {
           carrierHash: carrier.carrierHash,
-          carrierName: carrier.name,
+          carrierName: formatCarrierLabel(carrier),
           customerReference: request.customerReference,
           message
         });
 
-        errors.push({
-          ...resolvedRequest,
-          carrierHash: carrier.carrierHash,
-          carrierName: carrier.name,
-          carrierCode: carrier.code,
-          scac: carrier.scac,
-          errorMessage: message,
-          mode: "live"
-        });
+        return {
+          quote: null,
+          error: {
+            ...resolvedRequest,
+            carrierHash: carrier.carrierHash,
+            carrierName: formatCarrierLabel(carrier),
+            carrierCode: carrier.code || "Carrier",
+            scac: carrier.scac || carrier.code || "Carrier",
+            errorMessage: message,
+            mode: "live" as const
+          }
+        };
       }
+    });
+
+    for (const outcome of carrierOutcomes) {
+      if (outcome.quote) results.push(outcome.quote);
+      if (outcome.error) errors.push(outcome.error);
     }
   }
 
@@ -231,7 +261,8 @@ async function getCarrierQuote(
   baseUrl: string,
   accessToken: string,
   carrier: SevenLAccountConfig["carriers"][number],
-  request: LtlQuoteRequest
+  request: LtlQuoteRequest,
+  requestTimeoutMs: number
 ): Promise<LtlQuoteResult> {
   const params = new URLSearchParams({
     carrierHash: carrier.carrierHash,
@@ -257,13 +288,13 @@ async function getCarrierQuote(
     params.append("accessorialsList[]", accessorialCode);
   }
 
-  const response = await fetch(`${baseUrl}/api/v1/ltl/ltlrates?${params.toString()}`, {
+  const response = await fetchWithTimeout(`${baseUrl}/api/v1/ltl/ltlrates?${params.toString()}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
     cache: "no-store"
-  });
+  }, requestTimeoutMs);
 
   const { rawBody, json } = await readSevenLRateResponse(response);
   if (!response.ok) {
@@ -276,7 +307,7 @@ async function getCarrierQuote(
 
   const ratedResult = json?.data?.results?.[0];
   if (!ratedResult) {
-    throw new Error(`7L returned no rate results for carrier ${carrier.name}.`);
+    throw new Error(`7L returned no rate results for carrier ${formatCarrierLabel(carrier)}.`);
   }
 
   if (ratedResult.Error) {
@@ -292,9 +323,9 @@ async function getCarrierQuote(
   return {
     ...request,
     carrierHash: carrier.carrierHash,
-    carrierName: ratedResult.Name || carrier.name,
-    carrierCode: ratedResult.Code || carrier.code,
-    scac: ratedResult.SCAC || carrier.scac,
+    carrierName: ratedResult.Name || formatCarrierLabel(carrier),
+    carrierCode: ratedResult.Code || carrier.code || "Carrier",
+    scac: ratedResult.SCAC || carrier.scac || carrier.code || "Carrier",
     serviceLevel: ratedResult.ServiceLevel || "Less than Truckload",
     transitDays: normalizeTransitDays(ratedResult.TransitDays),
     quoteNumber: ratedResult.QuoteNumber || String(ratedResult.InternalRef ?? ""),
@@ -305,6 +336,10 @@ async function getCarrierQuote(
     rateRemarks: ratedResult.RateRemarks ?? [],
     mode: "live"
   };
+}
+
+function formatCarrierLabel(carrier: SevenLAccountConfig["carriers"][number]) {
+  return carrier.name || carrier.scac || carrier.code || "Carrier";
 }
 
 async function readSevenLRateResponse(response: Response) {
@@ -327,7 +362,7 @@ async function enrichRequestWithLocations(
   baseUrl: string,
   accessToken: string,
   request: LtlQuoteRequest,
-  locationCache: Map<string, ResolvedLocation>
+  locationCache: SevenLLocationCache
 ): Promise<LtlQuoteRequest> {
   const origin =
     request.originCity && request.originState
@@ -377,7 +412,7 @@ async function resolveZipLocation(
   accessToken: string,
   zipcode: string,
   country: LtlCountryCode,
-  locationCache: Map<string, ResolvedLocation>
+  locationCache: SevenLLocationCache
 ) {
   const cacheKey = `${country}:${zipcode.trim().toUpperCase()}`;
   const cached = locationCache.get(cacheKey);
@@ -385,6 +420,15 @@ async function resolveZipLocation(
     return cached;
   }
 
+  const lookup = fetchZipLocation(baseUrl, accessToken, zipcode, country).catch((error) => {
+    locationCache.delete(cacheKey);
+    throw error;
+  });
+  locationCache.set(cacheKey, lookup);
+  return lookup;
+}
+
+async function fetchZipLocation(baseUrl: string, accessToken: string, zipcode: string, country: LtlCountryCode) {
   const params = new URLSearchParams({
     zipcode: zipcode.trim(),
     zipcodeSearchType: "exact",
@@ -414,7 +458,6 @@ async function resolveZipLocation(
     country,
     zipcode: match.Zipcode?.trim() || zipcode.trim()
   } satisfies ResolvedLocation;
-  locationCache.set(cacheKey, resolved);
   return resolved;
 }
 
@@ -526,7 +569,19 @@ async function getAccessToken(credential: RuntimeSevenLCredential) {
   if (cached && cached.exp > now + 30) {
     return cached.accessToken;
   }
+  const pending = tokenRequestCache.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
 
+  const request = requestAccessToken(credential, cacheKey, now).finally(() => {
+    tokenRequestCache.delete(cacheKey);
+  });
+  tokenRequestCache.set(cacheKey, request);
+  return request;
+}
+
+async function requestAccessToken(credential: RuntimeSevenLCredential, cacheKey: string, now: number) {
   const response = await fetch(`${credential.baseUrl}/api/v1/login`, {
     method: "POST",
     headers: {
@@ -556,6 +611,44 @@ async function getAccessToken(credential: RuntimeSevenLCredential) {
   });
 
   return accessToken;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`7L carrier request timed out after ${timeoutMs} ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function mapWithConcurrency<T, R>(values: T[], concurrency: number, worker: (value: T, index: number) => Promise<R>) {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      while (nextIndex < values.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await worker(values[currentIndex], currentIndex);
+      }
+    })
+  );
+  return results;
+}
+
+function clampPositiveInteger(value: number | undefined, minimum: number, maximum: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.floor(value as number)));
 }
 
 function flattenBreakdown(items: unknown) {

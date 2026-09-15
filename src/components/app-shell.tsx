@@ -21,6 +21,7 @@ type NavGroup = {
   id: string;
   label: string;
   moduleKey?: ModuleKey;
+  requiredRoles?: PlatformRole[];
   children: NavNode[];
 };
 
@@ -96,6 +97,13 @@ const navEntries: NavNode[] = [
             moduleKey: "SHIPMENT_DOCUMENTS" as ModuleKey
           }
         ]
+      },
+      {
+        id: "supply-chain-design",
+        href: "/supply-chain-design",
+        label: "Supply Chain Design Studio",
+        moduleKey: "SUPPLY_CHAIN_DESIGN" as ModuleKey,
+        requiredRoles: ["ADMIN", "MANAGER"] as PlatformRole[]
       },
       {
         id: "tmg-order-intake",
@@ -382,7 +390,7 @@ function NavTree({
   );
 }
 
-function filterVisibleNavEntries(
+export function filterVisibleNavEntries(
   entries: NavNode[],
   role: PlatformRole | undefined,
   enabledModuleKeys?: ModuleKey[]
@@ -391,6 +399,10 @@ function filterVisibleNavEntries(
 
   for (const entry of entries) {
     if (isNavGroup(entry)) {
+      if (entry.requiredRoles && (!role || !entry.requiredRoles.includes(role))) {
+        continue;
+      }
+
       const children = filterVisibleNavEntries(entry.children, role, enabledModuleKeys);
       if (children.length > 0) {
         visibleEntries.push({ ...entry, children });
