@@ -56,7 +56,8 @@ a separate atomic inbox so it can arrive while the worker is active; acceptance 
 ## Bounds and operation
 
 Normal hours: weekdays 09:00–17:00 America/Toronto. Due wakes are at least thirty minutes apart, with
-at most six actions and ten minutes of work per wake. Two unproductive actions yield. The model can
+at most six actions and ten minutes of work per wake. Two unproductive actions yield; two consecutive
+wakes without useful progress back off for a day and expose `waiting_no_progress` in health. The model can
 wait up to a day. Parked/rejected companies retain a revisit date and condition. STOP is checked between
 actions and during sleep; an in-flight call can finish within its timeout. Expiry ends the process.
 
@@ -134,7 +135,9 @@ The supervised public evaluation used real local Q4 inference, public search and
 persisted across process restarts and parked an independently discovered company when its own new
 warehouse weakened the outsourcing hypothesis. Live testing exposed incomplete tool arguments,
 navigation-heavy extraction, a missing page, display-name/domain confusion and cache outcomes missing
-from the model's feedback; regression cases cover
+from the model's feedback; the model also repeated proposals after receiving cache feedback. The final
+context supplies observations rather than its own proposal/token logs, and stalled wakes back off for
+a day. Regression cases cover
 the resulting fixes. This establishes a working research loop, not sales effectiveness, validated
 contacts or a qualified opportunity. Private run history retains the failures and charged usage.
 

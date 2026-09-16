@@ -389,7 +389,8 @@ class Pilot:
             cooldown = 1 if name == "fetch" else 7
             if self.clock() - parse_time(attempt["at"]) < dt.timedelta(days=cooldown):
                 result = {"state": "cached_or_already_attempted", "previous": attempt,
-                          "retryAfter": iso(parse_time(attempt["at"]) + dt.timedelta(days=cooldown))}
+                          "retryAfter": iso(parse_time(attempt["at"]) + dt.timedelta(days=cooldown)),
+                          "nextStep": "Do not repeat or paraphrase this lookup. Resolve a different uncertainty, change research direction, or wait."}
                 self.event("action", action=name, purpose=purpose, company=args.get("company"), result=result)
                 return result
         if name in {"search", "fetch"} and args.get("company"):
@@ -528,7 +529,11 @@ class Pilot:
             "otherCompanies": [{k: c.get(k) for k in ("domain", "status", "summary", "revisitAt", "revisitWhen")} for c in companies if c not in active][-40:],
             "evidence": [{**e, "excerpt": e["excerpt"][:2600]} for e in chosen],
             "extractionNote": "Current extractor is " + EXTRACTOR_VERSION + "; older page excerpts may contain mostly navigation. Re-fetch if the content is needed.",
-            "recentEvents": self.state["events"][-8:], "feedback": self.state["feedback"][-20:],
+            # Proposed actions and token logs are audit data, not observations. Replaying them
+            # encouraged the local model to imitate its own unsuccessful proposals.
+            "recentEvents": [e for e in self.state["events"] if e["kind"] in
+                             {"action", "action_rejected", "yield", "error", "budget_stop"}][-6:],
+            "feedback": self.state["feedback"][-20:],
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
@@ -549,6 +554,7 @@ class Pilot:
         self.event("wake_started")
         deadline = time.monotonic() + 600
         unproductive = 0
+        productive = False
         for _ in range(max_steps):
             if time.monotonic() >= deadline:
                 break
@@ -568,6 +574,7 @@ class Pilot:
                 result = self.execute(action)
                 unproductive = unproductive + 1 if result.get("state") in {"cached_or_already_attempted", "unavailable", "already_known"} or result.get("empty") else 0
                 if unproductive == 0 and action["action"] != "wait":
+                    productive = True
                     self.state["lastUsefulActionAt"] = iso(self.clock())
                 if action["action"] == "wait":
                     break
@@ -578,6 +585,11 @@ class Pilot:
                 self.event("yield", reason="Two unproductive actions; wait for the next wake")
                 break
         self.state["health"] = "waiting"
+        self.state["unproductiveWakes"] = 0 if productive else self.state.get("unproductiveWakes", 0) + 1
+        if self.state["unproductiveWakes"] >= 2:
+            self.state["health"] = "waiting_no_progress"
+            self.state["nextWakeAt"] = iso(self.clock() + dt.timedelta(days=1))
+            self.event("yield", reason="Consecutive wakes made no useful progress; pause for a day rather than repeat the same work")
         self.state["lastError"] = None
         self.state["lastCompletedWakeAt"] = iso(self.clock())
         self.event("wake_completed")
@@ -600,6 +612,7 @@ class Pilot:
             "lastUsefulActionAt": self.state.get("lastUsefulActionAt"),
             "nextWakeAt": self.state.get("nextWakeAt"), "expiresAt": self.config["expiresAt"],
             "counts": counts, "usedToday": self.budget(), "totalUsdMicros": self.state["usdMicros"],
+            "unproductiveWakes": self.state.get("unproductiveWakes", 0),
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "publicDiscoveryOnly": self.config.get("publicDiscoveryOnly", False),
             "externalWrites": 0, "paidEmailEnrichments": 0, "lastError": self.state.get("lastError")}

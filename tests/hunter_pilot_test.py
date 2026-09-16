@@ -149,6 +149,18 @@ class PilotTests(unittest.TestCase):
         self.p.tick(force=True)
         self.assertIsNone(self.p.state["lastError"])
 
+    def test_repeated_unproductive_wakes_back_off_a_day(self):
+        self.p.tick(force=True)
+        self.p.tick(force=True)
+        self.assertEqual(self.p.state["health"], "waiting_no_progress")
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(days=1))
+
+    def test_model_context_contains_observations_not_its_own_proposal_logs(self):
+        self.p.event("proposed_action", proposal={"action": "search"})
+        self.p.event("model", usage={})
+        self.p.event("action_rejected", reason="Choose a different source")
+        self.assertEqual([e["kind"] for e in self.p.context()["recentEvents"]], ["action_rejected"])
+
     def test_suppressed_company_not_added(self):
         self.bridge.side_effect = lambda action, **kw: {"tenantId": "tenant-a", "tenantSlug": "synthetic", "allowed": action == "context", "reason": "SUPPRESSED"}
         with self.assertRaises(ValueError):
