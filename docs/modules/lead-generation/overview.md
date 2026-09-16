@@ -20,6 +20,11 @@ Lead generation, contacts, TradeMining, Apollo outreach is documented because co
 
 ## Hunter dry-run control plane
 
+The separate [autonomous research pilot](autonomous-pilot.md) implements the owner's September 2026
+source-agnostic, judgment-led research brief. It is isolated from the production workflow below, has
+no outreach/write tools, and distinguishes public-only evaluation from connected suppression/contact
+validation. Its runtime and activation status must be verified rather than inferred from this document.
+
 Hunter Phase 1 creates a daily, tenant-scoped prospecting plan without performing enrichment or outreach. It combines existing TradeMining company evidence with source-agnostic opportunity signals such as expansion, facility openings, retail rollouts, hiring, leadership changes, leases/construction, funding/acquisition, referrals, and manually researched news.
 
 The owner-approved planning allocation is 60% warehousing, 30% ocean/air, and 10% trucking. If one service-line bucket does not contain enough qualified companies, Hunter backfills with the highest-ranked remaining opportunities rather than padding the plan with weak records. The employee-facing Hunter Control Tower presents the five operating stages, a local-day production summary, separate current workflow inventory, attention queues, and a collapsed researched-opportunity evidence drill-down; policy, kill-switch, manual evidence, and dry-run controls live on the separate Automation Settings page. No Phase 1 path calls Apollo or sends a customer communication.
