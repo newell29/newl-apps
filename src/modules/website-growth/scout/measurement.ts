@@ -30,7 +30,7 @@ export async function measureScoutPage(tenantId: string, route: string, publishe
       }),
       source("enquiries", period, async () => {
         const rows = await prisma.websiteInboundSubmission.groupBy({ by: ["pageUrl"],
-          where: { tenantId, formType: { not: "account_setup" }, createdAt: {
+          where: { tenantId, entryMethod: "WEBSITE_FORM", formType: { not: "account_setup" }, createdAt: {
             gte: new Date(range.startDate + "T00:00:00Z"), lt: new Date(Date.parse(range.endDate + "T00:00:00Z") + DAY_MS) } },
           _count: { _all: true } });
         return { enquiries: rows.filter(row => safePath(row.pageUrl) === route).reduce((sum, row) => sum + row._count._all, 0) };

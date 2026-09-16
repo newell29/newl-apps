@@ -168,7 +168,10 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       const route = routePath(proposal.proposedRoute);
       const title = text(proposal.proposedTitle, "Proposed title", 250), hypothesis = text(proposal.hypothesis, "Proposal hypothesis");
       if (!route) throw new ScoutWorkError("A proposal needs a website route.");
-      const opportunityId = stableId(tenantId, `proposal:${route}:${title.toLowerCase()}`);
+      const existing = await tx.websiteGrowthOpportunity.findFirst({ where: { tenantId, targetPage: route,
+        topic: { equals: title, mode: "insensitive" }, status: { in: ["NEW", "REVIEWING", "APPROVED", "IN_PROGRESS"] } }, select: { id: true } });
+      // Reuse active work, but let a later outcome review improve a previously published page again.
+      const opportunityId = existing?.id ?? stableId(tenantId, `proposal:${route}:${title.toLowerCase()}:from:${id}`);
       await tx.websiteGrowthOpportunity.upsert({ where: { id: opportunityId, tenantId }, create: { id: opportunityId, tenantId,
         topic: title, reason: hypothesis, recommendation: hypothesis, targetPage: route,
         action: proposal.newPage === true ? WebsiteGrowthAction.CREATE_PAGE : WebsiteGrowthAction.IMPROVE_EXISTING_PAGE, status: "REVIEWING" }, update: {} });

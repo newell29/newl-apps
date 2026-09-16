@@ -18,7 +18,7 @@ Work states are Ready, Working, Needs review, Waiting, Done, and Dismissed. Wait
 
 Reconciliation finds existing page candidates, unanswered publisher replies, published page drafts, and one open-ended research item. A completed research brief makes room for the next one without a weekly quota; dated waits and unresolved reviews remain respected. The worker carries recent completed and dismissed decisions into its next investigation, excluding private publisher conversations from public-search turns. A rejected/deferred research item is remembered instead of being selected repeatedly. New research or an outcome review can propose a new page: Scout then receives a page task and prepares the full brief before seeking owner publishing approval. Researched publisher prospects go through the existing relevance, quality, spam, dedupe, retention, and human-approval controls. No prospect promotion authorizes outreach.
 
-Page results use the existing complete draft contract and claims/approval/build path. Approval/build/publication status is reconciled back onto the workboard. Published pages receive a separate outcome task. Raw analytics can still be refreshed independently through the existing weekday check-in.
+Page results use the existing complete draft contract and claims/approval/build path. Approval/build/publication status is reconciled back onto the workboard. Published pages receive a separate outcome task. A later outcome review can open a fresh improvement for the same published page; equivalent active page work is reused. Raw analytics can still be refreshed independently through the existing weekday check-in.
 
 ## Publisher conversations
 
@@ -28,7 +28,7 @@ The server refreshes replies before sending, rechecks the recorded latest reply,
 
 ## Outcome measurement
 
-The baseline is the 28 complete days before publication. The comparison is days 1–28 after publication, excluding publication day and allowing four days for data availability. Search Console clicks/impressions, GA4 sessions/engaged sessions, and aggregate first-party enquiries are fetched independently for the exact route. A failed source is unavailable, an empty analytics result is no matching rows, and neither becomes an invented zero. Successful empty first-party enquiry counts are zero.
+The baseline is the 28 complete days before publication. The comparison is days 1–28 after publication, excluding publication day and allowing four days for data availability. Search Console clicks/impressions, GA4 sessions/engaged sessions, and aggregate first-party website-form enquiries are fetched independently for the exact route. A failed source is unavailable, an empty analytics result is no matching rows, and neither becomes an invented zero. Successful empty first-party enquiry counts are zero. Manually entered inbound opportunities are excluded through the WEBSITE_FORM entry-method filter.
 
 The server saves the raw aggregate measurement separately from the model's interpretation. Scout must report evidence limitations, insufficient volume, seasonality, and concurrent changes. Before/after movement is association, not causal lift. Form submissions are enquiries; they are not qualified leads until an owner definition and qualification mapping exist.
 

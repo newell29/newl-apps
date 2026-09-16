@@ -18,7 +18,7 @@ const work = () => newWork("PAGE", "opportunity-synthetic", "Improve warehouse i
 const leased = () => ({ ...work(), state: "WORKING" as const, lease: "lease-synthetic", leaseUntil: new Date(now.getTime() + DAY_MS).toISOString() });
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   db.$transaction.mockImplementation(async (callback: (client: typeof db) => unknown) => callback(db));
   db.automationJobRun.updateMany.mockResolvedValue({ count: 1 });
   db.automationJobRun.count.mockResolvedValue(0);
@@ -170,4 +170,18 @@ it("replenishes completed research immediately and respects an existing dated re
   db.automationJobRun.upsert.mockClear(); research.state = "WAITING";
   await reconcileScoutWork("tenant-a", now);
   expect(db.automationJobRun.upsert).not.toHaveBeenCalled();
+});
+
+it("allows a new outcome review to improve the same published page while retaining active-work deduplication", async () => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT" } });
+  db.websiteGrowthOpportunity.findFirst.mockResolvedValue(null);
+  const input = { decision: "DELIVER", summary: "Another improvement is warranted", nextAction: "Prepare the next brief", artifact: { proposedTitle: "Warehouse guide", proposedRoute: "/resources/warehouse-guide", hypothesis: "Improve the next conversion step", newPage: false } };
+  await completeScoutWork("tenant-a", "first-outcome-review", "lease-synthetic", input, now);
+  await completeScoutWork("tenant-a", "later-outcome-review", "lease-synthetic", input, now);
+  const createdIds = db.websiteGrowthOpportunity.upsert.mock.calls.map(call => call[0].create.id);
+  expect(createdIds[0]).not.toEqual(createdIds[1]);
+  expect(db.websiteGrowthOpportunity.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a", status: { in: ["NEW", "REVIEWING", "APPROVED", "IN_PROGRESS"] } }) }));
+  db.websiteGrowthOpportunity.findFirst.mockResolvedValue({ id: "active-page-work" });
+  await completeScoutWork("tenant-a", "another-review", "lease-synthetic", input, now);
+  expect(db.websiteGrowthOpportunity.upsert).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "active-page-work", tenantId: "tenant-a" }, update: {} }));
 });

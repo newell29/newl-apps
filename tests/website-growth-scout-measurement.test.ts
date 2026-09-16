@@ -24,7 +24,7 @@ describe("Scout per-change measurement", () => {
     expect(result.status).toBe("PARTIAL_OR_MISSING");
     expect(result.sources.filter(row => row.source === "search_console").every(row => row.metrics === null)).toBe(true);
     expect(result.sources.find(row => row.source === "ga4")?.metrics).toEqual({ sessions: 40, engagedSessions: 20 });
-    expect(mocks.inbound).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a" }) }));
+    expect(mocks.inbound).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a", entryMethod: "WEBSITE_FORM", formType: { not: "account_setup" } }) }));
     expect(result.caveat).toContain("not causal");
   });
   it("reports completely missing evidence explicitly", async () => {
