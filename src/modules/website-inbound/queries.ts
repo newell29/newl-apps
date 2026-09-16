@@ -1,107 +1,99 @@
-import { WebsiteInboundStatus, type Prisma } from "@prisma/client";
-
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { prisma } from "@/server/db";
-import type { WebsiteInboundStatusFilter, WebsiteInboundTypeFilter } from "@/modules/website-inbound/types";
+import {
+  buildOpportunityWhere,
+  CLOSED_STATUSES,
+  PAGE_SIZE,
+  todayDate,
+  type OpportunityFilters
+} from "./opportunities";
 
 export async function getWebsiteInboundShell(
   context: AuthenticatedContext,
-  filters: {
-    status?: WebsiteInboundStatusFilter;
-    formType?: WebsiteInboundTypeFilter;
-    search?: string;
-  } = {}
+  filters: OpportunityFilters,
+  selected?: string,
+  activityPage = 1
 ) {
-  const where = buildWhere(context.tenantId, filters);
-  const baseWhere: Prisma.WebsiteInboundSubmissionWhereInput = {
-    tenantId: context.tenantId,
-    NOT: {
-      formType: "account_setup"
-    }
-  };
-  const [submissions, totalCount, newCount, formTypes, statusCounts] =
+  const base = { tenantId: context.tenantId, NOT: { formType: "account_setup" } };
+  const where = buildOpportunityWhere(context.tenantId, context.userId, filters);
+  const open = { ...base, status: { notIn: CLOSED_STATUSES } };
+  const [totalCount, newCount, openCount, overdueCount, owners, detail, formTypes] =
     await Promise.all([
-      prisma.websiteInboundSubmission.findMany({
-        where,
-        orderBy: {
-          createdAt: "desc"
-        },
-        take: 200
-      }),
+      prisma.websiteInboundSubmission.count({ where }),
+      prisma.websiteInboundSubmission.count({ where: { ...base, status: "NEW" } }),
+      prisma.websiteInboundSubmission.count({ where: open }),
       prisma.websiteInboundSubmission.count({
-        where: baseWhere
+        where: { ...open, followUpOn: { lt: new Date(`${todayDate()}T00:00:00Z`) } }
       }),
-      prisma.websiteInboundSubmission.count({
-        where: {
-          ...baseWhere,
-          status: WebsiteInboundStatus.NEW
-        }
+      prisma.membership.findMany({
+        where: { tenantId: context.tenantId },
+        select: { userId: true, user: { select: { name: true, email: true } } },
+        orderBy: { user: { name: "asc" } }
       }),
+      selected
+        ? prisma.websiteInboundSubmission.findFirst({ where: { ...base, id: selected } })
+        : null,
       prisma.websiteInboundSubmission.groupBy({
         by: ["formType"],
-        where: baseWhere,
-        _count: {
-          _all: true
-        },
-        orderBy: {
-          formType: "asc"
-        }
-      }),
-      prisma.websiteInboundSubmission.groupBy({
-        by: ["status"],
-        where: baseWhere,
-        _count: {
-          _all: true
-        }
+        where: base,
+        _count: { _all: true },
+        orderBy: { formType: "asc" }
       })
     ]);
-
+  const pageCount = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const page = Math.min(filters.page, pageCount);
+  const activityCount = detail
+    ? await prisma.websiteInboundActivity.count({
+        where: { tenantId: context.tenantId, submissionId: detail.id }
+      })
+    : 0;
+  const activityPages = Math.max(1, Math.ceil(activityCount / PAGE_SIZE));
+  const currentActivityPage = Math.min(Math.max(activityPage, 1), activityPages);
+  const [submissions, activities] = await Promise.all([
+    prisma.websiteInboundSubmission.findMany({
+      where,
+      orderBy: [{ receivedOn: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      select: {
+        id: true,
+        company: true,
+        name: true,
+        email: true,
+        phone: true,
+        status: true,
+        primaryNeed: true,
+        contactChannel: true,
+        source: true,
+        ownerUserId: true,
+        nextAction: true,
+        followUpOn: true,
+        receivedOn: true
+      }
+    }),
+    detail
+      ? prisma.websiteInboundActivity.findMany({
+          where: { tenantId: context.tenantId, submissionId: detail.id },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          skip: (currentActivityPage - 1) * PAGE_SIZE,
+          take: PAGE_SIZE
+        })
+      : []
+  ]);
   return {
     submissions,
-    metrics: {
-      totalCount,
-      newCount,
-      visibleCount: submissions.length
-    },
-    formTypes: formTypes.map((entry) => ({
-      formType: entry.formType,
-      count: entry._count._all
+    detail,
+    activities,
+    formTypes,
+    activityCount,
+    activityPage: currentActivityPage,
+    activityPages,
+    owners: owners.map((owner) => ({
+      id: owner.userId,
+      label: owner.user.name || owner.user.email
     })),
-    statusCounts: statusCounts.map((entry) => ({
-      status: entry.status,
-      count: entry._count._all
-    }))
-  };
-}
-
-function buildWhere(
-  tenantId: string,
-  filters: {
-    status?: WebsiteInboundStatusFilter;
-    formType?: WebsiteInboundTypeFilter;
-    search?: string;
-  }
-): Prisma.WebsiteInboundSubmissionWhereInput {
-  const search = filters.search?.trim();
-
-  return {
-    tenantId,
-    NOT: {
-      formType: "account_setup"
-    },
-    ...(filters.status && filters.status !== "ALL" ? { status: filters.status } : {}),
-    ...(filters.formType && filters.formType !== "ALL" ? { formType: filters.formType } : {}),
-    ...(search
-      ? {
-          OR: [
-            { name: { contains: search, mode: "insensitive" } },
-            { email: { contains: search, mode: "insensitive" } },
-            { company: { contains: search, mode: "insensitive" } },
-            { primaryNeed: { contains: search, mode: "insensitive" } },
-            { formType: { contains: search, mode: "insensitive" } },
-            { source: { contains: search, mode: "insensitive" } }
-          ]
-        }
-      : {})
+    metrics: { totalCount, newCount, openCount, overdueCount },
+    page,
+    pageCount
   };
 }
