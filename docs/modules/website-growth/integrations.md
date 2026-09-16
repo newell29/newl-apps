@@ -79,3 +79,7 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which status values map to employee-approved business language? Requires employee confirmation.
 - Which write actions should require two-person approval? Requires owner confirmation.
 - Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+
+## Inbound opportunity attribution
+
+The Inbound Opportunities module now also stores manual phone/email/referral enquiries. Form count, landing-page aggregation and inbound evidence refresh restrict `entryMethod=WEBSITE_FORM`; source Website on a manual entry does not imply a form conversion. Original website payloads remain preserved when working contact/service details are edited.
