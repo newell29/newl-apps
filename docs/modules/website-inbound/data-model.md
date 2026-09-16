@@ -1,53 +1,13 @@
-# Website inbound submissions: Data Model
+# Inbound opportunity data model
 
-> Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
+`WebsiteInboundSubmission` remains the canonical opportunity. Existing contact and `primaryNeed` fields store the editable working details. The original form `fields` JSON and `pageUrl` remain evidence.
 
-## Purpose and status
+Added fields: `entryMethod` (WEBSITE_FORM/MANUAL), `contactChannel`, `ownerUserId`, date-only `receivedOn`/`followUpOn`, `nextAction`, `closedReason`, `phoneNormalized`, `revision`, `creationKey`, `createdByUserId`, and `lastActivityAt`.
 
-Website inbound submissions is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-inbound/page.tsx`, `src/app/api/website-inbound/route.ts`, `src/modules/website-inbound/*`, website inbound model/tests if present.
+`WebsiteInboundActivity` stores CREATED, UPDATED, and NOTE events with `tenantId`, `submissionId`, author ID/name snapshot, timestamp, optional note body, and field-level before/after changes. A composite `(tenantId, submissionId)` foreign key prevents activities from referring to another tenant's opportunity. Notes have no overwrite/delete operation.
 
-## Workflow / rules summary
+The owner references the tenant's Membership through `(tenantId, ownerUserId)`. An assigned membership cannot be deleted until its opportunities are reassigned or unassigned. Assignment changes do not alter permissions.
 
-- Entry points are protected authenticated pages and/or API routes for this module.
-- Server-side pages and mutating APIs should validate tenant context and module entitlement before data access.
-- Data persistence uses tenant-scoped Prisma models where a database model exists.
-- External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
-- Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
+Updates use `(tenantId, id, revision)` optimistic concurrency. Creation uses a tenant-scoped unique request key plus a serializable duplicate check. An identical retried request from its creator returns the existing record. Notes, updates and audit entries are written in the same transaction. Author names are snapshots so history remains readable after identity changes.
 
-## Data model
-
-Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
-
-```mermaid
-flowchart LR
-  UI[Authenticated UI/API] --> Auth[Auth + module guard]
-  Auth --> Service[Module service]
-  Service --> DB[(Tenant-scoped Prisma tables)]
-  Service --> Ext[External services when configured]
-```
-
-## Permissions
-
-Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
-
-## Failure modes
-
-Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
-
-## Testing
-
-Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
-
-## Source map
-
-| Responsibility | Main files | Supporting files | Tests |
-|---|---|---|---|
-| UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
-| Services/actions/queries | `src/modules/website*` or evidence paths above | `src/server/*` | module-named tests |
-| Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
-
-## Open questions
-
-- Which status values map to employee-approved business language? Requires employee confirmation.
-- Which write actions should require two-person approval? Requires owner confirmation.
-- Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+Migration `20260916143000_inbound_opportunities` adds schema only plus a backfill of historical enquiry dates from creation time (Toronto date), last activity from update time, and digits-only phone matching. Existing status values and original payloads are unchanged; the existing rows default to WEBSITE_FORM. Database application needs explicit approval. No database migration is performed by local Prisma client generation or schema-diff generation.

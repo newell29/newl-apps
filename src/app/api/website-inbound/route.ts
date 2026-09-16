@@ -6,6 +6,7 @@ import {
   isLikelySpamWebsiteInboundSubmission,
   stripWebsiteInboundSystemFields
 } from "@/modules/website-inbound/spam";
+import { normalizePhone, todayDate } from "@/modules/website-inbound/opportunities";
 import { summarizeWebsiteInboundFields } from "@/modules/website-inbound/summary";
 import type { WebsiteInboundSubmissionInput } from "@/modules/website-inbound/types";
 
@@ -107,7 +108,9 @@ export async function POST(request: Request) {
       source: payload.source ?? "website",
       pageUrl: payload.pageUrl,
       fields,
-      ...summary
+      ...summary,
+      phoneNormalized: normalizePhone(summary.phone),
+      receivedOn: new Date(`${todayDate()}T00:00:00Z`)
     },
     select: {
       id: true,

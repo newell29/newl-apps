@@ -40,6 +40,30 @@ enum WebsiteInboundStatus {
   QUALIFIED
   CONVERTED
   CLOSED
+  QUOTE_SENT
+  WON
+  LOST
+  NURTURE
+  DISQUALIFIED
+}
+
+enum WebsiteInboundEntryMethod {
+  WEBSITE_FORM
+  MANUAL
+}
+
+enum WebsiteInboundChannel {
+  WEBSITE_FORM
+  PHONE
+  EMAIL
+  REFERRAL
+  OTHER
+}
+
+enum WebsiteInboundActivityType {
+  CREATED
+  UPDATED
+  NOTE
 }
 
 enum WebsiteGrowthOpportunityStatus {
@@ -827,6 +851,7 @@ model Membership {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  inboundOpportunities WebsiteInboundSubmission[]
 
   @@unique([tenantId, userId])
   @@index([tenantId, role])
@@ -905,12 +930,47 @@ model WebsiteInboundSubmission {
   phone       String?
   primaryNeed String?
   fields      Json
+  entryMethod WebsiteInboundEntryMethod @default(WEBSITE_FORM)
+  contactChannel WebsiteInboundChannel @default(WEBSITE_FORM)
+  ownerUserId String?
+  receivedOn DateTime @default(now()) @db.Date
+  nextAction String?
+  followUpOn DateTime? @db.Date
+  closedReason String?
+  phoneNormalized String?
+  revision Int @default(0)
+  creationKey String?
+  createdByUserId String?
+  lastActivityAt DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner Membership? @relation(fields: [tenantId, ownerUserId], references: [tenantId, userId], onDelete: NoAction)
+  activities WebsiteInboundActivity[]
 
+  @@unique([tenantId, id])
+  @@unique([tenantId, creationKey])
+  @@index([tenantId, ownerUserId])
+  @@index([tenantId, followUpOn])
+  @@index([tenantId, phoneNormalized])
   @@index([tenantId, createdAt])
   @@index([tenantId, status])
   @@index([tenantId, formType])
+}
+
+model WebsiteInboundActivity {
+  id String @id @default(cuid())
+  tenantId String
+  submissionId String
+  type WebsiteInboundActivityType
+  body String?
+  changes Json?
+  actorUserId String
+  actorName String
+  createdAt DateTime @default(now())
+
+  submission WebsiteInboundSubmission @relation(fields: [tenantId, submissionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, submissionId, createdAt])
 }
 
 model SupplyChainDesignProject {

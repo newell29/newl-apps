@@ -159,6 +159,7 @@ export async function getWebsiteGrowthShell(
         formType: {
           not: "account_setup"
         },
+        entryMethod: "WEBSITE_FORM",
         createdAt: {
           gte: last30Days
         }
@@ -171,6 +172,7 @@ export async function getWebsiteGrowthShell(
         formType: {
           not: "account_setup"
         },
+        entryMethod: "WEBSITE_FORM",
         pageUrl: {
           not: null
         }

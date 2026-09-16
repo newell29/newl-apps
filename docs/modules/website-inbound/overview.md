@@ -1,53 +1,11 @@
-# Website inbound submissions: Overview
+# Inbound opportunities
 
-> Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
+> Evidence status: implemented on the inbound-opportunity-tracking feature branch; deployment and migrations require review.
 
-## Purpose and status
+The existing `/website-inbound` module is now the shared inbound opportunity queue for website forms and manually entered phone, email, referral, and other enquiries. The navigation label is **Inbound Opportunities**; the route and `WEBSITE_INBOUND` entitlement remain unchanged.
 
-Website inbound submissions is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-inbound/page.tsx`, `src/app/api/website-inbound/route.ts`, `src/modules/website-inbound/*`, website inbound model/tests if present.
+Both intake types support edits to company, contact name, email, phone, service requirements, source, enquiry date, owner, status, next action, follow-up date, and outcome reason. Original website payloads and page URLs are retained separately. Notes are appended with author and timestamp; field changes appear in the same activity history.
 
-## Workflow / rules summary
+Default view: all open opportunities. Quick views: New, My opportunities, Due today, Overdue, All opportunities. Filters include status, channel, owner, source, service, text search, form type, and inclusive enquiry dates. Both the queue and activity history paginate in groups of 25.
 
-- Entry points are protected authenticated pages and/or API routes for this module.
-- Server-side pages and mutating APIs should validate tenant context and module entitlement before data access.
-- Data persistence uses tenant-scoped Prisma models where a database model exists.
-- External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
-- Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
-
-## Data model
-
-Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
-
-```mermaid
-flowchart LR
-  UI[Authenticated UI/API] --> Auth[Auth + module guard]
-  Auth --> Service[Module service]
-  Service --> DB[(Tenant-scoped Prisma tables)]
-  Service --> Ext[External services when configured]
-```
-
-## Permissions
-
-Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
-
-## Failure modes
-
-Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
-
-## Testing
-
-Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
-
-## Source map
-
-| Responsibility | Main files | Supporting files | Tests |
-|---|---|---|---|
-| UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
-| Services/actions/queries | `src/modules/website*` or evidence paths above | `src/server/*` | module-named tests |
-| Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
-
-## Open questions
-
-- Which status values map to employee-approved business language? Requires employee confirmation.
-- Which write actions should require two-person approval? Requires owner confirmation.
-- Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+See [workflow](workflow.md), [business rules](business-rules.md), [data model](data-model.md), and [testing](testing.md).
