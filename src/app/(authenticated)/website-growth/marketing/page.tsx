@@ -4,8 +4,9 @@ import { PageHeader } from "@/components/page-header";
 import { requireModule, resolveRoleCanMutate } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 import { scoutWorkspace } from "@/modules/website-growth/scout/store";
-import { proposeScoutPageAction, refreshScoutWorkAction, reviewScoutWorkAction, saveScoutMissionAction, sendScoutReplyAction } from "@/modules/website-growth/scout/actions";
+import { proposeScoutPageAction, refreshScoutWorkAction, saveScoutMissionAction, sendScoutReplyAction } from "@/modules/website-growth/scout/actions";
 import { record, type Work } from "@/modules/website-growth/scout/model";
+import { ScoutReviewForm } from "@/modules/website-growth/scout/review-form";
 import { prisma } from "@/server/db";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export default async function ScoutWorkPage() {
     {workspace.truncated && <p role="status">The work history limit has been reached. Archive reviewed history before further research.</p>}
     <div className="grid items-start gap-5 xl:grid-cols-3">
       <WorkColumn title="Needs your decision" empty="No finished work needs a decision." items={items.filter(item => item.state === "NEEDS_REVIEW")} canReview={canReview} />
-      <WorkColumn title="Scout is pursuing" empty={canReview ? "No research is underway. Find outstanding work or add a priority." : "No research is underway."} items={items.filter(item => ["READY", "WORKING"].includes(item.state))} canReview={canReview} />
+      <WorkColumn title="Ready and in progress" empty={canReview ? "No research is underway. Find outstanding work or add a priority." : "No research is underway."} items={items.filter(item => ["READY", "WORKING"].includes(item.state))} canReview={canReview} />
       <WorkColumn title="Waiting and measuring" empty="No scheduled reviews or external waits." items={items.filter(item => item.state === "WAITING")} canReview={canReview} />
     </div>
     {canReview && <details className="rounded-lg border border-border bg-card p-5"><summary className="cursor-pointer font-semibold">Give Scout a page to investigate</summary>
@@ -78,9 +79,7 @@ function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEma
     </div></details>}
     <details className="mt-3"><summary className="cursor-pointer text-xs text-mutedForeground">Progress and decisions</summary><ol className="mt-2 space-y-2 text-xs">{item.history.slice(-8).map((event, index) => <li key={index}>{new Date(event.at).toLocaleDateString("en-CA")} — {event.summary}</li>)}</ol></details>
     {canReview && item.kind === "RELATIONSHIP" && item.state === "NEEDS_REVIEW" && item.recipientEmail && <form action={sendScoutReplyAction} className="mt-4 space-y-2"><input type="hidden" name="id" value={item.id} /><input type="hidden" name="revision" value={item.revision} /><label className="flex gap-2 text-xs"><input type="checkbox" name="confirmSend" required />I approve sending this response to the recipient shown above.</label><button className={button}>Approve and send response</button></form>}
-    {canReview && item.state !== "WORKING" && !item.evidence.replySend && <form action={reviewScoutWorkAction} className="mt-4 space-y-2"><input type="hidden" name="id" value={item.id} /><input type="hidden" name="revision" value={item.revision} />
-      <label className="text-xs">Feedback / next action<textarea name="feedback" required maxLength={2000} className={field} /></label><div className="flex flex-wrap gap-2"><button name="decision" value="REVISE" className={button}>Return to Scout</button>
-        {!item.draftId && <button name="decision" value="ACCEPT" className={button}>Mark reviewed</button>}<button name="decision" value="DISMISS" className={button}>Dismiss</button></div></form>}
+    {canReview && item.state !== "WORKING" && !item.evidence.replySend && <ScoutReviewForm id={item.id} revision={item.revision} hasDraft={Boolean(item.draftId)} />}
   </article>;
 }
 

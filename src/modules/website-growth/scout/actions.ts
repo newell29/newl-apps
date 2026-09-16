@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { requireModule, requireMutationAccess, requireRole } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 import { proposeScoutPage, reconcileScoutWork, reviewScoutWork, saveScoutMission } from "./store";
-import { text } from "./model";
+import { ScoutWorkError, text } from "./model";
 import { approveAndSendScoutReply } from "./reply";
 
 async function reviewer() {
@@ -28,12 +28,17 @@ export async function refreshScoutWorkAction() {
   revalidatePath("/website-growth");
   revalidatePath("/website-growth/marketing");
 }
-export async function reviewScoutWorkAction(form: FormData) {
-  const context = await reviewer();
-  await reviewScoutWork(context.tenantId, context.userId, text(form.get("id"), "Work ID", 100), Number(form.get("revision")),
-    text(form.get("decision"), "Decision", 50), text(form.get("feedback"), "Feedback", 2000));
-  revalidatePath("/website-growth");
-  revalidatePath("/website-growth/marketing");
+export async function reviewScoutWorkAction(form: FormData): Promise<{ error: string | null }> {
+  try {
+    const context = await reviewer();
+    await reviewScoutWork(context.tenantId, context.userId, text(form.get("id"), "Work ID", 100), Number(form.get("revision")),
+      text(form.get("decision"), "Decision", 50), text(form.get("feedback"), "Feedback", 2000));
+    revalidatePath("/website-growth");
+    revalidatePath("/website-growth/marketing");
+    return { error: null };
+  } catch (error) {
+    return { error: error instanceof ScoutWorkError ? error.message : "Scout could not confirm this decision. Reload the workboard and check its saved state before trying again." };
+  }
 }
 export async function proposeScoutPageAction(form: FormData) {
   const context = await reviewer();

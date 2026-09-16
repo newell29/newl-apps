@@ -52,3 +52,12 @@ it("shows recorded source measurements separately from the model with missing so
   expect(html).toContain("42 clicks"); expect(html).toContain("No matching data"); expect(html).toContain("Unavailable");
   expect(html).toContain("Wait for more evidence."); expect(html).toContain("2026-01-01");
 });
+
+it("renders the decision as a form control that survives submission without a clicked-button value", async () => {
+  mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
+    items: [{ ...newWork("PAGE", "opportunity-synthetic", "Investigate page", "Improve clarity", "/resources/guide"), id: "work-synthetic" }] });
+  const html = renderToStaticMarkup(await ScoutWorkPage());
+  expect(html).toMatch(/<select[^>]*name="decision"/);
+  expect(html).toContain("Save decision");
+  expect(html).toMatch(/<option[^>]*value="REVISE"[^>]*selected/);
+});
