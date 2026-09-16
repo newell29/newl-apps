@@ -55,7 +55,7 @@ export default async function WebsiteGrowthBacklinksPage({
       <PageHeader
         eyebrow="Website Growth · Authority"
         title="Curated backlink opportunities"
-        description="Scout reviews Semrush broadly, but only strong, deduplicated and actionable prospects enter this bounded queue."
+        description="Scout researches relevant publishers and industry relationships. Review prospects with supporting evidence and a useful outreach angle."
       />
 
       <BacklinkNavigation />
@@ -77,7 +77,7 @@ export default async function WebsiteGrowthBacklinksPage({
       ) : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <MetricCard label="Needs your review" value={groups.REVIEW.length} caption="Curated—not raw Semrush rows" />
+        <MetricCard label="Needs your review" value={groups.REVIEW.length} caption="Reviewed publisher prospects" />
         <MetricCard label="Approved / underway" value={groups.ACTIVE.length} caption="Ready for the execution worker" />
         <MetricCard label="Blocked this run" value={blockedThisRun} caption="New blocks from the latest executor cycle" />
         <MetricCard label="Blocked total" value={blockedTotal} caption="All unresolved blocked opportunities" />
@@ -144,9 +144,9 @@ export default async function WebsiteGrowthBacklinksPage({
 
       <section className="rounded-lg border border-border bg-card p-5 shadow-sm">
         <div className="grid gap-4 lg:grid-cols-4">
-          <FlowStep number="1" title="Scout discovers" body="Semrush backlink gaps, new/lost links and referring domains are reviewed weekly." />
+          <FlowStep number="1" title="Scout discovers" body="Scout chooses research from marketing priorities, available evidence, and saved decisions." />
           <FlowStep number="2" title="Codex filters" body="Duplicates, weak directories, paid dofollow offers and risky sites are removed before storage." />
-          <FlowStep number="3" title="You approve" body="Approve one prospect or the complete weekly batch. Approval does not authorize payment." />
+          <FlowStep number="3" title="You approve" body="Approve an individual prospect or the reviewed batch. Approval does not authorize payment." />
           <FlowStep number="4" title="Agent executes" body="The executor claims approved work, records outreach or submissions, and verifies live links." />
         </div>
       </section>

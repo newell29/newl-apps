@@ -134,6 +134,11 @@ PY
 
 scout_state="$(sed -n '1p' "${temporary_directory}/state.txt")"
 run_id="$(sed -n '2p' "${temporary_directory}/state.txt")"
+if [[ "${scout_state}" == "managed" ]]; then
+  echo "Scout marketing owns research; this legacy discovery trigger has no work."
+  completed=1
+  exit 0
+fi
 if [[ "${scout_state}" == "already_running" ]]; then
   send_website_growth_teams_message \
     "Website Growth Scout checked in, but another Scout run is already active. No duplicate run was started; the active run will send its own result when it finishes."
