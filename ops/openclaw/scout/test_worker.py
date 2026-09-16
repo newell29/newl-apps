@@ -66,6 +66,25 @@ class WorkerTests(unittest.TestCase):
             self.assertIn("Already answered on the service page", prompt)
             self.assertNotIn("Private publisher correspondence", prompt)
 
+    def test_embedded_page_contract_retains_all_referenced_definitions(self):
+        schema = worker.result_schema("PAGE")
+        references = []
+        def visit(value):
+            if isinstance(value, dict):
+                if "$ref" in value:
+                    references.append(value["$ref"])
+                for child in value.values(): visit(child)
+            elif isinstance(value, list):
+                for child in value: visit(child)
+        visit(schema)
+        self.assertGreater(len(references), 0)
+        for reference in references:
+            self.assertTrue(reference.startswith("#/"))
+            target = schema
+            for part in reference[2:].split("/"):
+                target = target[part]
+            self.assertIsInstance(target, dict)
+
     def test_every_kind_has_a_complete_output_schema(self):
         for kind in ["PAGE", "RESEARCH", "RELATIONSHIP", "MEASUREMENT"]:
             schema = worker.result_schema(kind)

@@ -56,7 +56,8 @@ def result_schema(kind):
     string = {"type": "string"}
     if kind == "PAGE":
         path = Path(__file__).resolve().parent.parent / "skills/website-growth-scout/scout-output.schema.json"
-        artifact = json.loads(path.read_text())["properties"]["drafts"]["items"]["properties"]["draft"]
+        page_schema = json.loads(path.read_text())
+        artifact = page_schema["properties"]["drafts"]["items"]["properties"]["draft"]
     elif kind == "RELATIONSHIP":
         artifact = object_schema({"subject": string, "body": string, "rationale": string})
     else:
@@ -64,9 +65,12 @@ def result_schema(kind):
                                   "limitations": string, "proposedTitle": string, "proposedRoute": string,
                                   "hypothesis": string, "newPage": {"type": "boolean"},
                                   "prospects": {"type": "array", "maxItems": 5, "items": json.loads((Path(__file__).resolve().parent.parent / "skills/website-growth-scout/scout-output.schema.json").read_text())["properties"]["backlinks"]["properties"]["prospects"]["items"]}})
-    return object_schema({"decision": {"type": "string", "enum": ["DELIVER", "WAIT", "DISMISS", "CONTINUE"]},
+    schema = object_schema({"decision": {"type": "string", "enum": ["DELIVER", "WAIT", "DISMISS", "CONTINUE"]},
                           "summary": string, "nextAction": string, "reviewInDays": {"type": "integer", "minimum": 1, "maximum": 90},
                           "artifact": {"anyOf": [artifact, {"type": "null"}]}})
+    if kind == "PAGE":
+        schema["$defs"] = page_schema["$defs"]
+    return schema
 
 
 RULES = """You are Scout, Newl's inbound marketing specialist. Own useful outcomes and finish existing work.
