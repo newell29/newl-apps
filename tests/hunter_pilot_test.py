@@ -1,16 +1,21 @@
 """Synthetic regression cases; no network, credentials or production lead fixtures."""
 import datetime as dt
 import json
+import os
 import importlib.util
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
 import unittest
 import urllib.error
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops/openclaw/hunter"))
 from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, digest, UTC, ZONE
+from hunter_pilot import LocalModel, configured_model, MISSION, TOOLS, SCHEMA
+from pilot_subscription_model import (SubscriptionModel, subscription_environment,
+    require_subscription, output_schema, run_bounded, DISABLED_FEATURES)
 
 
 class PilotTests(unittest.TestCase):
@@ -149,11 +154,142 @@ class PilotTests(unittest.TestCase):
         self.p.tick(force=True)
         self.assertIsNone(self.p.state["lastError"])
 
-    def test_repeated_unproductive_wakes_back_off_a_day(self):
+    def test_two_stalled_wakes_leave_room_to_change_direction(self):
         self.p.tick(force=True)
         self.p.tick(force=True)
-        self.assertEqual(self.p.state["health"], "waiting_no_progress")
-        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(days=1))
+        self.assertEqual(self.p.state["health"], "waiting")
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(minutes=30))
+
+    def test_repeated_stalls_surface_review_and_stop_until_next_business_day(self):
+        self.time = dt.datetime(2026, 9, 18, 19, tzinfo=UTC)  # Friday afternoon
+        for _ in range(3):
+            self.p.tick(force=True)
+        self.assertEqual(self.p.state["health"], "needs_review")
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), dt.datetime(2026, 9, 21, 13, tzinfo=UTC))
+        self.time += dt.timedelta(minutes=30)
+        self.p.tick()
+        self.assertEqual(self.model.call_count, 3)
+
+    def test_one_clue_cannot_pause_global_research_for_a_day(self):
+        result = self.action("wait", reason="One property page is unavailable", minutes=1440)
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(minutes=30))
+        self.assertEqual(result["requestedMinutes"], 1440)
+        self.assertEqual(result["minutes"], 30)
+
+    def test_upgrade_recovers_existing_long_wait_without_resetting_usage_or_history(self):
+        self.p.state.update(health="waiting", nextWakeAt=(self.time + dt.timedelta(days=1)).isoformat(),
+                            lastCompletedWakeAt=(self.time - dt.timedelta(hours=2)).isoformat())
+        self.p.budget()["modelCalls"] = 38
+        self.p.state["attempts"]["prior"] = {"action": "search", "query": "synthetic old clue", "at": self.time.isoformat()}
+        self.p.tick()
+        self.assertEqual(self.model.call_count, 1)
+        self.assertEqual(self.p.budget()["modelCalls"], 39)
+        self.assertIn("prior", self.p.state["attempts"])
+        self.assertEqual(len([e for e in self.p.state["events"] if e["kind"] == "schedule_recovered"]), 1)
+
+    def test_upgrade_does_not_shorten_budget_or_error_waits(self):
+        for health in ("budget_wait", "error", "needs_review"):
+            wake = (self.time + dt.timedelta(days=1)).isoformat()
+            self.p.state.update(health=health, nextWakeAt=wake)
+            self.p.state.pop("schedulePolicyVersion", None)
+            self.p.tick()
+            self.assertEqual(self.p.state["nextWakeAt"], wake)
+        self.model.assert_not_called()
+
+    def test_upgrade_after_graceful_stop_uses_recorded_wait_cause(self):
+        wake = (self.time + dt.timedelta(days=1)).isoformat()
+        self.p.state.update(health="stopped", nextWakeAt=wake,
+                            lastCompletedWakeAt=(self.time - dt.timedelta(hours=2)).isoformat())
+        self.p.event("action", action="wait", result={"state": "waiting", "reason": "One clue is unavailable"})
+        self.p.tick()
+        self.assertEqual(self.model.call_count, 1)
+        self.assertNotEqual(self.p.state["nextWakeAt"], wake)
+
+    def test_stopped_budget_error_or_unknown_schedule_is_not_recovered(self):
+        for kind in ("budget_stop", "error", None):
+            wake = (self.time + dt.timedelta(days=1)).isoformat()
+            self.p.state.update(health="stopped", nextWakeAt=wake, events=[])
+            self.p.state.pop("schedulePolicyVersion", None)
+            if kind:
+                self.p.event(kind)
+            self.p.tick()
+            self.assertEqual(self.p.state["nextWakeAt"], wake)
+        self.model.assert_not_called()
+
+    def test_recovered_wait_does_not_bypass_stop_or_exhausted_budget(self):
+        self.p.state.update(health="waiting", nextWakeAt=(self.time + dt.timedelta(days=1)).isoformat(),
+                            lastCompletedWakeAt=(self.time - dt.timedelta(hours=2)).isoformat())
+        self.p.budget()["modelCalls"] = 40
+        with self.assertRaises(BudgetExceeded):
+            self.p.tick()
+        self.path.joinpath("STOP").touch()
+        with self.assertRaisesRegex(RuntimeError, "STOP_REQUESTED"):
+            self.p.tick(force=True)
+        self.model.assert_not_called()
+
+    def test_default_wakes_continue_research_across_the_day(self):
+        counter = 0
+        def model(_context):
+            nonlocal counter
+            counter += 1
+            return ({"action": "search", "purpose": "Investigate a new market clue", "args": {
+                "query": f"synthetic wholesale brand {counter}", "direction": "gta"}}, {})
+        self.p.model = model
+        for _ in range(4):
+            self.p.tick()
+            self.time += dt.timedelta(minutes=30)
+        self.assertEqual(counter, 12)
+        self.assertEqual(self.p.budget()["modelCalls"], 12)
+        self.assertEqual(self.p.state["unproductiveWakes"], 0)
+
+    def test_unsaved_company_decision_can_recover_by_exploring_another_clue(self):
+        self.model.side_effect = [
+            ({"action": "decide", "purpose": "Abandon a weak clue", "args": {
+                "company": "provider.example", "status": "parked", "summary": "Provider, not a proven buyer",
+                "uncertainty": "No partnership basis found", "nextAction": "Move to another clue",
+                "evidenceIds": [], "revisitDays": 30, "revisitWhen": "A referral relationship emerges"}}, {}),
+            ({"action": "search", "purpose": "Abandon that provider and investigate goods distributors", "args": {
+                "query": "synthetic Canadian housewares distributors", "direction": "gta"}}, {}),
+            ({"action": "wait", "purpose": "Continue next session", "args": {"minutes": 30, "reason": "Resume saved clues"}}, {})]
+        self.p.tick()
+        self.assertFalse(self.p.state["companies"])
+        self.assertEqual(self.search.call_count, 1)
+        self.assertEqual(self.p.state["unproductiveWakes"], 0)
+        self.assertEqual(self.p.context()["researchCoverage"]["directions"]["gta"]["attempts"], 1)
+
+    def test_search_coverage_survives_restart_and_records_empty_attempts(self):
+        self.search.return_value = []
+        self.action("search", query="synthetic retail expansion", direction="charlotte")
+        restarted = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
+        coverage = restarted.context()["researchCoverage"]
+        self.assertEqual(coverage["directions"]["charlotte"]["attempts"], 1)
+        self.assertEqual(coverage["directions"]["gta"]["attempts"], 0)
+        self.assertEqual(coverage["directions"]["charlotte"]["recentQueries"], ["synthetic retail expansion"])
+
+    def test_old_partial_search_history_is_not_invented_or_reset(self):
+        self.p.state["attempts"] = {
+            "old-complete": {"action": "search", "at": self.time.isoformat(), "query": "synthetic old search", "result": {"direction": "ocean"}},
+            "old-interrupted": {"action": "search", "at": self.time.isoformat(), "query": "synthetic interrupted search"}}
+        coverage = self.p.context()["researchCoverage"]
+        self.assertEqual(coverage["directions"]["ocean"]["attempts"], 1)
+        self.assertEqual(coverage["unknownDirectionAttempts"], 1)
+        self.assertEqual(len(self.p.state["attempts"]), 2)
+
+    def test_unread_clues_preserve_older_options_without_retrying_failed_pages(self):
+        self.action("search", query="synthetic wholesale", direction="gta")
+        clues = self.p.context()["unreadClues"]
+        self.assertEqual(clues[0]["url"], "https://supply.example/")
+        self.fetch.return_value = (None, None)
+        self.action("fetch", url="https://supply.example/")
+        self.assertEqual(self.p.context()["unreadClues"], [])
+        self.time += dt.timedelta(days=2)
+        self.assertEqual(self.p.context()["unreadClues"], [])
+
+    def test_pending_clues_do_not_resurface_parked_or_blocked_company_domains(self):
+        company = self.open()
+        for status in ("parked", "blocked", "rejected"):
+            company["status"] = status
+            self.assertEqual(self.p.context()["unreadClues"], [])
 
     def test_model_context_contains_observations_not_its_own_proposal_logs(self):
         self.p.event("proposed_action", proposal={"action": "search"})
@@ -327,6 +463,177 @@ class PilotTests(unittest.TestCase):
         result = self.action("fetch", company="Synthetic Supply", url="https://supply.example/")
         self.assertTrue(result["evidenceIds"])
         self.assertEqual(self.p.state['evidence'][result['evidenceIds'][0]]['company'], 'supply.example')
+
+    def enable_comparison(self):
+        self.config["comparisonCases"] = 10
+        atomic_write(self.path / "config.json", self.config)
+        self.p.config = self.config
+
+    def test_comparison_uses_same_context_without_executing_shadows(self):
+        self.enable_comparison()
+        shadow = Mock(return_value=({"action": "send", "args": {}}, {}))
+        with patch("hunter_pilot.LocalModel", return_value=shadow):
+            self.p.tick(force=True)
+        self.assertEqual(self.p.budget()["modelCalls"], 3)
+        self.assertEqual(self.model.call_count, 1)
+        self.assertEqual(shadow.call_count, 2)
+        self.assertEqual(shadow.call_args_list[0].args, self.model.call_args.args)
+        self.assertEqual(self.model.call_args.args[0]["usedToday"]["modelCalls"], 0)
+        self.assertEqual([e["action"] for e in self.p.state["events"] if e["kind"] == "action"], ["wait"])
+        self.assertEqual(len(self.p.state["modelComparisons"]), 1)
+
+    def test_partial_comparison_stops_at_shared_budget_and_survives_restart(self):
+        self.enable_comparison()
+        self.p.budget()["modelCalls"] = 38
+        with patch("hunter_pilot.LocalModel", return_value=self.model):
+            self.p.tick(force=True)
+        self.assertEqual(self.p.budget()["modelCalls"], 40)
+        case = self.p.state["modelComparisons"][0]
+        self.assertEqual(len(case["shadows"]), 1)
+        self.assertEqual(case["incomplete"], "modelCalls")
+        restarted = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
+        self.assertEqual(restarted.state["modelComparisons"], [case])
+
+    def test_failed_shadow_is_visible_and_does_not_repeat_or_execute(self):
+        self.enable_comparison()
+        with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=TimeoutError)):
+            self.p.tick(force=True)
+        self.assertEqual(self.p.budget()["modelCalls"], 3)
+        self.assertEqual(len(self.p.state["modelComparisons"][0]["shadows"]), 2)
+        self.assertEqual(self.p.state["modelComparisons"][0]["shadows"][0]["error"], "TimeoutError")
+
+    def test_completed_comparison_limit_does_not_call_shadows(self):
+        self.enable_comparison()
+        self.p.state["modelComparisons"] = [{}] * 10
+        with patch("hunter_pilot.LocalModel") as factory:
+            self.p.tick(force=True)
+        factory.assert_not_called()
+
+    def test_stop_between_primary_and_shadow_prevents_more_inference(self):
+        self.enable_comparison()
+        self.p.stop_requested = True
+        with self.assertRaisesRegex(RuntimeError, "STOP_REQUESTED"):
+            self.p.tick(force=True)
+        self.model.assert_not_called()
+
+    def test_search_comparison_counts_cost_and_does_not_repeat_after_restart(self):
+        self.config.update(searchProvider="BRAVE", searchCostMicros=5000)
+        atomic_write(self.path / "config.json", self.config)
+        self.p.config = self.config
+        with patch("hunter_pilot.search_web", return_value=[]) as search:
+            self.p.compare_search(["Synthetic wholesale Canada"])
+            restarted = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
+            restarted.compare_search(["canada WHOLESALE synthetic"])
+        self.assertEqual(search.call_count, 2)
+        self.assertEqual(restarted.budget()["searches"], 2)
+        self.assertEqual(restarted.state["usdMicros"], 5000)
+        self.assertEqual(len(restarted.state["companies"]), 0)
+
+    def test_search_comparison_partial_failure_and_cash_limit_are_preserved(self):
+        self.config.update(searchProvider="BRAVE", searchCostMicros=5000)
+        atomic_write(self.path / "config.json", self.config)
+        self.p.config = self.config
+        self.p.state["usdMicros"] = 50_000_000
+        with patch("hunter_pilot.search_web", side_effect=TimeoutError) as search:
+            with self.assertRaises(BudgetExceeded):
+                self.p.compare_search(["synthetic"])
+        self.assertEqual(search.call_count, 1)
+        providers = next(iter(self.p.state["searchComparisons"].values()))["providers"]
+        self.assertEqual(providers["DUCKDUCKGO"]["state"], "unavailable")
+        self.assertNotIn("BRAVE", providers)
+
+
+class SubscriptionTests(unittest.TestCase):
+    def setUp(self):
+        self.model = SubscriptionModel("gpt-5.6-terra", MISSION, TOOLS, SCHEMA)
+
+    def test_api_keys_and_business_credentials_not_inherited(self):
+        with patch.dict(os.environ, {"HOME": "/synthetic", "OPENAI_API_KEY": "synthetic",
+                "INGESTION_API_TOKEN": "synthetic", "HUNTER_BRAVE_SEARCH_API_KEY": "synthetic"}, clear=True):
+            self.assertEqual(subscription_environment(), {"HOME": "/synthetic"})
+
+    def test_auth_failure_and_api_key_login_fail_closed(self):
+        for code, output in [(0, "Logged in using an API key"), (0, ""), (1, "Logged in using ChatGPT")]:
+            with patch("pilot_subscription_model.subprocess.run", return_value=Mock(returncode=code, stdout=output, stderr="")):
+                with self.assertRaisesRegex(RuntimeError, "CHATGPT_SUBSCRIPTION_REQUIRED"):
+                    require_subscription("/synthetic/codex", {})
+
+    def test_subscription_auth_uses_existing_cli_without_reading_tokens(self):
+        with patch("pilot_subscription_model.subprocess.run", return_value=Mock(returncode=0, stdout="", stderr="Logged in using ChatGPT")) as run:
+            require_subscription("/synthetic/codex", {})
+        self.assertEqual(run.call_args.args[0], ["/synthetic/codex", "login", "status"])
+
+    def test_unknown_provider_or_model_cannot_fall_back(self):
+        for config in [{"modelProvider": "OPENAI_API", "model": "gpt-5.6-terra"},
+                {"modelProvider": "CHATGPT_SUBSCRIPTION", "model": "other"}]:
+            with self.assertRaises(ValueError):
+                configured_model(config)
+
+    def test_strict_schema_covers_all_actions_and_nullable_optional_fields(self):
+        schema = output_schema(SCHEMA)
+        self.assertEqual(schema["type"], "object")
+        variants = schema["properties"]["decision"]["anyOf"]
+        self.assertEqual(len(variants), 6)
+        for row in variants:
+            args = row["properties"]["args"]
+            self.assertEqual(set(args["required"]), set(args["properties"]))
+        self.assertIn({"type": "null"}, variants[0]["properties"]["args"]["properties"]["company"]["anyOf"])
+
+    def invoke(self, events, result=None):
+        def run(command, prompt, environment):
+            self.assertIn("--ignore-user-config", command)
+            self.assertIn('web_search="disabled"', command)
+            self.assertIn('approval_policy="never"', command)
+            self.assertIn("read-only", command)
+            self.assertIn("gpt-5.6-terra", command)
+            for feature in DISABLED_FEATURES:
+                self.assertIn(feature, command)
+            if result is not None:
+                Path(command[command.index("--output-last-message") + 1]).write_text(json.dumps(result))
+            return "\n".join(json.dumps(e) for e in events)
+        with patch("pilot_subscription_model.resolve_cli", return_value="/synthetic/codex"), \
+             patch("pilot_subscription_model.require_subscription"), \
+             patch("pilot_subscription_model.run_bounded", side_effect=run):
+            return self.model({"synthetic": True})
+
+    def test_subscription_returns_one_decision_and_plan_usage(self):
+        action, usage = self.invoke([{"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 30}}],
+            {"decision": {"action": "search", "purpose": "Test", "args": {"query": "synthetic", "direction": "gta", "company": None}}})
+        self.assertNotIn("company", action["args"])
+        self.assertEqual(usage["billing"], "plan_usage")
+        self.assertFalse(usage["apiFallback"])
+        self.assertEqual(usage["inputTokens"], 100)
+
+    def test_missing_and_partial_model_outputs_are_not_accepted(self):
+        for events, result in [([], None), ([{"type": "turn.failed"}], None),
+                ([{"type": "turn.completed"}], {}), ([{"type": "turn.completed"}], {"decision": {}})]:
+            with self.assertRaises(RuntimeError):
+                self.invoke(events, result)
+
+    def test_unexpected_tool_event_rejects_model_response(self):
+        with self.assertRaisesRegex(RuntimeError, "MODEL_TOOL_USE_REJECTED"):
+            self.invoke([{"type": "item.completed", "item": {"type": "command_execution"}}])
+
+    def test_timeout_kills_child_process_group(self):
+        process = Mock(pid=12345)
+        process.communicate.side_effect = [subprocess.TimeoutExpired("synthetic", 180), ("", "")]
+        with patch("pilot_subscription_model.subprocess.Popen", return_value=process), \
+             patch("pilot_subscription_model.os.killpg") as kill:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                run_bounded(["synthetic"], "prompt", {})
+        kill.assert_called_once()
+
+    def test_local_thinking_has_bounded_output(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = json.dumps({"message": {"content": "{}"}}).encode()
+        with patch("hunter_pilot.urllib.request.urlopen", return_value=response) as call:
+            LocalModel("synthetic", thinking=True)({})
+        payload = json.loads(call.call_args.args[0].data)
+        self.assertTrue(payload["think"])
+        self.assertEqual(payload["options"]["num_predict"], 4096)
+        self.assertEqual(call.call_args.kwargs["timeout"], 180)
 
 
 if __name__ == "__main__":

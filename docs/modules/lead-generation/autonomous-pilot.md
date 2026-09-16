@@ -1,13 +1,16 @@
 # Hunter autonomous research pilot
 
-Evidence status: pilot implementation merged in PR #553; connected activation remains separate.
+Evidence status: pilot and machine-route correction merged in PRs #553/#554. The owner deployed the
+Production flag and the connected read-only pilot was validated on 2026-09-16. The research-continuity
+correction described below is a separate reviewed rollout; implementation is not proof of live adoption.
 Owner authorization: build the pilot, 2026-09-16. The owner-supplied location, company-size, service
 and lane preferences are in `ops/openclaw/hunter/pilot-mission.md`.
 
 ## Scope
 
 One Python loop chooses search, fetch, open-company, people-search, decide or wait actions. These are
-choices, not mandatory stages. It reuses Hunter's public retrieval helpers, local Ollama and Newl's
+choices, not mandatory stages. It reuses Hunter's public retrieval helpers, local Ollama or the existing
+ChatGPT-authenticated Codex CLI, and Newl's
 tenant/identity conventions. No framework migration, extra agents, database migration, dashboard,
 outreach generation, approval or enrollment is included. Company research does not require TradeMining.
 
@@ -69,15 +72,40 @@ a separate atomic inbox so it can arrive while the worker is active; acceptance 
 ## Bounds and operation
 
 Normal hours: weekdays 09:00–17:00 America/Toronto. Due wakes are at least thirty minutes apart, with
-at most six actions and ten minutes of work per wake. Two unproductive actions yield; two consecutive
-wakes without useful progress back off for a day and expose `waiting_no_progress` in health. The model can
-wait up to a day. Parked/rejected companies retain a revisit date and condition. STOP is checked between
+three model calls by default (hard maximum six for a supervised override) and ten minutes
+of work per wake. An investigation continues from its journal across wakes; one wake is not a complete
+market scan. Three actions per half hour spread the existing 40-call daily allowance over roughly
+fourteen wakes when productive, rather than consuming it in seven large batches. These are ceilings,
+not a required activity or lead quota; waits, model time and other budgets can reduce actual work.
+
+Two unproductive actions yield to the next half-hour wake. A model-requested global wait is capped at
+thirty minutes, even when an older proposal requests a day. Known companies use `decide/parked` with
+their own revisit condition; one unavailable property page must not pause other research. Three
+consecutive unproductive wakes expose `needs_review` and `researchNeedsReview=true`, then stop until
+09:00 the next business day. This is a visible quality failure, not a claim that the market is exhausted.
+The review flag remains visible outside business hours. No additional notifications or agents are added.
+Parked/rejected companies retain a revisit date and condition. STOP is checked between
 actions and during sleep; an in-flight call can finish within its timeout. Expiry ends the process.
+
+The model receives per-direction search coverage and up to eight saved, unattempted public clues.
+Coverage is derived from persisted attempts, including failed/empty calls; cached repeats do not inflate
+it. Old completed attempts recover direction from their saved result; interrupted attempts missing
+direction remain explicitly unknown. These hints do not force a rotation or mandatory research stages.
+Previously attempted URLs and parked/rejected/blocked company domains do not become new unread clues.
+Instructions distinguish businesses moving goods from available warehouse property or competing
+service providers, and do not invent product-category exclusions or require explicit buying intent.
+
+On first v2 wake, an inherited v1 `waiting`/`waiting_no_progress` timer longer than thirty minutes is
+shortened and audited as `schedule_recovered`. A gracefully stopped worker also requires a recorded
+model wait/yield cause; an unknown stopped schedule is preserved. Budget/error/review waits are preserved. STOP, expiry,
+tenant and server-policy guards still run before model/tool I/O. Budgets, evidence, holds and feedback
+are not reset. Do not initialize a fresh journal or reset allowances to make trial results look better.
 
 Daily limits: 40 searches, 60 fetched pages, 20 free people searches, 40 model calls and 60 minutes of
 model time. A call reserves its full timeout before execution; a crash does not refund unknown usage.
-Paid search, if later explicitly configured, reserves a conservative per-call price against US$10/day
-and US$50 total; an unknown/zero Brave price is refused. Default evaluation uses DuckDuckGo and local
+Paid search, when explicitly configured, reserves a conservative per-call price. New configurations
+cap cash spending at US$5/day and US$10 total; existing configuration limits are not silently replaced.
+An unknown/zero Brave price is refused. Default initialization uses DuckDuckGo and local
 Qwen, with no paid API calls. No enrichment allowance exists. Initialize an expiry covering five business
 dates, never an indefinite run. Q4 is an evaluation model, not a replacement for production research.
 
@@ -136,6 +164,17 @@ rosters. Do not attach live journal/credential files to Git or PRs.
    Measure commercial fit, unsupported inferences, buyer accuracy and elapsed time. Quantization is not
    a quality guarantee; the initial small comparison did not establish a Q8 advantage. A stronger model
    comparison requires an approved existing model budget, not automatic paid fallback.
+8. For the continuity correction, first reproduce the long global wait and missing alternatives with
+   synthetic tests. Verify repeated half-hour wakes, preserved budgets after restart/upgrade, a pivot
+   after a blocked clue, and a visible stop after repeated failure. A small supervised local-model
+   trial may use the remaining existing daily allowance; setup and validation usage must remain
+   distinguishable from unattended business results. Do not call masked contact candidates verified
+   buyers, or count a search result as a qualified opportunity.
+9. Review at least two normal business days after the revised worker is deliberately adopted. Inspect
+   multiple completed research sessions, source/service diversity when initial clues stall, completed
+   company decisions, supported Newl fit and contact gaps. Keep the five-day commercial acceptance
+   target above; neither a test pass nor more searches proves effectiveness. If the model still cannot
+   pivot, classify this as a failed model/control trial before increasing spend or adding machinery.
 
 ## Implementation verification, 2026-09-16
 
@@ -156,7 +195,35 @@ contacts or a qualified opportunity. Private run history retains the failures an
 
 The existing Vercel Preview build invokes migrations and Teamship-user provisioning. Publishing a
 branch/Preview therefore needs separate approval for that existing setup; a local build does not do
-those operations. Full live clearance/Apollo acceptance remains pending a reviewed endpoint deployment.
+those operations. That was the deployment limitation at the initial public evaluation; subsequent
+connected integration checks are recorded below. Commercial/contact acceptance remains unproven.
+
+### Continuity correction validation, 2026-09-16
+
+The connected bridge passed a real tenant/context check, one company-clearance check and a zero-credit
+Apollo lookup returning two masked candidates. These were supervised integration checks, not verified
+buyers or proof of unattended research quality. No outreach or CRM/Apollo record writes occurred.
+
+Eight initial synthetic regressions reproduced the existing long-wait, session-size and context gaps.
+The expanded Python suite now has 55 passing cases; the route/service/middleware/worker Vitest command
+passes 47 checks, including the Python suite wrapper. Lint, typecheck and the local build pass. The first
+typecheck/build encountered an out-of-date generated Prisma client; `prisma generate` from the existing
+unchanged schema repaired the local generated types. No migration or database operation was run.
+
+Using the original journal and remaining daily allowance, a supervised three-action trial with local
+`qwen3:30b-instruct` chose a different clue, searched and fetched an official company page, then tried
+to decide an unsaved company and was rejected. The company was another logistics provider; it did not
+establish a useful buyer. Tool instructions were clarified to permit abandoning unsaved clues without
+creating a company merely to reject it. One subsequent call with installed
+`qwen3.8-rvn:q8_0-multilingual` shifted its stated aim toward actual shippers, but still searched the
+same Charlotte facility-expansion theme. Neither test produced a qualified recommendation. The
+contexts differed, so this is diagnostic evidence, not a controlled model ranking or Q8 promotion.
+
+All four model calls were charged to the existing 40-call daily limit. Total recorded paid API spend
+remained zero. The unchanged v1 background runtime was resumed; its own exhausted-budget path schedules
+the next wake for 09:00 on September 17. No budget/history reset, model promotion, new schedule, paid
+fallback or unattended v2 rollout was performed. The correction removes a demonstrated control failure;
+local-model commercial judgment remains an open acceptance risk.
 
 ## Compatibility and rollback
 
@@ -170,3 +237,115 @@ For the optional LaunchAgent, `launchctl bootout gui/$(id -u)/com.newl.hunter-pi
 unloads only the evaluator. Its plist can then be removed after confirming that exact label.
 No database rollback or existing Hunter restart is needed. Production deployment, connection approval,
 paid enrichment and sending remain separate decisions.
+
+The continuity correction changes only the local worker, its instructions, synthetic tests and this
+runbook. UI, API route, server action/service, schema, tenant permissions and Apollo adapter are unchanged;
+the existing route/service/middleware tests remain required. It requires no database migration or new
+Vercel setting. Merging the PR does not update the Mac LaunchAgent automatically: after review, stop only
+the isolated pilot, retain a private state/config backup, select the reviewed runtime source, and resume
+the same journal with its original expiry and remaining budgets. Keep the old runtime worktree until
+the service no longer references it. Never repoint or restart the legacy Hunter worker for this change.
+
+## Subscription Terra / Brave comparison, owner-approved 2026-09-16
+
+The owner approved this setup and explicitly selected GPT-5.6 Terra through the existing ChatGPT plan.
+This supersedes the earlier zero-paid-search trial only for bounded Brave retrieval. It does **not**
+authorize OpenAI API-key billing, paid enrichment, outreach, production deployment, or a budget reset.
+
+The existing OpenClaw worker scripts use Codex CLI for subscription inference. OpenClaw's ordinary
+`openai/...` provider is separately API-key authenticated on the inspected host. The pilot therefore
+reuses the subscription CLI path, not that API provider or a newly created OpenClaw agent. Authentication
+is checked through `codex login status`; credentials are never copied, extracted or passed in a prompt.
+
+`pilot_subscription_model.py` permits only `gpt-5.6-terra`, checks ChatGPT login before every call, strips
+business/API credentials from the child environment, ignores user configuration, and runs in an empty
+temporary directory with a read-only sandbox. Shell, apps, plugins, hooks, subagents, computer/browser
+tools and built-in web search are disabled. The model returns one structured proposed decision; Hunter
+alone performs retrieval and business actions through the existing deterministic executor. Unexpected
+tool events, incomplete output, missing usage, failed authentication and timeout fail closed. The process
+group is killed on timeout. No alternate model, API key, hidden web search or paid fallback is attempted.
+Subscription failure pauses until the next business morning, with a visible error. Plan usage remains
+shared with other ChatGPT/Codex work; zero API fees do not mean unlimited subscription capacity.
+
+Approved runtime configuration (private file; preserve tenant, expiry, evidence and all counters):
+
+```json
+{
+  "modelProvider": "CHATGPT_SUBSCRIPTION",
+  "model": "gpt-5.6-terra",
+  "reasoningEffort": "medium",
+  "searchProvider": "BRAVE",
+  "searchCostMicros": 5000,
+  "comparisonCases": 10
+}
+```
+
+The approved cash caps are US$5/day and US$10 **total**, including evaluation searches. Keep the existing
+40 calls / 3,600 model seconds / 40 searches / 60 pages / 20 zero-credit people searches daily limits.
+There is no automatic increase because a comparison needs more calls. The current expiry stays unchanged.
+Set `codexBinary` only when the supervisor PATH does not expose the existing CLI; it must be a trusted,
+already installed executable. The basic installer intentionally still refuses replacing a running service
+or enabling paid/connected operation. Apply the authorized runtime update with a private backup and the
+worker lock, then repoint only `com.newl.hunter-pilot-evaluation` to the exact tested commit.
+
+### Matched evaluation without another production workflow
+
+For up to ten eligible wakes, capture the exact same context for Terra, local Qwen 3.8 Q4 and local Qwen
+3.8 Q8. Only Terra's action is executed. Both local alternatives use thinking with a 4,096 generated-token
+ceiling and 180-second timeout. They are recorded for human comparison and never score, approve, overrule
+or execute a lead action. Each inference charges the same durable daily counters before starting. A
+comparison wake therefore normally uses all three model calls for one real action and two shadow
+proposals; after ten cases the normal three-action wakes resume automatically. Partial/failed comparisons
+remain visible and are not silently repeated. STOP, tenant policy and expiry apply before shadow calls too.
+
+This evaluates decisions on identical packets. It is not a randomized end-to-end model ranking or ten
+owner-labelled companies. Assess buyer/provider classification, supported Newl fit, sensible next action,
+repetition, correct abandonment, latency and incomplete outputs. Allow two subsequent business days of
+Terra research to evaluate completed investigations and owner intervention before declaring success.
+Preserve the business acceptance criteria above; research activity is not sales effectiveness.
+
+`compare-search --query-file <private-json-path>` compares up to ten identical query strings through
+DuckDuckGo and Brave, five results per provider, using the same journal, lock, policy checks and cash/
+search limits. This explicit experiment is the only intentional paired duplicate lookup; completed or
+interrupted provider attempts are never silently rerun. Results stay in `searchComparisons`; they do not
+create companies or recommendations. Review relevant shipper/partner results, first-party evidence,
+duplicate domains, empty/error rates and latency. URLs alone do not establish an opportunity.
+
+`preflight` verifies the live tenant read boundary and subscription login without making an inference.
+It is not evidence that Terra has completed a research decision. `status` reports the model provider,
+comparison counts, remaining operating state and spend; `review.md` includes the proposed alternatives.
+
+### Verification and scope
+
+The expanded synthetic suite covers subscription-vs-API authentication, environment isolation, strict
+output normalization, missing/partial outputs, usage requirements, unexpected tools, process timeout,
+Qwen thinking limits, identical comparison packets, partial-budget recovery, stopped inference, paired
+search cost accounting and restart deduplication. Runtime observations must be reported separately from
+these tests. Today's original 40 model calls are exhausted: the next model run must wait for the existing
+next-business-day budget, not use a fresh journal or a synthetic date.
+
+This addition changes only local worker code, tests and documentation. UI, API routes, services, schema,
+tenant/suppression rules, contact permissions and Vercel settings do not change. No migration is required.
+Existing Preview build automation can still run its established Preview-only database preparation when
+the PR is updated; it is not a Hunter schema change or production deployment. Open PR #476 modifies the
+retrieval helper reused here but has no direct file overlap; revalidate that contract if it merges.
+
+### Setup observations, 2026-09-16
+
+The authenticated tenant read and existing ChatGPT login passed preflight; no model inference was made.
+Ten manually chosen public research queries were submitted to both retrieval providers using the original
+journal: all twenty requests completed, returning 50 DuckDuckGo and 48 Brave result rows. The conservative
+Brave reservation was US$0.05. This was supervised retrieval validation, not autonomous lead generation.
+No company/contact records or recommendations were created by the comparison. The original daily model
+usage remained 40/40, so Terra and matched Qwen inference must begin at the next permitted business wake.
+
+Manual review found mixed relevance: Brave surfaced useful company/market-entry results; DuckDuckGo had
+more directly relevant importer and explicit partner pages for some briefs. Both providers returned poor
+results for ambiguous pallet and regional-expansion queries. This does not establish either provider as
+commercially superior; query selection and follow-up judgment remain the primary evaluation questions.
+Public result titles/URLs remain private evaluation material, not source-controlled customer fixtures.
+
+Validation: 72 Python cases and 47 focused Vitest checks passed (the latter includes the Python wrapper).
+`prisma:generate`, `typecheck`, `lint`, `build` and `git diff --check` passed. Client generation used the
+unchanged Hunter schema; no production migration, credential change, enrollment or communication occurred.
+The local-worker PR has no browser behavior changes; Vercel Preview remains a build compatibility check.
