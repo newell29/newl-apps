@@ -46,7 +46,9 @@
     "worker:teamship-sr810465-vm": "tsx scripts/teamship-phase2-sr810465-vm.ts",
     "worker:teamship-browser-read": "tsx scripts/teamship-browser-read-worker.ts",
     "worker:teamship-print": "tsx scripts/teamship-print-worker.ts",
-    "worker:tmg-order-intake": "tsx scripts/tmg-teamship-order-worker.ts"
+    "worker:tmg-order-intake": "tsx scripts/tmg-teamship-order-worker.ts",
+    "hunter:pilot": "PYTHONDONTWRITEBYTECODE=1 python3 ops/openclaw/hunter/hunter_pilot.py",
+    "test:hunter-pilot": "vitest run tests/hunter-pilot-read.test.ts tests/hunter-pilot-route.test.ts tests/hunter-pilot-worker.test.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
