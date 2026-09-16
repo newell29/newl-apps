@@ -180,7 +180,7 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       await persistWebsiteGrowthBacklinkReview({ tenantId, runId: id, review, database: tx });
       result.nextAction = "Review the researched publisher opportunities in Backlink Scout. No outreach has been approved or sent.";
     }
-    const updated = nextWork(work, { ...result, evidence, draftId, lease: null, leaseUntil: null }, `COMPLETED:${lease}`, result.summary, now);
+    const updated = nextWork(work, { ...result, artifact: result.artifact ?? work.artifact, evidence, draftId, lease: null, leaseUntil: null }, `COMPLETED:${lease}`, result.summary, now);
     await replace(tx, tenantId, id, work, updated);
     await audit(tx, tenantId, null, "work-completed", id, { kind: work.kind, state: updated.state, draftId });
     return updated;

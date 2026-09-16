@@ -142,3 +142,20 @@ describe("Scout conversation handoffs", () => {
     expect(db.automationJobRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a", id: "stale" }), data: expect.objectContaining({ output: expect.objectContaining({ state: "DISMISSED", lease: null }) }) }));
   });
 });
+
+it("preserves the prior artifact when interrupted research is deferred", async () => {
+  const artifact = { recommendation: "Verified research already saved", evidence: ["https://example.com/guide"] };
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH", artifact } });
+  const result = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "WAIT", summary: "Source unavailable", nextAction: "Retry source tomorrow", reviewInDays: 1, artifact: null }, now);
+  expect(result.artifact).toEqual(artifact);
+  expect(result.state).toBe("WAITING");
+});
+
+it("promotes an evidence-backed idea to a page task without approving or building it", async () => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH" } });
+  const result = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "DELIVER", summary: "Useful page opportunity", nextAction: "Prepare full brief", artifact: { proposedTitle: "Warehouse selection guide", proposedRoute: "/resources/warehouse-guide", hypothesis: "Answer a recurring service-fit question", newPage: true } }, now);
+  expect(result.state).toBe("DONE");
+  expect(db.websiteGrowthOpportunity.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ tenantId: "tenant-a", status: "REVIEWING", action: "CREATE_PAGE" }) }));
+  expect(db.automationJobRun.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ tenantId: "tenant-a", jobType: WORK_JOB, output: expect.objectContaining({ kind: "PAGE", state: "READY" }) }) }));
+  expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
+});
