@@ -1,3 +1,4 @@
+import { MISSION_JOB, stableId, record as scoutRecord } from "@/modules/website-growth/scout/model";
 import {
   JobStatus,
   WebsiteGrowthBacklinkStatus,
@@ -156,6 +157,8 @@ export async function prepareWebsiteGrowthScoutRun({
   runLane?: WebsiteGrowthScoutRunLane;
   researchScope?: WebsiteGrowthScoutResearchScope;
 }) {
+  const mission = await prisma.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, "mission"), jobType: MISSION_JOB }, select: { input: true } });
+  if (scoutRecord(mission?.input).enabled === true) return { state: "managed" as const, runId: "", message: "Scout marketing now owns research. First-party data check-ins continue independently." };
   const jobType = runLane === "BACKLINKS" ? BACKLINK_DISCOVERY_JOB_TYPE : JOB_TYPE;
   const active = await prisma.automationJobRun.findFirst({
     where: {

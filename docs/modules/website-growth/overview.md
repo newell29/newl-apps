@@ -1,5 +1,9 @@
 # Website Growth and SEO
 
+## Scout marketing redesign
+
+The default workspace now follows persistent marketing work through research, owner decisions, and outcome reviews. See [Scout marketing specialist](scout-marketing-redesign.md) for the implemented worker contract, data model, approval boundaries, regression coverage, and staged cutover. Existing scheduled discovery remains available while the marketing mission is paused.
+
 > Evidence status: implementation details are confirmed from code. Claims, publishing limits, and business outcomes remain human-approved.
 
 ## Purpose
@@ -47,7 +51,7 @@ When Scout has stored more than one brief for the same opportunity, the opportun
 
 The Website Growth UI intentionally separates two different kinds of records:
 
-- **Scout workspace** is the default view. It contains only AI-curated Scout briefs and groups them into `Needs your review`, `Approved and building`, `Preview ready`, and `Completed and closed`.
+- **Page briefs and previews** at `/website-growth/pages` contains the existing AI-curated Scout briefs and groups them into `Needs your review`, `Approved and building`, `Preview ready`, and `Completed and closed`.
 - **Research signals** contains the full GA4, Search Console, Semrush, and first-party evidence inventory. These records are inputs to Scout, not a human work queue.
 - **Backlink Scout** contains only Codex-reviewed, deduplicated prospects that pass deterministic relevance, quality, and spam-risk gates. Raw public-web results, model rejections, and raw Semrush rows are retained only in tenant-scoped automation history and are never presented as a work queue.
 
@@ -105,7 +109,7 @@ At 9:15 AM `America/Toronto`, Monday and Wednesday run content-only read-only Co
 
 Every weekday trigger first checks the dedicated SEMrush mailbox folder. New PDFs update the cache without using API units; duplicate PDFs are skipped. Position Tracking summary metrics refresh the observation date while the last complete tracked-keyword list is retained until a newer complete list exists. Site Audit, backlink, organic-position, and SEO-overview excerpts are supporting context only. When SEMrush API units are available, a deep read-only session may still refresh the complete Position Tracking snapshot. Deterministic Newl Apps code selects primary and supporting keywords only from human-approved, built, or published Scout briefs, deduplicates them against the tracked-keyword list, and creates a two-column SEMrush import workbook without a separate keyword approval step. Broad competitor-gap discovery remains monthly and optional.
 
-Each Tuesday backlink funnel rotates through one of four 12-query plans. Each query returns at most 10 results; deterministic code accepts at most 120 rows, 60 unique domains, 40 full-page downloads, and two downloads per domain per run. Every canonical URL hash is written to the tenant-scoped backlink-discovery job ledger before Codex triage. URLs seen in any prior Scout run or already promoted to the backlink queue are counted as duplicates and never downloaded or added again. Triage returns at most 15 finalists; final Codex review may promote at most five. There is no recursive crawl. Newl Apps then applies its existing minimum relevance/quality score of 60, high-spam rejection, referring-domain/target-page dedupe, 50-item active-queue cap, and 45-day stale-review archive.
+Each Tuesday backlink funnel rotates through one of four 12-query plans. Each query returns at most 10 results; deterministic code accepts at most 120 rows, 60 unique domains, 40 full-page downloads, and two downloads per domain per run. Every canonical URL hash is written to the tenant-scoped backlink-discovery job ledger before Codex triage. URLs with completed review evidence in a successful run from the last 30 days, or already promoted to the backlink queue, are excluded. Failed fetches, incomplete runs, older reviews, and legacy hashes without completion evidence remain retryable. Triage returns at most 15 finalists; final Codex review may promote at most five. There is no recursive crawl. Newl Apps then applies its existing minimum relevance/quality score of 60, high-spam rejection, referring-domain/target-page dedupe, 50-item active-queue cap, and 45-day stale-review archive.
 
 Backlink approval is distinct from content approval and spending approval. Admin or Manager may approve an opportunity for execution. A dedicated executor token can claim approved free work and report submitted, contacted, blocked, live, or lost states. Paid placements are excluded from machine claims and never authorize a purchase or paid ranking link.
 

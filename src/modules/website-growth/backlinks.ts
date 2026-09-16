@@ -156,12 +156,14 @@ export async function persistWebsiteGrowthBacklinkReview({
   tenantId,
   runId,
   review,
-  now = new Date()
+  now = new Date(),
+  database = prisma
 }: {
   tenantId: string;
   runId: string;
   review: WebsiteGrowthBacklinkReview;
   now?: Date;
+  database?: Prisma.TransactionClient;
 }): Promise<WebsiteGrowthBacklinkPersistenceSummary> {
   const qualified = review.prospects.filter(
     (prospect) => getWebsiteGrowthBacklinkQualificationFailure(prospect) === null
@@ -169,12 +171,12 @@ export async function persistWebsiteGrowthBacklinkReview({
   let skippedByQualityGate = review.prospects.length - qualified.length;
   const dedupeKeys = qualified.map(buildWebsiteGrowthBacklinkDedupeKey);
   const existing = dedupeKeys.length > 0
-    ? await prisma.websiteGrowthBacklinkOpportunity.findMany({
+    ? await database.websiteGrowthBacklinkOpportunity.findMany({
         where: { tenantId, dedupeKey: { in: dedupeKeys } }
       })
     : [];
   const existingByKey = new Map(existing.map((item) => [item.dedupeKey, item]));
-  let activeQueueCount = await prisma.websiteGrowthBacklinkOpportunity.count({
+  let activeQueueCount = await database.websiteGrowthBacklinkOpportunity.count({
     where: { tenantId, status: { in: activeBacklinkStatuses } }
   });
   let created = 0;
@@ -203,7 +205,7 @@ export async function persistWebsiteGrowthBacklinkReview({
         skippedExistingDecision += 1;
         continue;
       }
-      await prisma.websiteGrowthBacklinkOpportunity.updateMany({
+      await database.websiteGrowthBacklinkOpportunity.updateMany({
         where: { id: current.id, tenantId },
         data: {
           lastSeenAt: now,
@@ -232,7 +234,7 @@ export async function persistWebsiteGrowthBacklinkReview({
       continue;
     }
 
-    await prisma.websiteGrowthBacklinkOpportunity.create({
+    await database.websiteGrowthBacklinkOpportunity.create({
       data: {
         tenantId,
         dedupeKey,
@@ -265,7 +267,7 @@ export async function persistWebsiteGrowthBacklinkReview({
   }
 
   const staleBefore = new Date(now.getTime() - BACKLINK_REVIEW_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  const archived = await prisma.websiteGrowthBacklinkOpportunity.updateMany({
+  const archived = await database.websiteGrowthBacklinkOpportunity.updateMany({
     where: {
       tenantId,
       status: WebsiteGrowthBacklinkStatus.NEEDS_REVIEW,
