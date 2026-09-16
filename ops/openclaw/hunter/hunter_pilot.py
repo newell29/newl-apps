@@ -25,12 +25,13 @@ from zoneinfo import ZoneInfo
 
 from hunter_company_research import search_web, fetch_bytes, parse_page_published_at
 from hunter_ingest import api_request
+from pilot_subscription_model import SubscriptionModel
 
 UTC = dt.timezone.utc
 ZONE = ZoneInfo("America/Toronto")
 REPO = Path(__file__).resolve().parents[3]
 MISSION = Path(__file__).with_name("pilot-mission.md").read_text()
-VERSION = "hunter-autonomous-pilot-v2"
+VERSION = "hunter-autonomous-pilot-v3"
 DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
 ACTIONS = ["search", "fetch", "open_company", "people", "decide", "wait"]
@@ -232,22 +233,34 @@ def fetch_public_page(url):
 
 
 class LocalModel:
-    def __init__(self, model):
+    def __init__(self, model, thinking=False):
         self.model = model
+        self.thinking = thinking
 
     def __call__(self, context):
         request = urllib.request.Request("http://127.0.0.1:11434/api/chat", method="POST",
             headers={"Content-Type": "application/json"}, data=json.dumps({
-                "model": self.model, "stream": False, "think": False, "format": SCHEMA,
+                "model": self.model, "stream": False, "think": self.thinking, "format": SCHEMA,
                 "messages": [{"role": "system", "content": MISSION + "\n" + TOOLS},
                              {"role": "user", "content": json.dumps(context, ensure_ascii=False)}],
-                "options": {"temperature": 0.2, "num_ctx": 16384, "num_predict": 1000},
+                "options": {"temperature": 0.2, "num_ctx": 16384, "num_predict": 4096 if self.thinking else 1000},
                 "keep_alive": "10m"
             }).encode())
         with urllib.request.urlopen(request, timeout=180) as response:
             payload = json.loads(response.read(100_000))
         return json.loads(payload["message"]["content"]), {
+            "provider": "OLLAMA", "thinking": self.thinking,
             "inputTokens": payload.get("prompt_eval_count", 0), "outputTokens": payload.get("eval_count", 0)}
+
+
+def configured_model(config):
+    provider = config.get("modelProvider", "OLLAMA")
+    if provider == "CHATGPT_SUBSCRIPTION":
+        return SubscriptionModel(config["model"], MISSION, TOOLS, SCHEMA,
+            binary=config.get("codexBinary"), effort=config.get("reasoningEffort", "medium"))
+    if provider != "OLLAMA":
+        raise ValueError("Unknown pilot model provider; no paid API fallback")
+    return LocalModel(config["model"], thinking=config.get("localThinking", False))
 
 
 class BudgetExceeded(Exception):
@@ -261,8 +274,9 @@ class Pilot:
         self.state_path = self.directory / "state.json"
         self.state = json.loads(self.state_path.read_text())
         self.clock = clock
+        self.stop_requested = False
         self.bridge = bridge or (PublicDiscoveryBridge() if self.config.get("publicDiscoveryOnly") else RemoteReadBridge())
-        self.model = model or LocalModel(self.config["model"])
+        self.model = model or configured_model(self.config)
         self.search = search or (lambda q: search_web(self.config["searchProvider"], q, 5))
         self.fetch = fetch or fetch_public_page
         if self.state["tenantId"] != self.config["tenantId"]:
@@ -279,7 +293,7 @@ class Pilot:
         current = json.loads((self.directory / "config.json").read_text())
         if current != self.config:
             raise RuntimeError("CONFIG_CHANGED_RESTART_REQUIRED")
-        if (self.directory / "STOP").exists():
+        if self.stop_requested or (self.directory / "STOP").exists():
             raise RuntimeError("STOP_REQUESTED")
         if self.clock() >= parse_time(self.config["expiresAt"]):
             raise RuntimeError("PILOT_EXPIRED")
@@ -294,6 +308,8 @@ class Pilot:
             "modelCalls": 0, "modelSeconds": 0, "usdMicros": 0})
 
     def reserve(self, kind, cost=0):
+        if not isinstance(cost, int) or cost < 0:
+            raise ValueError("Invalid cost reservation")
         budget = self.budget()
         limits = self.config["limits"]
         if budget[kind] + 1 > limits[kind]:
@@ -633,21 +649,15 @@ class Pilot:
         deadline = time.monotonic() + 600
         unproductive = 0
         productive = False
+        starting_calls = self.budget()["modelCalls"]
+        compared = False
         for _ in range(max_steps):
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= deadline or self.budget()["modelCalls"] - starting_calls >= max_steps:
                 break
-            self.guard()
-            reserved_budget = self.budget()
-            self.reserve("modelCalls")
-            started = time.monotonic()
-            try:
-                action, usage = self.model(self.context())
-            finally:
-                elapsed = min(180, int(time.monotonic() - started) + 1)
-                reserved_budget["modelSeconds"] -= 180 - elapsed
-                self.save()
-            self.event("model", model=self.config["model"], version=VERSION, usage=usage)
+            context = json.loads(json.dumps(self.context()))  # identical immutable packet for all three models
+            action, usage = self.infer(self.model, self.config["model"], context)
             self.event("proposed_action", proposal=action)
+            waiting = False
             try:
                 result = self.execute(action)
                 unproductive = unproductive + 1 if result.get("state") in {"cached_or_already_attempted", "unavailable", "already_known"} or result.get("empty") else 0
@@ -655,10 +665,17 @@ class Pilot:
                     productive = True
                     self.state["lastUsefulActionAt"] = iso(self.clock())
                 if action["action"] == "wait":
-                    break
+                    waiting = True
             except (ValueError, KeyError, TypeError) as error:
                 self.event("action_rejected", reason=str(error)[:300])
                 unproductive += 1
+            # Temporary matched evaluation, not another production decision stage.
+            # Execute the primary action first; local proposals are never executed.
+            if not compared and max_steps >= 3 and self.budget()["modelCalls"] - starting_calls == 1:
+                self.compare_models(context, action, deadline)
+                compared = True
+            if waiting:
+                break
             if unproductive >= 2:
                 self.event("yield", reason="Two unproductive actions; wait for the next wake")
                 break
@@ -671,6 +688,78 @@ class Pilot:
         self.state["lastError"] = None
         self.state["lastCompletedWakeAt"] = iso(self.clock())
         self.event("wake_completed")
+
+    def infer(self, model, name, context, evaluation=False):
+        self.guard()
+        reserved_budget = self.budget()
+        self.reserve("modelCalls")
+        started = time.monotonic()
+        try:
+            action, usage = model(context)
+        finally:
+            elapsed = min(180, int(time.monotonic() - started) + 1)
+            reserved_budget["modelSeconds"] -= 180 - elapsed
+            self.save()
+        self.event("model", model=name, version=VERSION, usage=usage, evaluation=evaluation)
+        return action, usage
+
+    def compare_models(self, context, primary, deadline):
+        limit = self.config.get("comparisonCases", 0)
+        if not isinstance(limit, int) or not 0 <= limit <= 10:
+            raise ValueError("Comparison must be limited to at most ten cases")
+        cases = self.state.setdefault("modelComparisons", [])
+        if len(cases) >= limit:
+            return
+        case = {"at": iso(self.clock()), "contextId": digest(context), "context": context,
+                "primaryModel": self.config["model"], "primary": primary, "shadows": []}
+        cases.append(case)
+        self.save()  # partial cases remain visible and never silently retried
+        for name in ["qwen3.8-rvn:q4_k_m-multilingual", "qwen3.8-rvn:q8_0-multilingual"]:
+            if time.monotonic() + 180 > deadline:
+                case["incomplete"] = "wake_time"
+                break
+            try:
+                proposal, usage = self.infer(LocalModel(name, thinking=True), name, context, evaluation=True)
+                case["shadows"].append({"model": name, "proposal": proposal, "usage": usage})
+            except BudgetExceeded as error:
+                case["incomplete"] = str(error)
+                break
+            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError) as error:
+                case["shadows"].append({"model": name, "error": type(error).__name__})
+            finally:
+                self.save()
+
+    def compare_search(self, queries):
+        if not isinstance(queries, list) or not 1 <= len(queries) <= 10:
+            raise ValueError("Search comparison needs 1–10 matched queries")
+        cost = self.config["searchCostMicros"]
+        if self.config["searchProvider"] != "BRAVE" or not 0 < cost <= 1_000_000:
+            raise ValueError("Configure the approved Brave price before comparing search")
+        trials = self.state.setdefault("searchComparisons", {})
+        for query in queries:
+            query = text(query, 350)
+            key = digest(sorted(re.findall(r"[\w]+", query.casefold())))
+            if key not in trials and len(trials) >= 10:
+                raise ValueError("Ten search comparison cases already recorded")
+            trial = trials.setdefault(key, {"query": query, "providers": {}})
+            for provider in ["DUCKDUCKGO", "BRAVE"]:
+                if provider in trial["providers"]:
+                    continue
+                self.guard()
+                self.reserve("searches", cost if provider == "BRAVE" else 0)
+                record = {"at": iso(self.clock()), "state": "started"}
+                trial["providers"][provider] = record
+                self.save()
+                started = time.monotonic()
+                try:
+                    record["results"] = search_web(provider, query, 5)
+                    record["state"] = "completed"
+                except (urllib.error.URLError, TimeoutError) as error:
+                    record["state"], record["error"] = "unavailable", type(error).__name__
+                finally:
+                    record["seconds"] = round(time.monotonic() - started, 2)
+                    self.save()
+        self.event("search_comparison", cases=len(trials), recommendations=0)
 
     def status(self):
         counts = {s: sum(c["status"] == s for c in self.state["companies"].values())
@@ -694,6 +783,9 @@ class Pilot:
             "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
             "searchesByDirection": {d: r["attempts"] for d, r in self.research_coverage()["directions"].items()},
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
+            "modelProvider": self.config.get("modelProvider", "OLLAMA"),
+            "comparisonCases": len(self.state.get("modelComparisons", [])),
+            "searchComparisonCases": len(self.state.get("searchComparisons", {})),
             "publicDiscoveryOnly": self.config.get("publicDiscoveryOnly", False),
             "externalWrites": 0, "paidEmailEnrichments": 0, "lastError": self.state.get("lastError")}
 
@@ -712,6 +804,10 @@ class Pilot:
                 rows.append(f"- [{e['title'] or e['url']}]({e['url']}) — retrieved {e['retrievedAt']}")
             rows.append("")
         path = self.directory / "review.md"
+        rows += ["## Matched model evaluation", "", "Shadow proposals are not executed or recommendations.", ""]
+        for case in self.state.get("modelComparisons", []):
+            rows += ["### " + case["contextId"], "", "```json",
+                     json.dumps({k: v for k, v in case.items() if k != "context"}, indent=2), "```", ""]
         path.write_text("\n".join(rows))
         os.chmod(path, 0o600)
         return str(path)
@@ -736,9 +832,12 @@ def initialize(args, bridge=None):
     config = {"version": VERSION, "tenantId": context["tenantId"], "tenantSlug": context["tenantSlug"],
         "publicDiscoveryOnly": args.public_only,
         "model": args.model, "expiresAt": iso(expires), "searchProvider": args.search_provider,
+        "modelProvider": args.model_provider, "localThinking": args.local_thinking,
+        "reasoningEffort": args.reasoning_effort, "comparisonCases": args.comparison_cases,
         "searchCostMicros": cost if args.search_provider == "BRAVE" else 0,
         "limits": {"searches": 40, "pages": 60, "people": 20, "modelCalls": 40, "modelSeconds": 3600,
-                   "dailyUsdMicros": 10_000_000, "totalUsdMicros": 50_000_000}}
+                   "dailyUsdMicros": 5_000_000, "totalUsdMicros": 10_000_000}}
+    configured_model(config)  # reject incompatible provider/model before writing state
     atomic_write(directory / "config.json", config)
     atomic_write(directory / "state.json", {"tenantId": context["tenantId"], "companies": {}, "evidence": {},
         "attempts": {}, "budgets": {}, "usdMicros": 0, "events": [], "feedback": [], "health": "initialized"})
@@ -746,10 +845,14 @@ def initialize(args, bridge=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["init", "once", "serve", "status", "report", "feedback", "stop"])
+    parser.add_argument("command", choices=["init", "once", "serve", "status", "report", "feedback", "stop", "preflight", "compare-search"])
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--env-file", action="append", default=[])
     parser.add_argument("--model", default="qwen3.8-rvn:q4_k_m-multilingual")
+    parser.add_argument("--model-provider", choices=["OLLAMA", "CHATGPT_SUBSCRIPTION"], default="OLLAMA")
+    parser.add_argument("--local-thinking", action="store_true")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "high"], default="medium")
+    parser.add_argument("--comparison-cases", type=int, choices=range(11), default=0)
     parser.add_argument("--search-provider", choices=["DUCKDUCKGO", "BRAVE"], default="DUCKDUCKGO")
     parser.add_argument("--search-cost-usd", type=float, default=0)
     parser.add_argument("--expires-at")
@@ -759,6 +862,7 @@ def main():
     parser.add_argument("--note")
     parser.add_argument("--force", action="store_true", help="One supervised wake outside hours; never bypass safety/budget/expiry")
     parser.add_argument("--max-steps", type=int, default=DEFAULT_WAKE_STEPS)
+    parser.add_argument("--query-file", help="Private JSON list of up to ten matched search queries")
     args = parser.parse_args()
     load_env(args.env_file)
     directory = Path(args.state_dir).expanduser().resolve()
@@ -798,10 +902,22 @@ def main():
             print(json.dumps({"state": "already_running"}))
             return
         pilot = Pilot(directory)
+        if args.command == "preflight":
+            pilot.guard()
+            info = pilot.model.preflight() if isinstance(pilot.model, SubscriptionModel) else {"provider": "OLLAMA"}
+            print(json.dumps({**info, "state": "preflight_passed", "inferenceRun": False}))
+            return
+        if args.command == "compare-search":
+            if not args.query_file:
+                parser.error("compare-search requires --query-file")
+            pilot.compare_search(json.loads(Path(args.query_file).read_text()))
+            print(json.dumps({"state": "search_comparison_completed", "cases": len(pilot.state.get("searchComparisons", {})), "usedToday": pilot.budget()}))
+            return
         stopping = False
         def stop_handler(_signal, _frame):
             nonlocal stopping
             stopping = True
+            pilot.stop_requested = True
         signal.signal(signal.SIGTERM, stop_handler)
         signal.signal(signal.SIGINT, stop_handler)
         while not stopping:
@@ -818,7 +934,7 @@ def main():
                 code = str(error) if re.fullmatch(r"[A-Z_0-9]+", str(error)) else type(error).__name__
                 pilot.state["health"] = "error"
                 pilot.state["lastError"] = code
-                pilot.state["nextWakeAt"] = iso(now() + dt.timedelta(minutes=30))
+                pilot.state["nextWakeAt"] = iso(next_business_start(now()) if code.startswith("CHATGPT_") else now() + dt.timedelta(minutes=30))
                 pilot.event("error", code=code)
                 if code in {"STOP_REQUESTED", "PILOT_EXPIRED", "TENANT_MISMATCH", "CONFIG_CHANGED_RESTART_REQUIRED", "HUNTER_DISABLED", "PILOT_DISABLED"}:
                     stopping = True
