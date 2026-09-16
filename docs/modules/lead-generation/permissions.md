@@ -37,6 +37,10 @@ Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are i
 - Signal-scout and company-research machine routes require the tenant-bound ingestion credential and
   resolve the tenant server-side. An explicit research cohort cannot select another tenant or bypass
   the company/customer/contact suppression rules.
+- The exact autonomous-pilot read endpoint bypasses browser-session middleware and authenticates with
+  the tenant-bound ingestion credential itself. It remains disabled by default and honors module access,
+  Hunter policy/kill switch and company/contact holds. No adjacent pilot path or interactive Hunter page
+  gains a middleware exemption. This endpoint has no write, enrichment, approval or sending capability.
 - Company-research evidence and health are read through the authenticated Hunter page. Phase 3 has no
   Apollo, pipeline-stage, cadence, email, LinkedIn, or other communication action.
 - The Hunter quality endpoint requires the distinct OpenClaw assistant token, Alex's mapped Microsoft
