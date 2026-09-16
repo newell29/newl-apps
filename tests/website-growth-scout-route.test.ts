@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { newWork, DEFAULT_MISSION } from "@/modules/website-growth/scout/model";
 import { POST } from "@/app/api/website-growth/scout/work-items/route";
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), access: vi.fn(), workspace: vi.fn(), reconcile: vi.fn(), claim: vi.fn(), complete: vi.fn(), context: vi.fn() }));
 vi.mock("@/server/website-growth-scout-auth", () => ({ authenticateWebsiteGrowthScoutRequest: mocks.auth,
@@ -24,7 +25,9 @@ describe("Scout worker boundary", () => {
     const value = { mission: { enabled: false }, capacity: { available: false }, items: [{ id: "work", lease: "private-lease" }] };
     mocks.workspace.mockResolvedValue(value);
     const response = await POST(request({ action: "prepare" }));
-    expect(await response.json()).toMatchObject({ data: { items: [{ lease: null }], due: [] } });
+    const body = await response.json();
+    expect(body).toMatchObject({ data: { items: [], due: [] } });
+    expect(JSON.stringify(body)).not.toContain("private-lease");
     expect(mocks.reconcile).not.toHaveBeenCalled();
   });
   it("does not expose sending, approval, mission changes, or publishing actions", async () => {
@@ -39,4 +42,13 @@ describe("Scout worker boundary", () => {
     expect(response.status).toBe(503);
     expect(JSON.stringify(await response.json())).not.toContain("private connection detail");
   });
+});
+
+it("bounds the selection packet independently of large saved artifacts", async () => {
+  const workspace = { mission: { ...DEFAULT_MISSION, enabled: true }, capacity: { available: true }, items: Array.from({ length: 80 }, (_, index) => ({ ...newWork("RESEARCH", null, "Research", "Investigate", null), id: `work-${index}`, artifact: { large: "a".repeat(90_000) } })) };
+  mocks.workspace.mockResolvedValue(workspace); mocks.reconcile.mockResolvedValue(workspace);
+  const body = await (await POST(request({ action: "prepare" }))).json();
+  expect(body.data.due).toHaveLength(50);
+  expect(body.data.items[0]).not.toHaveProperty("artifact");
+  expect(JSON.stringify(body).length).toBeLessThan(100_000);
 });

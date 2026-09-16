@@ -159,3 +159,15 @@ it("promotes an evidence-backed idea to a page task without approving or buildin
   expect(db.automationJobRun.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ tenantId: "tenant-a", jobType: WORK_JOB, output: expect.objectContaining({ kind: "PAGE", state: "READY" }) }) }));
   expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
 });
+
+it("replenishes completed research immediately and respects an existing dated research wait", async () => {
+  db.automationJobRun.findMany.mockResolvedValue([]);
+  db.websiteGrowthOpportunity.findMany.mockResolvedValue([]); db.websiteGrowthBacklinkOpportunity.findMany.mockResolvedValue([]); db.websiteGrowthContentDraft.findMany.mockResolvedValue([]);
+  const research = { ...newWork("RESEARCH", null, "Research", "Find useful work", null), state: "DONE" };
+  db.automationJobRun.findFirst.mockImplementation(async (query: { where: { jobType: string } }) => query.where.jobType === WORK_JOB ? { id: "completed-research", output: research } : null);
+  await reconcileScoutWork("tenant-a", now);
+  expect(db.automationJobRun.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ id: stableId("tenant-a", "research:after:completed-research"), output: expect.objectContaining({ state: "READY", kind: "RESEARCH" }) }) }));
+  db.automationJobRun.upsert.mockClear(); research.state = "WAITING";
+  await reconcileScoutWork("tenant-a", now);
+  expect(db.automationJobRun.upsert).not.toHaveBeenCalled();
+});

@@ -53,6 +53,19 @@ class WorkerTests(unittest.TestCase):
                 self.assertNotIn("OPENCLAW_WEBSITE_GROWTH_TOKEN", run.call_args.kwargs["env"])
                 self.assertNotIn("OPENAI_API_KEY", run.call_args.kwargs["env"])
 
+    def test_prior_decisions_inform_new_work_without_publisher_correspondence(self):
+        workspace = self.workspace()
+        workspace["items"].extend([
+            {"id": "old", "kind": "RESEARCH", "state": "DISMISSED", "nextAction": "Already answered on the service page"},
+            {"id": "private", "kind": "RELATIONSHIP", "state": "DONE", "nextAction": "Private publisher correspondence"}
+        ])
+        claimed = {"id": "work", "lease": "lease", "kind": "RESEARCH"}
+        with patch.object(worker, "api", side_effect=[workspace, claimed, {}, {}]), patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "DELIVER"}]) as model:
+            worker.run()
+            prompt = model.call_args_list[-1].args[0]
+            self.assertIn("Already answered on the service page", prompt)
+            self.assertNotIn("Private publisher correspondence", prompt)
+
     def test_every_kind_has_a_complete_output_schema(self):
         for kind in ["PAGE", "RESEARCH", "RELATIONSHIP", "MEASUREMENT"]:
             schema = worker.result_schema(kind)

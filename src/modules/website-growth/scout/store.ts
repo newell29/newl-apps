@@ -62,10 +62,14 @@ export async function reconcileScoutWork(tenantId: string, now = new Date()) {
     work.state = "WAITING";
     await ensureWork(tenantId, `measurement:${draft.id}:${draft.publishedAt.toISOString()}`, work);
   }
-  // An open research brief lets the agent choose a new direction beyond the imported shortlist.
-  const week = Math.floor(now.getTime() / (7 * DAY_MS));
-  await ensureWork(tenantId, `research:${week}`, newWork("RESEARCH", null, "Find the next valuable inbound opportunity",
-    "Use the owner's priorities, existing work, customer questions, and public research to identify a useful page or industry relationship.", null, {}, now));
+  // Keep one open research brief, replenished by completed work rather than a calendar quota.
+  const latestResearch = await prisma.automationJobRun.findFirst({ where: { tenantId, jobType: WORK_JOB,
+    output: { path: ["kind"], equals: "RESEARCH" } }, orderBy: { createdAt: "desc" } });
+  const previousResearch = readWork(latestResearch?.output);
+  if (!previousResearch || ["DONE", "DISMISSED"].includes(previousResearch.state)) {
+    await ensureWork(tenantId, `research:after:${latestResearch?.id ?? "initial"}`, newWork("RESEARCH", null, "Find the next valuable inbound opportunity",
+      "Use the owner's priorities, previous decisions, customer questions, and public research to identify the next useful page or industry relationship.", null, {}, now));
+  }
   return scoutWorkspace(tenantId);
 }
 async function ensureWork(tenantId: string, key: string, work: Work) {

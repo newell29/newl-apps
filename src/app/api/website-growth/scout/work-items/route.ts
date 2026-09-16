@@ -20,9 +20,14 @@ export async function POST(request: Request) {
     if (input.action === "prepare") {
       const saved = await scoutWorkspace(tenant.id);
       const workspace = saved.mission.enabled ? await reconcileScoutWork(tenant.id) : saved;
-      // Expose only public research notes and bounded work history; never credentials or customer records.
-      return NextResponse.json({ data: { ...workspace, items: workspace.items.map(item => ({ ...item, lease: null })),
-        due: workspace.capacity.available ? workspace.items.filter(item => isDue(item)).map(item => item.id) : [] } });
+      // Selection needs summaries, not every saved artifact. Fetch full evidence only after a scoped claim.
+      const due = workspace.capacity.available ? workspace.items.filter(item => isDue(item)).slice(0, 50) : [];
+      const decisions = workspace.items.filter(item => ["DONE", "DISMISSED"].includes(item.state) && item.kind !== "RELATIONSHIP").slice(0, 20);
+      const items = [...due, ...decisions].map(item => ({ id: item.id, kind: item.kind, state: item.state,
+        title: item.title.slice(0, 250), hypothesis: item.hypothesis.slice(0, 800), nextAction: item.nextAction.slice(0, 500), lease: null,
+        history: item.history.slice(-3).map(event => ({ ...event, summary: event.summary.slice(0, 300) })) }));
+      return NextResponse.json({ data: { mission: workspace.mission, configured: workspace.configured,
+        capacity: workspace.capacity, truncated: workspace.truncated, items, due: due.map(item => item.id) } });
     }
     const id = text(input.id, "Work ID", 100);
     if (input.action === "claim") return NextResponse.json({ data: await claimScoutWork(tenant.id, id, text(input.reason, "Selection reason", 1500)) });

@@ -96,19 +96,22 @@ def run():
     due_ids = set(workspace["due"])
     candidates = [{key: item.get(key) for key in ("id", "kind", "title", "hypothesis", "nextAction", "history")}
                   for item in workspace["items"] if item["id"] in due_ids]
+    # Carry decisions forward without exposing private conversations to public-search turns.
+    learning = [{key: item.get(key) for key in ("kind", "title", "hypothesis", "nextAction", "history")}
+                for item in workspace["items"] if item.get("state") in {"DONE", "DISMISSED"} and item.get("kind") != "RELATIONSHIP"][:20]
     # Selection is bounded by the application; the model chooses the priority and explains why.
     with tempfile.TemporaryDirectory(prefix="newl-scout-") as temporary:
         directory = Path(temporary)
         selection_schema = object_schema({"id": {"type": "string", "enum": [item["id"] for item in candidates]}, "reason": {"type": "string"}})
         selected = model(RULES + "\nSelect one due item. Prefer unfinished work, useful replies, and due outcome reviews.\n" +
-                         json.dumps({"mission": workspace["mission"], "candidates": candidates}), selection_schema, directory, "selection")
+                         json.dumps({"mission": workspace["mission"], "candidates": candidates, "previousDecisions": learning}), selection_schema, directory, "selection")
         claimed = api({"action": "claim", "id": selected["id"], "reason": selected["reason"]})
         identity = {"id": claimed["id"], "lease": claimed["lease"]}
         try:
             context = api({"action": "context", **identity})
             # Lease is kept by this deterministic wrapper, never passed to the model.
             public_work = {key: value for key, value in claimed.items() if key not in {"lease", "leaseUntil"}}
-            result = model(RULES + "\n" + json.dumps({"mission": workspace["mission"], "work": public_work, "context": context}),
+            result = model(RULES + "\n" + json.dumps({"mission": workspace["mission"], "work": public_work, "context": context, "previousDecisions": learning}),
                            result_schema(claimed["kind"]), directory, "result", search=claimed["kind"] in {"PAGE", "RESEARCH"})
         except Exception:
             # Research has no external side effects, so its failure can be safely deferred in isolation.
