@@ -1,6 +1,6 @@
 # Hunter autonomous research pilot
 
-Evidence status: implemented on an isolated feature branch; production Hunter is unchanged.
+Evidence status: pilot implementation merged in PR #553; connected activation remains separate.
 Owner authorization: build the pilot, 2026-09-16. The owner-supplied location, company-size, service
 and lane preferences are in `ops/openclaw/hunter/pilot-mission.md`.
 
@@ -27,10 +27,23 @@ Two explicit modes exist:
   CRM writes, approvals, enrollment or messaging. The Mac never receives database or Apollo secrets.
   Activation requires reviewed deployment and `HUNTER_PILOT_ENABLED=true` on the server.
 
-There is no deployed pilot read endpoint today. The connected bridge requires an approved runtime
+Deployment alone does not activate the pilot. The connected bridge requires an approved runtime
 connection before live validation. Public-only results remain explicitly uncleared; this is not an
 alternative way to pass suppression. Switching modes requires deliberate deployment/connection review,
 not editing a note or marking a prospect accepted.
+
+The exact `/api/lead-gen/hunter/pilot/read` path must bypass browser-session middleware so its own
+ingestion authentication can run. Neighbouring pilot paths and the Hunter UI remain browser protected.
+Missing/invalid machine credentials still return 401; an authenticated request with the server flag
+disabled returns `PILOT_DISABLED`. A login redirect is an integration failure, not successful token
+authentication. PR #553 initially omitted this exact middleware exemption; regression coverage now
+routes requests through Next's matcher, middleware and the real ingestion authentication boundary.
+
+No database migration is introduced by this pilot or its middleware correction. After the corrected
+deployment is ready, activation requires the server flag on the intended environment and a separate
+review of the worker's connected configuration. Preserve/rebind the existing private journal to the
+authenticated tenant without resetting budgets or silently clearing prior holds. Validate context,
+company clearance and a small zero-credit people lookup before enabling unattended connected work.
 
 ## Research and memory
 
