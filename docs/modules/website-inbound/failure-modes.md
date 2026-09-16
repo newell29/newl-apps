@@ -1,53 +1,11 @@
-# Website inbound submissions: Failure Modes
+# Inbound opportunity failure modes
 
-> Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
-
-## Purpose and status
-
-Website inbound submissions is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-inbound/page.tsx`, `src/app/api/website-inbound/route.ts`, `src/modules/website-inbound/*`, website inbound model/tests if present.
-
-## Workflow / rules summary
-
-- Entry points are protected authenticated pages and/or API routes for this module.
-- Server-side pages and mutating APIs should validate tenant context and module entitlement before data access.
-- Data persistence uses tenant-scoped Prisma models where a database model exists.
-- External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
-- Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
-
-## Data model
-
-Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
-
-```mermaid
-flowchart LR
-  UI[Authenticated UI/API] --> Auth[Auth + module guard]
-  Auth --> Service[Module service]
-  Service --> DB[(Tenant-scoped Prisma tables)]
-  Service --> Ext[External services when configured]
-```
-
-## Permissions
-
-Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
-
-## Failure modes
-
-Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
-
-## Testing
-
-Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
-
-## Source map
-
-| Responsibility | Main files | Supporting files | Tests |
-|---|---|---|---|
-| UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
-| Services/actions/queries | `src/modules/website*` or evidence paths above | `src/server/*` | module-named tests |
-| Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
-
-## Open questions
-
-- Which status values map to employee-approved business language? Requires employee confirmation.
-- Which write actions should require two-person approval? Requires owner confirmation.
-- Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+- Invalid or oversized input returns an inline error; controlled fields retain the entered values.
+- A duplicate warning creates no record until the user selects a separate enquiry or opens an existing record.
+- A concurrent edit or stale revision returns a reload message and writes no activity or audit event.
+- Invalid tenant record IDs, foreign owner IDs, account-setup IDs, and read-only requests fail before authorized persistence.
+- Activity and audit failures roll back the corresponding transaction. Unexpected error details are not displayed to users.
+- Concurrent serializable creation can return a retry error; the request key prevents an ordinary retried create from making a second record.
+- Partially populated or empty historical contact evidence is valid for editing and notes. Missing fields display as unspecified instead of being invented.
+- Pagination clamps out-of-range page numbers; a selected unavailable record displays a not-found message without querying its history.
+- A database without the approved additive migration cannot run the new queue. Production migrations and deployment remain separate owner actions.

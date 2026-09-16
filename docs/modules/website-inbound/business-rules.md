@@ -1,53 +1,15 @@
-# Website inbound submissions: Business Rules
+# Inbound opportunity business rules
 
-> Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
+> Requested scope confirmed by the owner: manual inbound entry, editable website leads, notes, owners, follow-up tracking, improved statuses and filters. Business outcome definitions below remain subject to review.
 
-## Purpose and status
-
-Website inbound submissions is documented because code, routes, schema, or tests were located. Main evidence: `src/app/(authenticated)/website-inbound/page.tsx`, `src/app/api/website-inbound/route.ts`, `src/modules/website-inbound/*`, website inbound model/tests if present.
-
-## Workflow / rules summary
-
-- Entry points are protected authenticated pages and/or API routes for this module.
-- Server-side pages and mutating APIs should validate tenant context and module entitlement before data access.
-- Data persistence uses tenant-scoped Prisma models where a database model exists.
-- External calls use `src/server/integrations/*` or module-specific integration helpers. Secret values are not documented here.
-- Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
-
-## Data model
-
-Relevant tables and enums are in `prisma/schema.prisma`. Operationally important fields include primary `id`, `tenantId` where present, status enums, foreign keys to tenant/user/module, timestamps, metadata JSON, and unique/index constraints declared in Prisma.
-
-```mermaid
-flowchart LR
-  UI[Authenticated UI/API] --> Auth[Auth + module guard]
-  Auth --> Service[Module service]
-  Service --> DB[(Tenant-scoped Prisma tables)]
-  Service --> Ext[External services when configured]
-```
-
-## Permissions
-
-Roles and defaults are in `src/server/auth/role-policy.ts`. Runtime checks are in `src/server/auth/authorization.ts`; gaps should be treated as requiring code review before enabling production writes.
-
-## Failure modes
-
-Expected failures include missing tenant entitlement, read-only mutation attempts, validation errors, missing integration credentials, duplicate records, empty parser results, external API errors, timeouts, and partial job completion. Recovery should use module UI review screens, audit/job records, and documented dry-run scripts before live writes.
-
-## Testing
-
-Relevant tests are under `tests/` and generally named after the module. Recommended checks: `npm test`, `npm run lint`, `npm run typecheck`, and targeted route/service tests. Live integration scripts must not be run without explicit approval and safe credentials.
-
-## Source map
-
-| Responsibility | Main files | Supporting files | Tests |
-|---|---|---|---|
-| UI and routes | See evidence paths above | `src/components/app-shell.tsx` | module-named tests under `tests/` |
-| Services/actions/queries | `src/modules/website*` or evidence paths above | `src/server/*` | module-named tests |
-| Schema | `prisma/schema.prisma` | `prisma/migrations/*` | schema-dependent unit tests |
-
-## Open questions
-
-- Which status values map to employee-approved business language? Requires employee confirmation.
-- Which write actions should require two-person approval? Requires owner confirmation.
-- Which external integration credentials should be moved from env fallback to tenant-scoped settings first? Requires owner confirmation.
+- Current opportunity details are editable; `fields`, `formType`, `pageUrl`, original creation time, and `entryMethod` are not changed by the editor.
+- Website-form contact channel remains Website form. A manual enquiry can switch among Phone, Email, Referral, and Other.
+- A new manual entry requires at least one of company, contact name, email, or phone. Existing submissions can be entirely missing contact evidence and still accept corrections and notes.
+- Services/requirements are free text, allowing multiple services without imposing an unapproved taxonomy.
+- New lifecycle choices: New, Contacted, Qualified, Quote sent, Won, Nurture, Lost, Not a fit / Spam. A lost opportunity requires an outcome reason.
+- Existing Reviewed, Converted, and Closed values are preserved. They remain filterable and can be retained on existing records; they are not offered for new manual records. No migration reinterprets these business outcomes.
+- Won, Lost, Not a fit / Spam, legacy Converted, and legacy Closed are outside open/due/overdue queues. Nurture remains open.
+- Won is a manual tracking decision. It does not post revenue, create a customer, issue a quote, send communications, or trigger an external operation. The precise commercial definition of Won requires owner confirmation.
+- Follow-up and enquiry dates are calendar dates. Today/overdue uses `America/Toronto`; enquiry range endpoints are inclusive.
+- Duplicate checks use exact company/email ignoring case, or digits-only phone equality. They are advisory; different requirements at the same company may be separate opportunities.
+- Existing module access and mutation policies apply. Every query, note, edit, and duplicate lookup is tenant scoped.
