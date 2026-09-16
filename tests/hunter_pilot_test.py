@@ -149,11 +149,142 @@ class PilotTests(unittest.TestCase):
         self.p.tick(force=True)
         self.assertIsNone(self.p.state["lastError"])
 
-    def test_repeated_unproductive_wakes_back_off_a_day(self):
+    def test_two_stalled_wakes_leave_room_to_change_direction(self):
         self.p.tick(force=True)
         self.p.tick(force=True)
-        self.assertEqual(self.p.state["health"], "waiting_no_progress")
-        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(days=1))
+        self.assertEqual(self.p.state["health"], "waiting")
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(minutes=30))
+
+    def test_repeated_stalls_surface_review_and_stop_until_next_business_day(self):
+        self.time = dt.datetime(2026, 9, 18, 19, tzinfo=UTC)  # Friday afternoon
+        for _ in range(3):
+            self.p.tick(force=True)
+        self.assertEqual(self.p.state["health"], "needs_review")
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), dt.datetime(2026, 9, 21, 13, tzinfo=UTC))
+        self.time += dt.timedelta(minutes=30)
+        self.p.tick()
+        self.assertEqual(self.model.call_count, 3)
+
+    def test_one_clue_cannot_pause_global_research_for_a_day(self):
+        result = self.action("wait", reason="One property page is unavailable", minutes=1440)
+        self.assertEqual(dt.datetime.fromisoformat(self.p.state["nextWakeAt"]), self.time + dt.timedelta(minutes=30))
+        self.assertEqual(result["requestedMinutes"], 1440)
+        self.assertEqual(result["minutes"], 30)
+
+    def test_upgrade_recovers_existing_long_wait_without_resetting_usage_or_history(self):
+        self.p.state.update(health="waiting", nextWakeAt=(self.time + dt.timedelta(days=1)).isoformat(),
+                            lastCompletedWakeAt=(self.time - dt.timedelta(hours=2)).isoformat())
+        self.p.budget()["modelCalls"] = 38
+        self.p.state["attempts"]["prior"] = {"action": "search", "query": "synthetic old clue", "at": self.time.isoformat()}
+        self.p.tick()
+        self.assertEqual(self.model.call_count, 1)
+        self.assertEqual(self.p.budget()["modelCalls"], 39)
+        self.assertIn("prior", self.p.state["attempts"])
+        self.assertEqual(len([e for e in self.p.state["events"] if e["kind"] == "schedule_recovered"]), 1)
+
+    def test_upgrade_does_not_shorten_budget_or_error_waits(self):
+        for health in ("budget_wait", "error", "needs_review"):
+            wake = (self.time + dt.timedelta(days=1)).isoformat()
+            self.p.state.update(health=health, nextWakeAt=wake)
+            self.p.state.pop("schedulePolicyVersion", None)
+            self.p.tick()
+            self.assertEqual(self.p.state["nextWakeAt"], wake)
+        self.model.assert_not_called()
+
+    def test_upgrade_after_graceful_stop_uses_recorded_wait_cause(self):
+        wake = (self.time + dt.timedelta(days=1)).isoformat()
+        self.p.state.update(health="stopped", nextWakeAt=wake,
+                            lastCompletedWakeAt=(self.time - dt.timedelta(hours=2)).isoformat())
+        self.p.event("action", action="wait", result={"state": "waiting", "reason": "One clue is unavailable"})
+        self.p.tick()
+        self.assertEqual(self.model.call_count, 1)
+        self.assertNotEqual(self.p.state["nextWakeAt"], wake)
+
+    def test_stopped_budget_error_or_unknown_schedule_is_not_recovered(self):
+        for kind in ("budget_stop", "error", None):
+            wake = (self.time + dt.timedelta(days=1)).isoformat()
+            self.p.state.update(health="stopped", nextWakeAt=wake, events=[])
+            self.p.state.pop("schedulePolicyVersion", None)
+            if kind:
+                self.p.event(kind)
+            self.p.tick()
+            self.assertEqual(self.p.state["nextWakeAt"], wake)
+        self.model.assert_not_called()
+
+    def test_recovered_wait_does_not_bypass_stop_or_exhausted_budget(self):
+        self.p.state.update(health="waiting", nextWakeAt=(self.time + dt.timedelta(days=1)).isoformat(),
+                            lastCompletedWakeAt=(self.time - dt.timedelta(hours=2)).isoformat())
+        self.p.budget()["modelCalls"] = 40
+        with self.assertRaises(BudgetExceeded):
+            self.p.tick()
+        self.path.joinpath("STOP").touch()
+        with self.assertRaisesRegex(RuntimeError, "STOP_REQUESTED"):
+            self.p.tick(force=True)
+        self.model.assert_not_called()
+
+    def test_default_wakes_continue_research_across_the_day(self):
+        counter = 0
+        def model(_context):
+            nonlocal counter
+            counter += 1
+            return ({"action": "search", "purpose": "Investigate a new market clue", "args": {
+                "query": f"synthetic wholesale brand {counter}", "direction": "gta"}}, {})
+        self.p.model = model
+        for _ in range(4):
+            self.p.tick()
+            self.time += dt.timedelta(minutes=30)
+        self.assertEqual(counter, 12)
+        self.assertEqual(self.p.budget()["modelCalls"], 12)
+        self.assertEqual(self.p.state["unproductiveWakes"], 0)
+
+    def test_unsaved_company_decision_can_recover_by_exploring_another_clue(self):
+        self.model.side_effect = [
+            ({"action": "decide", "purpose": "Abandon a weak clue", "args": {
+                "company": "provider.example", "status": "parked", "summary": "Provider, not a proven buyer",
+                "uncertainty": "No partnership basis found", "nextAction": "Move to another clue",
+                "evidenceIds": [], "revisitDays": 30, "revisitWhen": "A referral relationship emerges"}}, {}),
+            ({"action": "search", "purpose": "Abandon that provider and investigate goods distributors", "args": {
+                "query": "synthetic Canadian housewares distributors", "direction": "gta"}}, {}),
+            ({"action": "wait", "purpose": "Continue next session", "args": {"minutes": 30, "reason": "Resume saved clues"}}, {})]
+        self.p.tick()
+        self.assertFalse(self.p.state["companies"])
+        self.assertEqual(self.search.call_count, 1)
+        self.assertEqual(self.p.state["unproductiveWakes"], 0)
+        self.assertEqual(self.p.context()["researchCoverage"]["directions"]["gta"]["attempts"], 1)
+
+    def test_search_coverage_survives_restart_and_records_empty_attempts(self):
+        self.search.return_value = []
+        self.action("search", query="synthetic retail expansion", direction="charlotte")
+        restarted = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
+        coverage = restarted.context()["researchCoverage"]
+        self.assertEqual(coverage["directions"]["charlotte"]["attempts"], 1)
+        self.assertEqual(coverage["directions"]["gta"]["attempts"], 0)
+        self.assertEqual(coverage["directions"]["charlotte"]["recentQueries"], ["synthetic retail expansion"])
+
+    def test_old_partial_search_history_is_not_invented_or_reset(self):
+        self.p.state["attempts"] = {
+            "old-complete": {"action": "search", "at": self.time.isoformat(), "query": "synthetic old search", "result": {"direction": "ocean"}},
+            "old-interrupted": {"action": "search", "at": self.time.isoformat(), "query": "synthetic interrupted search"}}
+        coverage = self.p.context()["researchCoverage"]
+        self.assertEqual(coverage["directions"]["ocean"]["attempts"], 1)
+        self.assertEqual(coverage["unknownDirectionAttempts"], 1)
+        self.assertEqual(len(self.p.state["attempts"]), 2)
+
+    def test_unread_clues_preserve_older_options_without_retrying_failed_pages(self):
+        self.action("search", query="synthetic wholesale", direction="gta")
+        clues = self.p.context()["unreadClues"]
+        self.assertEqual(clues[0]["url"], "https://supply.example/")
+        self.fetch.return_value = (None, None)
+        self.action("fetch", url="https://supply.example/")
+        self.assertEqual(self.p.context()["unreadClues"], [])
+        self.time += dt.timedelta(days=2)
+        self.assertEqual(self.p.context()["unreadClues"], [])
+
+    def test_pending_clues_do_not_resurface_parked_or_blocked_company_domains(self):
+        company = self.open()
+        for status in ("parked", "blocked", "rejected"):
+            company["status"] = status
+            self.assertEqual(self.p.context()["unreadClues"], [])
 
     def test_model_context_contains_observations_not_its_own_proposal_logs(self):
         self.p.event("proposed_action", proposal={"action": "search"})

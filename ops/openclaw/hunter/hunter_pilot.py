@@ -30,7 +30,8 @@ UTC = dt.timezone.utc
 ZONE = ZoneInfo("America/Toronto")
 REPO = Path(__file__).resolve().parents[3]
 MISSION = Path(__file__).with_name("pilot-mission.md").read_text()
-VERSION = "hunter-autonomous-pilot-v1"
+VERSION = "hunter-autonomous-pilot-v2"
+DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
 ACTIONS = ["search", "fetch", "open_company", "people", "decide", "wait"]
 DIRECTIONS = ["charlotte", "gta", "ocean", "referral"]
@@ -66,12 +67,18 @@ people: {company, titles:[up to 8 roles]} -- zero-credit Apollo search, no email
   after an official company page was fetched. Results never count as verified employment.
 decide: {company, status:'active'|'parked'|'rejected'|'recommended', summary, uncertainty,
   nextAction, evidenceIds:[id,...], quote, quoteEvidenceId, revisitDays, revisitWhen}.
+  company must be an already-saved domain from activeCompanies, dueForRevisit or otherCompanies.
+  If an unsaved clue is weak, abandon it in the purpose of your next search/fetch; do not create a
+  company merely to reject it or call decide for an unknown company.
   A recommendation needs an exact supporting quote from a fetched official page. Missing evidence
   must remain explicit. Use active to pivot a hypothesis. Park/reject instead of filling a quota.
-wait: {reason, minutes:30..1440} -- wait when no useful work is likely within the remaining budget.
+wait: {reason, minutes:30..1440} -- global pause, capped to 30 minutes. For a known company,
+  use decide/parked with a revisit condition instead. One blocked clue is not global exhaustion.
 No mandatory order or research passes. Do not loop over the same failed action. At most five active
 companies; choose whether to finish/park one or explore a better direction. Complete useful decisions
 instead of only collecting sources. References must be actual evidence IDs in the journal.
+Work continues across wakes; do not try to finish all research in one search or one wake. Use
+researchCoverage and unreadClues to consider alternatives after a dead end; neither is a quota.
 """
 
 
@@ -88,6 +95,13 @@ def parse_time(value):
     if result.tzinfo is None:
         raise ValueError("Timestamp requires timezone")
     return result.astimezone(UTC)
+
+
+def next_business_start(value):
+    day = value.astimezone(ZONE).date() + dt.timedelta(days=1)
+    while day.weekday() >= 5:
+        day += dt.timedelta(days=1)
+    return dt.datetime.combine(day, dt.time(9), ZONE)
 
 
 def digest(value):
@@ -398,7 +412,7 @@ class Pilot:
         # Save the attempt BEFORE I/O, so interrupted/failed lookups are not repeated on restart.
         if key:
             self.state["attempts"][key] = {"at": iso(self.clock()), "action": name, "purpose": purpose,
-                "query": args.get("query"), "url": args.get("url"), "state": "started"}
+                "query": args.get("query"), "url": args.get("url"), "direction": args.get("direction"), "state": "started"}
             self.save()
         try:
             result = self.perform(name, args)
@@ -511,9 +525,51 @@ class Pilot:
             if type(minutes) is not int or not 30 <= minutes <= 1440:
                 raise ValueError("Wait must be 30–1440 minutes")
             reason = text(args.get("reason"))
-            self.state["nextWakeAt"] = iso(self.clock() + dt.timedelta(minutes=minutes))
-            return {"state": "waiting", "reason": reason}
+            self.state["nextWakeAt"] = iso(self.clock() + dt.timedelta(minutes=30))
+            return {"state": "waiting", "reason": reason, "requestedMinutes": minutes, "minutes": 30,
+                    "nextStep": "Reconsider the best available investigation next wake. A blocked clue does not exhaust other companies, sources or services."}
         raise ValueError("Action not allowed")
+
+    def research_coverage(self):
+        # Derive coverage from durable attempts, not model claims or repeated cached actions.
+        # Old journals may lack direction on interrupted calls; keep that uncertainty explicit.
+        rows = {d: {"attempts": 0, "lastAttemptAt": None, "recentQueries": []} for d in DIRECTIONS}
+        unknown = 0
+        for attempt in self.state["attempts"].values():
+            if attempt.get("action") != "search":
+                continue
+            direction = attempt.get("direction") or (attempt.get("result") or {}).get("direction")
+            if direction not in rows:
+                unknown += 1
+                continue
+            row = rows[direction]
+            row["attempts"] += 1
+            row["lastAttemptAt"] = attempt.get("at")
+            if attempt.get("query"):
+                row["recentQueries"] = (row["recentQueries"] + [attempt["query"]])[-3:]
+        return {"directions": rows, "unknownDirectionAttempts": unknown}
+
+    def unread_clues(self):
+        from urllib.parse import urlparse
+        clues, seen = [], set()
+        for evidence in reversed(list(self.state["evidence"].values())):
+            if evidence["kind"] != "search":
+                continue
+            url = evidence["url"]
+            host = (urlparse(url).hostname or "").removeprefix("www.")
+            company = self.state["companies"].get(evidence.get("company")) or self.state["companies"].get(host)
+            if company and company["status"] != "active":
+                continue  # Known dispositions/revisits already have their own context.
+            key = self.cache_key("fetch", {"url": url})
+            attempt = self.state["attempts"].get(key)
+            if key in seen or attempt:
+                continue
+            seen.add(key)
+            clues.append({k: evidence.get(k) for k in ("id", "url", "title", "publishedAt")})
+            clues[-1]["excerpt"] = evidence.get("excerpt", "")[:500]
+            if len(clues) == 8:
+                break
+        return clues
 
     def context(self):
         self.ingest_feedback()
@@ -535,9 +591,31 @@ class Pilot:
                              {"action", "action_rejected", "yield", "error", "budget_stop"}][-6:],
             "feedback": self.state["feedback"][-20:],
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
+            "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
+            "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
+            "workSelection": "Follow a promising investigation across wakes. After a stall, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
-    def tick(self, force=False, max_steps=6):
+    def recover_legacy_wait(self):
+        if self.state.get("schedulePolicyVersion") == 2:
+            return
+        wake = self.state.get("nextWakeAt")
+        last_schedule = next((e for e in reversed(self.state["events"]) if e["kind"] in {"budget_stop", "error", "yield"} or
+                              (e["kind"] == "action" and e.get("action") == "wait")), {})
+        legacy_wait = self.state.get("health") in {"waiting", "waiting_no_progress"} or (
+            self.state.get("health") == "stopped" and last_schedule.get("kind") in {"action", "yield"})
+        if legacy_wait and wake and parse_time(wake) > self.clock() + dt.timedelta(minutes=30):
+            # Only v1 model/no-progress waits are shortened. Budget, error, STOP and expiry
+            # remain authoritative; no history, counters, dispositions or limits are reset.
+            completed = self.state.get("lastCompletedWakeAt")
+            due = parse_time(completed) + dt.timedelta(minutes=30) if completed else self.clock() + dt.timedelta(minutes=30)
+            self.state["nextWakeAt"] = iso(min(parse_time(wake), max(self.clock(), due)))
+            self.event("schedule_recovered", previousWakeAt=wake, nextWakeAt=self.state["nextWakeAt"])
+        self.state["schedulePolicyVersion"] = 2
+        self.save()
+
+    def tick(self, force=False, max_steps=DEFAULT_WAKE_STEPS):
+        self.recover_legacy_wait()
         self.state["heartbeatAt"] = iso(self.clock())
         self.state["pid"] = os.getpid()
         self.save()
@@ -586,10 +664,10 @@ class Pilot:
                 break
         self.state["health"] = "waiting"
         self.state["unproductiveWakes"] = 0 if productive else self.state.get("unproductiveWakes", 0) + 1
-        if self.state["unproductiveWakes"] >= 2:
-            self.state["health"] = "waiting_no_progress"
-            self.state["nextWakeAt"] = iso(self.clock() + dt.timedelta(days=1))
-            self.event("yield", reason="Consecutive wakes made no useful progress; pause for a day rather than repeat the same work")
+        if self.state["unproductiveWakes"] >= 3:
+            self.state["health"] = "needs_review"
+            self.state["nextWakeAt"] = iso(next_business_start(self.clock()))
+            self.event("yield", reason="Three consecutive wakes made no useful progress despite alternatives in context. Research quality needs review; pause until next business day rather than spend the budget looping.")
         self.state["lastError"] = None
         self.state["lastCompletedWakeAt"] = iso(self.clock())
         self.event("wake_completed")
@@ -613,6 +691,8 @@ class Pilot:
             "nextWakeAt": self.state.get("nextWakeAt"), "expiresAt": self.config["expiresAt"],
             "counts": counts, "usedToday": self.budget(), "totalUsdMicros": self.state["usdMicros"],
             "unproductiveWakes": self.state.get("unproductiveWakes", 0),
+            "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
+            "searchesByDirection": {d: r["attempts"] for d, r in self.research_coverage()["directions"].items()},
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "publicDiscoveryOnly": self.config.get("publicDiscoveryOnly", False),
             "externalWrites": 0, "paidEmailEnrichments": 0, "lastError": self.state.get("lastError")}
@@ -678,7 +758,7 @@ def main():
     parser.add_argument("--verdict", choices=["accepted", "wrong_company", "wrong_buyer", "poor_fit", "timing", "reject"])
     parser.add_argument("--note")
     parser.add_argument("--force", action="store_true", help="One supervised wake outside hours; never bypass safety/budget/expiry")
-    parser.add_argument("--max-steps", type=int, default=6)
+    parser.add_argument("--max-steps", type=int, default=DEFAULT_WAKE_STEPS)
     args = parser.parse_args()
     load_env(args.env_file)
     directory = Path(args.state_dir).expanduser().resolve()
@@ -731,7 +811,7 @@ def main():
                 pilot.tick(force=args.force and args.command == "once", max_steps=args.max_steps)
             except BudgetExceeded as error:
                 pilot.state["health"] = "budget_wait"
-                pilot.state["nextWakeAt"] = iso(dt.datetime.combine(now().astimezone(ZONE).date() + dt.timedelta(days=1), dt.time(9), ZONE))
+                pilot.state["nextWakeAt"] = iso(next_business_start(now()))
                 pilot.event("budget_stop", budget=str(error))
             except Exception as error:
                 # Do not log raw transport exception text or model responses.

@@ -1,6 +1,8 @@
 # Hunter autonomous research pilot
 
-Evidence status: pilot implementation merged in PR #553; connected activation remains separate.
+Evidence status: pilot and machine-route correction merged in PRs #553/#554. The owner deployed the
+Production flag and the connected read-only pilot was validated on 2026-09-16. The research-continuity
+correction described below is a separate reviewed rollout; implementation is not proof of live adoption.
 Owner authorization: build the pilot, 2026-09-16. The owner-supplied location, company-size, service
 and lane preferences are in `ops/openclaw/hunter/pilot-mission.md`.
 
@@ -69,10 +71,34 @@ a separate atomic inbox so it can arrive while the worker is active; acceptance 
 ## Bounds and operation
 
 Normal hours: weekdays 09:00–17:00 America/Toronto. Due wakes are at least thirty minutes apart, with
-at most six actions and ten minutes of work per wake. Two unproductive actions yield; two consecutive
-wakes without useful progress back off for a day and expose `waiting_no_progress` in health. The model can
-wait up to a day. Parked/rejected companies retain a revisit date and condition. STOP is checked between
+three model-selected actions by default (hard maximum six for a supervised override) and ten minutes
+of work per wake. An investigation continues from its journal across wakes; one wake is not a complete
+market scan. Three actions per half hour spread the existing 40-call daily allowance over roughly
+fourteen wakes when productive, rather than consuming it in seven large batches. These are ceilings,
+not a required activity or lead quota; waits, model time and other budgets can reduce actual work.
+
+Two unproductive actions yield to the next half-hour wake. A model-requested global wait is capped at
+thirty minutes, even when an older proposal requests a day. Known companies use `decide/parked` with
+their own revisit condition; one unavailable property page must not pause other research. Three
+consecutive unproductive wakes expose `needs_review` and `researchNeedsReview=true`, then stop until
+09:00 the next business day. This is a visible quality failure, not a claim that the market is exhausted.
+The review flag remains visible outside business hours. No additional notifications or agents are added.
+Parked/rejected companies retain a revisit date and condition. STOP is checked between
 actions and during sleep; an in-flight call can finish within its timeout. Expiry ends the process.
+
+The model receives per-direction search coverage and up to eight saved, unattempted public clues.
+Coverage is derived from persisted attempts, including failed/empty calls; cached repeats do not inflate
+it. Old completed attempts recover direction from their saved result; interrupted attempts missing
+direction remain explicitly unknown. These hints do not force a rotation or mandatory research stages.
+Previously attempted URLs and parked/rejected/blocked company domains do not become new unread clues.
+Instructions distinguish businesses moving goods from available warehouse property or competing
+service providers, and do not invent product-category exclusions or require explicit buying intent.
+
+On first v2 wake, an inherited v1 `waiting`/`waiting_no_progress` timer longer than thirty minutes is
+shortened and audited as `schedule_recovered`. A gracefully stopped worker also requires a recorded
+model wait/yield cause; an unknown stopped schedule is preserved. Budget/error/review waits are preserved. STOP, expiry,
+tenant and server-policy guards still run before model/tool I/O. Budgets, evidence, holds and feedback
+are not reset. Do not initialize a fresh journal or reset allowances to make trial results look better.
 
 Daily limits: 40 searches, 60 fetched pages, 20 free people searches, 40 model calls and 60 minutes of
 model time. A call reserves its full timeout before execution; a crash does not refund unknown usage.
@@ -136,6 +162,17 @@ rosters. Do not attach live journal/credential files to Git or PRs.
    Measure commercial fit, unsupported inferences, buyer accuracy and elapsed time. Quantization is not
    a quality guarantee; the initial small comparison did not establish a Q8 advantage. A stronger model
    comparison requires an approved existing model budget, not automatic paid fallback.
+8. For the continuity correction, first reproduce the long global wait and missing alternatives with
+   synthetic tests. Verify repeated half-hour wakes, preserved budgets after restart/upgrade, a pivot
+   after a blocked clue, and a visible stop after repeated failure. A small supervised local-model
+   trial may use the remaining existing daily allowance; setup and validation usage must remain
+   distinguishable from unattended business results. Do not call masked contact candidates verified
+   buyers, or count a search result as a qualified opportunity.
+9. Review at least two normal business days after the revised worker is deliberately adopted. Inspect
+   multiple completed research sessions, source/service diversity when initial clues stall, completed
+   company decisions, supported Newl fit and contact gaps. Keep the five-day commercial acceptance
+   target above; neither a test pass nor more searches proves effectiveness. If the model still cannot
+   pivot, classify this as a failed model/control trial before increasing spend or adding machinery.
 
 ## Implementation verification, 2026-09-16
 
@@ -156,7 +193,35 @@ contacts or a qualified opportunity. Private run history retains the failures an
 
 The existing Vercel Preview build invokes migrations and Teamship-user provisioning. Publishing a
 branch/Preview therefore needs separate approval for that existing setup; a local build does not do
-those operations. Full live clearance/Apollo acceptance remains pending a reviewed endpoint deployment.
+those operations. That was the deployment limitation at the initial public evaluation; subsequent
+connected integration checks are recorded below. Commercial/contact acceptance remains unproven.
+
+### Continuity correction validation, 2026-09-16
+
+The connected bridge passed a real tenant/context check, one company-clearance check and a zero-credit
+Apollo lookup returning two masked candidates. These were supervised integration checks, not verified
+buyers or proof of unattended research quality. No outreach or CRM/Apollo record writes occurred.
+
+Eight initial synthetic regressions reproduced the existing long-wait, session-size and context gaps.
+The expanded Python suite now has 55 passing cases; the route/service/middleware/worker Vitest command
+passes 47 checks, including the Python suite wrapper. Lint, typecheck and the local build pass. The first
+typecheck/build encountered an out-of-date generated Prisma client; `prisma generate` from the existing
+unchanged schema repaired the local generated types. No migration or database operation was run.
+
+Using the original journal and remaining daily allowance, a supervised three-action trial with local
+`qwen3:30b-instruct` chose a different clue, searched and fetched an official company page, then tried
+to decide an unsaved company and was rejected. The company was another logistics provider; it did not
+establish a useful buyer. Tool instructions were clarified to permit abandoning unsaved clues without
+creating a company merely to reject it. One subsequent call with installed
+`qwen3.8-rvn:q8_0-multilingual` shifted its stated aim toward actual shippers, but still searched the
+same Charlotte facility-expansion theme. Neither test produced a qualified recommendation. The
+contexts differed, so this is diagnostic evidence, not a controlled model ranking or Q8 promotion.
+
+All four model calls were charged to the existing 40-call daily limit. Total recorded paid API spend
+remained zero. The unchanged v1 background runtime was resumed; its own exhausted-budget path schedules
+the next wake for 09:00 on September 17. No budget/history reset, model promotion, new schedule, paid
+fallback or unattended v2 rollout was performed. The correction removes a demonstrated control failure;
+local-model commercial judgment remains an open acceptance risk.
 
 ## Compatibility and rollback
 
@@ -170,3 +235,11 @@ For the optional LaunchAgent, `launchctl bootout gui/$(id -u)/com.newl.hunter-pi
 unloads only the evaluator. Its plist can then be removed after confirming that exact label.
 No database rollback or existing Hunter restart is needed. Production deployment, connection approval,
 paid enrichment and sending remain separate decisions.
+
+The continuity correction changes only the local worker, its instructions, synthetic tests and this
+runbook. UI, API route, server action/service, schema, tenant permissions and Apollo adapter are unchanged;
+the existing route/service/middleware tests remain required. It requires no database migration or new
+Vercel setting. Merging the PR does not update the Mac LaunchAgent automatically: after review, stop only
+the isolated pilot, retain a private state/config backup, select the reviewed runtime source, and resume
+the same journal with its original expiry and remaining budgets. Keep the old runtime worktree until
+the service no longer references it. Never repoint or restart the legacy Hunter worker for this change.
