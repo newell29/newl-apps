@@ -1,5 +1,14 @@
 # Website growth and SEO: Source Map
 
+## Scout marketing redesign
+
+- Workboard and page briefs: `src/app/(authenticated)/website-growth/marketing/page.tsx` and `pages/page.tsx`.
+- Mission, work, research leases, measurements, and owner response actions: `src/modules/website-growth/scout/`.
+- Tenant-bound worker API: `src/app/api/website-growth/scout/work-items/route.ts`.
+- External research runtime: `ops/openclaw/run-scout-marketing.sh` and `ops/openclaw/scout/worker.py`.
+
+The default workspace now follows persistent marketing work through research, owner decisions, and outcome reviews. See [Scout marketing specialist](scout-marketing-redesign.md) for the implemented worker contract, data model, approval boundaries, regression coverage, and staged cutover. Existing scheduled discovery remains available while the marketing mission is paused.
+
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
 ## Purpose and status

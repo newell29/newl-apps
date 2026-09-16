@@ -244,12 +244,11 @@ export async function ingestWebsiteGrowthBacklinkDiscoveryResults({
       jobType: { in: [WEBSITE_GROWTH_SCOUT_JOB_TYPE, HISTORICAL_WEBSITE_GROWTH_SCOUT_JOB_TYPE] },
       id: { not: runId }
     },
-    select: { output: true }
+    select: { output: true, status: true, startedAt: true }
   });
   const historicalHashes = new Set<string>();
   for (const historical of historicalRuns) {
-    const discovery = readRecord(readRecord(historical.output).backlinkDiscovery);
-    for (const value of readStringArray(discovery.seenUrlHashes)) historicalHashes.add(value);
+    for (const value of reusableWebsiteGrowthResearchHashes(historical)) historicalHashes.add(value);
   }
   const existingBacklinks = await prisma.websiteGrowthBacklinkOpportunity.findMany({
     where: { tenantId, sourceUrl: { not: null } },
@@ -366,6 +365,7 @@ export async function completeWebsiteGrowthBacklinkDiscovery({
               sourceDomain: readOptionalBoundedString(record.sourceDomain, 300)
             };
           }),
+          reviewedUrlHashes: parsed.filter((item) => item.disposition !== "FETCH_FAILED").map((item) => item.id),
           fetchedCount: parsed.filter((item) =>
             item.disposition === "FETCHED" || item.disposition === "FINALIST"
           ).length,
@@ -535,4 +535,15 @@ function getIsoWeek(date: Date) {
   utc.setUTCDate(utc.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
   return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+/** Research dedupe expires; failed or unfinished review never consumes a URL forever.
+ * Existing curated prospects remain separately deduplicated regardless of age. */
+export function reusableWebsiteGrowthResearchHashes(
+  run: { output: unknown; status: string; startedAt: Date }, now = new Date()
+) {
+  if (run.status !== JobStatus.SUCCESS || now.getTime() - run.startedAt.getTime() > 30 * 86_400_000) return [];
+  const discovery = readRecord(readRecord(run.output).backlinkDiscovery);
+  // Legacy ledgers cannot distinguish fetched failures from completed review. Revisit them once.
+  return readStringArray(discovery.reviewedUrlHashes);
 }

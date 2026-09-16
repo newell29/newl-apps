@@ -1,0 +1,42 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { POST } from "@/app/api/website-growth/scout/work-items/route";
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), access: vi.fn(), workspace: vi.fn(), reconcile: vi.fn(), claim: vi.fn(), complete: vi.fn(), context: vi.fn() }));
+vi.mock("@/server/website-growth-scout-auth", () => ({ authenticateWebsiteGrowthScoutRequest: mocks.auth,
+  WebsiteGrowthScoutAuthError: class extends Error { status = 401; } }));
+vi.mock("@/server/db", () => ({ prisma: { tenant: { findUnique: mocks.tenant }, tenantModuleAccess: { findFirst: mocks.access } } }));
+vi.mock("@/modules/website-growth/scout/store", () => ({ scoutWorkspace: mocks.workspace, reconcileScoutWork: mocks.reconcile,
+  claimScoutWork: mocks.claim, completeScoutWork: mocks.complete, scoutWorkContext: mocks.context }));
+const request = (body: object) => new Request("https://example.com/api/website-growth/scout/work-items", { method: "POST", body: JSON.stringify(body) });
+beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockReturnValue({ tenantSlug: "synthetic" }); mocks.tenant.mockResolvedValue({ id: "tenant-authenticated" }); mocks.access.mockResolvedValue({ id: "access" }); });
+describe("Scout worker boundary", () => {
+  it("resolves the tenant from authentication and ignores model-supplied tenant scope", async () => {
+    mocks.claim.mockResolvedValue({ id: "work" });
+    expect((await POST(request({ action: "claim", id: "work", reason: "Continue useful work", tenantId: "foreign" }))).status).toBe(200);
+    expect(mocks.claim).toHaveBeenCalledWith("tenant-authenticated", "work", "Continue useful work");
+    expect(mocks.access).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-authenticated", enabled: true }) }));
+  });
+  it("blocks disabled tenants before touching work", async () => {
+    mocks.access.mockResolvedValue(null);
+    expect((await POST(request({ action: "prepare" }))).status).toBe(403);
+    expect(mocks.workspace).not.toHaveBeenCalled();
+  });
+  it("never exposes another active lease and avoids model work when the budget is exhausted", async () => {
+    const value = { mission: { enabled: false }, capacity: { available: false }, items: [{ id: "work", lease: "private-lease" }] };
+    mocks.workspace.mockResolvedValue(value);
+    const response = await POST(request({ action: "prepare" }));
+    expect(await response.json()).toMatchObject({ data: { items: [{ lease: null }], due: [] } });
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
+  it("does not expose sending, approval, mission changes, or publishing actions", async () => {
+    for (const action of ["send", "approve", "publish", "save-mission"]) {
+      expect((await POST(request({ action, id: "work", lease: "lease" }))).status).toBe(422);
+    }
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+  it("returns a safe failure without leaking underlying integration details", async () => {
+    mocks.claim.mockRejectedValue(new Error("private connection detail"));
+    const response = await POST(request({ action: "claim", id: "work", reason: "Continue" }));
+    expect(response.status).toBe(503);
+    expect(JSON.stringify(await response.json())).not.toContain("private connection detail");
+  });
+});

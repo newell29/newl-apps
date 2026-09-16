@@ -1,3 +1,4 @@
+import { MISSION_JOB, stableId, record } from "@/modules/website-growth/scout/model";
 import { WebsiteGrowthOpportunityStatus, type Prisma } from "@prisma/client";
 
 import { createWebsiteGrowthContentDraftPayload } from "@/modules/website-growth/content-drafts";
@@ -14,6 +15,10 @@ export async function produceWebsiteGrowthDraft({
   actorUserId?: string | null;
   source: "employee" | "openclaw-scout";
 }) {
+  if (source === "openclaw-scout") {
+    const mission = await prisma.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, "mission"), jobType: MISSION_JOB }, select: { input: true } });
+    if (record(mission?.input).enabled === true) return null;
+  }
   const opportunity = await prisma.websiteGrowthOpportunity.findFirst({
     where: {
       tenantId,

@@ -1,5 +1,9 @@
 # Website growth and SEO: Data Model
 
+## Scout marketing redesign
+
+The default workspace now follows persistent marketing work through research, owner decisions, and outcome reviews. See [Scout marketing specialist](scout-marketing-redesign.md) for the implemented worker contract, data model, approval boundaries, regression coverage, and staged cutover. Existing scheduled discovery remains available while the marketing mission is paused.
+
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
 ## Purpose and status
@@ -22,7 +26,7 @@ SEMrush cache metadata lives in tenant-scoped `WebsiteGrowthDataImport` records.
 
 `WebsiteGrowthBacklinkOpportunity` is the curated backlink system of record. It stores one tenant-scoped prospect per deterministic referring-domain/target-page dedupe key, human/executor lifecycle status, category, source and target URLs, quality signals, approved public outreach angle, cost flag, and verification timestamps. It does not store raw Semrush backlink rows. `REJECTED` and `ARCHIVED` records are hidden from the default workspace but retain the prior decision so Scout does not repeatedly propose them.
 
-Raw public-web discovery is deliberately not another user-facing repository. Each tenant-scoped `WEBSITE_GROWTH_BACKLINK_DISCOVERY` `AutomationJobRun.output.backlinkDiscovery` record stores the bounded query plan, canonical URL hashes seen by that run, aggregate model funnel counts, and at most 15 finalists. Individual rejected model decisions are discarded after their counts are recorded; successful runs compact their URL ledger to hash, canonical URL, and domain. Before any page fetch, the ingest service compares a candidate hash with both legacy Scout ledgers, the dedicated discovery ledgers, and every existing curated backlink source URL. This uses the existing automation ledger and requires no new production migration. The volume is bounded to 120 hashes per weekly run. Content runs remain `WEBSITE_GROWTH_SCOUT_WEEKLY`, so the two lanes have independent locks and failure states.
+Raw public-web discovery is deliberately not another user-facing repository. Each tenant-scoped `WEBSITE_GROWTH_BACKLINK_DISCOVERY` `AutomationJobRun.output.backlinkDiscovery` record stores the bounded query plan, canonical URL hashes seen by that run, aggregate model funnel counts, and at most 15 finalists. Individual rejected model decisions are discarded after their counts are recorded; successful runs compact their URL ledger to hash, canonical URL, and domain. Before any page fetch, the ingest service compares a candidate hash with successfully reviewed hashes from successful legacy/dedicated ledgers in the last 30 days and every existing curated backlink source URL. Incomplete legacy evidence does not suppress research. This uses the existing automation ledger and requires no new production migration. The volume is bounded to 120 hashes per weekly run. Content runs remain `WEBSITE_GROWTH_SCOUT_WEEKLY`, so the two lanes have independent locks and failure states.
 
 Successful outreach summaries are stored as tenant-scoped `AutomationJobRun` records with job type `WEBSITE_GROWTH_BACKLINK_OUTREACH`. Their sanitized output contains current-run and lifetime counts plus blocked opportunity IDs, categories, reasons, next actions, and retry guidance. Blocker categories are derived from the recorded reason at read time; no model-controlled status comparison is used.
 

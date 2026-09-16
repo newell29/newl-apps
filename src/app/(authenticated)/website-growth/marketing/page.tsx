@@ -1,0 +1,104 @@
+import { ModuleKey, PlatformRole } from "@prisma/client";
+import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
+import { requireModule, resolveRoleCanMutate } from "@/server/auth/authorization";
+import { getAuthenticatedContext } from "@/server/tenant-context";
+import { scoutWorkspace } from "@/modules/website-growth/scout/store";
+import { proposeScoutPageAction, refreshScoutWorkAction, reviewScoutWorkAction, saveScoutMissionAction, sendScoutReplyAction } from "@/modules/website-growth/scout/actions";
+import { record, type Work } from "@/modules/website-growth/scout/model";
+import { prisma } from "@/server/db";
+
+export const dynamic = "force-dynamic";
+const field = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm";
+const button = "rounded-md border border-border px-3 py-2 text-sm font-semibold hover:bg-muted";
+const kindLabels = { PAGE: "Page improvement", RELATIONSHIP: "Publisher conversation", MEASUREMENT: "Outcome review", RESEARCH: "New research" };
+
+export default async function ScoutWorkPage() {
+  const context = await getAuthenticatedContext();
+  await requireModule(context, ModuleKey.WEBSITE_GROWTH);
+  const workspace = await scoutWorkspace(context.tenantId);
+  const recipients = await prisma.websiteGrowthBacklinkOpportunity.findMany({ where: { tenantId: context.tenantId,
+    id: { in: workspace.items.filter(item => item.kind === "RELATIONSHIP").map(item => item.referenceId ?? "") } }, select: { id: true, recipientEmail: true } });
+  const items = workspace.items.map(item => ({ ...item, recipientEmail: typeof item.evidence.replyRecipient === "string" ? item.evidence.replyRecipient : recipients.find(row => row.id === item.referenceId)?.recipientEmail ?? null }));
+  const canReview = ([PlatformRole.ADMIN, PlatformRole.MANAGER] as PlatformRole[]).includes(context.role) && await resolveRoleCanMutate(context.tenantId, context.role);
+  return <div className="space-y-6">
+    <PageHeader eyebrow="Website Growth" title="Scout marketing workboard" description="Set the direction, review finished work, and follow what Scout learns from the results." />
+    <nav className="flex flex-wrap gap-3 text-sm font-semibold"><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/backlinks">Publisher opportunities</Link><Link href="/website-growth/signals">Research signals</Link></nav>
+    <section className="rounded-lg border border-border bg-card p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Marketing direction</h2><span className="rounded-full bg-muted px-3 py-1 text-sm">{workspace.mission.enabled ? "Research enabled" : "Research paused"}</span></div>
+      <p className="mt-2 text-mutedForeground">{workspace.mission.objective}</p>
+      {!workspace.configured && <p className="mt-3 text-sm text-mutedForeground">Confirm the priorities and enquiry definition below before enabling Scout. Sending and publishing keep their existing approval steps.</p>}
+      {canReview && <details className="mt-4" open={!workspace.configured}><summary className="cursor-pointer text-sm font-semibold">Edit priorities and research budget</summary>
+        <form action={saveScoutMissionAction} className="mt-4 grid gap-4 md:grid-cols-2">
+          <label className="md:col-span-2">Objective<textarea name="objective" defaultValue={workspace.mission.objective} required maxLength={1500} className={field} /></label>
+          <label>Priority services, markets, and audiences<textarea name="priorities" defaultValue={workspace.mission.priorities} required maxLength={2500} rows={3} className={field} /></label>
+          <label>What counts as a qualified enquiry<textarea name="qualifiedLead" defaultValue={workspace.mission.qualifiedLead} required maxLength={1500} rows={3} className={field} /></label>
+          <label>Research steps per rolling day<input name="dailySteps" type="number" min={1} max={20} defaultValue={workspace.mission.dailySteps} required className={field} /></label>
+          <label>Maximum items being worked or awaiting review<input name="maxActive" type="number" min={1} max={10} defaultValue={workspace.mission.maxActive} required className={field} /></label>
+          <label className="flex items-center gap-2"><input name="enabled" type="checkbox" defaultChecked={workspace.mission.enabled} />Enable research and draft preparation</label>
+          <div><button className={button}>Save direction</button></div>
+        </form>
+      </details>}
+    </section>
+    <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-mutedForeground">Work resumes from its saved next action. Published pages return for measurement.</p>
+      {canReview && <form action={refreshScoutWorkAction}><button className={button}>Find outstanding work</button></form>}
+    </div>
+    {workspace.truncated && <p role="status">The work history limit has been reached. Archive reviewed history before further research.</p>}
+    <div className="grid items-start gap-5 xl:grid-cols-3">
+      <WorkColumn title="Needs your decision" empty="No finished work needs a decision." items={items.filter(item => item.state === "NEEDS_REVIEW")} canReview={canReview} />
+      <WorkColumn title="Scout is pursuing" empty={canReview ? "No research is underway. Find outstanding work or add a priority." : "No research is underway."} items={items.filter(item => ["READY", "WORKING"].includes(item.state))} canReview={canReview} />
+      <WorkColumn title="Waiting and measuring" empty="No scheduled reviews or external waits." items={items.filter(item => item.state === "WAITING")} canReview={canReview} />
+    </div>
+    {canReview && <details className="rounded-lg border border-border bg-card p-5"><summary className="cursor-pointer font-semibold">Give Scout a page to investigate</summary>
+      <form action={proposeScoutPageAction} className="mt-4 grid gap-3 md:grid-cols-2"><label>Title<input name="title" required maxLength={250} className={field} /></label><label>Website route<input name="route" required placeholder="/services/warehousing" className={field} /></label>
+        <label className="md:col-span-2">Problem or hypothesis<textarea name="hypothesis" required maxLength={4000} className={field} /></label><label><input name="newPage" type="checkbox" /> Propose a new page</label><div><button className={button}>Add research</button></div></form>
+    </details>}
+    <details className="rounded-lg border border-border p-5"><summary className="cursor-pointer font-semibold">Decisions and learning ({workspace.items.filter(item => ["DONE", "DISMISSED"].includes(item.state)).length})</summary>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">{workspace.items.filter(item => ["DONE", "DISMISSED"].includes(item.state)).slice(0, 20).map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</div>
+    </details>
+  </div>;
+}
+function WorkColumn({ title, empty, items, canReview }: { title: string; empty: string; items: Array<Work & { id: string; recipientEmail?: string | null }>; canReview: boolean }) {
+  return <section className="space-y-3"><h2 className="text-lg font-semibold">{title} <span className="text-mutedForeground">{items.length}</span></h2>{items.length === 0 ? <p className="rounded-lg border border-dashed border-border p-5 text-sm text-mutedForeground">{empty}</p> : items.map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</section>;
+}
+function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEmail?: string | null }; canReview: boolean }) {
+  const artifact = record(item.artifact);
+  return <article className="rounded-lg border border-border bg-card p-4 shadow-sm">
+    <p className="text-xs font-semibold uppercase tracking-wide text-primary">{kindLabels[item.kind]}</p><h3 className="mt-2 font-semibold">{item.title}</h3>
+    {item.route && <p className="mt-1 break-all text-xs text-mutedForeground">{item.route}</p>}<p className="mt-3 text-sm">{item.hypothesis}</p>
+    <p className="mt-3 text-sm"><strong>Next:</strong> {item.nextAction}</p>
+    {item.state === "WAITING" && <p className="mt-2 text-xs text-mutedForeground">Review {new Date(item.nextReviewAt).toLocaleDateString("en-CA", { timeZone: "UTC" })}</p>}
+    {item.kind === "MEASUREMENT" && <MeasurementEvidence value={item.evidence.measurement} />}
+    {item.draftId && <Link className="mt-3 inline-block text-sm font-semibold text-primary" href={`/website-growth/drafts/${encodeURIComponent(item.draftId)}`}>Review complete page brief →</Link>}
+    {item.kind === "RELATIONSHIP" && typeof artifact.body === "string" && <div className="mt-4 rounded-md bg-muted/40 p-3"><p className="text-xs">To: {item.recipientEmail ?? "Recipient unavailable"}</p><p className="mt-2 text-sm font-semibold">{String(artifact.subject ?? "Proposed response")}</p><p className="mt-2 whitespace-pre-wrap text-sm">{artifact.body}</p><p className="mt-3 text-xs text-mutedForeground">{item.evidence.replySend === "ACCEPTED" ? "Microsoft 365 accepted this response." : item.evidence.replySend ? "Sending is pending or uncertain. Check progress before taking action." : "Prepared for review. Sending adds the standard business identity and opt-out footer. No response has been sent."}</p></div>}
+    {item.artifact && item.kind !== "PAGE" && <details className="mt-3"><summary className="cursor-pointer text-sm">Evidence and recommendation</summary><div className="mt-2 space-y-2 text-sm">
+      {[artifact.recommendation, artifact.rationale, artifact.limitations].filter(value => typeof value === "string" && value).map((value, index) => <p key={index}>{String(value)}</p>)}
+      {Array.isArray(artifact.evidence) && <ul className="list-disc space-y-1 pl-5">{artifact.evidence.filter(value => typeof value === "string").map((value, index) => <li key={index}>{String(value)}</li>)}</ul>}
+      {Array.isArray(artifact.prospects) && artifact.prospects.length > 0 && <Link href="/website-growth/backlinks" className="inline-block font-semibold text-primary">Review publisher opportunities →</Link>}
+    </div></details>}
+    <details className="mt-3"><summary className="cursor-pointer text-xs text-mutedForeground">Progress and decisions</summary><ol className="mt-2 space-y-2 text-xs">{item.history.slice(-8).map((event, index) => <li key={index}>{new Date(event.at).toLocaleDateString("en-CA")} — {event.summary}</li>)}</ol></details>
+    {canReview && item.kind === "RELATIONSHIP" && item.state === "NEEDS_REVIEW" && item.recipientEmail && <form action={sendScoutReplyAction} className="mt-4 space-y-2"><input type="hidden" name="id" value={item.id} /><input type="hidden" name="revision" value={item.revision} /><label className="flex gap-2 text-xs"><input type="checkbox" name="confirmSend" required />I approve sending this response to the recipient shown above.</label><button className={button}>Approve and send response</button></form>}
+    {canReview && item.state !== "WORKING" && !item.evidence.replySend && <form action={reviewScoutWorkAction} className="mt-4 space-y-2"><input type="hidden" name="id" value={item.id} /><input type="hidden" name="revision" value={item.revision} />
+      <label className="text-xs">Feedback / next action<textarea name="feedback" required maxLength={2000} className={field} /></label><div className="flex flex-wrap gap-2"><button name="decision" value="REVISE" className={button}>Return to Scout</button>
+        {!item.draftId && <button name="decision" value="ACCEPT" className={button}>Mark reviewed</button>}<button name="decision" value="DISMISS" className={button}>Dismiss</button></div></form>}
+  </article>;
+}
+
+function MeasurementEvidence({ value }: { value: unknown }) {
+  const measurement = record(value), windows = record(measurement.windows);
+  if (!Array.isArray(measurement.sources)) return null;
+  const labels: Record<string, string> = { search_console: "Search Console", ga4: "Google Analytics", enquiries: "Enquiries" };
+  const metrics: Record<string, string> = { clicks: "clicks", impressions: "impressions", sessions: "sessions", engagedSessions: "engaged sessions", enquiries: "enquiries" };
+  const describe = (source: string, period: string) => {
+    const row = measurement.sources as unknown[];
+    const result = record(row.find(item => record(item).source === source && record(item).period === period));
+    if (result.status !== "AVAILABLE") return result.status === "NO_MATCHING_ROWS" ? "No matching data" : "Unavailable";
+    return Object.entries(record(result.metrics)).filter(([, amount]) => typeof amount === "number")
+      .map(([key, amount]) => `${Number(amount).toLocaleString("en-CA")} ${metrics[key] ?? key}`).join("; ");
+  };
+  return <details className="mt-3"><summary className="cursor-pointer text-sm font-semibold">Recorded measurement</summary>
+    <div className="mt-2 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr><th className="p-2">Source</th>{["before", "after"].map(period => <th key={period} className="p-2">{period === "before" ? "Before" : "After"}<span className="mt-1 block font-normal">{String(record(windows[period]).startDate ?? "")} – {String(record(windows[period]).endDate ?? "")}</span></th>)}</tr></thead>
+      <tbody>{Object.entries(labels).map(([source, label]) => <tr key={source} className="border-t border-border"><th className="p-2 font-normal">{label}</th><td className="p-2">{describe(source, "before")}</td><td className="p-2">{describe(source, "after")}</td></tr>)}</tbody></table></div>
+    <p className="mt-2 text-xs text-mutedForeground">{String(measurement.caveat ?? "Enquiries are not qualified leads. Before/after movement does not establish causation.")}</p>
+  </details>;
+}

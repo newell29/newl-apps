@@ -428,12 +428,16 @@ export async function syncWebsiteGrowthOutreachReplies({
   const tracked = await prisma.websiteGrowthBacklinkOpportunity.findMany({
     where: {
       tenantId,
-      status: WebsiteGrowthBacklinkStatus.CONTACTED,
+      status: { in: [WebsiteGrowthBacklinkStatus.CONTACTED, WebsiteGrowthBacklinkStatus.REPLIED] },
       recipientEmail: { not: null },
-      contactedAt: { gte: new Date(now.getTime() - REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000) }
+      OR: [
+        { contactedAt: { gte: new Date(now.getTime() - REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000) } },
+        { messages: { some: { tenantId, sentAt: { gte: new Date(now.getTime() - REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000) } } } }
+      ]
     },
     include: {
       messages: {
+        where: { tenantId },
         select: {
           conversationId: true,
           subject: true,
@@ -474,6 +478,8 @@ export async function syncWebsiteGrowthOutreachReplies({
     const allowSenderOnlyFallback =
       trackedByRecipient.get(recipientEmail) === 1;
     const matched = messages
+      .filter((message) => !opportunity.lastReplyAt || (message.receivedDateTime && new Date(message.receivedDateTime) > opportunity.lastReplyAt))
+      .sort((left, right) => Number(isWebsiteGrowthOutreachOptOut(`${right.subject ?? ""} ${right.bodyPreview ?? ""}`)) - Number(isWebsiteGrowthOutreachOptOut(`${left.subject ?? ""} ${left.bodyPreview ?? ""}`)) || Date.parse(right.receivedDateTime ?? "") - Date.parse(left.receivedDateTime ?? ""))
       .map((message) => ({
         message,
         strict: isWebsiteGrowthOutreachReplyMatch({
@@ -500,7 +506,7 @@ export async function syncWebsiteGrowthOutreachReplies({
     const receivedAt = reply.receivedDateTime ? new Date(reply.receivedDateTime) : now;
     await prisma.$transaction(async (tx) => {
       await tx.websiteGrowthBacklinkOpportunity.update({
-        where: { id: opportunity.id },
+        where: { id: opportunity.id, tenantId },
         data: {
           status: optedOut
             ? WebsiteGrowthBacklinkStatus.LOST
