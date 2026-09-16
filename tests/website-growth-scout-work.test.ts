@@ -185,3 +185,13 @@ it("allows a new outcome review to improve the same published page while retaini
   await completeScoutWork("tenant-a", "another-review", "lease-synthetic", input, now);
   expect(db.websiteGrowthOpportunity.upsert).toHaveBeenLastCalledWith(expect.objectContaining({ where: { id: "active-page-work", tenantId: "tenant-a" }, update: {} }));
 });
+
+it.each(["WAIT", "CONTINUE", "DISMISS"])("does not promote an unfinished or rejected %s research artifact", async decision => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH" } });
+  const result = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision, summary: "Research is not ready", nextAction: "Retain the evidence without promoting it", reviewInDays: 1,
+    artifact: { proposedTitle: "Incomplete idea", proposedRoute: "/resources/incomplete", hypothesis: "Unverified", prospects: [{ incomplete: true }] } }, now);
+  expect(result.state).toBe(decision === "WAIT" ? "WAITING" : decision === "CONTINUE" ? "READY" : "DISMISSED");
+  expect(db.websiteGrowthOpportunity.upsert).not.toHaveBeenCalled();
+  expect(db.automationJobRun.upsert).not.toHaveBeenCalled();
+  expect(db.websiteGrowthBacklinkOpportunity.findMany).not.toHaveBeenCalled();
+});

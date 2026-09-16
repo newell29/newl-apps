@@ -132,6 +132,7 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
 
 export async function completeScoutWork(tenantId: string, id: string, lease: string, input: unknown, now = new Date()) {
   const result = parseResult(input, now);
+  const delivering = result.state === "NEEDS_REVIEW";
   return prisma.$transaction(async tx => {
     const current = await tx.automationJobRun.findFirst({ where: { id, tenantId, jobType: WORK_JOB } });
     const previous = readWork(current?.output);
@@ -163,7 +164,7 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       if (!source || source.lastReplyAt?.toISOString() !== work.evidence.replyAt) throw new ScoutWorkError("The conversation changed. Review the latest reply first.", 409);
       evidence = { ...evidence, replyRecipient: source.recipientEmail?.trim().toLowerCase() ?? null };
     }
-    if (["RESEARCH", "MEASUREMENT"].includes(work.kind) && result.artifact?.proposedRoute && result.state !== "DISMISSED") {
+    if (["RESEARCH", "MEASUREMENT"].includes(work.kind) && result.artifact?.proposedRoute && delivering) {
       const proposal = result.artifact;
       const route = routePath(proposal.proposedRoute);
       const title = text(proposal.proposedTitle, "Proposed title", 250), hypothesis = text(proposal.hypothesis, "Proposal hypothesis");
@@ -181,10 +182,11 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       result.state = "DONE";
       result.nextAction = "Scout will prepare a complete page brief from this proposal; publishing still requires owner approval.";
     }
-    if (work.kind === "RESEARCH" && Array.isArray(result.artifact?.prospects) && result.artifact.prospects.length > 0) {
+    if (delivering && work.kind === "RESEARCH" && Array.isArray(result.artifact?.prospects) && result.artifact.prospects.length > 0) {
       const review = parseWebsiteGrowthBacklinkReview({ source: "WEB_DISCOVERY", queried: true, observedAt: now.toISOString(),
         summary: result.summary, rawProspectsReviewed: result.artifact.prospects.length, duplicatesRejected: 0, qualityRejected: 0, prospects: result.artifact.prospects });
       await persistWebsiteGrowthBacklinkReview({ tenantId, runId: id, review, database: tx });
+      result.state = "NEEDS_REVIEW";
       result.nextAction = "Review the researched publisher opportunities in Backlink Scout. No outreach has been approved or sent.";
     }
     const updated = nextWork(work, { ...result, artifact: result.artifact ?? work.artifact, evidence, draftId, lease: null, leaseUntil: null }, `COMPLETED:${lease}`, result.summary, now);
