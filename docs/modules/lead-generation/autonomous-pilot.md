@@ -370,6 +370,38 @@ results for ambiguous pallet and regional-expansion queries. This does not estab
 commercially superior; query selection and follow-up judgment remain the primary evaluation questions.
 Public result titles/URLs remain private evaluation material, not source-controlled customer fixtures.
 
+### Accelerated supervised validation, 2026-09-17
+
+The owner authorized back-to-back supervised testing instead of waiting thirty minutes between trial
+wakes and asked not to stop at the original 40-call evaluation limit. The private pilot allowance was
+raised to 120 model calls and 10,800 model seconds for the day. This is a ceiling, not a target or a new
+default. Search/page/people limits, the US$5 daily and US$10 total cash caps, expiry, tenant/suppression
+checks and no-write/no-contact controls were unchanged. Testing stopped voluntarily at 57 calls after
+the flow produced a complete recommendation, leaving 63 calls for the normal business-day worker.
+
+The first Terra inference exposed a false `MODEL_TOOL_USE_REJECTED`: the CLI emitted a passive completed
+diagnostic item before returning a valid structured decision. The adapter now counts that diagnostic but
+still rejects command/tool and unknown item types. Terra's next decision succeeded. The first Qwen Q4
+shadow then timed out after 180 seconds and its socket timeout escaped the comparison wrapper. That
+failure is now contained and recorded. Further Qwen comparison cases were stopped at one because they
+were obstructing the requested Terra workflow validation; no Qwen proposal was executed.
+
+The rapid loop then completed twelve useful Terra actions but repeatedly switched named companies after
+reading their pages without preserving why. `dismiss_clue` now records evidence-backed dead ends without
+forcing every clue through a company workflow. The live journal immediately used it to close Radius
+Logistics, Canada Cartage, Olliix/JLA Home, Furniture of America, Naturium and other weak clues. A people
+lookup prerequisite also needed clearer recovery instructions: after an initial repeated rejection, the
+model fetched and attached official-domain evidence before trying the zero-credit lookup again.
+
+The trial completed two end-to-end GTA trucking investigations. Lee Li Holdings was parked because its
+official history describes integrated production, distribution and delivery; no people candidate was
+found and outsourcing remains unsupported. Importel Ltd. was recommended for owner review after official
+warehouse/distribution and carrier-policy evidence, with one masked Operations Manager clue. Buying intent,
+employment, volume, lane mix, equipment/security requirements and outsourcing remain unconfirmed, and
+`outreachReady` remains false. An initial recommendation failed the exact-quote gate because the model
+used an ellipsis; it gathered stronger official freight evidence and then passed the unchanged gate.
+This validates flow mechanics and useful commercial restraint, not outbound conversion or broad market yield.
+
 Validation: 72 Python cases and 47 focused Vitest checks passed (the latter includes the Python wrapper).
 `prisma:generate`, `typecheck`, `lint`, `build` and `git diff --check` passed. Client generation used the
 unchanged Hunter schema; no production migration, credential change, enrollment or communication occurred.
