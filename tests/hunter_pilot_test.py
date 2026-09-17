@@ -286,6 +286,19 @@ class PilotTests(unittest.TestCase):
         self.time += dt.timedelta(days=2)
         self.assertEqual(self.p.context()["unreadClues"], [])
 
+    def test_dismiss_clue_preserves_reason_and_removes_unsaved_domain(self):
+        evidence = self.action("search", query="synthetic distributor", direction="gta")["evidenceIds"]
+        result = self.action("dismiss_clue", evidenceIds=evidence,
+            reason="Official evidence shows a provider operating the local service itself",
+            name="Synthetic Supply", domain="supply.example")
+        self.assertEqual(result["state"], "dismissed")
+        self.assertEqual(self.p.context()["unreadClues"], [])
+        dismissed = self.p.context()["dismissedClues"][0]
+        self.assertEqual(dismissed["domain"], "supply.example")
+        self.assertIn("operating the local service", dismissed["reason"])
+        with self.assertRaisesRegex(ValueError, "Cite actual retrieved evidence IDs"):
+            self.action("dismiss_clue", evidenceIds=["invented"], reason="Unsupported")
+
     def test_pending_clues_do_not_resurface_parked_or_blocked_company_domains(self):
         company = self.open()
         for status in ("parked", "blocked", "rejected"):
@@ -583,7 +596,7 @@ class SubscriptionTests(unittest.TestCase):
         schema = output_schema(SCHEMA)
         self.assertEqual(schema["type"], "object")
         variants = schema["properties"]["decision"]["anyOf"]
-        self.assertEqual(len(variants), 6)
+        self.assertEqual(len(variants), 7)
         for row in variants:
             args = row["properties"]["args"]
             self.assertEqual(set(args["required"]), set(args["properties"]))

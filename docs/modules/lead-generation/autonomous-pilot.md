@@ -8,7 +8,7 @@ and lane preferences are in `ops/openclaw/hunter/pilot-mission.md`.
 
 ## Scope
 
-One Python loop chooses search, fetch, open-company, people-search, decide or wait actions. These are
+One Python loop chooses search, fetch, open-company, dismiss-clue, people-search, decide or wait actions. These are
 choices, not mandatory stages. It reuses Hunter's public retrieval helpers, local Ollama or the existing
 ChatGPT-authenticated Codex CLI, and Newl's
 tenant/identity conventions. No framework migration, extra agents, database migration, dashboard,
@@ -102,6 +102,12 @@ Coverage is derived from persisted attempts, including failed/empty calls; cache
 it. Old completed attempts recover direction from their saved result; interrupted attempts missing
 direction remain explicitly unknown. These hints do not force a rotation or mandatory research stages.
 Previously attempted URLs and parked/rejected/blocked company domains do not become new unread clues.
+A `dismiss_clue` action records why evidence for an unsaved company does not justify more work and
+removes that evidence/domain from unread clues. It is local research memory, not a company rejection
+or suppression decision. After an official named-company page is fetched for a stated uncertainty, the
+mission asks the model to open it, dismiss it, or fetch one decision-relevant source before returning
+to broad discovery. This continuity rule was added after an accelerated live trial completed twelve
+useful Terra actions but repeatedly switched companies without saving a disposition.
 Instructions distinguish businesses moving goods from available warehouse property or competing
 service providers, and do not invent product-category exclusions or require explicit buying intent.
 
