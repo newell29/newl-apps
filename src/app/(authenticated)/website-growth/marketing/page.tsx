@@ -34,7 +34,7 @@ export default async function ScoutWorkPage() {
   return <div className="space-y-6">
     <WorkboardRefresh />
     <PageHeader eyebrow="Website Growth" title="Scout marketing workboard" description="Set the direction, review finished work, and follow what Scout learns from the results." />
-    <nav className="flex flex-wrap gap-3 text-sm font-semibold"><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/backlinks">Publisher opportunities</Link><Link href="/website-growth/signals">Research signals</Link></nav>
+    <nav className="flex flex-wrap gap-3 text-sm font-semibold"><Link href="/website-growth">Effectiveness review</Link><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/backlinks">Publisher opportunities</Link><Link href="/website-growth/signals">Research signals</Link></nav>
     <section className="rounded-lg border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Marketing direction</h2><span className="rounded-full bg-muted px-3 py-1 text-sm">{workspace.mission.enabled ? "Research enabled" : "Research paused"}</span></div>
       <p className="mt-2 text-mutedForeground">{workspace.mission.objective}</p>
@@ -64,7 +64,7 @@ export default async function ScoutWorkPage() {
     </div>
     <section className="rounded-lg border border-border bg-card p-5 space-y-3"><h2 className="text-lg font-semibold">What we are learning</h2>
       <p className="text-sm">Measure enquiries and useful visits, then search clicks, impressions, click-through rate, and position. Briefs and builds show activity; measured outcomes guide the next hypothesis.</p>
-      <p className="text-sm text-mutedForeground">Qualified lead and revenue attribution are not connected yet. Website form counts are enquiries. Before/after changes show association, not proof that a page caused the change.</p>
+      <p className="text-sm text-mutedForeground">Per-change qualified lead and revenue attribution are not connected yet. The effectiveness review separately shows current human-recorded enquiry statuses. Before/after changes show association, not proof that a page caused the change.</p>
       <p className="text-sm">{competitors.status === "AVAILABLE" ? `${competitors.reports.filter(report => report.fresh).length} recent Semrush reports available. Reports keep their own observation dates; Scout also researches public competitor pages for the selected task.` : "Competitor reports are unavailable. Scout must use dated public sources and disclose evidence gaps."}</p>
       <p className="text-xs text-mutedForeground">Initial page review: 28 days before and 28 days after publication, with reporting time allowed. Deferred reviews use a later 28-day window. A report can recommend keeping, improving, stopping, or waiting.</p>
       {outcomes.length ? <div className="grid gap-4 md:grid-cols-2">{outcomes.slice(0, 6).map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</div> : <p className="text-sm font-medium">No page outcome has been measured yet. Published pages will return here when their reporting window is ready.</p>}

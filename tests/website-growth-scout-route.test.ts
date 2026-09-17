@@ -7,8 +7,10 @@ vi.mock("@/server/website-growth-scout-auth", () => ({ authenticateWebsiteGrowth
 vi.mock("@/server/db", () => ({ prisma: { tenant: { findUnique: mocks.tenant }, tenantModuleAccess: { findFirst: mocks.access } } }));
 vi.mock("@/modules/website-growth/scout/store", () => ({ scoutWorkspace: mocks.workspace, reconcileScoutWork: mocks.reconcile,
   claimScoutWork: mocks.claim, completeScoutWork: mocks.complete, scoutWorkContext: mocks.context }));
+const effectiveness = vi.hoisted(() => ({ refresh: vi.fn(), load: vi.fn() }));
+vi.mock("@/modules/website-growth/scout/effectiveness", () => ({ refreshSiteReview: effectiveness.refresh, loadSiteReview: effectiveness.load }));
 const request = (body: object) => new Request("https://example.com/api/website-growth/scout/work-items", { method: "POST", body: JSON.stringify(body) });
-beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockReturnValue({ tenantSlug: "synthetic" }); mocks.tenant.mockResolvedValue({ id: "tenant-authenticated" }); mocks.access.mockResolvedValue({ id: "access" }); });
+beforeEach(() => { vi.resetAllMocks(); effectiveness.refresh.mockResolvedValue(null); effectiveness.load.mockResolvedValue(null); mocks.auth.mockReturnValue({ tenantSlug: "synthetic" }); mocks.tenant.mockResolvedValue({ id: "tenant-authenticated" }); mocks.access.mockResolvedValue({ id: "access" }); });
 describe("Scout worker boundary", () => {
   it("resolves the tenant from authentication and ignores model-supplied tenant scope", async () => {
     mocks.claim.mockResolvedValue({ id: "work" });
@@ -51,4 +53,16 @@ it("bounds the selection packet independently of large saved artifacts", async (
   expect(body.data.due).toHaveLength(50);
   expect(body.data.items[0]).not.toHaveProperty("artifact");
   expect(JSON.stringify(body).length).toBeLessThan(100_000);
+});
+
+it("continues existing research when the optional site refresh and saved snapshot are unavailable", async () => {
+  const item = { ...newWork("RESEARCH", null, "Investigate", "Use public evidence", null), id: "research" };
+  const workspace = { mission: { ...DEFAULT_MISSION, enabled: true }, capacity: { available: true, usedSteps: 0, active: 0 }, items: [item] };
+  mocks.workspace.mockResolvedValue(workspace); mocks.reconcile.mockResolvedValue(workspace);
+  effectiveness.refresh.mockRejectedValue(new Error("private provider detail")); effectiveness.load.mockRejectedValue(new Error("unavailable"));
+  const response = await POST(request({ action: "prepare", tenantId: "foreign" }));
+  expect(response.status).toBe(200); const body = await response.json();
+  expect(body.data.due).toEqual(["research"]); expect(body.data.learning.effectiveness.status).toBe("UNAVAILABLE");
+  expect(effectiveness.refresh).toHaveBeenCalledWith("tenant-authenticated");
+  expect(JSON.stringify(body)).not.toContain("private provider detail");
 });

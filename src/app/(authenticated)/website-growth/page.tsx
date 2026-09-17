@@ -1,1 +1,1 @@
-export { default, dynamic } from "./marketing/page";
+export { default, dynamic, maxDuration } from "./effectiveness/page";

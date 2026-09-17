@@ -6,6 +6,7 @@ import { requireModule, requireMutationAccess, requireRole } from "@/server/auth
 import { getAuthenticatedContext } from "@/server/tenant-context";
 import { proposeScoutPage, reconcileScoutWork, reviewScoutWork, saveScoutMission } from "./store";
 import { ScoutWorkError, text } from "./model";
+import { refreshSiteReview } from "./effectiveness";
 import { approveAndSendScoutReply } from "./reply";
 
 async function reviewer() {
@@ -52,4 +53,17 @@ export async function sendScoutReplyAction(form: FormData) {
   await approveAndSendScoutReply(context.tenantId, context.userId, text(form.get("id"), "Work ID", 100), Number(form.get("revision")));
   revalidatePath("/website-growth");
   revalidatePath("/website-growth/marketing");
+}
+
+export async function refreshScoutEffectivenessAction(): Promise<{ error: string | null }> {
+  try {
+    const context = await reviewer();
+    await refreshSiteReview(context.tenantId);
+    await reconcileScoutWork(context.tenantId);
+    revalidatePath("/website-growth");
+    revalidatePath("/website-growth/effectiveness");
+    return { error: null };
+  } catch {
+    return { error: "The review could not be refreshed. Saved evidence is preserved; the next worker wake can retry. Existing work remains available." };
+  }
 }
