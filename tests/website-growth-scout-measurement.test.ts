@@ -23,7 +23,7 @@ describe("Scout per-change measurement", () => {
     const result = await measureScoutPage("tenant-a", "/services/warehouse", published, now);
     expect(result.status).toBe("PARTIAL_OR_MISSING");
     expect(result.sources.filter(row => row.source === "search_console").every(row => row.metrics === null)).toBe(true);
-    expect(result.sources.find(row => row.source === "ga4")?.metrics).toEqual({ sessions: 40, engagedSessions: 20 });
+    expect(result.sources.find(row => row.source === "ga4")?.metrics).toEqual({ sessions: 40, engagedSessions: 20, engagementRate: 0.5 });
     expect(mocks.inbound).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a", entryMethod: "WEBSITE_FORM", formType: { not: "account_setup" } }) }));
     expect(result.caveat).toContain("not causal");
   });
@@ -37,6 +37,32 @@ describe("Scout per-change measurement", () => {
     mocks.search.mockResolvedValue([]); mocks.ga4.mockResolvedValue([]); mocks.inbound.mockResolvedValue([]);
     const result = await measureScoutPage("tenant-a", "/services/warehouse", published, now);
     expect(result.sources.find(row => row.source === "search_console")?.status).toBe("NO_MATCHING_ROWS");
-    expect(result.sources.find(row => row.source === "enquiries")?.metrics).toEqual({ enquiries: 0 });
+    expect(result.sources.find(row => row.source === "enquiries")?.metrics).toEqual({ enquiries: 0, excludedDiagnosticEnquiries: 0 });
+  });
+  it("calculates comparable changes, weighted search position and rate metrics without dividing by zero", async () => {
+    mocks.search.mockResolvedValueOnce([{ keys: ["https://example.com/services/warehouse"], clicks: 0, impressions: 100, position: 8 }])
+      .mockResolvedValueOnce([{ keys: ["https://example.com/services/warehouse"], clicks: 10, impressions: 100, position: 4 },
+        { keys: ["https://example.com/services/warehouse/"], clicks: 5, impressions: 50, position: 10 }]);
+    mocks.ga4.mockResolvedValueOnce([{ page: "/services/warehouse", sessions: 100, engagedSessions: 50 }]).mockRejectedValueOnce(new Error("Unavailable"));
+    mocks.inbound.mockResolvedValue([]);
+    const result = await measureScoutPage("tenant-a", "/services/warehouse", published, now);
+    expect(result.sources.find(row => row.source === "search_console" && row.period === "after")?.metrics).toEqual({ clicks: 15, impressions: 150, ctr: 0.1, position: 6 });
+    expect(result.changes?.find(row => row.metric === "clicks")).toMatchObject({ difference: 15, percentChange: null });
+    expect(result.changes?.some(row => row.source === "ga4")).toBe(false);
+  });
+  it("gives a deferred review new evidence with a later equal-length window and the original baseline", () => {
+    const windows = measurementWindows(published, now, true);
+    expect(windows.before).toEqual(measurementWindows(published, now).before);
+    expect(windows.after).toEqual({ startDate: "2026-05-16", endDate: "2026-06-12" });
+  });
+  it("separates explicitly marked diagnostics from real enquiries and analytics without excluding ordinary attribution parameters", async () => {
+    mocks.search.mockResolvedValue([]);
+    mocks.ga4.mockResolvedValue([{ page: "/resources/contact?codex_weekly_diagnostic=synthetic", sessions: 20, engagedSessions: 10 },
+      { page: "/resources/contact?utm_source=example", sessions: 8, engagedSessions: 4 }]);
+    mocks.inbound.mockResolvedValue([{ pageUrl: "https://example.com/resources/contact?codex_weekly_diagnostic=synthetic", _count: { _all: 9 } },
+      { pageUrl: "https://example.com/resources/contact?utm_source=example", _count: { _all: 2 } }, { pageUrl: null, _count: { _all: 5 } }]);
+    const result = await measureScoutPage("tenant-a", "/resources/contact", published, now);
+    expect(result.sources.find(row => row.source === "enquiries")?.metrics).toEqual({ enquiries: 2, excludedDiagnosticEnquiries: 9 });
+    expect(result.sources.find(row => row.source === "ga4")?.metrics?.sessions).toBe(8);
   });
 });

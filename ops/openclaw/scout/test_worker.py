@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -21,11 +22,12 @@ class WorkerTests(unittest.TestCase):
 
     def test_success_saves_one_scoped_completion(self):
         claimed = {"id": "work", "lease": "opaque-lease", "kind": "RESEARCH"}
-        with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, {}]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful work"}, {"decision": "DELIVER"}]) as model:
+        with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, {}]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful work"}, {"decision": "DELIVER"}, {"verdict": "PASS", "reason": "Evidence supports the proposal"}]) as model:
             worker.run()
             self.assertEqual(api.call_args_list[-1].args[0]["action"], "complete")
             self.assertEqual(api.call_args_list[-1].args[0]["lease"], "opaque-lease")
             self.assertNotIn("opaque-lease", model.call_args_list[-1].args[0])
+            self.assertEqual(api.call_args_list[-1].args[0]["result"]["supervisor"]["verdict"], "PASS")
 
     def test_model_failure_defers_only_claimed_research(self):
         claimed = {"id": "work", "lease": "lease", "kind": "RESEARCH"}
@@ -35,7 +37,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_uncertain_completion_is_not_overwritten(self):
         claimed = {"id": "work", "lease": "lease", "kind": "RESEARCH"}
-        with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, TimeoutError()]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "DELIVER"}]):
+        with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, TimeoutError()]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "DELIVER"}, {"verdict": "PASS", "reason": "Complete"}]):
             with self.assertRaises(TimeoutError): worker.run()
             self.assertEqual(len(api.call_args_list), 4)
 
@@ -60,11 +62,53 @@ class WorkerTests(unittest.TestCase):
             {"id": "private", "kind": "RELATIONSHIP", "state": "DONE", "nextAction": "Private publisher correspondence"}
         ])
         claimed = {"id": "work", "lease": "lease", "kind": "RESEARCH"}
-        with patch.object(worker, "api", side_effect=[workspace, claimed, {}, {}]), patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "DELIVER"}]) as model:
+        with patch.object(worker, "api", side_effect=[workspace, claimed, {}, {}]), patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "WAIT"}]) as model:
             worker.run()
             prompt = model.call_args_list[-1].args[0]
             self.assertIn("Already answered on the service page", prompt)
             self.assertNotIn("Private publisher correspondence", prompt)
+
+    def test_quality_failure_or_interruption_preserves_artifact_without_delivery(self):
+        for review in [{"verdict": "REVISE", "reason": "Verify the public source"}, TimeoutError(), {}]:
+            claimed = {"id": "work", "lease": "private-lease", "kind": "RESEARCH"}
+            artifact = {"recommendation": "Saved investigation"}
+            with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, {}]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "DELIVER", "artifact": artifact}, review]):
+                worker.run()
+                result = api.call_args_list[-1].args[0]["result"]
+                self.assertEqual(result["decision"], "WAIT")
+                self.assertEqual(result["artifact"], artifact)
+                self.assertEqual(result["reviewInDays"], 1)
+
+    def test_supervisor_receives_measured_outcomes_and_dated_competitor_evidence(self):
+        workspace = self.workspace()
+        workspace["learning"] = {"outcomes": [{"measurement": {"clicks": 42}}], "competitors": {"observedAt": "2026-06-15", "fresh": False}}
+        claimed = {"id": "work", "lease": "private-lease", "kind": "RESEARCH"}
+        with patch.object(worker, "api", side_effect=[workspace, claimed, {}, {}]), patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Test the conversion hypothesis"}, {"decision": "WAIT"}]) as model:
+            worker.run()
+            self.assertIn('"clicks": 42', model.call_args_list[0].args[0])
+            self.assertIn('"fresh": false', model.call_args_list[0].args[0])
+            self.assertIn("Test the conversion hypothesis", model.call_args_list[1].args[0])
+            self.assertEqual(model.call_args_list[0].kwargs["timeout"], 180)
+
+    @unittest.skipUnless(shutil.which("zsh"), "Installer requires zsh")
+    def test_installer_does_not_attempt_an_unconfigured_message_delivery(self):
+        installer = Path(__file__).resolve().parent.parent / "install-scout-marketing.sh"
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            runner = directory / "ops/openclaw/run-scout-marketing.sh"
+            runner.parent.mkdir(parents=True)
+            runner.write_text("# synthetic readable runner\n")
+            executable = directory / "openclaw"
+            executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$SCOUT_TEST_ARGS"\n')
+            executable.chmod(0o700)
+            output = directory / "args.txt"
+            environment = {**worker.os.environ, "PATH": str(directory) + ":" + worker.os.environ["PATH"],
+                           "NEWL_APPS_SCOUT_RUNTIME_REPO_PATH": str(directory), "SCOUT_TEST_ARGS": str(output)}
+            subprocess.run([shutil.which("zsh"), str(installer)], env=environment, check=True, capture_output=True)
+            arguments = output.read_text().splitlines()
+            self.assertEqual(arguments[:2], ["cron", "add"])
+            self.assertIn("--no-deliver", arguments)
+            self.assertIn("--disabled", arguments)
 
     def test_embedded_page_contract_retains_all_referenced_definitions(self):
         schema = worker.result_schema("PAGE")
