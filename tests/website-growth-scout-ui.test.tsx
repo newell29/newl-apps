@@ -33,7 +33,7 @@ describe("Scout marketing workboard", () => {
   it("does not render mutation controls for read-only users", async () => {
     mocks.context.mockResolvedValue({ tenantId: "tenant-a", role: "READ_ONLY" });
     const html = renderToStaticMarkup(await ScoutWorkPage());
-    expect(html).not.toContain("Save direction"); expect(html).not.toContain("Check for newly available work"); expect(html).not.toContain("Approve and send");
+    expect(html).not.toContain("Save direction"); expect(html).not.toContain("Check for due work"); expect(html).not.toContain("Approve and send");
   });
   it("renders unsafe model text as escaped text rather than executable markup", async () => {
     mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
@@ -56,11 +56,13 @@ it("shows recorded source measurements separately from the model with missing so
   expect(html).toContain("Wait for more evidence."); expect(html).toContain("2026-01-01");
 });
 
-it("does not present available research as an owner decision", async () => {
+it("does not present due research as an owner decision", async () => {
   mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
     items: [{ ...newWork("PAGE", "opportunity-synthetic", "Investigate page", "Improve clarity", "/resources/guide"), id: "work-synthetic" }] });
   const html = renderToStaticMarkup(await ScoutWorkPage());
-  expect(html).toContain("Available to Scout — 1 item");
+  expect(html).toContain("Due for Scout — 1 item");
+  expect(html).toContain("Due means the item is ready or its review date has arrived");
+  expect(html).toContain("Budget and active-slot capacity are checked separately");
   expect(html).not.toMatch(/<select[^>]*name="decision"/);
   expect(html).not.toContain("Save decision");
 });
@@ -72,7 +74,7 @@ it("shows approved builds as external work with no second brief decision or fict
   const html = renderToStaticMarkup(await ScoutWorkPage());
   expect(html).toContain("No work needs your decision"); expect(html).toContain("External systems"); expect(html).toContain("Open build and preview");
   expect(html).not.toContain("Save decision"); expect(html).not.toContain("Scout checks again");
-  expect(html).toContain("Available to Scout"); expect(html).toContain("No page outcome has been measured yet");
+  expect(html).toContain("Due for Scout"); expect(html).toContain("No page outcome has been measured yet");
 });
 
 it("separates future reviews from due work and only shows decisions for owner actions", async () => {
@@ -86,7 +88,7 @@ it("separates future reviews from due work and only shows decisions for owner ac
     capacity: { usedSteps: 0, active: 0, available: true } });
   const html = renderToStaticMarkup(await ScoutWorkPage());
   expect(html).toContain("Scheduled reviews"); expect(html).toContain("Future measurement");
-  expect(html).toContain("Available to Scout — 1 item"); expect(html).toContain("Resume quality review");
+  expect(html).toContain("Due for Scout — 1 item"); expect(html).toContain("Resume quality review");
   expect(html).toContain("Your decisions"); expect(html).toContain("Needs direction"); expect(html).toContain("Waiting for your decision");
   expect(html.match(/Save decision/g)).toHaveLength(1);
 });
