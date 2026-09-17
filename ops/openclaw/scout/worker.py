@@ -90,7 +90,8 @@ For MEASUREMENT use the authoritative supplied measurements, distinguish associa
 Judge progress by qualified enquiries when actually linked, then enquiries, engaged visits, search clicks, impressions, CTR and position.
 Briefs written and pages shipped measure activity, not marketing success. Never invent lead quality, conversion attribution, or causal lift.
 Use KEEP, ITERATE, STOP, or WAIT with confidence and an explicit explanation of what the data can support.
-If volume is too low or sources are unavailable, choose WAIT and a dated review; a follow-up reads a later 28-day window.
+Use available sources when others are missing; explain what they support and reduce confidence. Do not require every integration to succeed.
+If the evidence cannot support a useful next action, choose WAIT and a dated review; a follow-up reads a later 28-day window.
 Use prior measured outcomes to decide which hypotheses to repeat or change. Explain which evidence changed your recommendation.
 Competitor reports and public pages show context, not our results. Cite dated source URLs; stale caches cannot prove current rankings.
 For RESEARCH investigate the best new opportunity; provide a specific proposal, supporting public URLs, and a useful next action.

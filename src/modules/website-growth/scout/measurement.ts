@@ -1,6 +1,15 @@
 import { fetchGa4LandingPageRows, fetchSearchConsoleRows } from "@/modules/website-growth/integrations";
 import { prisma } from "@/server/db";
-import { DAY_MS, routePath } from "./model";
+import { DAY_MS, record, routePath } from "./model";
+
+export function hasPostChangeEvidence(value: unknown) {
+  const measurement = record(value);
+  return Array.isArray(measurement.sources) && measurement.sources.some(value => {
+    const row = record(value);
+    return row.period === "after" && row.status === "AVAILABLE" &&
+      Object.entries(record(row.metrics)).some(([key, amount]) => key !== "excludedDiagnosticEnquiries" && typeof amount === "number" && Number.isFinite(amount));
+  });
+}
 
 export function measurementWindows(publishedAt: Date, now = new Date(), followUp = false) {
   const day = new Date(publishedAt.toISOString().slice(0, 10) + "T00:00:00Z");

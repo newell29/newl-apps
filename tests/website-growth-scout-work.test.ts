@@ -16,6 +16,7 @@ vi.mock("@/server/db", () => ({ prisma: db }));
 vi.mock("@/modules/website-growth/newl-website-context-scanner", () => ({ resolveNewlWebsiteContext: vi.fn().mockResolvedValue({}) }));
 const now = new Date("2026-06-15T12:00:00Z");
 const supervisor = { verdict: "PASS", reason: "Sources and complete deliverable reviewed." };
+const measurement = { status: "AVAILABLE", sources: [{ source: "search_console", period: "after", status: "AVAILABLE", metrics: { clicks: 20 } }] };
 const work = () => newWork("PAGE", "opportunity-synthetic", "Improve warehouse information", "Explain service fit", "/services/warehouse", {}, now);
 const leased = () => ({ ...work(), state: "WORKING" as const, lease: "lease-synthetic", leaseUntil: new Date(now.getTime() + DAY_MS).toISOString() });
 
@@ -178,7 +179,7 @@ it("replenishes completed research immediately and respects an existing dated re
 });
 
 it("allows a new outcome review to improve the same published page while retaining active-work deduplication", async () => {
-  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT", evidence: { measurement: { status: "AVAILABLE" } } } });
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT", evidence: { measurement } } });
   db.websiteGrowthOpportunity.findFirst.mockResolvedValue(null);
   const input = { decision: "DELIVER", supervisor, summary: "Another improvement is warranted", nextAction: "Prepare the next brief", artifact: { proposedTitle: "Warehouse guide", proposedRoute: "/resources/warehouse-guide", hypothesis: "Improve the next conversion step", newPage: false } };
   await completeScoutWork("tenant-a", "first-outcome-review", "lease-synthetic", input, now);
@@ -209,7 +210,7 @@ it.each([undefined, { verdict: "REVISE", reason: "Unsupported assertion" }, { ve
   expect(db.websiteGrowthOpportunity.upsert).not.toHaveBeenCalled(); expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
 });
 
-it.each(["PARTIAL_OR_MISSING", "WAITING_FOR_DATA", undefined])("does not promote a measurement proposal with %s evidence even if the model passes it", async status => {
+it.each(["PARTIAL_OR_MISSING", "WAITING_FOR_DATA", undefined])("does not promote a measurement proposal with %s and no usable evidence even if the model passes it", async status => {
   db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT", evidence: { measurement: status ? { status } : null } } });
   const saved = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "DELIVER", supervisor, summary: "Proposal", nextAction: "Create page",
     artifact: { proposedRoute: "/resources/guide", proposedTitle: "Guide", hypothesis: "Test" } }, now);
@@ -217,9 +218,16 @@ it.each(["PARTIAL_OR_MISSING", "WAITING_FOR_DATA", undefined])("does not promote
 });
 
 it("records a reviewed measurement without asking the owner to approve an informational report", async () => {
-  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT", evidence: { measurement: { status: "AVAILABLE" } } } });
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT", evidence: { measurement } } });
   const saved = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "DELIVER", supervisor, summary: "Keep monitoring", nextAction: "Learn from this", artifact: { outcome: "KEEP", recommendation: "Retain the useful copy", confidence: "LOW" } }, now);
   expect(saved.state).toBe("DONE"); expect(saved.evidence.supervisor).toMatchObject({ verdict: "PASS" });
+});
+
+it("can learn and propose from partial post-change evidence with explicit low confidence", async () => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "MEASUREMENT", evidence: { measurement: { ...measurement, status: "PARTIAL_OR_MISSING" } } } });
+  const saved = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "DELIVER", supervisor, summary: "Search supports another test", nextAction: "Prepare a brief",
+    artifact: { proposedRoute: "/resources/guide", proposedTitle: "Guide", hypothesis: "Test a clearer answer", confidence: "HIGH", limitations: "Analytics is unavailable; this is not evidence of lead lift." } }, now);
+  expect(saved.state).toBe("DONE"); expect(saved.artifact?.confidence).toBe("LOW"); expect(db.websiteGrowthOpportunity.upsert).toHaveBeenCalled();
 });
 
 it("escalates repeated quality failures and resumes only when the owner supplies direction", async () => {

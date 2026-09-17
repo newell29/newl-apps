@@ -4,7 +4,7 @@ import { prisma } from "@/server/db";
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { parseWebsiteGrowthScoutCompletion } from "@/modules/website-growth/scout-run";
 import { parseWebsiteGrowthBacklinkReview, persistWebsiteGrowthBacklinkReview } from "@/modules/website-growth/backlinks";
-import { measurementWindows, measureScoutPage } from "./measurement";
+import { hasPostChangeEvidence, measurementWindows, measureScoutPage } from "./measurement";
 import { projectPageHandoffs } from "./lifecycle";
 import { scoutCompetitorEvidence, scoutOutcomes, supervisorReview } from "./learning";
 import { DEFAULT_MISSION, MISSION_JOB, WORK_JOB, STEP_JOB, LEASE_MS, DAY_MS, ScoutWorkError,
@@ -157,9 +157,12 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
     const work = await leasedWork(tx, tenantId, id, lease, now);
     let draftId = work.draftId;
     let evidence: Record<string, unknown> = { ...work.evidence, supervisor: review ? { ...review, reviewedAt: now.toISOString() } : null };
-    if (result.state === "NEEDS_REVIEW" && work.kind === "MEASUREMENT" && record(evidence.measurement).status !== "AVAILABLE") {
+    if (work.kind === "MEASUREMENT" && result.artifact && record(evidence.measurement).status !== "AVAILABLE") {
+      result.artifact = { ...result.artifact, confidence: "LOW" };
+    }
+    if (result.state === "NEEDS_REVIEW" && work.kind === "MEASUREMENT" && !hasPostChangeEvidence(evidence.measurement)) {
       result.state = "WAITING";
-      result.nextAction = "Measurement is incomplete. Scout will retry the sources and retain the available evidence.";
+      result.nextAction = "Post-change measurement is unavailable. Scout will retry the sources and retain the available evidence.";
       result.nextReviewAt = new Date(now.getTime() + 7 * DAY_MS).toISOString();
     }
     const delivering = result.state === "NEEDS_REVIEW";
@@ -218,7 +221,7 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       }
     }
     if (result.state === "WAITING" && work.attempts >= 3 && ((review ? review.verdict !== "PASS" : record(input).decision === "DELIVER") ||
-      (work.kind === "MEASUREMENT" && record(evidence.measurement).status !== "AVAILABLE"))) {
+      (work.kind === "MEASUREMENT" && !hasPostChangeEvidence(evidence.measurement)))) {
       evidence = { ...evidence, externalWait: true, escalation: { at: now.toISOString(), reason: result.nextAction } };
       result.nextAction = `Scout needs help after repeated incomplete attempts: ${result.nextAction}`.slice(0, 1500);
     }
