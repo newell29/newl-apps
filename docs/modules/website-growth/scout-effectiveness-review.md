@@ -12,7 +12,7 @@ Traffic changes of at least ten clicks/sessions, at least 25%, and a baseline of
 
 Opportunities combine these hints with existing research/proposals, independent competitive context, and the supervisor's public research. Topics without current Search Console exposure remain eligible. Current page work is linked and reused; proposals for the same exact normalized route reuse an active opportunity regardless of title. Website publication, publisher approval, and actual sending retain their existing boundaries.
 
-Work & impact distinguishes prepared briefs, approval/build handoffs, published pages awaiting data, and available post-change measurements. It includes hypothesis, publication date when recorded, measurement windows, before/after observations, source gaps, interpretation and a link to the original brief. Before/after movement is association, not causal lift. A brief or build does not prove publication or marketing success.
+Work & impact distinguishes prepared briefs, approval/build handoffs, published pages awaiting data, and available post-change measurements. It includes hypothesis, publication date when recorded, measurement windows, before/after observations, source gaps, interpretation and a link to the original brief. Before/after movement is association, not causal lift. A brief or build does not prove publication or marketing success. Page research without a saved brief is excluded from Work & impact even if marked Done or Dismissed. Rejected/dismissed briefs remain visible as Closed — not published, preserving the delivery record without implying a live change.
 
 ## Persistence, refresh and failure recovery
 

@@ -24,7 +24,6 @@ export function EffectivenessReview({ review, items, mission, canReview, workspa
   const pages = (result?.pages ?? []).filter(page => page.route.toLowerCase().includes(query.toLowerCase()) && (filter === "All pages" || page.direction === filter));
   const siteWork = items.find(item => item.evidence.source === "site-review");
   const report = record(siteWork?.artifact);
-  const work = items.filter(item => item.kind === "MEASUREMENT" || (item.kind === "PAGE" && (item.draftId || ["DONE", "DISMISSED"].includes(item.state))));
   const opportunities = items.filter(item => item.evidence.source !== "site-review" && (item.kind === "RESEARCH" || item.kind === "PAGE") && !item.draftId && !["DONE", "DISMISSED"].includes(item.state));
   return <>
     <section className={`${panel} space-y-3`}>
@@ -42,7 +41,7 @@ export function EffectivenessReview({ review, items, mission, canReview, workspa
       {typeof report.recommendation === "string" ? <><p className="whitespace-pre-wrap text-sm">{report.recommendation}</p><p className="text-xs text-mutedForeground">{String(report.limitations ?? "")}</p><p className="text-xs">{siteWork!.state === "DONE" ? "Recorded" : `Draft / ${siteWork!.state.toLowerCase()}`} · next review {date(siteWork!.nextReviewAt)}</p></> : <p className="text-sm text-mutedForeground">{siteWork ? siteWork.nextAction : "Scout has not completed a whole-site review yet. The saved evidence below can be inspected independently."}</p>}
       <Link href="/website-growth/marketing" className="inline-block text-sm font-semibold text-primary">Open decisions and active work →</Link>
     </section>
-    <div role="group" aria-label="Review area" className="flex flex-wrap gap-2">{[["performance", "Page performance"], ["opportunities", "Opportunities"], ["work", "Work & impact"]].map(([key, label]) => <button key={key} type="button" aria-pressed={area === key} onClick={() => setArea(key)} className={`${button} ${area === key ? "bg-muted" : ""}`}>{label}</button>)}</div>
+    <div role="group" aria-label="Review area" className="flex flex-wrap gap-2">{[["performance", "Page performance"], ["opportunities", "Opportunities"], ["work", "Work & impact"]].map(([key, label]) => <button key={key} type="button" aria-pressed={area === key} onClick={() => setArea(key)} className={`${button} ${area === key ? "border-primary bg-primary/10 text-primary" : ""}`}>{label}</button>)}</div>
     <section aria-live="polite" className="space-y-4">
       {area === "performance" && <>
         <div className="flex flex-wrap items-end gap-3"><label className="text-sm">Find a route<input className="mt-1 block rounded border border-border bg-background p-2" value={query} onChange={event => setQuery(event.target.value)} placeholder="/services/" /></label><label className="text-sm">Show<select className="mt-1 block rounded border border-border bg-background p-2" value={filter} onChange={event => setFilter(event.target.value)}>{["All pages", "Declining", "Improving", "Mixed", "No clear change", "Insufficient evidence"].map(value => <option key={value}>{value}</option>)}</select></label></div>
@@ -59,7 +58,7 @@ export function EffectivenessReview({ review, items, mission, canReview, workspa
       </>}
       {area === "work" && <>
         <p className="text-sm text-mutedForeground">A prepared brief or completed build is not a published improvement. Outcome reviews retain the original hypothesis and source measurements. Before/after movement shows association, not causal lift.</p>
-        {work.length ? work.map(item => <WorkImpact key={item.id} item={item} />) : <p className={panel}>No delivered briefs or page outcome records yet. Research proposals remain in Opportunities.</p>}
+        <WorkImpactList items={items} />
       </>}
     </section>
     <aside className={`${panel} space-y-2 text-sm`}><strong>Business outcomes and attribution</strong><p>{mission?.qualifiedLead ?? "Define a qualified enquiry in the marketing direction."}</p><p>Enquiries are website forms grouped by the submitted page. Qualified, Quote sent and Won show separate current statuses recorded in Inbound Opportunities; these are not historical conversion stages or revenue. Diagnostic submissions are excluded when tagged; untagged tests and spam can remain.</p><p>Original landing-session attribution, revenue, and a continuously configured competitor watchlist are not connected here.</p><Link href="/website-inbound" className="inline-block text-primary">Review and qualify inbound opportunities →</Link></aside>
@@ -74,10 +73,14 @@ function PageEvidence({ page, items }: { page: PageReview; items: Item[] }) {
     <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Measure</th><th className="p-2">Previous</th><th className="p-2">Latest</th><th className="p-2">Change</th></tr></thead><tbody>{page.comparisons.map(row => <tr key={`${row.source}:${row.metric}`} className="border-t border-border"><th className="p-2 font-normal">{metrics[row.metric] ?? row.metric}</th><td className="p-2">{format(row.metric, row.before)}</td><td className="p-2">{format(row.metric, row.after)}</td><td className="p-2">{(["ctr", "engagementRate"].includes(row.metric) ? `${(row.difference * 100).toFixed(1)} pp` : format(row.metric, row.difference))}{row.percentChange !== null && !["ctr", "engagementRate", "position"].includes(row.metric) ? ` (${row.percentChange.toFixed(1)}%)` : ""}</td></tr>)}</tbody></table></div>
     {page.gaps.length > 0 && <p className="mt-2 text-xs text-mutedForeground">Evidence gaps: {page.gaps.join("; ")}. Missing rows are not assumed to be zero.</p>}<ActiveWork route={page.route} items={items} /></details>;
 }
+export function WorkImpactList({ items }: { items: Item[] }) {
+  const delivered = items.filter(item => item.kind === "MEASUREMENT" || (item.kind === "PAGE" && item.draftId));
+  return delivered.length ? <>{delivered.map(item => <WorkImpact key={item.id} item={item} />)}</> : <p className={panel}>No delivered briefs or page outcome records yet. Active research proposals remain in Opportunities; dismissed research stays in the workboard history.</p>;
+}
 function WorkImpact({ item }: { item: Item }) {
   const handoff = record(item.evidence.handoff), measurement = record(item.evidence.measurement), artifact = record(item.artifact);
   const hasResults = Array.isArray(measurement.sources) && measurement.sources.some(value => { const source = record(value); return source.period === "after" && source.status === "AVAILABLE" && Object.values(record(source.metrics)).some(value => typeof value === "number"); });
-  const state = item.kind === "MEASUREMENT" ? hasResults ? "Measured — review evidence" : "Published — awaiting measurement" : handoff.draftStatus === "PUBLISHED" ? "Published" : handoff.draftStatus && handoff.draftStatus !== "DRAFT" ? "Approved / build handoff" : "Prepared — not verified live";
+  const state = item.kind === "MEASUREMENT" ? hasResults ? "Measured — review evidence" : "Published — awaiting measurement" : handoff.draftStatus === "PUBLISHED" ? "Published" : item.state === "DISMISSED" || handoff.draftStatus === "REJECTED" ? "Closed — not published" : ["APPROVED", "BUILT"].includes(String(handoff.draftStatus)) ? "Approved / build handoff" : "Prepared — not verified live";
   return <article className={`${panel} space-y-2`}><p className="text-xs font-semibold uppercase text-primary">{state}</p><h3 className="font-semibold">{item.title}</h3><p className="text-sm">Hypothesis: {item.hypothesis}</p>
     {typeof item.evidence.publishedAt === "string" && <p className="text-xs">Published {date(item.evidence.publishedAt)}</p>}<p className="text-sm">Next: {item.nextAction}</p>
     {typeof artifact.recommendation === "string" && <p className="text-sm">{String(artifact.outcome ?? "Recommendation")}: {artifact.recommendation} {artifact.confidence ? `(${String(artifact.confidence).toLowerCase()} confidence)` : ""}</p>}
