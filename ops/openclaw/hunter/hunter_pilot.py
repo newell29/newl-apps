@@ -84,6 +84,10 @@ companies; choose whether to finish/park one or explore a better direction. Comp
 instead of only collecting sources. After fetching a named company's official page for a stated
 uncertainty, normally open it, dismiss the clue, or fetch one clearly necessary source before starting
 another broad search. References must be actual evidence IDs in the journal.
+buyerResearchQueue contains commercially recommended companies that have not yet received one tailored,
+zero-credit people lookup. Normally finish one pending buyer-role check before another broad discovery
+search unless an active investigation has an immediately decisive source. This prepares owner review;
+it does not verify employment, reveal an email, approve outreach, or make contact mandatory for fit.
 Work continues across wakes; do not try to finish all research in one search or one wake. Use
 researchCoverage and unreadClues to consider alternatives after a dead end; neither is a quota.
 """
@@ -377,6 +381,17 @@ class Pilot:
         return [e for e in self.state["evidence"].values() if e["kind"] == "page" and e["excerpt"] and
                 urlparse(e["url"]).hostname in {company["domain"], "www." + company["domain"]}]
 
+    def buyer_research(self, company):
+        attempted = "contactState" in company or bool(company.get("contactResearchAt"))
+        candidates = company.get("contacts", [])
+        return {"state": "COMPLETED" if attempted else "PENDING",
+                "contactState": company.get("contactState", "NOT_RESEARCHED"),
+                "candidateCount": len(candidates) if isinstance(candidates, list) else 0,
+                "titles": company.get("contactTitles", []),
+                "researchedAt": company.get("contactResearchAt"),
+                "employmentVerified": False,
+                "outreachReady": False}
+
     def safety(self, company):
         result = self.bridge("company", name=company["name"], domain=company["domain"])
         if result.get("tenantId") != self.config["tenantId"]:
@@ -526,6 +541,8 @@ class Pilot:
                 raise RuntimeError("CONTACT_LOOKUP_NOT_ALLOWED")
             company["contacts"] = result.get("candidates", [])
             company["contactState"] = result["result"]
+            company["contactTitles"] = titles
+            company["contactResearchAt"] = iso(self.clock())
             return {"state": result["result"], "candidates": company["contacts"]}
         if name == "decide":
             company = self.company(args)
@@ -616,13 +633,21 @@ class Pilot:
         companies = list(self.state["companies"].values())
         active = [c for c in companies if c["status"] == "active"]
         due = [c for c in companies if c.get("revisitAt") and parse_time(c["revisitAt"]) <= self.clock() and c["status"] in {"parked", "rejected"}]
-        wanted = set(i for c in active + due for i in c.get("evidenceIds", []))
+        buyer_pending = [c for c in companies if c["status"] == "recommended" and
+                         self.buyer_research(c)["state"] == "PENDING"]
+        wanted = set(i for c in active + due + buyer_pending for i in c.get("evidenceIds", []))
         evidence = list(self.state["evidence"].values())
         chosen = [e for e in evidence if e["id"] in wanted][-8:]
         chosen += [e for e in evidence[-4:] if e not in chosen]
         return {"now": iso(self.clock()), "mode": "public discovery only: people tool disabled, all recommendations require live clearance" if self.config.get("publicDiscoveryOnly") else "read-only pilot; no buying intent confirmed",
             "activeCompanies": active, "dueForRevisit": due[:5],
-            "otherCompanies": [{k: c.get(k) for k in ("domain", "status", "summary", "revisitAt", "revisitWhen")} for c in companies if c not in active][-40:],
+            "buyerResearchQueue": [{**{k: c.get(k) for k in ("name", "domain", "direction", "summary", "uncertainty", "nextAction")},
+                                     "buyerResearch": self.buyer_research(c),
+                                     "officialEvidenceAttached": bool(self.official_evidence(c))}
+                                    for c in buyer_pending[:5]] if not self.config.get("publicDiscoveryOnly") else [],
+            "otherCompanies": [{**{k: c.get(k) for k in ("domain", "status", "summary", "revisitAt", "revisitWhen", "contactState")},
+                                "buyerResearch": self.buyer_research(c) if c["status"] == "recommended" else None}
+                               for c in companies if c not in active][-40:],
             "evidence": [{**e, "excerpt": e["excerpt"][:2600]} for e in chosen],
             "extractionNote": "Current extractor is " + EXTRACTOR_VERSION + "; older page excerpts may contain mostly navigation. Re-fetch if the content is needed.",
             # Proposed actions and token logs are audit data, not observations. Replaying them
@@ -634,7 +659,7 @@ class Pilot:
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
+            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -789,6 +814,9 @@ class Pilot:
     def status(self):
         counts = {s: sum(c["status"] == s for c in self.state["companies"].values())
                   for s in ["active", "parked", "rejected", "recommended", "needs_clearance", "blocked"]}
+        recommended = [c for c in self.state["companies"].values() if c["status"] == "recommended"]
+        buyer_research = {"pending": sum(self.buyer_research(c)["state"] == "PENDING" for c in recommended),
+                          "completed": sum(self.buyer_research(c)["state"] == "COMPLETED" for c in recommended)}
         alive = False
         if self.state.get("pid"):
             try:
@@ -806,6 +834,7 @@ class Pilot:
             "counts": counts, "usedToday": self.budget(), "totalUsdMicros": self.state["usdMicros"],
             "unproductiveWakes": self.state.get("unproductiveWakes", 0),
             "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
+            "buyerResearch": buyer_research,
             "searchesByDirection": {d: r["attempts"] for d, r in self.research_coverage()["directions"].items()},
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "modelProvider": self.config.get("modelProvider", "OLLAMA"),
@@ -825,6 +854,11 @@ class Pilot:
                      "Uncertain: " + c["uncertainty"], "", "Next action: " + c["nextAction"], "",
                      "Contact preparation: " + c.get("contactState", "Not yet researched") + ". No contact cleared for sending.", "",
                      "Revisit: " + c.get("revisitWhen", "Still investigating"), ""]
+            if c["status"] == "recommended":
+                buyer = self.buyer_research(c)
+                rows += ["Owner review preparation: " + ("buyer-role research pending."
+                         if buyer["state"] == "PENDING" else
+                         "buyer-role search completed; any returned candidates remain employment-unverified."), ""]
             for eid in c["evidenceIds"]:
                 e = self.state["evidence"][eid]
                 rows.append(f"- [{e['title'] or e['url']}]({e['url']}) — retrieved {e['retrievedAt']}")
