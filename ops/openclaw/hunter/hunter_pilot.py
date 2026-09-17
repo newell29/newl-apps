@@ -69,7 +69,8 @@ dismiss_clue: {evidenceIds:[id,...], reason, name?, domain?} -- remember why an 
   more work. Use this for a named company that is clearly irrelevant or buyer-inappropriate; it is not
   a company rejection, suppression decision, or permanent statement about future fit.
 people: {company, titles:[up to 8 roles]} -- zero-credit Apollo search, no email reveal. Use only
-  after an official company page was fetched. Results never count as verified employment.
+  after an official company page was fetched with company set to the saved domain, so that page evidence
+  is attached to the company. Results never count as verified employment.
 decide: {company, status:'active'|'parked'|'rejected'|'recommended', summary, uncertainty,
   nextAction, evidenceIds:[id,...], quote, quoteEvidenceId, revisitDays, revisitWhen}.
   company must be an already-saved domain from activeCompanies, dueForRevisit or otherCompanies.
@@ -513,7 +514,8 @@ class Pilot:
             company = self.company(args)
             self.safety(company)
             if not self.official_evidence(company):
-                raise ValueError("Read an official company page before searching employees")
+                raise ValueError("Before people search, fetch an official company page with company='" +
+                                 company["domain"] + "' so page evidence is attached to this company")
             titles = args.get("titles")
             if not isinstance(titles, list) or not 1 <= len(titles) <= 8:
                 raise ValueError("Choose 1–8 relevant roles")

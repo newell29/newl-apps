@@ -368,7 +368,7 @@ class PilotTests(unittest.TestCase):
 
     def test_people_requires_official_page(self):
         self.open()
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "fetch an official company page with company='supply.example'"):
             self.action("people", company="supply.example", titles=["operations"])
         self.assertEqual(self.p.budget()["people"], 0)
 

@@ -90,6 +90,9 @@ website to change while other worthwhile research remains. Repeated inability to
 or retrieval problem to expose for review, not proof that Newl's opportunity market is exhausted.
 
 Choose buyer roles for the actual opportunity. Identify the person before worrying about email.
+After opening a company, fetch its official page with the saved company domain before using people;
+a search-result snippet is not attached official-page evidence. If the people action is rejected for
+this prerequisite, fetch the cited official page next instead of retrying people with different titles.
 Apollo search can return masked names and email-availability flags. Those are not verified identities,
 current employment, revealed addresses, or delivery validation. No paid enrichment in this pilot.
 Use the first name, masked surname hint, role and company as clues for public employer verification;
