@@ -1,3 +1,5 @@
+import { loadSiteReview, refreshSiteReview } from "@/modules/website-growth/scout/effectiveness";
+import { effectivenessPacket } from "@/modules/website-growth/scout/effectiveness-model";
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { authenticateWebsiteGrowthScoutRequest, WebsiteGrowthScoutAuthError } from "@/server/website-growth-scout-auth";
@@ -20,6 +22,7 @@ export async function POST(request: Request) {
     const input = record(JSON.parse(raw));
     if (input.action === "prepare") {
       const saved = await scoutWorkspace(tenant.id);
+      const review = saved.mission.enabled ? await refreshSiteReview(tenant.id).catch(() => loadSiteReview(tenant.id).catch(() => null)) : null;
       const workspace = saved.mission.enabled ? await reconcileScoutWork(tenant.id) : saved;
       // Selection needs summaries, not every saved artifact. Fetch full evidence only after a scoped claim.
       const due = workspace.capacity.available ? scoutCandidates(workspace.items) : [];
@@ -33,7 +36,7 @@ export async function POST(request: Request) {
         : !due.length ? "No research is due. Scout is waiting for a scheduled review or an external system." : null;
       return NextResponse.json({ data: { mission: workspace.mission, configured: workspace.configured,
         capacity: workspace.capacity, truncated: workspace.truncated, idleReason, items, due: due.map(item => item.id),
-        learning: due.length ? { outcomes: scoutOutcomes(workspace.items), competitors: await scoutCompetitorEvidence(tenant.id) } : null } });
+        learning: due.length ? { outcomes: scoutOutcomes(workspace.items), competitors: await scoutCompetitorEvidence(tenant.id), effectiveness: effectivenessPacket(review) } : null } });
     }
     const id = text(input.id, "Work ID", 100);
     if (input.action === "claim") return NextResponse.json({ data: await claimScoutWork(tenant.id, id, text(input.reason, "Selection reason", 1500)) });

@@ -1,3 +1,4 @@
+import { reviewWindows } from "@/modules/website-growth/scout/effectiveness-model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MISSION, DAY_MS, WORK_JOB, MISSION_JOB, STEP_JOB, isDue, newWork, parseMission, parseResult, stableId } from "@/modules/website-growth/scout/model";
 import { claimScoutWork, completeScoutWork, reviewScoutWork, scoutWorkContext, reconcileScoutWork } from "@/modules/website-growth/scout/store";
@@ -262,4 +263,48 @@ it("refuses a second candidate for a route already being researched even with sp
   db.automationJobRun.findMany.mockResolvedValue([{ id: "candidate", output: work() }, { id: "active", output: leased() }]);
   await expect(claimScoutWork("tenant-a", "candidate", "Duplicate work", now)).rejects.toThrow("already has active");
   expect(db.automationJobRun.create).not.toHaveBeenCalled();
+});
+
+it("records a quality-reviewed site briefing without adding an owner acknowledgement task", async () => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH", evidence: { source: "site-review", effectiveness: { status: "PARTIAL_OR_STALE" } } } });
+  const saved = await completeScoutWork("tenant-a", "site-review", "lease-synthetic", { decision: "DELIVER", supervisor, summary: "Investigated site changes", nextAction: "Review in two weeks", reviewInDays: 14,
+    artifact: { recommendation: "Wait for more traffic while completing the existing service brief", limitations: "Analytics is unavailable", proposedRoute: "", prospects: [] } }, now);
+  expect(saved.state).toBe("DONE"); expect(saved.nextReviewAt).toBe("2026-06-29T12:00:00.000Z");
+  expect(saved.evidence.previousReviews).toHaveLength(1);
+  expect(db.websiteGrowthOpportunity.upsert).not.toHaveBeenCalled();
+});
+
+it("reuses active page work even when a site review proposes a different title for the same route", async () => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH", evidence: { source: "site-review" } } });
+  db.websiteGrowthOpportunity.findFirst.mockResolvedValue({ id: "existing-route-work" });
+  await completeScoutWork("tenant-a", "site-review", "lease-synthetic", { decision: "DELIVER", supervisor, summary: "Investigated", nextAction: "Continue existing work", artifact: { proposedRoute: routeForTest(), proposedTitle: "Different title", hypothesis: "Clearer answer", prospects: [] } }, now);
+  const query = db.websiteGrowthOpportunity.findFirst.mock.calls[0][0];
+  expect(query.where.targetPage).toBe(routeForTest()); expect(query.where).not.toHaveProperty("topic");
+  expect(db.websiteGrowthOpportunity.upsert.mock.calls[0][0].where.id).toBe("existing-route-work");
+});
+function routeForTest() { return "/services/warehouse"; }
+
+it("reuses one due site-review record and respects a future review date", async () => {
+  const id = stableId("tenant-a", "research:site-effectiveness");
+  const site = { ...newWork("RESEARCH", null, "Site review", "Investigate", null, { source: "site-review" }, now), state: "DONE", nextReviewAt: now.toISOString() };
+  db.websiteGrowthOpportunity.findMany.mockResolvedValue([]); db.websiteGrowthBacklinkOpportunity.findMany.mockResolvedValue([]);
+  db.automationJobRun.findFirst.mockImplementation(async ({ where }) => {
+    if (where.jobType === "WEBSITE_GROWTH_SCOUT_EFFECTIVENESS") return { output: { version: 1, attemptedAt: now.toISOString(), nextRefreshAt: now.toISOString(), windows: reviewWindows(now), inventory: { routes: [] }, sources: Object.fromEntries(["search_console", "ga4", "enquiries"].map(name => [name, { status: "UNAVAILABLE", attemptedAt: now.toISOString(), observedAt: null, data: null }])) } };
+    if (where.id === id) return { id, output: site };
+    return null;
+  });
+  await reconcileScoutWork("tenant-a", now);
+  expect(db.automationJobRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id }), data: expect.objectContaining({ output: expect.objectContaining({ state: "READY", attempts: 0 }) }) }));
+  db.automationJobRun.updateMany.mockClear(); site.nextReviewAt = "2026-07-01T00:00:00Z";
+  await reconcileScoutWork("tenant-a", now); expect(db.automationJobRun.updateMany).not.toHaveBeenCalled();
+});
+
+it("allows a later cycle of the reusable site review to revisit a previously published proposal", async () => {
+  db.websiteGrowthOpportunity.findFirst.mockResolvedValue(null);
+  const input = { decision: "DELIVER", supervisor, summary: "Next improvement", nextAction: "Prepare brief", artifact: { proposedRoute: "/services/warehouse", proposedTitle: "Improve warehouse page", hypothesis: "Test the next weakness", prospects: [] } };
+  for (const revision of [2, 8]) {
+    db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), revision, kind: "RESEARCH", evidence: { source: "site-review" } } });
+    await completeScoutWork("tenant-a", "same-recurring-review", "lease-synthetic", input, now);
+  }
+  expect(db.websiteGrowthOpportunity.upsert.mock.calls[0][0].create.id).not.toEqual(db.websiteGrowthOpportunity.upsert.mock.calls[1][0].create.id);
 });

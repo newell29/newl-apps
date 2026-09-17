@@ -1,3 +1,5 @@
+import { loadSiteReview } from "./effectiveness";
+import { effectivenessPacket } from "./effectiveness-model";
 import { randomUUID } from "node:crypto";
 import { JobStatus, Prisma, WebsiteGrowthAction, WebsiteGrowthContentDraftSource } from "@prisma/client";
 import { prisma } from "@/server/db";
@@ -66,11 +68,25 @@ export async function reconcileScoutWork(tenantId: string, now = new Date()) {
   }
   // Keep one open research brief, replenished by completed work rather than a calendar quota.
   const latestResearch = await prisma.automationJobRun.findFirst({ where: { tenantId, jobType: WORK_JOB,
-    output: { path: ["kind"], equals: "RESEARCH" } }, orderBy: { createdAt: "desc" } });
+    output: { path: ["kind"], equals: "RESEARCH" }, id: { not: stableId(tenantId, "research:site-effectiveness") } }, orderBy: { createdAt: "desc" } });
   const previousResearch = readWork(latestResearch?.output);
   if (!previousResearch || ["DONE", "DISMISSED"].includes(previousResearch.state)) {
     await ensureWork(tenantId, `research:after:${latestResearch?.id ?? "initial"}`, newWork("RESEARCH", null, "Find the next valuable inbound opportunity",
       "Use the owner's priorities, previous decisions, customer questions, and public research to identify the next useful page or industry relationship.", null, {}, now));
+  }
+  // One reusable review, not a growing queue of per-page alarms or calendar-generated tasks.
+  const siteReview = await loadSiteReview(tenantId).catch(() => null);
+  if (siteReview) {
+    const key = "research:site-effectiveness";
+    await ensureWork(tenantId, key, newWork("RESEARCH", null, "Review site performance, missed opportunities and delivered work",
+      "Investigate meaningful changes across the site, compare completed work with results, and select the next useful action. Missing sources do not block other research.",
+      null, { source: "site-review" }, now));
+    const job = await prisma.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, key), jobType: WORK_JOB } });
+    const work = readWork(job?.output);
+    if (work && work.state === "DONE" && Date.parse(work.nextReviewAt) <= now.getTime()) {
+      const updated = nextWork(work, { state: "READY", attempts: 0 }, "REVIEW_DUE", "Review fresh evidence and previous findings; reuse active work.", now);
+      await prisma.$transaction(tx => replace(tx, tenantId, job!.id, work, updated));
+    }
   }
   return scoutWorkspace(tenantId);
 }
@@ -112,7 +128,8 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
 export async function scoutWorkContext(tenantId: string, id: string, lease: string) {
   const work = await leasedWork(prisma, tenantId, id, lease);
   const learning = work.kind === "RELATIONSHIP" ? null : {
-    outcomes: scoutOutcomes((await scoutWorkspace(tenantId)).items), competitors: await scoutCompetitorEvidence(tenantId) };
+    outcomes: scoutOutcomes((await scoutWorkspace(tenantId)).items), competitors: await scoutCompetitorEvidence(tenantId),
+    effectiveness: effectivenessPacket(await loadSiteReview(tenantId).catch(() => null)) };
   if (work.kind === "PAGE") {
     const opportunity = await prisma.websiteGrowthOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "" },
       select: { action: true, topic: true, primaryKeyword: true, targetPage: true, sourcePage: true, reason: true,
@@ -136,6 +153,10 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
       previousMeasurements: [...previousMeasurements, ...(work.evidence.measurement ? [work.evidence.measurement] : [])].slice(-5) } }, "MEASURED", "Collected independent source results.");
     await prisma.$transaction(tx => replace(tx, tenantId, id, work, updated));
     return { draft, measurement, learning };
+  }
+  if (work.evidence.source === "site-review") {
+    const updated = nextWork(work, { evidence: { ...work.evidence, effectiveness: learning?.effectiveness ?? null } }, "SITE_EVIDENCE", "Saved dated site evidence for this investigation.");
+    await prisma.$transaction(tx => replace(tx, tenantId, id, work, updated));
   }
   return { website: await resolveNewlWebsiteContext(), learning, rule: "Research may propose new page work. Publisher opportunities must remain proposals until human approval." };
 }
@@ -195,9 +216,9 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       const title = text(proposal.proposedTitle, "Proposed title", 250), hypothesis = text(proposal.hypothesis, "Proposal hypothesis");
       if (!route) throw new ScoutWorkError("A proposal needs a website route.");
       const existing = await tx.websiteGrowthOpportunity.findFirst({ where: { tenantId, targetPage: route,
-        topic: { equals: title, mode: "insensitive" }, status: { in: ["NEW", "REVIEWING", "APPROVED", "IN_PROGRESS"] } }, select: { id: true } });
+        status: { in: ["NEW", "REVIEWING", "APPROVED", "IN_PROGRESS"] } }, select: { id: true } });
       // Reuse active work, but let a later outcome review improve a previously published page again.
-      const opportunityId = existing?.id ?? stableId(tenantId, `proposal:${route}:${title.toLowerCase()}:from:${id}`);
+      const opportunityId = existing?.id ?? stableId(tenantId, `proposal:${route}:${title.toLowerCase()}:from:${id}${work.evidence.source === "site-review" ? `:revision:${work.revision}` : ""}`);
       await tx.websiteGrowthOpportunity.upsert({ where: { id: opportunityId, tenantId }, create: { id: opportunityId, tenantId,
         topic: title, reason: hypothesis, recommendation: hypothesis, targetPage: route,
         action: proposal.newPage === true ? WebsiteGrowthAction.CREATE_PAGE : WebsiteGrowthAction.IMPROVE_EXISTING_PAGE, status: "REVIEWING" }, update: {} });
@@ -213,6 +234,16 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       await persistWebsiteGrowthBacklinkReview({ tenantId, runId: id, review, database: tx });
       result.state = "NEEDS_REVIEW";
       result.nextAction = "Review the researched publisher opportunities in Backlink Scout. No outreach has been approved or sent.";
+    }
+    if (delivering && work.kind === "RESEARCH" && work.evidence.source === "site-review") {
+      const previousReviews = Array.isArray(evidence.previousReviews) ? evidence.previousReviews : [];
+      evidence = { ...evidence, previousReviews: [...previousReviews, { at: now.toISOString(),
+        recommendation: String(result.artifact?.recommendation ?? "").slice(0, 4000),
+        limitations: String(result.artifact?.limitations ?? "").slice(0, 2000), evidence: evidence.effectiveness ?? null }].slice(-5) };
+      if (!Array.isArray(result.artifact?.prospects) || result.artifact.prospects.length === 0) {
+        result.state = "DONE";
+        if (!result.artifact?.proposedRoute) result.nextAction = "Site review recorded. Scout will revisit on the saved review date; see the recommendation and evidence.";
+      }
     }
     if (delivering && work.kind === "MEASUREMENT") {
       if (!result.artifact?.proposedRoute) {

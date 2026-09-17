@@ -72,3 +72,7 @@ Work history reads remain bounded at 1,000 items and source reconciliation at 60
 Owner decisions: priority services/markets, definition of qualified enquiry and numerical success thresholds, diagnostic-marker treatment, a named competitor watchlist, ongoing budget, and whether future campaign-scoped communication authority should replace individual response approvals. Current code grants no such expanded authority.
 
 Codex runtime reference: [official non-interactive documentation](https://learn.chatgpt.com/docs/non-interactive-mode), [CLI commands](https://learn.chatgpt.com/docs/developer-commands?surface=cli).
+
+## Whole-site effectiveness review
+
+The default `/website-growth` now opens the effectiveness review; `/website-growth/effectiveness` is a direct link and `/website-growth/marketing` retains the workboard. See [effectiveness review](scout-effectiveness-review.md) for coverage, recovery, and interpretation limits.

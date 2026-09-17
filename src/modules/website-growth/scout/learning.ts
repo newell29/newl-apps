@@ -6,7 +6,7 @@ const recent = (work: Work) => Date.parse(work.history.at(-1)?.at ?? "") || 0;
 
 /** Due measurements/revisions must not disappear behind hundreds of imported keyword candidates. */
 export function scoutCandidates(items: Item[], now = new Date()) {
-  const rank = (work: Work) => work.kind === "MEASUREMENT" ? 0 : work.attempts > 0 ? 1 : work.kind === "RELATIONSHIP" ? 2 : work.kind === "RESEARCH" ? 3 : 4;
+  const rank = (work: Work) => work.kind === "MEASUREMENT" ? 0 : work.attempts > 0 ? 1 : work.kind === "RELATIONSHIP" ? 2 : work.kind === "RESEARCH" ? (work.evidence.source === "site-review" ? 3 : 4) : 5;
   const due = items.filter(item => isDue(item, now)).sort((a, b) => rank(a) - rank(b) ||
     Number(b.evidence.score ?? 0) - Number(a.evidence.score ?? 0) || Date.parse(a.nextReviewAt) - Date.parse(b.nextReviewAt));
   const routes = new Set<string>();
