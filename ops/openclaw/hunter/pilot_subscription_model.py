@@ -20,6 +20,7 @@ DISABLED_FEATURES = (
     "computer_use", "in_app_browser", "image_generation", "view_image",
     "code_mode", "code_mode_host", "skill_search", "sleep_tool", "goals",
 )
+PASSIVE_ITEM_TYPES = {"agent_message", "reasoning", "error"}
 
 
 def subscription_environment():
@@ -124,10 +125,13 @@ class SubscriptionModel:
             try:
                 stdout = run_bounded(command, prompt, environment)
                 events = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+                diagnostic_items = 0
                 for event in events:
                     item = event.get("item", {})
-                    if item and item.get("type") not in {"agent_message", "reasoning"}:
+                    if item and item.get("type") not in PASSIVE_ITEM_TYPES:
                         raise RuntimeError("MODEL_TOOL_USE_REJECTED")
+                    if item.get("type") == "error":
+                        diagnostic_items += 1
                 completed = [e for e in events if e.get("type") == "turn.completed"]
                 if len(completed) != 1 or any(e.get("type") in {"error", "turn.failed"} for e in events):
                     raise RuntimeError("CHATGPT_MODEL_INCOMPLETE")
@@ -140,6 +144,7 @@ class SubscriptionModel:
                 return decision, {"provider": "CHATGPT_SUBSCRIPTION", "billing": "plan_usage",
                     "inputTokens": usage.get("input_tokens", 0),
                     "cachedInputTokens": usage.get("cached_input_tokens", 0),
-                    "outputTokens": usage.get("output_tokens", 0), "apiFallback": False}
+                    "outputTokens": usage.get("output_tokens", 0),
+                    "diagnosticItems": diagnostic_items, "apiFallback": False}
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
                 raise RuntimeError("CHATGPT_MODEL_INVALID_OR_TIMEOUT") from None

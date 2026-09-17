@@ -4,6 +4,7 @@ import json
 import os
 import importlib.util
 from pathlib import Path
+import socket
 import sys
 import tempfile
 import subprocess
@@ -285,6 +286,19 @@ class PilotTests(unittest.TestCase):
         self.time += dt.timedelta(days=2)
         self.assertEqual(self.p.context()["unreadClues"], [])
 
+    def test_dismiss_clue_preserves_reason_and_removes_unsaved_domain(self):
+        evidence = self.action("search", query="synthetic distributor", direction="gta")["evidenceIds"]
+        result = self.action("dismiss_clue", evidenceIds=evidence,
+            reason="Official evidence shows a provider operating the local service itself",
+            name="Synthetic Supply", domain="supply.example")
+        self.assertEqual(result["state"], "dismissed")
+        self.assertEqual(self.p.context()["unreadClues"], [])
+        dismissed = self.p.context()["dismissedClues"][0]
+        self.assertEqual(dismissed["domain"], "supply.example")
+        self.assertIn("operating the local service", dismissed["reason"])
+        with self.assertRaisesRegex(ValueError, "Cite actual retrieved evidence IDs"):
+            self.action("dismiss_clue", evidenceIds=["invented"], reason="Unsupported")
+
     def test_pending_clues_do_not_resurface_parked_or_blocked_company_domains(self):
         company = self.open()
         for status in ("parked", "blocked", "rejected"):
@@ -330,6 +344,8 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(c["status"], "recommended")
         self.assertEqual(c["buyingIntent"], "UNCONFIRMED")
         self.assertFalse(c["outreachReady"])
+        self.assertIn("research-qualified for owner review", MISSION)
+        self.assertIn("Do not dismiss solely because outsourcing is not public", MISSION)
 
     def test_redirect_to_other_domain_cannot_verify_identity(self):
         c = self.open()
@@ -354,7 +370,7 @@ class PilotTests(unittest.TestCase):
 
     def test_people_requires_official_page(self):
         self.open()
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "fetch an official company page with company='supply.example'"):
             self.action("people", company="supply.example", titles=["operations"])
         self.assertEqual(self.p.budget()["people"], 0)
 
@@ -502,6 +518,15 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(len(self.p.state["modelComparisons"][0]["shadows"]), 2)
         self.assertEqual(self.p.state["modelComparisons"][0]["shadows"][0]["error"], "TimeoutError")
 
+    def test_socket_timeout_in_shadow_does_not_stop_primary_wake(self):
+        self.enable_comparison()
+        with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=socket.timeout)):
+            self.p.tick(force=True)
+        case = self.p.state["modelComparisons"][0]
+        self.assertEqual(len(case["shadows"]), 2)
+        self.assertEqual(case["shadows"][0]["error"], "timeout")
+        self.assertIsNone(self.p.state.get("lastError"))
+
     def test_completed_comparison_limit_does_not_call_shadows(self):
         self.enable_comparison()
         self.p.state["modelComparisons"] = [{}] * 10
@@ -573,7 +598,7 @@ class SubscriptionTests(unittest.TestCase):
         schema = output_schema(SCHEMA)
         self.assertEqual(schema["type"], "object")
         variants = schema["properties"]["decision"]["anyOf"]
-        self.assertEqual(len(variants), 6)
+        self.assertEqual(len(variants), 7)
         for row in variants:
             args = row["properties"]["args"]
             self.assertEqual(set(args["required"]), set(args["properties"]))
@@ -613,6 +638,19 @@ class SubscriptionTests(unittest.TestCase):
     def test_unexpected_tool_event_rejects_model_response(self):
         with self.assertRaisesRegex(RuntimeError, "MODEL_TOOL_USE_REJECTED"):
             self.invoke([{"type": "item.completed", "item": {"type": "command_execution"}}])
+
+    def test_non_tool_diagnostic_does_not_discard_completed_decision(self):
+        action, usage = self.invoke([
+            {"type": "item.completed", "item": {"type": "error", "message": "Synthetic CLI diagnostic"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 30}},
+        ], {"decision": {"action": "search", "purpose": "Test diagnostic handling",
+              "args": {"query": "synthetic", "direction": "gta", "company": None}}})
+        self.assertEqual(action["action"], "search")
+        self.assertEqual(usage["diagnosticItems"], 1)
+
+    def test_unknown_item_type_still_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "MODEL_TOOL_USE_REJECTED"):
+            self.invoke([{"type": "item.completed", "item": {"type": "future_unknown_item"}}])
 
     def test_timeout_kills_child_process_group(self):
         process = Mock(pid=12345)

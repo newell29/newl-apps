@@ -34,7 +34,7 @@ MISSION = Path(__file__).with_name("pilot-mission.md").read_text()
 VERSION = "hunter-autonomous-pilot-v3"
 DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
-ACTIONS = ["search", "fetch", "open_company", "people", "decide", "wait"]
+ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "decide", "wait"]
 DIRECTIONS = ["charlotte", "gta", "ocean", "referral"]
 ENV_KEYS = {"INGESTION_API_TOKEN", "INGESTION_TENANT_SLUG", "HUNTER_BRAVE_SEARCH_API_KEY",
             "NEWL_APPS_BASE_URL", "VERCEL_AUTOMATION_BYPASS_SECRET"}
@@ -49,6 +49,7 @@ ARG_TYPES.update(direction={"type": "string", "enum": DIRECTIONS},
 CONTRACTS = {
     "search": (["query", "direction"], ["company"]), "fetch": (["url"], ["company"]),
     "open_company": (["name", "domain", "direction", "hypothesis", "evidenceIds"], []),
+    "dismiss_clue": (["evidenceIds", "reason"], ["name", "domain"]),
     "people": (["company", "titles"], []),
     "decide": (["company", "status", "summary", "uncertainty", "nextAction", "evidenceIds", "revisitDays", "revisitWhen"], ["quote", "quoteEvidenceId"]),
     "wait": (["reason", "minutes"], [])}
@@ -64,20 +65,25 @@ search: {query, direction, company?} -- company is an existing domain, or omit f
 fetch: {url, company?} -- read a public HTTPS page. Prefer official evidence and useful links.
 open_company: {name, domain, direction, hypothesis, evidenceIds:[id,...]} -- remember a company
   supported by retrieved evidence. Domain deduplicates identity; all companies receive a safety check.
+dismiss_clue: {evidenceIds:[id,...], reason, name?, domain?} -- remember why an unsaved clue is not worth
+  more work. Use this for a named company that is clearly irrelevant or buyer-inappropriate; it is not
+  a company rejection, suppression decision, or permanent statement about future fit.
 people: {company, titles:[up to 8 roles]} -- zero-credit Apollo search, no email reveal. Use only
-  after an official company page was fetched. Results never count as verified employment.
+  after an official company page was fetched with company set to the saved domain, so that page evidence
+  is attached to the company. Results never count as verified employment.
 decide: {company, status:'active'|'parked'|'rejected'|'recommended', summary, uncertainty,
   nextAction, evidenceIds:[id,...], quote, quoteEvidenceId, revisitDays, revisitWhen}.
   company must be an already-saved domain from activeCompanies, dueForRevisit or otherCompanies.
-  If an unsaved clue is weak, abandon it in the purpose of your next search/fetch; do not create a
-  company merely to reject it or call decide for an unknown company.
+  Do not create a company merely to reject it or call decide for an unknown company.
   A recommendation needs an exact supporting quote from a fetched official page. Missing evidence
   must remain explicit. Use active to pivot a hypothesis. Park/reject instead of filling a quota.
 wait: {reason, minutes:30..1440} -- global pause, capped to 30 minutes. For a known company,
   use decide/parked with a revisit condition instead. One blocked clue is not global exhaustion.
 No mandatory order or research passes. Do not loop over the same failed action. At most five active
 companies; choose whether to finish/park one or explore a better direction. Complete useful decisions
-instead of only collecting sources. References must be actual evidence IDs in the journal.
+instead of only collecting sources. After fetching a named company's official page for a stated
+uncertainty, normally open it, dismiss the clue, or fetch one clearly necessary source before starting
+another broad search. References must be actual evidence IDs in the journal.
 Work continues across wakes; do not try to finish all research in one search or one wake. Use
 researchCoverage and unreadClues to consider alternatives after a dead end; neither is a quota.
 """
@@ -492,13 +498,24 @@ class Pilot:
             self.safety(company)
             self.state["companies"][key] = company
             return {"state": "opened", "company": key}
+        if name == "dismiss_clue":
+            ids = self.refs(args)
+            item = {"at": iso(self.clock()), "evidenceIds": ids,
+                "reason": text(args.get("reason")), "name": None, "domain": None}
+            if args.get("name") is not None:
+                item["name"] = text(args.get("name"), 200)
+            if args.get("domain") is not None:
+                item["domain"] = domain(args.get("domain"))
+            self.state.setdefault("dismissedClues", []).append(item)
+            return {"state": "dismissed", "evidenceIds": ids}
         if name == "people":
             if self.config.get("publicDiscoveryOnly"):
                 raise ValueError("People search disabled: live suppression bridge is unavailable. Prepare public research only.")
             company = self.company(args)
             self.safety(company)
             if not self.official_evidence(company):
-                raise ValueError("Read an official company page before searching employees")
+                raise ValueError("Before people search, fetch an official company page with company='" +
+                                 company["domain"] + "' so page evidence is attached to this company")
             titles = args.get("titles")
             if not isinstance(titles, list) or not 1 <= len(titles) <= 8:
                 raise ValueError("Choose 1–8 relevant roles")
@@ -568,11 +585,18 @@ class Pilot:
     def unread_clues(self):
         from urllib.parse import urlparse
         clues, seen = [], set()
+        dismissed = self.state.get("dismissedClues", [])
+        dismissed_ids = {eid for item in dismissed for eid in item.get("evidenceIds", [])}
+        dismissed_domains = {item.get("domain") for item in dismissed if item.get("domain")}
         for evidence in reversed(list(self.state["evidence"].values())):
             if evidence["kind"] != "search":
                 continue
+            if evidence["id"] in dismissed_ids:
+                continue
             url = evidence["url"]
             host = (urlparse(url).hostname or "").removeprefix("www.")
+            if host in dismissed_domains:
+                continue
             company = self.state["companies"].get(evidence.get("company")) or self.state["companies"].get(host)
             if company and company["status"] != "active":
                 continue  # Known dispositions/revisits already have their own context.
@@ -606,10 +630,11 @@ class Pilot:
             "recentEvents": [e for e in self.state["events"] if e["kind"] in
                              {"action", "action_rejected", "yield", "error", "budget_stop"}][-6:],
             "feedback": self.state["feedback"][-20:],
+            "dismissedClues": self.state.get("dismissedClues", [])[-20:],
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "Follow a promising investigation across wakes. After a stall, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
+            "workSelection": "Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -724,7 +749,7 @@ class Pilot:
             except BudgetExceeded as error:
                 case["incomplete"] = str(error)
                 break
-            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError) as error:
+            except (OSError, urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError) as error:
                 case["shadows"].append({"model": name, "error": type(error).__name__})
             finally:
                 self.save()
@@ -785,6 +810,7 @@ class Pilot:
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "modelProvider": self.config.get("modelProvider", "OLLAMA"),
             "comparisonCases": len(self.state.get("modelComparisons", [])),
+            "dismissedClues": len(self.state.get("dismissedClues", [])),
             "searchComparisonCases": len(self.state.get("searchComparisons", {})),
             "publicDiscoveryOnly": self.config.get("publicDiscoveryOnly", False),
             "externalWrites": 0, "paidEmailEnrichments": 0, "lastError": self.state.get("lastError")}
@@ -802,6 +828,12 @@ class Pilot:
             for eid in c["evidenceIds"]:
                 e = self.state["evidence"][eid]
                 rows.append(f"- [{e['title'] or e['url']}]({e['url']}) — retrieved {e['retrievedAt']}")
+            rows.append("")
+        if self.state.get("dismissedClues"):
+            rows += ["## Dismissed discovery clues", "", "Saved research dead ends; not company rejections.", ""]
+            for item in self.state["dismissedClues"][-40:]:
+                label = item.get("name") or item.get("domain") or "Unnamed clue"
+                rows.append(f"- **{label}** — {item['reason']}")
             rows.append("")
         path = self.directory / "review.md"
         rows += ["## Matched model evaluation", "", "Shadow proposals are not executed or recommendations.", ""]

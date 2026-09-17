@@ -8,7 +8,7 @@ and lane preferences are in `ops/openclaw/hunter/pilot-mission.md`.
 
 ## Scope
 
-One Python loop chooses search, fetch, open-company, people-search, decide or wait actions. These are
+One Python loop chooses search, fetch, open-company, dismiss-clue, people-search, decide or wait actions. These are
 choices, not mandatory stages. It reuses Hunter's public retrieval helpers, local Ollama or the existing
 ChatGPT-authenticated Codex CLI, and Newl's
 tenant/identity conventions. No framework migration, extra agents, database migration, dashboard,
@@ -71,6 +71,11 @@ operational changes and referral relationships. Trade data is optional. Recommen
 saved quote from a fetched official-domain page; snippets alone fail. This checks provenance, not every
 commercial inference. Buying intent stays UNCONFIRMED and outreachReady stays false. Apollo results
 are candidates with unverified employment; email availability is not a revealed/verified address.
+The accelerated trial clarified the opportunity definition: `recommended` means research-qualified for
+owner review. It requires a supported goods-movement use case, Newl service/geography fit and no strong
+contradiction; it does not require public proof that the company is shopping for a provider. Missing
+outsourcing evidence remains an uncertainty. Park a plausible fit for a known future trigger; dismiss
+when identity, service, geography or operating evidence actually weakens the hypothesis.
 
 Data lives outside the checkout in a private directory. An atomic, fsynced journal persists evidence,
 companies, attempted searches, decisions, feedback and usage before external calls. One worker holds
@@ -102,6 +107,12 @@ Coverage is derived from persisted attempts, including failed/empty calls; cache
 it. Old completed attempts recover direction from their saved result; interrupted attempts missing
 direction remain explicitly unknown. These hints do not force a rotation or mandatory research stages.
 Previously attempted URLs and parked/rejected/blocked company domains do not become new unread clues.
+A `dismiss_clue` action records why evidence for an unsaved company does not justify more work and
+removes that evidence/domain from unread clues. It is local research memory, not a company rejection
+or suppression decision. After an official named-company page is fetched for a stated uncertainty, the
+mission asks the model to open it, dismiss it, or fetch one decision-relevant source before returning
+to broad discovery. This continuity rule was added after an accelerated live trial completed twelve
+useful Terra actions but repeatedly switched companies without saving a disposition.
 Instructions distinguish businesses moving goods from available warehouse property or competing
 service providers, and do not invent product-category exclusions or require explicit buying intent.
 
@@ -272,7 +283,10 @@ business/API credentials from the child environment, ignores user configuration,
 temporary directory with a read-only sandbox. Shell, apps, plugins, hooks, subagents, computer/browser
 tools and built-in web search are disabled. The model returns one structured proposed decision; Hunter
 alone performs retrieval and business actions through the existing deterministic executor. Unexpected
-tool events, incomplete output, missing usage, failed authentication and timeout fail closed. The process
+tool events, incomplete output, missing usage, failed authentication and timeout fail closed. A completed
+non-tool `error` item emitted by the CLI is counted as a passive diagnostic when the same turn has exactly
+one valid structured result and `turn.completed`; actual command/tool items and unknown item types remain
+rejected. Top-level errors and failed turns still fail closed. The process
 group is killed on timeout. No alternate model, API key, hidden web search or paid fallback is attempted.
 Subscription failure pauses until the next business morning, with a visible error. Plan usage remains
 shared with other ChatGPT/Codex work; zero API fees do not mean unlimited subscription capacity.
@@ -306,7 +320,8 @@ ceiling and 180-second timeout. They are recorded for human comparison and never
 or execute a lead action. Each inference charges the same durable daily counters before starting. A
 comparison wake therefore normally uses all three model calls for one real action and two shadow
 proposals; after ten cases the normal three-action wakes resume automatically. Partial/failed comparisons
-remain visible and are not silently repeated. STOP, tenant policy and expiry apply before shadow calls too.
+remain visible and are not silently repeated. Local connection and socket timeouts are contained in the
+shadow record and cannot stop the primary Terra wake. STOP, tenant policy and expiry apply before shadow calls too.
 
 This evaluates decisions on identical packets. It is not a randomized end-to-end model ranking or ten
 owner-labelled companies. Assess buyer/provider classification, supported Newl fit, sensible next action,
@@ -354,6 +369,39 @@ more directly relevant importer and explicit partner pages for some briefs. Both
 results for ambiguous pallet and regional-expansion queries. This does not establish either provider as
 commercially superior; query selection and follow-up judgment remain the primary evaluation questions.
 Public result titles/URLs remain private evaluation material, not source-controlled customer fixtures.
+
+### Accelerated supervised validation, 2026-09-17
+
+The owner authorized back-to-back supervised testing instead of waiting thirty minutes between trial
+wakes and asked not to stop at the original 40-call evaluation limit. The private pilot allowance was
+raised to 120 model calls and 10,800 model seconds for the remaining isolated pilot. This is an evaluation
+ceiling, not a target or a new source default. The normal half-hour cadence can use at most 48 calls in a
+full unattended business day; the higher cap mainly permits supervised rapid testing. Search/page/people limits, the US$5 daily and US$10 total cash caps, expiry, tenant/suppression
+checks and no-write/no-contact controls were unchanged. Testing stopped voluntarily at 57 calls after
+the flow produced a complete recommendation, leaving 63 calls for today's normal business-day worker.
+
+The first Terra inference exposed a false `MODEL_TOOL_USE_REJECTED`: the CLI emitted a passive completed
+diagnostic item before returning a valid structured decision. The adapter now counts that diagnostic but
+still rejects command/tool and unknown item types. Terra's next decision succeeded. The first Qwen Q4
+shadow then timed out after 180 seconds and its socket timeout escaped the comparison wrapper. That
+failure is now contained and recorded. Further Qwen comparison cases were stopped at one because they
+were obstructing the requested Terra workflow validation; no Qwen proposal was executed.
+
+The rapid loop then completed twelve useful Terra actions but repeatedly switched named companies after
+reading their pages without preserving why. `dismiss_clue` now records evidence-backed dead ends without
+forcing every clue through a company workflow. The live journal immediately used it to close Radius
+Logistics, Canada Cartage, Olliix/JLA Home, Furniture of America, Naturium and other weak clues. A people
+lookup prerequisite also needed clearer recovery instructions: after an initial repeated rejection, the
+model fetched and attached official-domain evidence before trying the zero-credit lookup again.
+
+The trial completed two end-to-end GTA trucking investigations. Lee Li Holdings was parked because its
+official history describes integrated production, distribution and delivery; no people candidate was
+found and outsourcing remains unsupported. Importel Ltd. was recommended for owner review after official
+warehouse/distribution and carrier-policy evidence, with one masked Operations Manager clue. Buying intent,
+employment, volume, lane mix, equipment/security requirements and outsourcing remain unconfirmed, and
+`outreachReady` remains false. An initial recommendation failed the exact-quote gate because the model
+used an ellipsis; it gathered stronger official freight evidence and then passed the unchanged gate.
+This validates flow mechanics and useful commercial restraint, not outbound conversion or broad market yield.
 
 Validation: 72 Python cases and 47 focused Vitest checks passed (the latter includes the Python wrapper).
 `prisma:generate`, `typecheck`, `lint`, `build` and `git diff --check` passed. Client generation used the

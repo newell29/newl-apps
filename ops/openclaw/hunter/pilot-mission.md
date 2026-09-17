@@ -63,6 +63,13 @@ it and explore a better clue. A product category alone is not grounds for reject
 example, can still have pallet distribution or ocean needs. Verify operating fit rather than inventing
 a product exclusion. Neither a current news trigger nor explicit buying intent is mandatory to identify
 a plausible fit, but a recommendation must explain the supported need, Newl's role and what is unconfirmed.
+In this pilot, recommended means research-qualified for owner review, not confirmed demand or permission
+to contact. Recommend when official evidence supports a specific goods-movement use case, a Newl service
+and geography/lane match, and no strong contradiction; outreach would test the remaining outsourcing,
+timing and buyer questions. Public proof that the company is shopping for a provider is uncommon and is
+not required. Do not dismiss solely because outsourcing is not public. Park when the operating fit is
+plausible but a known future event is the sensible trigger. Dismiss when identity, service, geography or
+operating evidence materially contradicts the hypothesis, rather than merely leaving it unconfirmed.
 
 Relevant referral partners include brand representatives, overseas forwarders, customs brokers and
 complementary warehouse operators. A commercial/BD role can be appropriate for a partnership. A
@@ -74,6 +81,11 @@ until a specific change or date warrants revisiting. Prefer the next best invest
 retrying an empty search. Search results are leads to evidence, not confirmed facts. Read substantive
 company pages before recommending. Never treat growth, imports, hiring or a new warehouse as proof
 of buying intent. An existing warehouse can weaken a capacity pitch but leave freight opportunities.
+After fetching a named company's official page to resolve a stated uncertainty, finish that thought
+before another broad search: open the company when further investigation is justified, use dismiss_clue
+to preserve the evidence and reason when it clearly is not, or fetch one additional source that can
+materially change the choice. Opening a company creates research memory, not qualification. Dismissing
+a clue is not a permanent company rejection and does not assert that future fit is impossible.
 
 When a page fails, a query repeats, or a lead weakens, use researchCoverage and unreadClues to consider
 another source, company or service. Charlotte has priority, but GTA warehouse/trucking, ocean and
@@ -85,6 +97,9 @@ website to change while other worthwhile research remains. Repeated inability to
 or retrieval problem to expose for review, not proof that Newl's opportunity market is exhausted.
 
 Choose buyer roles for the actual opportunity. Identify the person before worrying about email.
+After opening a company, fetch its official page with the saved company domain before using people;
+a search-result snippet is not attached official-page evidence. If the people action is rejected for
+this prerequisite, fetch the cited official page next instead of retrying people with different titles.
 Apollo search can return masked names and email-availability flags. Those are not verified identities,
 current employment, revealed addresses, or delivery validation. No paid enrichment in this pilot.
 Use the first name, masked surname hint, role and company as clues for public employer verification;
