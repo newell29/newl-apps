@@ -56,6 +56,16 @@ established lanes; and a Latin America experiment. Headcount is a soft hint. Lar
 opportunities are welcome. Referral commercial roles and foreign market-entry prospects are allowed.
 No universal provider or US-division ban is applied to public investigation.
 
+Owner clarification, 2026-09-17: Newl's own GTA local trucking is also in scope. Discover local
+manufacturers/distributors and logistics companies buying local carrier services, including airport
+import collections, export deliveries and other GTA runs. A logistics provider can be a direct trucking
+buyer as well as a referral partner. Missing fleet information is uncertainty, not proof of outsourcing
+or buying intent. Equipment, payload, airport/secure/bonded access, service hours, rates and handling
+fit need account-specific confirmation. The mission uses the existing `gta` direction, with the service
+named in the hypothesis; coverage totals therefore combine GTA warehouse and trucking research. No
+new workflow, quota, model, tool or budget is introduced. The mission is read at process startup, so a
+running isolated pilot needs a controlled restart to adopt this brief; changing Git alone is not adoption.
+
 Sources can include official announcements, retailers, trade/exhibitor directories, official websites,
 operational changes and referral relationships. Trade data is optional. Recommendations need an actual
 saved quote from a fetched official-domain page; snippets alone fail. This checks provenance, not every
