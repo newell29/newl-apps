@@ -374,10 +374,11 @@ Public result titles/URLs remain private evaluation material, not source-control
 
 The owner authorized back-to-back supervised testing instead of waiting thirty minutes between trial
 wakes and asked not to stop at the original 40-call evaluation limit. The private pilot allowance was
-raised to 120 model calls and 10,800 model seconds for the day. This is a ceiling, not a target or a new
-default. Search/page/people limits, the US$5 daily and US$10 total cash caps, expiry, tenant/suppression
+raised to 120 model calls and 10,800 model seconds for the remaining isolated pilot. This is an evaluation
+ceiling, not a target or a new source default. The normal half-hour cadence can use at most 48 calls in a
+full unattended business day; the higher cap mainly permits supervised rapid testing. Search/page/people limits, the US$5 daily and US$10 total cash caps, expiry, tenant/suppression
 checks and no-write/no-contact controls were unchanged. Testing stopped voluntarily at 57 calls after
-the flow produced a complete recommendation, leaving 63 calls for the normal business-day worker.
+the flow produced a complete recommendation, leaving 63 calls for today's normal business-day worker.
 
 The first Terra inference exposed a false `MODEL_TOOL_USE_REJECTED`: the CLI emitted a passive completed
 diagnostic item before returning a valid structured decision. The adapter now counts that diagnostic but
