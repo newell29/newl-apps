@@ -31,7 +31,7 @@ def api(payload):
         return json.loads(raw)["data"]
 
 
-def model(prompt, schema, directory, name, search=False):
+def model(prompt, schema, directory, name, search=False, timeout=900):
     schema_path = directory / (name + ".schema.json")
     output_path = directory / (name + ".json")
     schema_path.write_text(json.dumps(schema), encoding="utf-8")
@@ -44,7 +44,7 @@ def model(prompt, schema, directory, name, search=False):
             "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps", "--disable", "plugins", "--disable", "multi_agent",
             "--output-schema", str(schema_path), "--output-last-message", str(output_path), "--color", "never", "-"]
     subprocess.run(args, input=prompt, text=True, env=environment, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, timeout=1100, check=True)
+                   stderr=subprocess.DEVNULL, timeout=timeout, check=True)
     return json.loads(output_path.read_text(encoding="utf-8"))
 
 
@@ -65,6 +65,10 @@ def result_schema(kind):
                                   "limitations": string, "proposedTitle": string, "proposedRoute": string,
                                   "hypothesis": string, "newPage": {"type": "boolean"},
                                   "prospects": {"type": "array", "maxItems": 5, "items": json.loads((Path(__file__).resolve().parent.parent / "skills/website-growth-scout/scout-output.schema.json").read_text())["properties"]["backlinks"]["properties"]["prospects"]["items"]}})
+        if kind == "MEASUREMENT":
+            artifact["properties"].update({"outcome": {"type": "string", "enum": ["KEEP", "ITERATE", "STOP", "WAIT"]},
+                                           "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]}})
+            artifact["required"] = list(artifact["properties"])
     schema = object_schema({"decision": {"type": "string", "enum": ["DELIVER", "WAIT", "DISMISS", "CONTINUE"]},
                           "summary": string, "nextAction": string, "reviewInDays": {"type": "integer", "minimum": 1, "maximum": 90},
                           "artifact": {"anyOf": [artifact, {"type": "null"}]}})
@@ -83,6 +87,12 @@ Choose WAIT with a concrete next action when evidence is missing. DISMISS weak w
 For PAGE deliver the complete page brief schema with exact copy, source context, and useful conversion improvements.
 For RELATIONSHIP draft a relevant response to the latest reply for human review; make no commitments.
 For MEASUREMENT use the authoritative supplied measurements, distinguish association from causation, and retain limitations.
+Judge progress by qualified enquiries when actually linked, then enquiries, engaged visits, search clicks, impressions, CTR and position.
+Briefs written and pages shipped measure activity, not marketing success. Never invent lead quality, conversion attribution, or causal lift.
+Use KEEP, ITERATE, STOP, or WAIT with confidence and an explicit explanation of what the data can support.
+If volume is too low or sources are unavailable, choose WAIT and a dated review; a follow-up reads a later 28-day window.
+Use prior measured outcomes to decide which hypotheses to repeat or change. Explain which evidence changed your recommendation.
+Competitor reports and public pages show context, not our results. Cite dated source URLs; stale caches cannot prove current rankings.
 For RESEARCH investigate the best new opportunity; provide a specific proposal, supporting public URLs, and a useful next action.
 Research and outcome artifacts may propose a page with proposedTitle, proposedRoute, hypothesis, and newPage.
 Use empty strings when no page is proposed and an empty prospects array when no publishers qualify.
@@ -95,7 +105,7 @@ Never recommend paid ranking links, irrelevant directories, or volume for its ow
 def run():
     workspace = api({"action": "prepare"})
     if not workspace["mission"]["enabled"] or not workspace["due"]:
-        print("Scout has no research due or is paused.")
+        print(workspace.get("idleReason") or "Scout has no research due or is paused.")
         return
     due_ids = set(workspace["due"])
     candidates = [{key: item.get(key) for key in ("id", "kind", "title", "hypothesis", "nextAction", "history")}
@@ -106,22 +116,46 @@ def run():
     # Selection is bounded by the application; the model chooses the priority and explains why.
     with tempfile.TemporaryDirectory(prefix="newl-scout-") as temporary:
         directory = Path(temporary)
-        selection_schema = object_schema({"id": {"type": "string", "enum": [item["id"] for item in candidates]}, "reason": {"type": "string"}})
-        selected = model(RULES + "\nSelect one due item. Prefer unfinished work, useful replies, and due outcome reviews.\n" +
-                         json.dumps({"mission": workspace["mission"], "candidates": candidates, "previousDecisions": learning}), selection_schema, directory, "selection")
+        selection_schema = object_schema({"id": {"type": "string", "enum": [item["id"] for item in candidates]},
+                                          "reason": {"type": "string", "maxLength": 1500}})
+        selected = model(RULES + "\nAct as Scout's supervisor. Select one due item and give a concrete research direction in the reason. "
+                         "Prefer due outcome reviews and unfinished work. Use the recorded results and competitive evidence to explain expected value, "
+                         "the hypothesis to test, and what would change your mind. Do not merely choose the highest traffic keyword.\n" +
+                         json.dumps({"mission": workspace["mission"], "candidates": candidates, "previousDecisions": learning,
+                                     "learning": workspace.get("learning")}), selection_schema, directory, "selection", timeout=180)
         claimed = api({"action": "claim", "id": selected["id"], "reason": selected["reason"]})
         identity = {"id": claimed["id"], "lease": claimed["lease"]}
         try:
             context = api({"action": "context", **identity})
             # Lease is kept by this deterministic wrapper, never passed to the model.
             public_work = {key: value for key, value in claimed.items() if key not in {"lease", "leaseUntil"}}
-            result = model(RULES + "\n" + json.dumps({"mission": workspace["mission"], "work": public_work, "context": context, "previousDecisions": learning}),
+            result = model(RULES + "\n" + json.dumps({"mission": workspace["mission"], "direction": selected["reason"], "work": public_work, "context": context, "previousDecisions": learning}),
                            result_schema(claimed["kind"]), directory, "result", search=claimed["kind"] in {"PAGE", "RESEARCH"})
         except Exception:
             # Research has no external side effects, so its failure can be safely deferred in isolation.
             api({"action": "complete", **identity, "result": {"decision": "WAIT", "summary": "Research was interrupted; prior progress is preserved.",
                  "nextAction": "Resume this item with the saved evidence on the next review.", "reviewInDays": 1, "artifact": None}})
             raise RuntimeError("Scout research was deferred after an interrupted step") from None
+        # A separate bounded review turn evaluates the artifact, not its own drafting conversation.
+        # Failures preserve the complete research; they do not strand a lease or deliver unchecked work.
+        if result.get("decision") == "DELIVER":
+            review_schema = object_schema({"verdict": {"type": "string", "enum": ["PASS", "REVISE", "WAIT"]},
+                                            "reason": {"type": "string", "maxLength": 2000}})
+            try:
+                review = model(RULES + "\nAct as the quality supervisor. Review the proposed result against the source context. "
+                               "PASS only complete, useful, supported work. REVISE unsupported claims, missing exact copy, generic tasks, "
+                               "or routine public research pushed back onto the owner. WAIT for missing evidence. "
+                               "Check dated competitor evidence and distinguish measured results from interpretation. "
+                               "This quality review never approves sending, building or publishing.\n" +
+                               json.dumps({"mission": workspace["mission"], "work": public_work, "context": context, "result": result}),
+                               review_schema, directory, "review", timeout=180)
+                if review.get("verdict") not in {"PASS", "REVISE", "WAIT"} or not str(review.get("reason", "")).strip():
+                    raise ValueError("Incomplete quality review")
+            except Exception:
+                review = {"verdict": "WAIT", "reason": "Supervisor review was interrupted. Resume with the saved artifact and review it before delivery."}
+            result["supervisor"] = review
+            if review["verdict"] != "PASS":
+                result.update({"decision": "WAIT", "nextAction": review["reason"][:1500], "reviewInDays": 1})
         # A lost completion acknowledgement must never overwrite the saved result with a failure.
         api({"action": "complete", **identity, "result": result})
         print("Scout saved one research step. Review the marketing workboard.")

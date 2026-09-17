@@ -17,5 +17,6 @@ openclaw cron add \
   --command-argv "[\"/bin/zsh\",\"${runner_path}\"]" \
   --command-cwd "${runtime_repo_path}" \
   --timeout-seconds 2400 \
+  --no-deliver \
   --disabled
 echo "Marketing wake installed disabled. Review the mission and preview before enabling it."

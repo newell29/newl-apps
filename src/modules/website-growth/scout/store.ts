@@ -5,6 +5,8 @@ import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website
 import { parseWebsiteGrowthScoutCompletion } from "@/modules/website-growth/scout-run";
 import { parseWebsiteGrowthBacklinkReview, persistWebsiteGrowthBacklinkReview } from "@/modules/website-growth/backlinks";
 import { measurementWindows, measureScoutPage } from "./measurement";
+import { projectPageHandoffs } from "./lifecycle";
+import { scoutCompetitorEvidence, scoutOutcomes, supervisorReview } from "./learning";
 import { DEFAULT_MISSION, MISSION_JOB, WORK_JOB, STEP_JOB, LEASE_MS, DAY_MS, ScoutWorkError,
   isDue, newWork, nextWork, parseMission, parseResult, readWork, record, routePath, stableId, text,
   type Work } from "./model";
@@ -18,7 +20,7 @@ export async function scoutWorkspace(tenantId: string) {
     prisma.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB }, orderBy: { createdAt: "desc" }, take: 1000 })
   ]);
   const mission = missionJob ? parseMission(missionJob.input) : DEFAULT_MISSION;
-  const items = jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; });
+  const items = await projectPageHandoffs(prisma, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
   const usedSteps = await prisma.automationJobRun.count({ where: { tenantId, jobType: STEP_JOB,
     startedAt: { gte: new Date(Date.now() - DAY_MS) } } });
   const active = items.filter(item => item.state === "NEEDS_REVIEW" || (item.state === "WORKING" && Date.parse(item.leaseUntil ?? "") > Date.now())).length;
@@ -46,7 +48,7 @@ export async function reconcileScoutWork(tenantId: string, now = new Date()) {
       orderBy: { lastReplyAt: "desc" }, take: 40, select: { id: true, title: true, targetPage: true, lastReplyAt: true,
         sourceDomain: true, sourceUrl: true, outreachAngle: true } }),
     prisma.websiteGrowthContentDraft.findMany({ where: { tenantId, status: "PUBLISHED", publishedAt: { not: null } },
-      orderBy: { publishedAt: "desc" }, take: 60, select: { id: true, title: true, proposedPath: true, targetPage: true, publishedAt: true } })
+      orderBy: { publishedAt: "desc" }, take: 60, select: { id: true, title: true, proposedPath: true, targetPage: true, publishedAt: true, opportunity: { select: { reason: true } } } })
   ]);
   for (const page of pages) await ensureWork(tenantId, `page:${page.id}`, newWork("PAGE", page.id, page.topic,
     page.reason, safePath(page.targetPage ?? page.sourcePage), { source: "existing-opportunity", score: page.score }, now));
@@ -56,7 +58,7 @@ export async function reconcileScoutWork(tenantId: string, now = new Date()) {
   for (const draft of published) {
     const route = safePath(draft.proposedPath ?? draft.targetPage);
     if (!route || !draft.publishedAt) continue;
-    const work = newWork("MEASUREMENT", draft.id, `Measure: ${draft.title}`, "Evaluate the page against its pre-publication baseline and propose the next action.", route,
+    const work = newWork("MEASUREMENT", draft.id, `Measure: ${draft.title}`, draft.opportunity?.reason || "Evaluate the page against its pre-publication baseline and propose the next action.", route,
       { publishedAt: draft.publishedAt.toISOString() }, now);
     work.nextReviewAt = measurementWindows(draft.publishedAt, now).readyAt;
     work.state = "WAITING";
@@ -86,9 +88,13 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
     if (!mission.enabled) throw new ScoutWorkError("Scout research is paused. Save and enable an owner-approved research plan first.", 409);
     const jobs = await tx.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB }, take: 1001 });
     if (jobs.length > 1000) throw new ScoutWorkError("Scout work history needs archiving before further work.", 409);
-    const works = jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; });
+    const works = await projectPageHandoffs(tx, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
     const work = works.find(item => item.id === id);
     if (!work || !isDue(work, now)) throw new ScoutWorkError("This item is unavailable, already claimed, or not due.", 409);
+    if (work.kind === "PAGE" && work.route && works.some(other => other.id !== id && other.kind === "PAGE" && other.route === work.route &&
+      (other.state === "NEEDS_REVIEW" || (other.state === "WORKING" && !isDue(other, now)) || (other.state === "WAITING" && other.evidence.externalWait)))) {
+      throw new ScoutWorkError("This page already has active research, a brief, or a build. Follow that work before starting another candidate.", 409);
+    }
     const steps = await tx.automationJobRun.count({ where: { tenantId, jobType: STEP_JOB, startedAt: { gte: new Date(now.getTime() - DAY_MS) } } });
     if (steps >= mission.dailySteps) throw new ScoutWorkError("The rolling daily research-step budget is used.", 409);
     const active = works.filter(item => item.id !== id && (item.state === "NEEDS_REVIEW" ||
@@ -105,11 +111,13 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
 
 export async function scoutWorkContext(tenantId: string, id: string, lease: string) {
   const work = await leasedWork(prisma, tenantId, id, lease);
+  const learning = work.kind === "RELATIONSHIP" ? null : {
+    outcomes: scoutOutcomes((await scoutWorkspace(tenantId)).items), competitors: await scoutCompetitorEvidence(tenantId) };
   if (work.kind === "PAGE") {
     const opportunity = await prisma.websiteGrowthOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "" },
       select: { action: true, topic: true, primaryKeyword: true, targetPage: true, sourcePage: true, reason: true,
         recommendation: true, supportingKeywords: true, evidence: true } });
-    return { opportunity, website: await resolveNewlWebsiteContext() };
+    return { opportunity, learning, website: await resolveNewlWebsiteContext() };
   }
   if (work.kind === "RELATIONSHIP") {
     const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "", status: "REPLIED", unsubscribedAt: null },
@@ -121,18 +129,26 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
     const draft = await prisma.websiteGrowthContentDraft.findFirst({ where: { tenantId, id: work.referenceId ?? "", status: "PUBLISHED" },
       select: { title: true, summary: true, publishedAt: true } });
     if (!draft?.publishedAt || !work.route) throw new ScoutWorkError("Published page evidence is unavailable.", 409);
-    const measurement = await measureScoutPage(tenantId, work.route, draft.publishedAt);
+    const measurement = await measureScoutPage(tenantId, work.route, draft.publishedAt, new Date(), Boolean(work.evidence.measurement));
     // Store authoritative measurement separately from the model's interpretation.
-    const updated = nextWork(work, { evidence: { ...work.evidence, measurement } }, "MEASURED", "Collected independent source results.");
+    const previousMeasurements = Array.isArray(work.evidence.previousMeasurements) ? work.evidence.previousMeasurements : [];
+    const updated = nextWork(work, { evidence: { ...work.evidence, measurement,
+      previousMeasurements: [...previousMeasurements, ...(work.evidence.measurement ? [work.evidence.measurement] : [])].slice(-5) } }, "MEASURED", "Collected independent source results.");
     await prisma.$transaction(tx => replace(tx, tenantId, id, work, updated));
-    return { draft, measurement };
+    return { draft, measurement, learning };
   }
-  return { website: await resolveNewlWebsiteContext(), rule: "Research may propose new page work. Publisher opportunities must remain proposals until human approval." };
+  return { website: await resolveNewlWebsiteContext(), learning, rule: "Research may propose new page work. Publisher opportunities must remain proposals until human approval." };
 }
 
 export async function completeScoutWork(tenantId: string, id: string, lease: string, input: unknown, now = new Date()) {
   const result = parseResult(input, now);
-  const delivering = result.state === "NEEDS_REVIEW";
+  const review = supervisorReview(record(input).supervisor);
+  // Preserve legacy/interrupted output for the next supervised step instead of losing its artifact.
+  if (result.state === "NEEDS_REVIEW" && review?.verdict !== "PASS") {
+    result.state = "WAITING";
+    result.nextAction = review?.reason.slice(0, 1500) ?? "Supervisor quality review is required before this work can be delivered.";
+    result.nextReviewAt = new Date(now.getTime() + DAY_MS).toISOString();
+  }
   return prisma.$transaction(async tx => {
     const current = await tx.automationJobRun.findFirst({ where: { id, tenantId, jobType: WORK_JOB } });
     const previous = readWork(current?.output);
@@ -140,7 +156,13 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
     if (previous?.state !== "WORKING" && previous?.history.some(event => event.action === `COMPLETED:${lease}`)) return previous;
     const work = await leasedWork(tx, tenantId, id, lease, now);
     let draftId = work.draftId;
-    let evidence = work.evidence;
+    let evidence: Record<string, unknown> = { ...work.evidence, supervisor: review ? { ...review, reviewedAt: now.toISOString() } : null };
+    if (result.state === "NEEDS_REVIEW" && work.kind === "MEASUREMENT" && record(evidence.measurement).status !== "AVAILABLE") {
+      result.state = "WAITING";
+      result.nextAction = "Measurement is incomplete. Scout will retry the sources and retain the available evidence.";
+      result.nextReviewAt = new Date(now.getTime() + 7 * DAY_MS).toISOString();
+    }
+    const delivering = result.state === "NEEDS_REVIEW";
     if (result.state === "NEEDS_REVIEW" && work.kind === "PAGE") {
       const opportunity = await tx.websiteGrowthOpportunity.findFirst({ where: { id: work.referenceId ?? "", tenantId,
         status: { in: ["NEW", "REVIEWING"] }, ...(work.draftId ? {} : { contentDrafts: { none: {} } }) } });
@@ -189,6 +211,17 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       result.state = "NEEDS_REVIEW";
       result.nextAction = "Review the researched publisher opportunities in Backlink Scout. No outreach has been approved or sent.";
     }
+    if (delivering && work.kind === "MEASUREMENT") {
+      if (!result.artifact?.proposedRoute) {
+        result.state = "DONE";
+        result.nextAction = "Outcome recorded for future prioritization. No owner decision is required.";
+      }
+    }
+    if (result.state === "WAITING" && work.attempts >= 3 && ((review ? review.verdict !== "PASS" : record(input).decision === "DELIVER") ||
+      (work.kind === "MEASUREMENT" && record(evidence.measurement).status !== "AVAILABLE"))) {
+      evidence = { ...evidence, externalWait: true, escalation: { at: now.toISOString(), reason: result.nextAction } };
+      result.nextAction = `Scout needs help after repeated incomplete attempts: ${result.nextAction}`.slice(0, 1500);
+    }
     const updated = nextWork(work, { ...result, artifact: result.artifact ?? work.artifact, evidence, draftId, lease: null, leaseUntil: null }, `COMPLETED:${lease}`, result.summary, now);
     await replace(tx, tenantId, id, work, updated);
     await audit(tx, tenantId, null, "work-completed", id, { kind: work.kind, state: updated.state, draftId });
@@ -204,10 +237,14 @@ export async function reviewScoutWork(tenantId: string, userId: string, id: stri
     const work = readWork(job?.output);
     if (!work || work.revision !== revision || work.state === "WORKING") throw new ScoutWorkError("This work changed. Reload before reviewing.", 409);
     if (work.evidence.replySend) throw new ScoutWorkError("This response has an external send record. Reconcile it in the mailbox; it cannot be restarted here.", 409);
+    if (work.kind === "PAGE" && work.draftId) {
+      const draft = await tx.websiteGrowthContentDraft.findFirst({ where: { tenantId, id: work.draftId }, select: { status: true, approvedAt: true } });
+      if (!draft || draft.status !== "DRAFT" || draft.approvedAt) throw new ScoutWorkError("This page has left brief review. Open the brief for its current build or publishing decision.", 409);
+    }
     // Page approvals and publishing stay in the established claims/build review path.
     if (work.kind === "PAGE" && work.draftId && decision === "ACCEPT") throw new ScoutWorkError("Approve this page through its complete brief.");
     const updated = nextWork(work, { state: decision === "REVISE" ? "READY" : decision === "DISMISS" ? "DISMISSED" : "DONE",
-      evidence: { ...work.evidence, externalWait: false },
+      evidence: { ...work.evidence, externalWait: false, escalation: null },
       nextAction: feedback, nextReviewAt: new Date().toISOString() }, "OWNER_REVIEW", feedback);
     await replace(tx, tenantId, id, work, updated);
     await audit(tx, tenantId, userId, "work-reviewed", id, { decision });
@@ -247,17 +284,13 @@ function safePath(value: unknown) { try { return routePath(value); } catch { ret
 async function reconcilePageHandoffs(tenantId: string) {
   const jobs = await prisma.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB,
     output: { path: ["kind"], equals: "PAGE" } }, take: 1000 });
-  for (const job of jobs) {
-    const work = readWork(job.output);
-    if (!work || work.state === "WORKING" || ["DONE", "DISMISSED"].includes(work.state)) continue;
-    const draft = await prisma.websiteGrowthContentDraft.findFirst({ where: { tenantId, opportunityId: work.referenceId ?? "" }, orderBy: { createdAt: "desc" }, select: { id: true, status: true } });
-    if (!draft) continue;
-    const state = draft.status === "PUBLISHED" ? "DONE" : draft.status === "REJECTED" ? "DISMISSED" : draft.status === "DRAFT" ? "NEEDS_REVIEW" : "WAITING";
-    if (draft.status === "DRAFT" && work.state === "READY" && draft.id === work.draftId) continue;
-    if (state === work.state && draft.id === work.draftId) continue;
-    const updated = nextWork(work, { state, draftId: draft.id, evidence: { ...work.evidence, externalWait: state === "WAITING" },
-      nextAction: state === "DONE" ? "Published; a separate outcome review follows the measurement window." : state === "WAITING" ? "Await the website build and owner publishing decision." : "Review the complete page brief." }, "HANDOFF", `Page brief is ${draft.status.toLowerCase()}.`);
-    await prisma.$transaction(tx => replace(tx, tenantId, job.id, work, updated));
+  const items = jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; });
+  const projected = await projectPageHandoffs(prisma, tenantId, items);
+  for (const work of items) {
+    const current = projected.find(item => item.id === work.id)!;
+    if (JSON.stringify(current) === JSON.stringify(work)) continue;
+    const updated = nextWork(work, current, "HANDOFF", current.nextAction);
+    await prisma.$transaction(tx => replace(tx, tenantId, work.id, work, updated));
   }
 }
 async function reconcileRelationshipHandoffs(tenantId: string) {

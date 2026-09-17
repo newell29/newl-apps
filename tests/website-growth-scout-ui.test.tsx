@@ -7,6 +7,7 @@ vi.mock("@/server/tenant-context", () => ({ getAuthenticatedContext: mocks.conte
 vi.mock("@/server/auth/authorization", () => ({ requireModule: vi.fn(), resolveRoleCanMutate: mocks.canMutate }));
 vi.mock("@/server/db", () => ({ prisma: { websiteGrowthBacklinkOpportunity: { findMany: mocks.recipients } } }));
 vi.mock("@/modules/website-growth/scout/store", () => ({ scoutWorkspace: mocks.workspace }));
+vi.mock("@/modules/website-growth/scout/workboard-refresh", () => ({ WorkboardRefresh: () => null }));
 vi.mock("@/modules/website-growth/scout/actions", () => ({ proposeScoutPageAction: vi.fn(), refreshScoutWorkAction: vi.fn(), reviewScoutWorkAction: vi.fn(), saveScoutMissionAction: vi.fn(), sendScoutReplyAction: vi.fn() }));
 beforeEach(() => {
   mocks.context.mockResolvedValue({ tenantId: "tenant-a", role: "ADMIN" }); mocks.canMutate.mockResolvedValue(true);
@@ -60,4 +61,14 @@ it("renders the decision as a form control that survives submission without a cl
   expect(html).toMatch(/<select[^>]*name="decision"/);
   expect(html).toContain("Save decision");
   expect(html).toMatch(/<option[^>]*value="REVISE"[^>]*selected/);
+});
+
+it("shows approved builds as external work with no second brief decision or fictional research date", async () => {
+  mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
+    items: [{ ...newWork("PAGE", "opportunity", "Build page", "Improve clarity", "/resources/guide"), id: "work", draftId: "draft-synthetic", state: "WAITING",
+      nextAction: "The website builder is implementing your approved brief.", evidence: { externalWait: true, handoff: { draftStatus: "APPROVED", phase: "RUNNING", needsOwner: false } } }] });
+  const html = renderToStaticMarkup(await ScoutWorkPage());
+  expect(html).toContain("No finished work needs a decision"); expect(html).toContain("Open build and preview");
+  expect(html).not.toContain("Save decision"); expect(html).not.toContain("Scout checks again");
+  expect(html).toContain("Candidate backlog"); expect(html).toContain("No page outcome has been measured yet");
 });

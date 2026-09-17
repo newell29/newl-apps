@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { authenticateWebsiteGrowthScoutRequest, WebsiteGrowthScoutAuthError } from "@/server/website-growth-scout-auth";
 import { claimScoutWork, completeScoutWork, reconcileScoutWork, scoutWorkContext, scoutWorkspace } from "@/modules/website-growth/scout/store";
-import { isDue, record, ScoutWorkError, text } from "@/modules/website-growth/scout/model";
+import { record, ScoutWorkError, text } from "@/modules/website-growth/scout/model";
+import { scoutCandidates, scoutCompetitorEvidence, scoutOutcomes } from "@/modules/website-growth/scout/learning";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -21,13 +22,18 @@ export async function POST(request: Request) {
       const saved = await scoutWorkspace(tenant.id);
       const workspace = saved.mission.enabled ? await reconcileScoutWork(tenant.id) : saved;
       // Selection needs summaries, not every saved artifact. Fetch full evidence only after a scoped claim.
-      const due = workspace.capacity.available ? workspace.items.filter(item => isDue(item)).slice(0, 50) : [];
+      const due = workspace.capacity.available ? scoutCandidates(workspace.items) : [];
       const decisions = workspace.items.filter(item => ["DONE", "DISMISSED"].includes(item.state) && item.kind !== "RELATIONSHIP").slice(0, 20);
       const items = [...due, ...decisions].map(item => ({ id: item.id, kind: item.kind, state: item.state,
         title: item.title.slice(0, 250), hypothesis: item.hypothesis.slice(0, 800), nextAction: item.nextAction.slice(0, 500), lease: null,
         history: item.history.slice(-3).map(event => ({ ...event, summary: event.summary.slice(0, 300) })) }));
+      const idleReason = !workspace.mission.enabled ? "Research is paused by the owner."
+        : workspace.capacity.usedSteps >= workspace.mission.dailySteps ? "The rolling daily research budget is used; Scout will resume as earlier steps leave the 24-hour window."
+        : workspace.capacity.active >= workspace.mission.maxActive ? "The active-work limit is reached. Finish the current research or resolve the decisions shown on the workboard."
+        : !due.length ? "No research is due. Scout is waiting for a scheduled review or an external system." : null;
       return NextResponse.json({ data: { mission: workspace.mission, configured: workspace.configured,
-        capacity: workspace.capacity, truncated: workspace.truncated, items, due: due.map(item => item.id) } });
+        capacity: workspace.capacity, truncated: workspace.truncated, idleReason, items, due: due.map(item => item.id),
+        learning: due.length ? { outcomes: scoutOutcomes(workspace.items), competitors: await scoutCompetitorEvidence(tenant.id) } : null } });
     }
     const id = text(input.id, "Work ID", 100);
     if (input.action === "claim") return NextResponse.json({ data: await claimScoutWork(tenant.id, id, text(input.reason, "Selection reason", 1500)) });
