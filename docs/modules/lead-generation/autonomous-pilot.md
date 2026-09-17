@@ -309,7 +309,8 @@ ceiling and 180-second timeout. They are recorded for human comparison and never
 or execute a lead action. Each inference charges the same durable daily counters before starting. A
 comparison wake therefore normally uses all three model calls for one real action and two shadow
 proposals; after ten cases the normal three-action wakes resume automatically. Partial/failed comparisons
-remain visible and are not silently repeated. STOP, tenant policy and expiry apply before shadow calls too.
+remain visible and are not silently repeated. Local connection and socket timeouts are contained in the
+shadow record and cannot stop the primary Terra wake. STOP, tenant policy and expiry apply before shadow calls too.
 
 This evaluates decisions on identical packets. It is not a randomized end-to-end model ranking or ten
 owner-labelled companies. Assess buyer/provider classification, supported Newl fit, sensible next action,

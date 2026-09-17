@@ -4,6 +4,7 @@ import json
 import os
 import importlib.util
 from pathlib import Path
+import socket
 import sys
 import tempfile
 import subprocess
@@ -501,6 +502,15 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.p.budget()["modelCalls"], 3)
         self.assertEqual(len(self.p.state["modelComparisons"][0]["shadows"]), 2)
         self.assertEqual(self.p.state["modelComparisons"][0]["shadows"][0]["error"], "TimeoutError")
+
+    def test_socket_timeout_in_shadow_does_not_stop_primary_wake(self):
+        self.enable_comparison()
+        with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=socket.timeout)):
+            self.p.tick(force=True)
+        case = self.p.state["modelComparisons"][0]
+        self.assertEqual(len(case["shadows"]), 2)
+        self.assertEqual(case["shadows"][0]["error"], "timeout")
+        self.assertIsNone(self.p.state.get("lastError"))
 
     def test_completed_comparison_limit_does_not_call_shadows(self):
         self.enable_comparison()

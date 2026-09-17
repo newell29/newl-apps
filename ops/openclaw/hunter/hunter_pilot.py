@@ -724,7 +724,7 @@ class Pilot:
             except BudgetExceeded as error:
                 case["incomplete"] = str(error)
                 break
-            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError) as error:
+            except (OSError, urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError) as error:
                 case["shadows"].append({"model": name, "error": type(error).__name__})
             finally:
                 self.save()
