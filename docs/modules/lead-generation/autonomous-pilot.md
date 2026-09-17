@@ -116,6 +116,22 @@ useful Terra actions but repeatedly switched companies without saving a disposit
 Instructions distinguish businesses moving goods from available warehouse property or competing
 service providers, and do not invent product-category exclusions or require explicit buying intent.
 
+The first full scheduled day exposed two further quality gaps. Broad Charlotte facility and economic-
+development searches repeatedly surfaced internal distribution centers, offices, distant facilities and
+large self-operated networks. The mission now favors company-first discovery through brands, importers,
+wholesalers, retail/marketplace programs, exhibitor/stockist evidence and observable external-logistics
+relationships; facility announcements remain useful when they identify a suitable occupier. This is
+source guidance, not a hard company-size filter or a requirement for public outsourcing proof.
+
+A commercial recommendation previously disappeared into `otherCompanies`, so the model had little
+reason to complete the zero-credit buyer-role lookup. Connected-mode context now exposes recommended
+companies without a completed people search in `buyerResearchQueue`, including their actual service
+hypothesis and whether official evidence is attached. One tailored people lookup normally becomes the
+highest-value unfinished task on a later wake. The result records searched titles and time; a completed
+empty lookup records a contact gap instead of triggering synonym retries. `status` reports pending and
+completed buyer research, and the review explains preparation state. This does not change commercial
+fit, verify employment, reveal email, clear suppression, make outreach ready or authorize contact.
+
 On first v2 wake, an inherited v1 `waiting`/`waiting_no_progress` timer longer than thirty minutes is
 shortened and audited as `schedule_recovered`. A gracefully stopped worker also requires a recorded
 model wait/yield cause; an unknown stopped schedule is preserved. Budget/error/review waits are preserved. STOP, expiry,

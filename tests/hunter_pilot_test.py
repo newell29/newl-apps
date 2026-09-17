@@ -344,8 +344,42 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(c["status"], "recommended")
         self.assertEqual(c["buyingIntent"], "UNCONFIRMED")
         self.assertFalse(c["outreachReady"])
+        self.assertEqual(self.p.context()["buyerResearchQueue"][0]["domain"], "supply.example")
+        self.assertEqual(self.p.status()["buyerResearch"], {"pending": 1, "completed": 0})
         self.assertIn("research-qualified for owner review", MISSION)
         self.assertIn("Do not dismiss solely because outsourcing is not public", MISSION)
+
+    def test_recommended_company_gets_one_buyer_research_continuation(self):
+        self.open(); self.decision()
+        self.bridge.side_effect = lambda action, **kw: {"tenantId": "tenant-a", "tenantSlug": "synthetic", "allowed": True,
+            "result": "PEOPLE_FOUND_EMAIL_NOT_REVEALED", "candidates": [{"id": "person-a", "title": "Operations Manager", "employmentVerified": False}]}
+        result = self.action("people", company="supply.example", titles=["Operations Manager", "Supply Chain Manager"])
+        company = self.p.state["companies"]["supply.example"]
+        self.assertEqual(result["state"], "PEOPLE_FOUND_EMAIL_NOT_REVEALED")
+        self.assertEqual(company["contactTitles"], ["Operations Manager", "Supply Chain Manager"])
+        self.assertEqual(company["contactResearchAt"], self.time.isoformat())
+        self.assertEqual(self.p.context()["buyerResearchQueue"], [])
+        self.assertEqual(self.p.status()["buyerResearch"], {"pending": 0, "completed": 1})
+        self.assertFalse(company["outreachReady"])
+
+    def test_empty_buyer_search_records_gap_without_retry_queue(self):
+        self.open(); self.decision()
+        self.bridge.side_effect = lambda action, **kw: {"tenantId": "tenant-a", "tenantSlug": "synthetic", "allowed": True,
+            "result": "NO_PEOPLE_RETURNED", "candidates": []}
+        self.action("people", company="supply.example", titles=["Owner", "Operations"])
+        buyer = self.p.buyer_research(self.p.state["companies"]["supply.example"])
+        self.assertEqual(buyer["state"], "COMPLETED")
+        self.assertEqual(buyer["candidateCount"], 0)
+        self.assertFalse(buyer["employmentVerified"])
+        self.assertEqual(self.p.context()["buyerResearchQueue"], [])
+
+    def test_legacy_contact_state_prevents_duplicate_buyer_lookup(self):
+        self.open(); self.decision()
+        company = self.p.state["companies"]["supply.example"]
+        company["contactState"] = "PEOPLE_FOUND_EMAIL_NOT_REVEALED"
+        company["contacts"] = [{"id": "legacy", "employmentVerified": False}]
+        self.assertEqual(self.p.context()["buyerResearchQueue"], [])
+        self.assertEqual(self.p.status()["buyerResearch"], {"pending": 0, "completed": 1})
 
     def test_redirect_to_other_domain_cannot_verify_identity(self):
         c = self.open()
@@ -367,6 +401,8 @@ class PilotTests(unittest.TestCase):
         result = self.action("people", company="supply.example", titles=["operations"])
         self.assertEqual(result["state"], "PEOPLE_FOUND_EMAIL_NOT_REVEALED")
         self.assertEqual(len(self.p.state["companies"]["supply.example"]["contacts"]), 1)
+        self.assertEqual(self.p.state["companies"]["supply.example"]["contactTitles"], ["operations"])
+        self.assertEqual(self.p.state["companies"]["supply.example"]["contactResearchAt"], self.time.isoformat())
 
     def test_people_requires_official_page(self):
         self.open()

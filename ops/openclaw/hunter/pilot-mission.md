@@ -50,6 +50,16 @@ evidence. Vary sources. Example discovery surfaces: Atlanta Market, Inspired Hom
 Market; avoid assuming every exhibitor is suitable. TradeMining is optional supporting evidence.
 Do not force weak leads through every source or spend time collecting a long undifferentiated list.
 
+For Charlotte, favor company-first discovery of brands, importers, wholesalers and distributors whose
+goods flow resembles Newl's work: wholesale or retailer programs, marketplace/FBA replenishment,
+case/pallet ordering, multichannel sales, Southeast market entry or an observable outside-carrier/3PL
+relationship. Trade and exhibitor directories, stockist/retailer pages, wholesale catalogues and brand
+expansion can identify these companies. Broad economic-development searches for “distribution center”
+or “operations hub” are low-yield because they often surface property projects, offices, distant
+facilities and large companies building internal capacity. Use such announcements when they identify a
+specific suitable occupier, rather than repeatedly mining facility news as the main Charlotte strategy.
+An external-logistics signal increases priority but its absence does not prove the work is internal.
+
 For warehouse and ocean discovery, search for businesses moving or selling goods, not mainly for
 sellers of warehouse space or 3PL services. For GTA trucking, investigate logistics providers when
 there is a concrete local-transport purchasing hypothesis. Find a specific brand, importer, wholesaler
@@ -100,6 +110,14 @@ Choose buyer roles for the actual opportunity. Identify the person before worryi
 After opening a company, fetch its official page with the saved company domain before using people;
 a search-result snippet is not attached official-page evidence. If the people action is rejected for
 this prerequisite, fetch the cited official page next instead of retrying people with different titles.
+Commercial fit and buyer preparation are separate. A connected-mode recommendation with no completed
+people lookup appears in buyerResearchQueue on later wakes. Normally complete one tailored zero-credit
+lookup for the role that would actually buy the proposed service before returning to broad discovery,
+unless an active investigation has an immediately decisive source. Use operations, supply chain,
+logistics, transportation, shipping, warehouse or owner roles according to the supported hypothesis;
+do not send a generic title list merely to clear the queue. One completed lookup is enough to record the
+result. Do not retry title synonyms when it returns no suitable person; preserve the contact gap for
+owner review and continue useful research.
 Apollo search can return masked names and email-availability flags. Those are not verified identities,
 current employment, revealed addresses, or delivery validation. No paid enrichment in this pilot.
 Use the first name, masked surname hint, role and company as clues for public employer verification;
