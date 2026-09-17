@@ -1,16 +1,18 @@
 import { ModuleKey, PlatformRole } from "@prisma/client";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { PageHeader } from "@/components/page-header";
 import { requireModule, resolveRoleCanMutate } from "@/server/auth/authorization";
 import { getAuthenticatedContext } from "@/server/tenant-context";
 import { scoutWorkspace } from "@/modules/website-growth/scout/store";
 import { proposeScoutPageAction, refreshScoutWorkAction, saveScoutMissionAction, sendScoutReplyAction } from "@/modules/website-growth/scout/actions";
-import { record, type Work } from "@/modules/website-growth/scout/model";
+import { isDue, record, type Work } from "@/modules/website-growth/scout/model";
 import { ScoutReviewForm } from "@/modules/website-growth/scout/review-form";
 import { prisma } from "@/server/db";
 import { needsOwner } from "@/modules/website-growth/scout/lifecycle";
 import { scoutCompetitorEvidence } from "@/modules/website-growth/scout/learning";
 import { WorkboardRefresh } from "@/modules/website-growth/scout/workboard-refresh";
+import { projectScoutWorkboard } from "@/modules/website-growth/scout/workboard-model";
 
 export const dynamic = "force-dynamic";
 const field = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm";
@@ -27,7 +29,8 @@ export default async function ScoutWorkPage() {
   const canReview = ([PlatformRole.ADMIN, PlatformRole.MANAGER] as PlatformRole[]).includes(context.role) && await resolveRoleCanMutate(context.tenantId, context.role);
   const competitors = await scoutCompetitorEvidence(context.tenantId);
   const outcomes = items.filter(item => item.kind === "MEASUREMENT" && item.evidence.measurement);
-  const candidates = items.filter(item => item.state === "READY");
+  const board = projectScoutWorkboard(items, workspace.mission, workspace.capacity);
+  const candidates = board.available;
   const groups = new Map<string, typeof candidates>();
   for (const item of candidates) { const key = item.route ?? item.kind; groups.set(key, [...(groups.get(key) ?? []), item]); }
   const capacity = workspace.capacity;
@@ -51,16 +54,30 @@ export default async function ScoutWorkPage() {
         </form>
       </details>}
     </section>
-    <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-mutedForeground">Work resumes from its saved next action. Published pages return for measurement.</p>
-      {canReview && <form action={refreshScoutWorkAction}><button className={button}>Find outstanding work</button></form>}
-    </div>
-    {capacity && <p role="status" className="rounded-lg bg-muted/40 p-4 text-sm">{capacity.usedSteps} of {workspace.mission.dailySteps} research steps used in the last 24 hours. {capacity.active} of {workspace.mission.maxActive} active research/review slots used.
-      {!workspace.mission.enabled ? " Research is paused." : capacity.usedSteps >= workspace.mission.dailySteps ? " Scout resumes as earlier steps leave the daily window." : capacity.active >= workspace.mission.maxActive ? " Scout will finish current work or wait for your decisions before starting more." : " Scout chooses the next due item at its next scheduled wake."}</p>}
+    <section className="rounded-lg border border-border bg-card p-5 space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">What happens when Scout wakes</h2><p className="mt-1 text-sm text-mutedForeground">The worker schedule is managed separately from Newl Apps. This board determines whether work is eligible when that worker wakes.</p></div>
+        {canReview && <form action={refreshScoutWorkAction}><button className={button}>Check for newly available work</button></form>}
+      </div>
+      <ol className="grid gap-3 text-sm md:grid-cols-3"><li><strong>1. Reconcile sources.</strong><br />Read saved opportunities, publisher replies, published pages, and reusable research reviews.</li><li><strong>2. Choose one due item.</strong><br />A supervisor weighs the owner’s direction, earlier decisions, measured results, and available competitor evidence.</li><li><strong>3. Save the next state.</strong><br />Scout records a result, a dated reason to wait, or a concrete owner decision. Sending, building, and publishing keep their approval gates.</li></ol>
+      <p role="status" className="rounded-md bg-muted/40 p-4 text-sm"><strong>If Scout woke now:</strong> {board.wakeStatus}</p>
+      {capacity && <p className="text-sm text-mutedForeground">{capacity.usedSteps} of {workspace.mission.dailySteps} research steps used in the rolling 24-hour window. {capacity.active} of {workspace.mission.maxActive} active research/review slots used. An empty wake does not claim work and does not consume a research step.</p>}
+      <div><h3 className="text-sm font-semibold">Where new work comes from <span className="font-normal text-mutedForeground">· open records now</span></h3><dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
+        <WorkSource label="Page opportunities" count={board.sourceCounts.pages}>Saved signals and pages you ask Scout to investigate.</WorkSource>
+        <WorkSource label="Publisher replies" count={board.sourceCounts.replies}>Replies that need a useful, reviewed next response.</WorkSource>
+        <WorkSource label="Outcome reviews" count={board.sourceCounts.measurements}>Published pages returning after their evidence window.</WorkSource>
+        <WorkSource label="Open exploration" count={board.sourceCounts.exploration}>One broad brief replenished after the last one closes.</WorkSource>
+        <WorkSource label="Whole-site review" count={board.sourceCounts.siteReview}>One reusable review of performance, impact, and gaps.</WorkSource>
+      </dl></div>
+      {canReview && <p className="text-xs text-mutedForeground">“Check for newly available work” only reconciles saved records. It does not run the AI worker or consume a research step.</p>}
+    </section>
     {workspace.truncated && <p role="status">The work history limit has been reached. Archive reviewed history before further research.</p>}
-    <div className="grid items-start gap-5 xl:grid-cols-3">
-      <WorkColumn title="Needs you today" empty="No finished work needs a decision." items={items.filter(needsOwner)} canReview={canReview} />
-      <WorkColumn title="Scout is working" empty="No research step is running right now. Candidates below are waiting for Scout to choose its next step." items={items.filter(item => item.state === "WORKING")} canReview={canReview} />
-      <WorkColumn title="Waiting on systems and results" empty="No scheduled reviews or external waits." items={items.filter(item => item.state === "WAITING" && !needsOwner(item))} canReview={canReview} />
+    <div className="grid items-start gap-5 xl:grid-cols-2">
+      <WorkColumn title="Your decisions" empty="No work needs your decision." items={board.ownerActions} canReview={canReview} />
+      <WorkColumn title="Working now" empty="No research step is running now. Available work below remains eligible for the next scheduled wake." items={board.working} canReview={canReview} />
+    </div>
+    <div className="grid items-start gap-5 xl:grid-cols-2">
+      <WorkColumn title="Scheduled reviews" empty="No work is waiting for a future evidence or follow-up date." items={board.scheduled} canReview={canReview} />
+      <WorkColumn title="External systems" empty="No builds, callbacks, or other external work are pending." items={board.external} canReview={canReview} />
     </div>
     <section className="rounded-lg border border-border bg-card p-5 space-y-3"><h2 className="text-lg font-semibold">What we are learning</h2>
       <p className="text-sm">Measure enquiries and useful visits, then search clicks, impressions, click-through rate, and position. Briefs and builds show activity; measured outcomes guide the next hypothesis.</p>
@@ -69,9 +86,10 @@ export default async function ScoutWorkPage() {
       <p className="text-xs text-mutedForeground">Initial page review: 28 days before and 28 days after publication, with reporting time allowed. Deferred reviews use a later 28-day window. A report can recommend keeping, improving, stopping, or waiting.</p>
       {outcomes.length ? <div className="grid gap-4 md:grid-cols-2">{outcomes.slice(0, 6).map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</div> : <p className="text-sm font-medium">No page outcome has been measured yet. Published pages will return here when their reporting window is ready.</p>}
     </section>
-    <details className="rounded-lg border border-border p-5"><summary className="cursor-pointer font-semibold">Candidate backlog — {candidates.length} signals across {groups.size} pages or research areas</summary>
-      <p className="mt-2 text-sm text-mutedForeground">These are options for Scout, not tasks for you. Related page signals are grouped; Scout checks active work and previous results before choosing one.</p>
-      <div className="mt-4 space-y-3">{Array.from(groups, ([route, group]) => <details key={route} className="rounded border border-border p-3"><summary className="cursor-pointer text-sm font-semibold">{route} · {group.length} candidate{group.length === 1 ? "" : "s"}</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</div></details>)}</div>
+    <details className="rounded-lg border border-border p-5"><summary className="cursor-pointer font-semibold">Available to Scout — {candidates.length} item{candidates.length === 1 ? "" : "s"} across {groups.size} pages or research areas</summary>
+      <p className="mt-2 text-sm text-mutedForeground">These items are eligible at the next scheduled wake. They are not tasks for you. The supervisor chooses one using the mission, prior decisions, measured outcomes, and evidence.</p>
+      {board.heldCandidates.length > 0 && <p className="mt-2 text-xs text-mutedForeground">{board.heldCandidates.length} related or overflow signal{board.heldCandidates.length === 1 ? " is" : "s are"} held outside this selection set by same-route deduplication, active page work, or the bounded worker packet.</p>}
+      {groups.size ? <div className="mt-4 space-y-3">{Array.from(groups, ([route, group]) => <details key={route} className="rounded border border-border p-3"><summary className="cursor-pointer text-sm font-semibold">{route} · {group.length} candidate{group.length === 1 ? "" : "s"}</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</div></details>)}</div> : <p className="mt-3 text-sm text-mutedForeground">Nothing is due. Future reviews and external waits remain visible above.</p>}
     </details>
     {canReview && <details className="rounded-lg border border-border bg-card p-5"><summary className="cursor-pointer font-semibold">Give Scout a page to investigate</summary>
       <form action={proposeScoutPageAction} className="mt-4 grid gap-3 md:grid-cols-2"><label>Title<input name="title" required maxLength={250} className={field} /></label><label>Website route<input name="route" required placeholder="/services/warehousing" className={field} /></label>
@@ -85,6 +103,9 @@ export default async function ScoutWorkPage() {
 function WorkColumn({ title, empty, items, canReview }: { title: string; empty: string; items: Array<Work & { id: string; recipientEmail?: string | null }>; canReview: boolean }) {
   return <section className="space-y-3"><h2 className="text-lg font-semibold">{title} <span className="text-mutedForeground">{items.length}</span></h2>{items.length === 0 ? <p className="rounded-lg border border-dashed border-border p-5 text-sm text-mutedForeground">{empty}</p> : items.map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</section>;
 }
+function WorkSource({ label, count, children }: { label: string; count: number; children: ReactNode }) {
+  return <div className="rounded-md border border-border p-3"><dt className="font-semibold">{label} <span className="text-mutedForeground">{count}</span></dt><dd className="mt-1 text-xs text-mutedForeground">{children}</dd></div>;
+}
 function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEmail?: string | null }; canReview: boolean }) {
   const artifact = record(item.artifact);
   const handoff = record(item.evidence.handoff), supervisor = record(item.evidence.supervisor);
@@ -92,7 +113,7 @@ function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEma
     <p className="text-xs font-semibold uppercase tracking-wide text-primary">{kindLabels[item.kind]}</p><h3 className="mt-2 font-semibold">{item.title}</h3>
     {item.route && <p className="mt-1 break-all text-xs text-mutedForeground">{item.route}</p>}<p className="mt-3 text-sm">{item.hypothesis}</p>
     <p className="mt-3 text-sm"><strong>Next:</strong> {item.nextAction}</p>
-    {item.state === "WAITING" && !item.evidence.externalWait && <p className="mt-2 text-xs text-mutedForeground">Scout checks again {new Date(item.nextReviewAt).toLocaleDateString("en-CA", { timeZone: "UTC" })}</p>}
+    {item.state === "WAITING" && !item.evidence.externalWait && <p className="mt-2 text-xs text-mutedForeground">{needsOwner(item) ? "Waiting for your decision." : isDue(item) ? "Available now for the next scheduled wake." : `Scout checks again ${new Date(item.nextReviewAt).toLocaleDateString("en-CA", { timeZone: "UTC" })}`}</p>}
     {typeof supervisor.verdict === "string" && <p className="mt-2 text-xs text-mutedForeground">Quality review: {supervisor.verdict.toLowerCase()} — {String(supervisor.reason ?? "")}</p>}
     {item.kind === "MEASUREMENT" && typeof artifact.outcome === "string" && <p className="mt-2 text-sm font-semibold">{artifact.outcome} · {String(artifact.confidence ?? "Unspecified").toLowerCase()} confidence</p>}
     {item.kind === "MEASUREMENT" && <MeasurementEvidence value={item.evidence.measurement} />}
@@ -105,7 +126,7 @@ function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEma
     </div></details>}
     <details className="mt-3"><summary className="cursor-pointer text-xs text-mutedForeground">Progress and decisions</summary><ol className="mt-2 space-y-2 text-xs">{item.history.slice(-8).map((event, index) => <li key={index}>{new Date(event.at).toLocaleDateString("en-CA")} — {event.summary}</li>)}</ol></details>
     {canReview && item.kind === "RELATIONSHIP" && item.state === "NEEDS_REVIEW" && item.recipientEmail && <form action={sendScoutReplyAction} className="mt-4 space-y-2"><input type="hidden" name="id" value={item.id} /><input type="hidden" name="revision" value={item.revision} /><label className="flex gap-2 text-xs"><input type="checkbox" name="confirmSend" required />I approve sending this response to the recipient shown above.</label><button className={button}>Approve and send response</button></form>}
-    {canReview && ["READY", "NEEDS_REVIEW", "WAITING"].includes(item.state) && (!item.evidence.externalWait || Boolean(item.evidence.escalation)) && !item.evidence.replySend && <ScoutReviewForm id={item.id} revision={item.revision} hasDraft={Boolean(item.draftId)} />}
+    {canReview && needsOwner(item) && (!item.evidence.externalWait || Boolean(item.evidence.escalation)) && !item.evidence.replySend && <ScoutReviewForm id={item.id} revision={item.revision} hasDraft={Boolean(item.draftId)} />}
   </article>;
 }
 

@@ -4,7 +4,7 @@ Evidence status: implemented on the feature branch. Activation requires reviewed
 
 ## Purpose and user flow
 
-`/website-growth` and `/website-growth/effectiveness` show Page performance, Opportunities, and Work & impact. The existing `/website-growth/marketing` workboard remains the execution and decision surface. Admin/Manager with mutation access can check freshness. Read-only roles see the evidence without a mutation button; server actions recheck module, mutation and role access. Pages read saved evidence and never call Google merely because someone opens or refreshes the browser.
+`/website-growth` and `/website-growth/effectiveness` show Page performance, Opportunities, and Work & impact. The existing `/website-growth/marketing` workboard remains the execution and decision surface. Admin/Manager with mutation access can refresh eligible saved evidence. The action reads Search Console, Analytics, aggregate enquiry, and page-inventory sources under the normal cooldown; it does not run the AI worker or consume a research step. Read-only roles see the evidence without a mutation button; server actions recheck module, mutation and role access. Pages read saved evidence and never call Google merely because someone opens or refreshes the browser.
 
 The review compares two adjacent 28-day periods ending three days before the current UTC date. It covers routes observed in Google reports, first-party forms, and the existing repository/static inventory, including pages Scout did not create. The inventory source/date and reporting caps remain visible. It is not an exhaustive crawl, index-health check, Search Console query segmentation report, or proof every site page has been examined.
 
