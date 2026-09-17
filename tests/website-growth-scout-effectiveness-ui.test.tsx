@@ -9,11 +9,11 @@ describe("Scout effectiveness view", () => {
     const html = renderToStaticMarkup(<EffectivenessReview {...props} />);
     expect(html).toContain("No site review is saved"); expect(html).toContain("not evidence of zero traffic");
     expect(html).toContain("Page performance"); expect(html).toContain("Opportunities"); expect(html).toContain("Work &amp; impact");
-    expect(html).not.toContain("Check review freshness"); expect(html).toContain("not historical conversion stages");
+    expect(html).not.toContain("Refresh saved evidence"); expect(html).toContain("not historical conversion stages");
   });
   it("renders only the authorized refresh control and reports a work-history gap", () => {
     const html = renderToStaticMarkup(<EffectivenessReview {...props} canReview workspaceAvailable={false} />);
-    expect(html).toContain("Check review freshness"); expect(html).toContain("Work history could not be loaded");
+    expect(html).toContain("Refresh saved evidence"); expect(html).toContain("does not run Scout or consume a research step"); expect(html).toContain("Work history could not be loaded");
   });
   it("escapes the model briefing and clearly labels an unreviewed draft", () => {
     const item = { ...newWork("RESEARCH", null, "Site review", "Investigate", null, { source: "site-review" }), id: "review", artifact: { recommendation: "<script>untrusted</script>" } };
