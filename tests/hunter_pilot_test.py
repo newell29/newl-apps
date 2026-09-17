@@ -614,6 +614,19 @@ class SubscriptionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "MODEL_TOOL_USE_REJECTED"):
             self.invoke([{"type": "item.completed", "item": {"type": "command_execution"}}])
 
+    def test_non_tool_diagnostic_does_not_discard_completed_decision(self):
+        action, usage = self.invoke([
+            {"type": "item.completed", "item": {"type": "error", "message": "Synthetic CLI diagnostic"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 30}},
+        ], {"decision": {"action": "search", "purpose": "Test diagnostic handling",
+              "args": {"query": "synthetic", "direction": "gta", "company": None}}})
+        self.assertEqual(action["action"], "search")
+        self.assertEqual(usage["diagnosticItems"], 1)
+
+    def test_unknown_item_type_still_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "MODEL_TOOL_USE_REJECTED"):
+            self.invoke([{"type": "item.completed", "item": {"type": "future_unknown_item"}}])
+
     def test_timeout_kills_child_process_group(self):
         process = Mock(pid=12345)
         process.communicate.side_effect = [subprocess.TimeoutExpired("synthetic", 180), ("", "")]

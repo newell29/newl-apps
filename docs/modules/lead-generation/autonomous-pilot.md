@@ -272,7 +272,10 @@ business/API credentials from the child environment, ignores user configuration,
 temporary directory with a read-only sandbox. Shell, apps, plugins, hooks, subagents, computer/browser
 tools and built-in web search are disabled. The model returns one structured proposed decision; Hunter
 alone performs retrieval and business actions through the existing deterministic executor. Unexpected
-tool events, incomplete output, missing usage, failed authentication and timeout fail closed. The process
+tool events, incomplete output, missing usage, failed authentication and timeout fail closed. A completed
+non-tool `error` item emitted by the CLI is counted as a passive diagnostic when the same turn has exactly
+one valid structured result and `turn.completed`; actual command/tool items and unknown item types remain
+rejected. Top-level errors and failed turns still fail closed. The process
 group is killed on timeout. No alternate model, API key, hidden web search or paid fallback is attempted.
 Subscription failure pauses until the next business morning, with a visible error. Plan usage remains
 shared with other ChatGPT/Codex work; zero API fees do not mean unlimited subscription capacity.
