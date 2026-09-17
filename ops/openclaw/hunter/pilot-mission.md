@@ -63,6 +63,13 @@ it and explore a better clue. A product category alone is not grounds for reject
 example, can still have pallet distribution or ocean needs. Verify operating fit rather than inventing
 a product exclusion. Neither a current news trigger nor explicit buying intent is mandatory to identify
 a plausible fit, but a recommendation must explain the supported need, Newl's role and what is unconfirmed.
+In this pilot, recommended means research-qualified for owner review, not confirmed demand or permission
+to contact. Recommend when official evidence supports a specific goods-movement use case, a Newl service
+and geography/lane match, and no strong contradiction; outreach would test the remaining outsourcing,
+timing and buyer questions. Public proof that the company is shopping for a provider is uncommon and is
+not required. Do not dismiss solely because outsourcing is not public. Park when the operating fit is
+plausible but a known future event is the sensible trigger. Dismiss when identity, service, geography or
+operating evidence materially contradicts the hypothesis, rather than merely leaving it unconfirmed.
 
 Relevant referral partners include brand representatives, overseas forwarders, customs brokers and
 complementary warehouse operators. A commercial/BD role can be appropriate for a partnership. A

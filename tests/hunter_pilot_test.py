@@ -344,6 +344,8 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(c["status"], "recommended")
         self.assertEqual(c["buyingIntent"], "UNCONFIRMED")
         self.assertFalse(c["outreachReady"])
+        self.assertIn("research-qualified for owner review", MISSION)
+        self.assertIn("Do not dismiss solely because outsourcing is not public", MISSION)
 
     def test_redirect_to_other_domain_cannot_verify_identity(self):
         c = self.open()

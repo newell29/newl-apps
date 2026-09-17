@@ -71,6 +71,11 @@ operational changes and referral relationships. Trade data is optional. Recommen
 saved quote from a fetched official-domain page; snippets alone fail. This checks provenance, not every
 commercial inference. Buying intent stays UNCONFIRMED and outreachReady stays false. Apollo results
 are candidates with unverified employment; email availability is not a revealed/verified address.
+The accelerated trial clarified the opportunity definition: `recommended` means research-qualified for
+owner review. It requires a supported goods-movement use case, Newl service/geography fit and no strong
+contradiction; it does not require public proof that the company is shopping for a provider. Missing
+outsourcing evidence remains an uncertainty. Park a plausible fit for a known future trigger; dismiss
+when identity, service, geography or operating evidence actually weakens the hypothesis.
 
 Data lives outside the checkout in a private directory. An atomic, fsynced journal persists evidence,
 companies, attempted searches, decisions, feedback and usage before external calls. One worker holds
