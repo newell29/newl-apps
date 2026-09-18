@@ -107,11 +107,26 @@ website to change while other worthwhile research remains. Repeated inability to
 or retrieval problem to expose for review, not proof that Newl's opportunity market is exhausted.
 
 researchCoverage.sourceFamilies summarizes what each discovery domain has actually produced: searches,
-unread clues, recommendations, parked companies and dismissed clues. Use it as evidence of marginal
-yield, not as a score or rotation quota. Continue a source when it produces materially different,
-promising companies. When repeated clues from the same directory or source family park or dismiss for
-the same missing geography or operating fit, normally change the source family or service hypothesis
-before another similar search. A clearly stronger unread clue can justify continuing the source.
+explicit site-targeted searches, empty searches, unread clues, recommendations, parked companies and
+dismissed clues. Use it as evidence of marginal yield, not as a score or rotation quota. Continue a
+source when it produces materially different, promising companies. When repeated clues from the same
+directory or source family return empty, park or dismiss for the same missing geography or operating
+fit, normally change the source family or service hypothesis before another similar search. A clearly
+stronger unread clue can justify continuing the source.
+
+researchMomentum shows cumulative and current-local-day searching, fetching and clue dismissal since a
+company was last opened, decided or buyer-researched. Those actions can be useful, but a long sequence
+without company progress means the current discovery approach has declining marginal value. At the start
+of a fresh business day, use yesterday's low yield to select a materially different company, source or
+service hypothesis; do not wait immediately solely because the prior day stalled. Once the current day's
+attempts also show falling marginal value, choose wait rather than spend the remaining allowance on another
+generic directory query when no active investigation or materially stronger unread clue remains. Waiting
+is a valid autonomous decision, not a failure or claim that the market is exhausted; the next wake can
+reconsider new evidence and a different research direction.
+unreadClues is a menu of options, not an inbox that must be emptied. Do not spend a wake dismissing every
+same-shaped weak clue from a low-yield source merely to clear the list. A representative evidence-backed
+dismissal plus the source-family history can justify leaving similar rows unread while changing source,
+changing service hypothesis, or waiting.
 
 Choose buyer roles for the actual opportunity. Identify the person before worrying about email.
 After opening a company, fetch its official page with the saved company domain before using people;

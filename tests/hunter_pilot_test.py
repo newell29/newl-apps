@@ -273,11 +273,36 @@ class PilotTests(unittest.TestCase):
             reason="No supported local movement or external logistics fit",
             name="Synthetic Supply", domain="supply.example")
         row = self.p.context()["researchCoverage"]["sourceFamilies"][0]
-        self.assertEqual(row, {"source": "supply.example", "searches": 1, "unreadClues": 0,
+        self.assertEqual(row, {"source": "supply.example", "searches": 1,
+            "targetedSearches": 0, "emptySearches": 0, "unreadClues": 0,
             "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 1,
             "lastSearchAt": self.time.isoformat()})
-        self.assertIn("observed source outcomes, not quotas", self.p.context()["workSelection"])
+        self.assertIn("observed source outcomes", self.p.context()["workSelection"])
+        self.assertIn("not quotas", self.p.context()["workSelection"])
         self.assertIn("evidence of marginal", MISSION)
+
+    def test_source_family_performance_remembers_empty_site_target(self):
+        self.search.return_value = []
+        self.action("search", query='site:directory.example exhibitors "North Carolina"', direction="charlotte")
+        row = next(row for row in self.p.context()["researchCoverage"]["sourceFamilies"]
+                   if row["source"] == "directory.example")
+        self.assertEqual(row["searches"], 1)
+        self.assertEqual(row["targetedSearches"], 1)
+        self.assertEqual(row["emptySearches"], 1)
+        self.assertEqual(row["unreadClues"], 0)
+
+    def test_source_family_summary_keeps_recent_target_visible_among_result_hosts(self):
+        old_rows = [{"url": f"https://old-{index}.example/", "title": "Old source", "snippet": "Old clue"}
+                    for index in range(5)]
+        self.search.return_value = old_rows
+        self.action("search", query="older broad search one", direction="charlotte")
+        self.action("search", query="older broad search two", direction="charlotte")
+        self.time += dt.timedelta(minutes=1)
+        self.search.return_value = [{"url": f"https://result-{index}.example/", "title": "Result",
+                                     "snippet": "Recent result"} for index in range(5)]
+        self.action("search", query="site:target-directory.example recent exhibitors", direction="charlotte")
+        sources = {row["source"] for row in self.p.source_family_performance()}
+        self.assertIn("target-directory.example", sources)
 
     def test_source_family_performance_counts_each_company_once_per_source(self):
         company = self.open()
@@ -325,6 +350,57 @@ class PilotTests(unittest.TestCase):
         for status in ("parked", "blocked", "rejected"):
             company["status"] = status
             self.assertEqual(self.p.context()["unreadClues"], [])
+
+    def test_resolved_company_hides_matching_third_party_clues_but_not_unrelated_rows(self):
+        self.search.return_value = [
+            {"url": "https://supply.example/", "title": "Synthetic Supply", "snippet": "Official wholesale site."},
+            {"url": "https://directory.example/synthetic", "title": "Synthetic Supply expansion",
+             "snippet": "Synthetic Supply serves Canadian retailers."},
+            {"url": "https://directory.example/unrelated", "title": "Different Brand",
+             "snippet": "A separate retailer distribution company."}]
+        evidence = self.action("search", query="synthetic supply and other distributors", direction="gta")["evidenceIds"]
+        self.action("open_company", name="Synthetic Supply", domain="supply.example", direction="gta",
+                    hypothesis="Case picking could fit", evidenceIds=[evidence[0]])
+        page = self.action("fetch", url="https://supply.example/", company="supply.example")["evidenceIds"][0]
+        self.decision(evidence=page)
+        clues = self.p.context()["unreadClues"]
+        self.assertEqual([clue["url"] for clue in clues], ["https://directory.example/unrelated"])
+
+    def test_named_dismissal_hides_other_matching_third_party_clues(self):
+        self.search.return_value = [
+            {"url": "https://one.example/profile", "title": "G.T. Wholesale Limited profile",
+             "snippet": "G.T. Wholesale Limited is outside the target market."},
+            {"url": "https://two.example/news", "title": "News about G.T. Wholesale Ltd.",
+             "snippet": "The distributor remains outside the target market."},
+            {"url": "https://three.example/brand", "title": "Different Brand",
+             "snippet": "Consumer goods wholesale."}]
+        evidence = self.action("search", query="G.T. Wholesale location", direction="gta")["evidenceIds"]
+        self.action("dismiss_clue", evidenceIds=[evidence[0]], name="G.T. Wholesale Limited",
+                    domain="gt-wholesale.com", reason="Outside the target geography")
+        self.assertEqual([clue["url"] for clue in self.p.context()["unreadClues"]],
+                         ["https://three.example/brand"])
+
+    def test_research_momentum_reports_work_since_last_company_progress(self):
+        self.open(); self.decision()
+        evidence = self.action("search", query="another synthetic distributor", direction="gta")["evidenceIds"]
+        self.action("dismiss_clue", evidenceIds=evidence, reason="No supported buyer-side need")
+        momentum = self.p.context()["researchMomentum"]
+        self.assertEqual(momentum["actionsSinceCompanyProgress"], 2)
+        self.assertEqual(momentum["searchesSinceCompanyProgress"], 1)
+        self.assertEqual(momentum["fetchesSinceCompanyProgress"], 0)
+        self.assertEqual(momentum["dismissalsSinceCompanyProgress"], 1)
+        self.assertEqual(momentum["actionsTodaySinceCompanyProgress"], 2)
+        self.assertEqual(momentum["searchesTodaySinceCompanyProgress"], 1)
+        self.assertEqual(momentum["dismissalsTodaySinceCompanyProgress"], 1)
+        self.assertIsNotNone(momentum["lastCompanyProgressAt"])
+        self.assertEqual(self.p.status()["researchMomentum"], momentum)
+        self.assertIn("falling marginal yield", self.p.context()["workSelection"])
+        self.assertIn("menu, not an inbox", self.p.context()["workSelection"])
+        self.time += dt.timedelta(days=1)
+        next_day = self.p.research_momentum()
+        self.assertEqual(next_day["actionsSinceCompanyProgress"], 2)
+        self.assertEqual(next_day["actionsTodaySinceCompanyProgress"], 0)
+        self.assertIn("fresh business day", self.p.context()["workSelection"])
 
     def test_model_context_contains_observations_not_its_own_proposal_logs(self):
         self.p.event("proposed_action", proposal={"action": "search"})
