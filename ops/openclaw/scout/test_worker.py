@@ -4,6 +4,7 @@ import subprocess
 import shutil
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("scout_worker", Path(__file__).with_name("worker.py"))
@@ -24,10 +25,27 @@ class WorkerTests(unittest.TestCase):
         claimed = {"id": "work", "lease": "opaque-lease", "kind": "RESEARCH"}
         with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, {}]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful work"}, {"decision": "DELIVER"}, {"verdict": "PASS", "reason": "Evidence supports the proposal"}]) as model:
             worker.run()
+            claim = api.call_args_list[1].args[0]
+            self.assertEqual(claim["action"], "claim")
+            self.assertTrue(claim["claimId"])
             self.assertEqual(api.call_args_list[-1].args[0]["action"], "complete")
             self.assertEqual(api.call_args_list[-1].args[0]["lease"], "opaque-lease")
             self.assertNotIn("opaque-lease", model.call_args_list[-1].args[0])
             self.assertEqual(api.call_args_list[-1].args[0]["result"]["supervisor"]["verdict"], "PASS")
+
+    def test_uncertain_claim_retries_with_the_same_idempotency_key(self):
+        payload = {"action": "claim", "claimId": "claim-synthetic", "id": "work", "reason": "Useful work"}
+        failures = [urllib.error.HTTPError("https://example.com", 503, "Unavailable", {}, None),
+                    ConnectionResetError("response acknowledgement was lost")]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__), \
+                 patch.object(worker, "api", side_effect=[failure, {"id": "work", "lease": "original-lease"}]) as api, \
+                 patch.object(worker.time, "sleep") as sleep:
+                claimed = worker.claim_with_retry(payload)
+                self.assertEqual(claimed["lease"], "original-lease")
+                self.assertEqual(api.call_args_list[0].args[0], payload)
+                self.assertEqual(api.call_args_list[1].args[0], payload)
+                sleep.assert_called_once_with(1)
 
     def test_model_failure_defers_only_claimed_research(self):
         claimed = {"id": "work", "lease": "lease", "kind": "RESEARCH"}

@@ -5,9 +5,11 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -29,6 +31,20 @@ def api(payload):
         if len(raw) > 2_000_000:
             raise RuntimeError("Scout context exceeds the bounded response size")
         return json.loads(raw)["data"]
+
+
+def claim_with_retry(payload, retries=2):
+    """Retry an uncertain claim with the same application idempotency key."""
+    for attempt in range(retries + 1):
+        try:
+            return api(payload)
+        except urllib.error.HTTPError as error:
+            if error.code not in {502, 503, 504} or attempt == retries:
+                raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
+            if attempt == retries:
+                raise
+        time.sleep(2 ** attempt)
 
 
 def model(prompt, schema, directory, name, search=False, timeout=900):
@@ -131,7 +147,8 @@ def run():
                          "the hypothesis to test, and what would change your mind. Do not merely choose the highest traffic keyword.\n" +
                          json.dumps({"mission": workspace["mission"], "candidates": candidates, "previousDecisions": learning,
                                      "learning": workspace.get("learning")}), selection_schema, directory, "selection", timeout=180)
-        claimed = api({"action": "claim", "id": selected["id"], "reason": selected["reason"]})
+        claimed = claim_with_retry({"action": "claim", "claimId": str(uuid.uuid4()),
+                                    "id": selected["id"], "reason": selected["reason"]})
         identity = {"id": claimed["id"], "lease": claimed["lease"]}
         try:
             context = api({"action": "context", **identity})
