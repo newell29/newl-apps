@@ -116,6 +116,15 @@ useful Terra actions but repeatedly switched companies without saving a disposit
 Instructions distinguish businesses moving goods from available warehouse property or competing
 service providers, and do not invent product-category exclusions or require explicit buying intent.
 
+The post-continuity accelerated evaluation completed 53 actions and produced two new research-qualified
+recommendations, but 12 of 17 searches stayed in Charlotte and five explicitly reused High Point Market.
+The directory eventually produced a strong prospect, so a hard source cap or forced service rotation
+would discard useful judgment. The context instead derives a bounded `sourceFamilies` summary from the
+existing journal. It shows search count, unread clues, recommended and parked companies, and dismissed
+clues by discovery domain. The model uses those observed outcomes as marginal-yield evidence: productive
+sources remain available, while repeated same-shaped dead ends should prompt a different source family
+or service hypothesis. This adds no score, quota, model stage, database record or external write.
+
 The first full scheduled day exposed two further quality gaps. Broad Charlotte facility and economic-
 development searches repeatedly surfaced internal distribution centers, offices, distant facilities and
 large self-operated networks. The mission now favors company-first discovery through brands, importers,

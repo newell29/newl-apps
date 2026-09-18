@@ -597,7 +597,50 @@ class Pilot:
             row["lastAttemptAt"] = attempt.get("at")
             if attempt.get("query"):
                 row["recentQueries"] = (row["recentQueries"] + [attempt["query"]])[-3:]
-        return {"directions": rows, "unknownDirectionAttempts": unknown}
+        return {"directions": rows, "unknownDirectionAttempts": unknown,
+                "sourceFamilies": self.source_family_performance()}
+
+    def source_family_performance(self):
+        """Summarize observed source yield without turning it into a rotation quota."""
+        from urllib.parse import urlparse
+
+        def host(evidence_id):
+            evidence = self.state["evidence"].get(evidence_id)
+            if not evidence:
+                return None
+            return (urlparse(evidence.get("url", "")).hostname or "").removeprefix("www.") or None
+
+        rows = {}
+        for attempt in self.state["attempts"].values():
+            if attempt.get("action") != "search":
+                continue
+            families = {host(eid) for eid in (attempt.get("result") or {}).get("evidenceIds", [])}
+            for family in families - {None}:
+                row = rows.setdefault(family, {"source": family, "searches": 0, "unreadClues": 0,
+                    "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 0,
+                    "lastSearchAt": None})
+                row["searches"] += 1
+                row["lastSearchAt"] = max(filter(None, [row["lastSearchAt"], attempt.get("at")]), default=None)
+
+        for item in self.state.get("dismissedClues", []):
+            for family in {host(eid) for eid in item.get("evidenceIds", [])} - {None}:
+                if family in rows:
+                    rows[family]["dismissedClues"] += 1
+
+        for company in self.state["companies"].values():
+            field = {"recommended": "recommendedCompanies", "parked": "parkedCompanies"}.get(company["status"])
+            if not field:
+                continue
+            for family in {host(eid) for eid in company.get("evidenceIds", [])} - {None}:
+                if family in rows:
+                    rows[family][field] += 1
+
+        for clue in self.unread_clues():
+            family = (urlparse(clue["url"]).hostname or "").removeprefix("www.")
+            if family in rows:
+                rows[family]["unreadClues"] += 1
+
+        return sorted(rows.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)[:10]
 
     def unread_clues(self):
         from urllib.parse import urlparse
@@ -659,7 +702,7 @@ class Pilot:
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
+            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. researchCoverage.sourceFamilies summarizes observed source outcomes, not quotas: reuse sources that yield promising companies, and leave a source family whose recent clues repeatedly park or dismiss unless an unread clue contains materially different operating evidence. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
