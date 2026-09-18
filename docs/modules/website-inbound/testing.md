@@ -10,6 +10,7 @@ Regression suites cover:
 - Existing form intake, Finance routing, server-owned intake metadata and manual-entry exclusion from Website Growth evidence.
 - Rendered detail UI with missing evidence, original payload, note history and read-only controls.
 - Exact Inbox/Sent Items classification, internal-message exclusion, thread preservation and ambiguous-match refusal.
+- Conversation presentation groups exact mailbox/Graph conversation IDs chronologically without merging mailbox handoffs or messages that lack a conversation ID.
 - Owner-mailbox allowlisting, stale-recipient/thread/status send gates, explicit approval actions and uncertain-send non-retry behavior.
 
 Local commands: `npm run prisma:generate`, `npm run typecheck`, `npm run lint`, `npm run build`, and `npm test -- tests/website-inbound-*.test.ts tests/website-inbound-ui.test.tsx tests/microsoft-graph-mail.test.ts tests/website-growth*.test.ts`.

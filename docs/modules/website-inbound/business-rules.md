@@ -15,5 +15,7 @@
 - Existing module access and mutation policies apply. Every query, note, edit, and duplicate lookup is tenant scoped.
 - Mailbox access is limited to the dedicated inbound-owner allowlist in Microsoft 365 settings, and each selected address must still exactly match a current tenant member email. The Assistant's shared/team inbox list does not grant inbound ownership. Assignment selects the sender before the first outbound email. A confirmed outbound email fixes the conversation mailbox until the newly assigned owner explicitly accepts a handoff.
 - Correspondence synchronization can link by a known Graph conversation or one exact contact email. It never matches by name or company domain and never stores unrelated mailbox messages.
+- Each provider message remains a separate audit record, while messages sharing an exact mailbox and Graph conversation ID display as one chronological conversation. Messages without a conversation ID remain separate.
+- Received correspondence comes from an approved owner mailbox's Inbox. A website-form notification delivered only to another mailbox is not copied into the owner's email history.
 - Draft generation and suggested next steps do not approve, send, change status, or save follow-up fields. Only the assigned owner can approve the exact customer-visible copy and send it.
 - Automatic acknowledgements and follow-up sends are not enabled in the pilot. A changed recipient, closed status, mailbox handoff, or newer message invalidates an old draft.
