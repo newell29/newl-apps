@@ -12,6 +12,10 @@
     {
       "path": "/api/operations/tmg-order-intake/scheduled",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/website-inbound/correspondence/scheduled",
+      "schedule": "7 * * * *"
     }
   ]
 }

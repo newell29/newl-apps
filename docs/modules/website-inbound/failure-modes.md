@@ -9,3 +9,8 @@
 - Partially populated or empty historical contact evidence is valid for editing and notes. Missing fields display as unspecified instead of being invented.
 - Pagination clamps out-of-range page numbers; a selected unavailable record displays a not-found message without querying its history.
 - A database without the approved additive migration cannot run the new queue. Production migrations and deployment remain separate owner actions.
+- Mailbox failures are isolated per approved owner mailbox. A successful mailbox still synchronizes; the result names mailbox failures without exposing credentials or tokens.
+- Messages without an exact opportunity email are ignored. Multiple exact matches enter the human matching queue instead of being guessed.
+- A changed recipient, closed opportunity, different owner, mailbox mismatch, or newer correspondence blocks an old draft before any send.
+- The send record moves from DRAFT to SENDING before Microsoft Graph is called. If Graph does not confirm the request, it becomes SEND_FAILED and is never retried automatically; the employee checks Sent Items and synchronizes before drafting again.
+- AI drafting failure falls back to a labelled, bounded acknowledgement template. It does not block correspondence tracking.

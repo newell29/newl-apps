@@ -9,6 +9,11 @@ import {
   OpportunityEditor
 } from "@/modules/website-inbound/components/opportunity-editor";
 import {
+  CorrespondencePanel,
+  EmailMatchQueue,
+  InboundMailboxToolbar
+} from "@/modules/website-inbound/components/correspondence-panel";
+import {
   CHANNEL_LABELS,
   CLOSED_STATUSES,
   FOLLOW_UP_TIME_ZONE,
@@ -91,6 +96,27 @@ export default async function WebsiteInboundPage({
           caption="Open opportunities due before today"
         />
       </section>
+      <InboundMailboxToolbar
+        enabled={shell.mailboxConfiguration.enabled}
+        reason={shell.mailboxConfiguration.reason}
+        mailboxes={shell.mailboxConfiguration.mailboxes}
+        canMutate={canMutate}
+      />
+      <EmailMatchQueue
+        canMutate={canMutate}
+        messages={shell.unmatchedCorrespondence.flatMap((message) => {
+          const candidates = correspondenceCandidates(message.matchCandidates);
+          return candidates.length
+            ? [{
+                id: message.id,
+                senderAddress: message.senderAddress,
+                subject: message.subject,
+                messageAt: message.messageAt.toISOString(),
+                candidates
+              }]
+            : [];
+        })}
+      />
       <section className="rounded-lg border border-border bg-card p-4 shadow-sm">
         <nav aria-label="Opportunity views" className="flex flex-wrap gap-2">
           {Object.entries(VIEWS).map(([key, label]) => (
@@ -242,6 +268,9 @@ export default async function WebsiteInboundPage({
                     row.followUpOn &&
                     dateOnly(row.followUpOn) < today &&
                     !CLOSED_STATUSES.includes(row.status);
+                  const emailNeedsReply =
+                    row.lastInboundEmailAt &&
+                    (!row.lastOutboundEmailAt || row.lastInboundEmailAt > row.lastOutboundEmailAt);
                   return (
                     <tr
                       key={row.id}
@@ -296,6 +325,15 @@ export default async function WebsiteInboundPage({
                             ? `${overdue ? "Overdue · " : ""}${dateOnly(row.followUpOn)}`
                             : "No follow-up date"}
                         </p>
+                        {row.lastInboundEmailAt || row.lastOutboundEmailAt ? (
+                          <p
+                            className={`mt-1 text-xs ${emailNeedsReply ? "font-semibold text-warning" : "text-mutedForeground"}`}
+                          >
+                            {emailNeedsReply
+                              ? `Reply received · ${formatShortDateTime(row.lastInboundEmailAt!)}`
+                              : `Last email · ${formatShortDateTime((row.lastOutboundEmailAt ?? row.lastInboundEmailAt)!)}`}
+                          </p>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -372,6 +410,44 @@ export default async function WebsiteInboundPage({
             />
             {detail ? (
               <>
+                <CorrespondencePanel
+                  opportunity={{
+                    id: detail.id,
+                    status: detail.status,
+                    email: detail.email,
+                    ownerUserId: detail.ownerUserId,
+                    communicationMailbox: detail.communicationMailbox
+                  }}
+                  messages={shell.correspondence.map((message) => ({
+                    id: message.id,
+                    direction: message.direction,
+                    status: message.status,
+                    mailboxAddress: message.mailboxAddress,
+                    subject: message.subject,
+                    bodyText: message.bodyText,
+                    bodyPreview: message.bodyPreview,
+                    senderAddress: message.senderAddress,
+                    senderName: message.senderName,
+                    webLink: message.webLink,
+                    hasAttachments: message.hasAttachments,
+                    messageAt: message.messageAt.toISOString(),
+                    draftSource: message.draftSource,
+                    draftRationale: message.draftRationale,
+                    suggestedNextAction: message.suggestedNextAction,
+                    suggestedFollowUpOn: message.suggestedFollowUpOn
+                      ? dateOnly(message.suggestedFollowUpOn)
+                      : null,
+                    basedOnMessageId: message.basedOnMessageId,
+                    failureReason: message.failureReason
+                  }))}
+                  ownerMailbox={
+                    shell.owners.find((owner) => owner.id === detail.ownerUserId)?.mailboxAddress ?? null
+                  }
+                  enabled={shell.mailboxConfiguration.enabled}
+                  draftingEnabled={shell.mailboxConfiguration.draftingEnabled}
+                  canMutate={canMutate}
+                  currentUserId={context.userId}
+                />
                 <section className="mt-6 space-y-4 border-t border-border pt-5">
                   <h3 className="font-semibold">Notes and activity</h3>
                   {canMutate ? <NoteComposer key={detail.id} submissionId={detail.id} /> : null}
@@ -485,8 +561,26 @@ export default async function WebsiteInboundPage({
 function dateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
 }
+function formatShortDateTime(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: FOLLOW_UP_TIME_ZONE
+  }).format(date);
+}
 function record(value: Prisma.JsonValue | undefined): Prisma.JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function correspondenceCandidates(value: Prisma.JsonValue | null) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    return typeof candidate.id === "string" && typeof candidate.label === "string"
+      ? [{ id: candidate.id, label: candidate.label }]
+      : [];
+  });
 }
 function renderValue(value: Prisma.JsonValue | undefined) {
   return value == null || value === ""

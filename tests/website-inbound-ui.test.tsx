@@ -12,7 +12,12 @@ vi.mock("@/modules/website-inbound/queries", () => ({ getWebsiteInboundShell: mo
 vi.mock("@/modules/website-inbound/actions", () => ({
   addOpportunityNoteAction: vi.fn(),
   createOpportunityAction: vi.fn(),
-  updateOpportunityAction: vi.fn()
+  updateOpportunityAction: vi.fn(),
+  generateOpportunityEmailDraftAction: vi.fn(),
+  handoffOpportunityMailboxAction: vi.fn(),
+  linkOpportunityEmailAction: vi.fn(),
+  sendOpportunityEmailDraftAction: vi.fn(),
+  syncOpportunityCorrespondenceAction: vi.fn()
 }));
 import Page from "@/app/(authenticated)/website-inbound/page";
 const detail = {
@@ -33,14 +38,15 @@ const detail = {
   entryMethod: "WEBSITE_FORM",
   contactChannel: "WEBSITE_FORM",
   fields: { Message: "Synthetic original request" },
-  pageUrl: null
+  pageUrl: null,
+  communicationMailbox: null
 };
 beforeEach(() => {
   mocks.canMutate.mockResolvedValue(true);
   mocks.query.mockResolvedValue({
     submissions: [detail],
     detail,
-    owners: [{ id: "user-a", label: "Test User" }],
+    owners: [{ id: "user-a", label: "Test User", email: "user@example.com", mailboxAddress: "user@example.com" }],
     formTypes: [],
     metrics: { totalCount: 1, newCount: 1, openCount: 1, overdueCount: 0 },
     page: 1,
@@ -55,7 +61,16 @@ beforeEach(() => {
         changes: null
       }
     ],
-    activityPages: 1
+    activityPages: 1,
+    correspondence: [],
+    unmatchedCorrespondence: [],
+    mailboxConfiguration: {
+      enabled: true,
+      draftingEnabled: true,
+      reason: null,
+      mailboxes: ["user@example.com"],
+      ownerMailboxes: { "user-a": "user@example.com" }
+    }
   });
 });
 describe("inbound opportunity interface", () => {
@@ -72,7 +87,9 @@ describe("inbound opportunity interface", () => {
       "Synthetic follow-up note",
       "Original website submission",
       "Synthetic original request",
-      "Unassigned"
+      "Unassigned",
+      "Microsoft 365 correspondence",
+      "Email correspondence"
     ])
       expect(html).toContain(text);
     expect(html).toContain('name="contactChannel" value="WEBSITE_FORM"');
@@ -85,6 +102,8 @@ describe("inbound opportunity interface", () => {
     expect(html).not.toContain("Save opportunity");
     expect(html).not.toContain("+ Add opportunity");
     expect(html).not.toContain("Add a note");
+    expect(html).not.toContain("Sync mail now");
+    expect(html).not.toContain("Prepare initial email");
     expect(html).toContain("view-only access");
     expect(html).toContain("Synthetic follow-up note");
     expect(html).toContain("disabled");
