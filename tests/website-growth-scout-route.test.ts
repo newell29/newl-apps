@@ -14,9 +14,14 @@ beforeEach(() => { vi.resetAllMocks(); effectiveness.refresh.mockResolvedValue(n
 describe("Scout worker boundary", () => {
   it("resolves the tenant from authentication and ignores model-supplied tenant scope", async () => {
     mocks.claim.mockResolvedValue({ id: "work" });
-    expect((await POST(request({ action: "claim", id: "work", reason: "Continue useful work", tenantId: "foreign" }))).status).toBe(200);
-    expect(mocks.claim).toHaveBeenCalledWith("tenant-authenticated", "work", "Continue useful work");
+    expect((await POST(request({ action: "claim", claimId: "claim-synthetic", id: "work", reason: "Continue useful work", tenantId: "foreign" }))).status).toBe(200);
+    expect(mocks.claim).toHaveBeenCalledWith("tenant-authenticated", "work", "Continue useful work", "claim-synthetic");
     expect(mocks.access).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-authenticated", enabled: true }) }));
+  });
+  it("keeps an older worker compatible during a staggered rollout", async () => {
+    mocks.claim.mockResolvedValue({ id: "work" });
+    expect((await POST(request({ action: "claim", id: "work", reason: "Continue useful work" }))).status).toBe(200);
+    expect(mocks.claim).toHaveBeenCalledWith("tenant-authenticated", "work", "Continue useful work", expect.any(String));
   });
   it("blocks disabled tenants before touching work", async () => {
     mocks.access.mockResolvedValue(null);
@@ -39,10 +44,15 @@ describe("Scout worker boundary", () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
   it("returns a safe failure without leaking underlying integration details", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.claim.mockRejectedValue(new Error("private connection detail"));
-    const response = await POST(request({ action: "claim", id: "work", reason: "Continue" }));
+    const response = await POST(request({ action: "claim", claimId: "claim-synthetic", id: "work", reason: "Continue" }));
     expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
     expect(JSON.stringify(await response.json())).not.toContain("private connection detail");
+    expect(logged).toHaveBeenCalledWith("Scout work-item request failed", expect.objectContaining({ action: "claim", errorType: "Error" }));
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("private connection detail");
+    logged.mockRestore();
   });
 });
 

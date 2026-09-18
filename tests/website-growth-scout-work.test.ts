@@ -8,7 +8,7 @@ import { reusableWebsiteGrowthResearchHashes } from "@/modules/website-growth/ba
 import { WEBSITE_GROWTH_BUILD_JOB_TYPE } from "@/modules/website-growth/build-requests";
 
 const db = vi.hoisted(() => ({
-  automationJobRun: { findFirst: vi.fn(), findMany: vi.fn(), count: vi.fn(), updateMany: vi.fn(), create: vi.fn(), upsert: vi.fn() },
+  automationJobRun: { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(), updateMany: vi.fn(), create: vi.fn(), upsert: vi.fn() },
   websiteGrowthOpportunity: { findMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), upsert: vi.fn() },
   websiteGrowthContentDraft: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn(), findFirst: vi.fn() },
   websiteGrowthBacklinkOpportunity: { findMany: vi.fn(), findFirst: vi.fn() }, auditLog: { create: vi.fn() }, $transaction: vi.fn()
@@ -68,23 +68,37 @@ describe("Scout persisted work and budgets", () => {
   };
   it("claims only tenant-scoped work and charges an immutable step inside a serializable transaction", async () => {
     setupClaim();
-    const result = await claimScoutWork("tenant-a", "work-synthetic", "Highest value unfinished work", now);
+    const result = await claimScoutWork("tenant-a", "work-synthetic", "Highest value unfinished work", "claim-synthetic", now);
     expect(result.state).toBe("WORKING");
     expect(db.automationJobRun.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { tenantId: "tenant-a", jobType: WORK_JOB } }));
     expect(db.automationJobRun.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a", jobType: MISSION_JOB }) }));
     expect(db.automationJobRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-a", output: { path: ["revision"], equals: 0 } }) }));
-    expect(db.automationJobRun.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ tenantId: "tenant-a", jobType: STEP_JOB }) }));
+    expect(db.automationJobRun.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      id: stableId("tenant-a", "step:claim-synthetic"), tenantId: "tenant-a", jobType: STEP_JOB,
+      input: expect.objectContaining({ workId: "work-synthetic", claimId: "claim-synthetic" })
+    }) }));
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "Serializable" });
+  });
+  it("returns the original lease when a committed claim is retried", async () => {
+    const claimed = { ...leased(), lease: "lease-original" };
+    db.automationJobRun.findUnique.mockResolvedValue({ jobType: STEP_JOB,
+      input: { workId: "work-synthetic", claimId: "claim-synthetic", lease: "lease-original" } });
+    db.automationJobRun.findFirst.mockResolvedValue({ output: claimed });
+    await expect(claimScoutWork("tenant-a", "work-synthetic", "Retry uncertain claim", "claim-synthetic", now))
+      .resolves.toMatchObject({ id: "work-synthetic", lease: "lease-original", state: "WORKING" });
+    expect(db.automationJobRun.create).not.toHaveBeenCalled();
+    expect(db.automationJobRun.updateMany).not.toHaveBeenCalled();
+    expect(db.automationJobRun.count).not.toHaveBeenCalled();
   });
   it("refuses paused, exhausted, foreign, and concurrently claimed work", async () => {
     setupClaim(DEFAULT_MISSION);
-    await expect(claimScoutWork("tenant-a", "work-synthetic", "Investigate", now)).rejects.toThrow("paused");
+    await expect(claimScoutWork("tenant-a", "work-synthetic", "Investigate", "claim-paused", now)).rejects.toThrow("paused");
     setupClaim(); db.automationJobRun.count.mockResolvedValue(6);
-    await expect(claimScoutWork("tenant-a", "work-synthetic", "Investigate", now)).rejects.toThrow("budget");
+    await expect(claimScoutWork("tenant-a", "work-synthetic", "Investigate", "claim-budget", now)).rejects.toThrow("budget");
     db.automationJobRun.count.mockResolvedValue(0);
-    await expect(claimScoutWork("tenant-b", "foreign", "Investigate", now)).rejects.toThrow("unavailable");
+    await expect(claimScoutWork("tenant-b", "foreign", "Investigate", "claim-foreign", now)).rejects.toThrow("unavailable");
     db.automationJobRun.updateMany.mockResolvedValue({ count: 0 });
-    await expect(claimScoutWork("tenant-a", "work-synthetic", "Investigate", now)).rejects.toThrow("concurrently");
+    await expect(claimScoutWork("tenant-a", "work-synthetic", "Investigate", "claim-concurrent", now)).rejects.toThrow("concurrently");
     expect(db.automationJobRun.create).not.toHaveBeenCalled();
   });
   it("defers a declined candidate instead of returning it on every run", async () => {
@@ -254,14 +268,14 @@ it("frees capacity after approval using current source records inside the claim 
     : [{ id: "approved-work", output: { ...work(), state: "NEEDS_REVIEW", draftId: "draft-approved" } },
       { id: "next-work", output: { ...work(), referenceId: "opportunity-next", route: "/resources/guide" } }]);
   db.websiteGrowthContentDraft.findMany.mockResolvedValue([{ id: "draft-approved", opportunityId: "opportunity-synthetic", status: "APPROVED" }]);
-  expect((await claimScoutWork("tenant-a", "next-work", "Continue useful work", now)).state).toBe("WORKING");
-  await expect(claimScoutWork("tenant-a", "approved-work", "Stale research claim", now)).rejects.toThrow("unavailable");
+  expect((await claimScoutWork("tenant-a", "next-work", "Continue useful work", "claim-next", now)).state).toBe("WORKING");
+  await expect(claimScoutWork("tenant-a", "approved-work", "Stale research claim", "claim-stale", now)).rejects.toThrow("unavailable");
 });
 
 it("refuses a second candidate for a route already being researched even with spare capacity", async () => {
   db.automationJobRun.findFirst.mockResolvedValue({ input: { ...DEFAULT_MISSION, enabled: true } });
   db.automationJobRun.findMany.mockResolvedValue([{ id: "candidate", output: work() }, { id: "active", output: leased() }]);
-  await expect(claimScoutWork("tenant-a", "candidate", "Duplicate work", now)).rejects.toThrow("already has active");
+  await expect(claimScoutWork("tenant-a", "candidate", "Duplicate work", "claim-duplicate", now)).rejects.toThrow("already has active");
   expect(db.automationJobRun.create).not.toHaveBeenCalled();
 });
 

@@ -96,9 +96,24 @@ async function ensureWork(tenantId: string, key: string, work: Work) {
     create: { id, tenantId, jobType: WORK_JOB, status: JobStatus.QUEUED, output: json(work) }, update: {} });
 }
 
-export async function claimScoutWork(tenantId: string, id: string, reason: string, now = new Date()) {
+export async function claimScoutWork(tenantId: string, id: string, reason: string, claimId: string, now = new Date()) {
   text(reason, "Selection reason", 1500);
+  text(claimId, "Claim ID", 100);
+  const stepId = stableId(tenantId, `step:${claimId}`);
   return prisma.$transaction(async tx => {
+    const previousStep = await tx.automationJobRun.findUnique({ where: { tenantId_id: { tenantId, id: stepId } } });
+    if (previousStep) {
+      if (previousStep.jobType !== STEP_JOB) throw new ScoutWorkError("This claim ID has already been used.", 409);
+      const previousInput = record(previousStep.input);
+      if (previousInput.workId !== id || previousInput.claimId !== claimId || typeof previousInput.lease !== "string") {
+        throw new ScoutWorkError("This claim ID has already been used for different work.", 409);
+      }
+      const previousJob = await tx.automationJobRun.findFirst({ where: { tenantId, id, jobType: WORK_JOB } });
+      const previousWork = readWork(previousJob?.output);
+      if (previousWork?.state === "WORKING" && previousWork.lease === previousInput.lease &&
+          Date.parse(previousWork.leaseUntil ?? "") > now.getTime()) return { id, ...previousWork };
+      throw new ScoutWorkError("This claim was already resolved or its lease expired. Prepare work again.", 409);
+    }
     const settings = await tx.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, "mission"), jobType: MISSION_JOB } });
     const mission = settings ? parseMission(settings.input) : DEFAULT_MISSION;
     if (!mission.enabled) throw new ScoutWorkError("Scout research is paused. Save and enable an owner-approved research plan first.", 409);
@@ -119,8 +134,8 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
     const updated = nextWork(work, { state: "WORKING", lease: randomUUID(), leaseUntil: new Date(now.getTime() + LEASE_MS).toISOString(),
       attempts: work.attempts + 1 }, "CLAIMED", reason, now);
     await replace(tx, tenantId, id, work, updated);
-    await tx.automationJobRun.create({ data: { tenantId, jobType: STEP_JOB, status: JobStatus.SUCCESS, startedAt: now,
-      finishedAt: now, input: { workId: id, lease: updated.lease } } });
+    await tx.automationJobRun.create({ data: { id: stepId, tenantId, jobType: STEP_JOB, status: JobStatus.SUCCESS, startedAt: now,
+      finishedAt: now, input: { workId: id, claimId, lease: updated.lease } } });
     return { id, ...updated };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
