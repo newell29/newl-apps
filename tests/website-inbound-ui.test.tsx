@@ -108,4 +108,36 @@ describe("inbound opportunity interface", () => {
     expect(html).toContain("Synthetic follow-up note");
     expect(html).toContain("disabled");
   });
+  it("explains disabled Microsoft 365 configuration even when an owner is already assigned", async () => {
+    mocks.query.mockResolvedValue({
+      submissions: [{ ...detail, ownerUserId: "user-a" }],
+      detail: { ...detail, ownerUserId: "user-a" },
+      owners: [{ id: "user-a", label: "Test User", email: "user@example.com", mailboxAddress: null }],
+      formTypes: [],
+      metrics: { totalCount: 1, newCount: 1, openCount: 1, overdueCount: 0 },
+      page: 1,
+      pageCount: 1,
+      activities: [],
+      activityPages: 1,
+      correspondence: [],
+      unmatchedCorrespondence: [],
+      mailboxConfiguration: {
+        enabled: false,
+        draftingEnabled: false,
+        reason: "Microsoft 365 is not active for this organization.",
+        mailboxes: [],
+        ownerMailboxes: {}
+      }
+    });
+    const html = renderToStaticMarkup(
+      await Page({ searchParams: Promise.resolve({ selected: "row-a" }) })
+    );
+    expect(html).toContain("Microsoft 365 correspondence is not enabled for this organization.");
+    expect(html).toContain(
+      "Email tracking and drafts will appear here after Microsoft 365 correspondence is enabled."
+    );
+    expect(html).not.toContain(
+      "Assign this opportunity to an approved mailbox owner to prepare email."
+    );
+  });
 });

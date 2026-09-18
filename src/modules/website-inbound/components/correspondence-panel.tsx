@@ -195,17 +195,25 @@ export function CorrespondencePanel({
   );
   const canPrepare =
     canMutate && enabled && Boolean(ownerMailbox) && Boolean(opportunity.email) && !closed && !mailboxMismatch;
+  const mailboxStatus = !enabled
+    ? "Microsoft 365 correspondence is not enabled for this organization."
+    : ownerMailbox
+      ? `Assigned mailbox: ${ownerMailbox}`
+      : opportunity.ownerUserId
+        ? "The assigned owner is not an approved Microsoft 365 mailbox."
+        : "Assign this opportunity to an approved mailbox owner to prepare email.";
+  const emptyTimelineMessage = !enabled
+    ? "Email tracking and drafts will appear here after Microsoft 365 correspondence is enabled."
+    : ownerMailbox
+      ? "No linked email yet. Synchronize Microsoft 365, or prepare the first approved email."
+      : "No linked email yet. Select an approved mailbox owner before preparing email.";
 
   return (
     <section className="mt-6 border-t border-border pt-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold">Email correspondence</h3>
-          <p className="mt-1 text-xs text-mutedForeground">
-            {ownerMailbox
-              ? `Assigned mailbox: ${ownerMailbox}`
-              : "Assign this opportunity to an approved mailbox owner to prepare email."}
-          </p>
+          <p className="mt-1 text-xs text-mutedForeground">{mailboxStatus}</p>
           {opportunity.communicationMailbox ? (
             <p className="mt-1 text-xs text-mutedForeground">
               Conversation mailbox: {opportunity.communicationMailbox}
@@ -255,9 +263,7 @@ export function CorrespondencePanel({
           )
         )}
         {!messages.some((message) => message.status !== "CANCELLED") ? (
-          <p className="text-sm text-mutedForeground">
-            No linked email yet. Synchronize Microsoft 365, or prepare the first approved email.
-          </p>
+          <p className="text-sm text-mutedForeground">{emptyTimelineMessage}</p>
         ) : null}
       </div>
     </section>
