@@ -423,6 +423,7 @@ export default async function WebsiteInboundPage({
                     direction: message.direction,
                     status: message.status,
                     mailboxAddress: message.mailboxAddress,
+                    conversationId: message.conversationId,
                     subject: message.subject,
                     bodyText: message.bodyText,
                     bodyPreview: message.bodyPreview,

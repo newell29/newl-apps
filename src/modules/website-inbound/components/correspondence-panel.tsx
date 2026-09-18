@@ -9,6 +9,7 @@ import {
   sendOpportunityEmailDraftAction,
   syncOpportunityCorrespondenceAction
 } from "../actions";
+import { groupCorrespondenceMessages } from "../correspondence-view";
 import { CLOSED_STATUSES, EMPTY_ACTION_STATE, type OpportunityActionState } from "../opportunities";
 
 const buttonClass =
@@ -23,6 +24,7 @@ export type CorrespondenceMessage = {
   direction: "INBOUND" | "OUTBOUND";
   status: "RECEIVED" | "DRAFT" | "SENDING" | "SENT" | "SEND_FAILED" | "CANCELLED";
   mailboxAddress: string;
+  conversationId: string | null;
   subject: string;
   bodyText: string;
   bodyPreview: string | null;
@@ -207,6 +209,12 @@ export function CorrespondencePanel({
     : ownerMailbox
       ? "No linked email yet. Synchronize Microsoft 365, or prepare the first approved email."
       : "No linked email yet. Select an approved mailbox owner before preparing email.";
+  const drafts = messages.filter((message) => message.status === "DRAFT");
+  const conversations = groupCorrespondenceMessages(
+    messages.filter(
+      (message) => message.status !== "DRAFT" && message.status !== "CANCELLED"
+    )
+  );
 
   return (
     <section className="mt-6 border-t border-border pt-5">
@@ -217,6 +225,12 @@ export function CorrespondencePanel({
           {opportunity.communicationMailbox ? (
             <p className="mt-1 text-xs text-mutedForeground">
               Conversation mailbox: {opportunity.communicationMailbox}
+            </p>
+          ) : null}
+          {enabled ? (
+            <p className="mt-1 max-w-2xl text-xs text-mutedForeground">
+              Received mail appears when a contact writes to an approved owner&apos;s Inbox. Website
+              form alerts delivered to a different mailbox are not copied into this history.
             </p>
           ) : null}
         </div>
@@ -250,19 +264,22 @@ export function CorrespondencePanel({
       <ActionMessage state={draftState} />
       <ActionMessage state={handoffState} />
       <div className="mt-4 space-y-3">
-        {messages.map((message) =>
-          message.status === "DRAFT" ? (
-            <DraftCard
-              key={message.id}
-              message={message}
-              canSend={canMutate && draftingEnabled && isOwner && !mailboxMismatch}
-              recipient={opportunity.email}
-            />
-          ) : message.status === "CANCELLED" ? null : (
-            <MessageCard key={message.id} message={message} />
+        {drafts.map((message) => (
+          <DraftCard
+            key={message.id}
+            message={message}
+            canSend={canMutate && draftingEnabled && isOwner && !mailboxMismatch}
+            recipient={opportunity.email}
+          />
+        ))}
+        {conversations.map((conversation) =>
+          conversation.messages.length > 1 ? (
+            <ConversationCard key={conversation.key} messages={conversation.messages} />
+          ) : (
+            <MessageCard key={conversation.key} message={conversation.messages[0]!} />
           )
         )}
-        {!messages.some((message) => message.status !== "CANCELLED") ? (
+        {!drafts.length && !conversations.length ? (
           <p className="text-sm text-mutedForeground">{emptyTimelineMessage}</p>
         ) : null}
       </div>
@@ -341,10 +358,51 @@ function DraftCard({
   );
 }
 
-function MessageCard({ message }: { message: CorrespondenceMessage }) {
-  const failed = message.status === "SEND_FAILED";
+function ConversationCard({ messages }: { messages: CorrespondenceMessage[] }) {
+  const latest = messages.at(-1)!;
+  const receivedCount = messages.filter((message) => message.direction === "INBOUND").length;
+  const sentCount = messages.filter((message) => message.direction === "OUTBOUND").length;
   return (
-    <article className={`rounded-md border p-3 ${failed ? "border-danger/30 bg-danger/10" : "border-border"}`}>
+    <article className="rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
+            Email conversation
+          </p>
+          <p className="mt-1 text-sm font-semibold">{latest.subject}</p>
+          <p className="mt-1 text-xs text-mutedForeground">
+            {messages.length} messages · {receivedCount} received · {sentCount} sent
+          </p>
+        </div>
+        <p className="text-xs text-mutedForeground">Latest {formatDateTime(latest.messageAt)}</p>
+      </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm font-semibold text-primary">
+          View conversation
+        </summary>
+        <ol className="mt-3 space-y-3 border-l border-border pl-3">
+          {messages.map((message) => (
+            <li key={message.id}>
+              <MessageCard message={message} nested />
+            </li>
+          ))}
+        </ol>
+      </details>
+    </article>
+  );
+}
+
+function MessageCard({
+  message,
+  nested = false
+}: {
+  message: CorrespondenceMessage;
+  nested?: boolean;
+}) {
+  const failed = message.status === "SEND_FAILED";
+  const className = `rounded-md border p-3 ${failed ? "border-danger/30 bg-danger/10" : "border-border"}`;
+  const content = (
+    <>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">
@@ -382,8 +440,9 @@ function MessageCard({ message }: { message: CorrespondenceMessage }) {
           uncertain customer communication automatically.
         </p>
       ) : null}
-    </article>
+    </>
   );
+  return nested ? <div className={className}>{content}</div> : <article className={className}>{content}</article>;
 }
 
 function ActionMessage({ state }: { state: OpportunityActionState }) {
