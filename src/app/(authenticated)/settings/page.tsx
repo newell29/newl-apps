@@ -670,6 +670,16 @@ export default async function SettingsPage() {
                 and approves the exact recipient, subject, and body. This setting never enables
                 automatic email.
               </p>
+              <p className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-5 text-mutedForeground">
+                Application mailbox runtime:{" "}
+                <span className="font-semibold text-foreground">
+                  {settings.microsoftGraph.applicationMailboxRuntimeReady ? "Ready" : "Not ready"}
+                </span>
+                .{" "}
+                {settings.microsoftGraph.applicationMailboxRuntimeReady
+                  ? "Microsoft Graph application credentials are present. The Exchange application access policy must still allow every selected owner mailbox."
+                  : "Configure the Microsoft Graph application client, secret, and tenant in Vercel before enabling live correspondence."}
+              </p>
             </div>
 
             <div className="grid gap-3 md:grid-cols-3">

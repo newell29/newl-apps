@@ -8,6 +8,8 @@ Microsoft Graph application access can synchronize Inbox and Sent Items for the 
 
 The pilot should enable inbound correspondence for Alex and Faisal only. It also needs Microsoft Graph application mail access plus an Exchange application access policy restricted to those approved owner mailboxes. Sending additionally requires `Mail.Send` and the existing Microsoft 365 **drafting enabled** setting. Removing a mailbox from the inbound-owner allowlist immediately prevents new synchronization, draft generation, and sending from that mailbox; historical ledger entries remain available for audit.
 
+Settings shows whether the Microsoft Graph application mailbox runtime is present. A **Ready** runtime confirms that the application client, secret, and tenant values exist; it does not prove that the Exchange application access policy includes each selected mailbox. The first pilot check should therefore use **Sync mail now** and confirm both mailbox results before enabling drafting.
+
 The Vercel schedule calls `/api/website-inbound/correspondence/scheduled` at minute 7 of each hour through the existing `CRON_SECRET` and ingestion tenant context. The job reads and records correspondence only; it never generates or sends customer mail. Users with mutation access can also synchronize on demand.
 
 Outbound mail remains human approved. New messages use Graph `sendMail`; a draft based on a linked inbound Graph message uses the original message's `reply` endpoint. An uncertain external send is not retried automatically. A later Sent Items synchronization can reconcile the local attempt.
