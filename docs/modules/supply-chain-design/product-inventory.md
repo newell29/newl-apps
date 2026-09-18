@@ -1,6 +1,6 @@
 # Supply Chain Design Studio Product Inventory
 
-> Evidence status: code-backed cleanup inventory as of branch `f4`.
+> Evidence status: reconciled against current main and the preserved `f4` source on 2026-09-18.
 
 This inventory is organized model-first: model/tool -> data it uses -> calculation it performs -> result it produces.
 
@@ -60,7 +60,7 @@ This inventory is organized model-first: model/tool -> data it uses -> calculati
 | Current Facility ID | Current Facility ID | Facility identifier in the optional facility and warehouse cost file. | text | TOR-01 | Facility and warehouse cost | Facility and warehouse cost |
 | Cost Category | Cost Category | Cost category in the optional facility and warehouse cost file. | text | Labour | Facility and warehouse cost | Cost by category |
 | Cost Amount | Annual Cost | Actual paid facility, warehouse, or existing 3PL cost amount for the stated period. | currency | 450000 | Facility-cost | Facility and warehouse cost |
-| Currency | Currency | Currency code. | text | USD | Future normalization | Retained, not yet converted |
+| Currency | Currency | Legacy generic currency code. | text | USD | Backward-compatible fallback | Used only when a matching amount-specific currency field is not present |
 
 ### Current Network Baseline Mode Matrix
 
@@ -189,9 +189,9 @@ This inventory is organized model-first: model/tool -> data it uses -> calculati
 CSV remains the supported customer upload structure for this pass:
 
 - Delivery Demand: Demand ID, Destination ZIP / Postal Code, Country, Annual Shipments, Annual Pallets when using warehouse cost comparison, Shipment Type when using warehouse cost comparison.
-- Current Facilities and Warehouse Costs: Facility ID, Facility Name, Facility Type, Facility ZIP / Postal Code, optional annual facility or warehouse cost, pallet capacity, current inventory pallets/units/value, currency and notes.
+- Current Facilities and Warehouse Costs: Facility ID, Facility Name, Facility Type, Facility ZIP / Postal Code, optional annual facility or warehouse cost with its currency, pallet capacity, current inventory pallets/units/value with its currency, and notes.
 - Historical Shipments: Record Type, Shipment / Order Reference, Shipment Date, Origin Facility ID, destination fields, shipment counts, volume measures, transportation cost, service fields, SKU / item and currency.
-- Candidate Warehouses and Proposed Costs: Candidate Facility ID, Candidate Facility Name, Candidate Type, Candidate ZIP / Postal Code, Candidate Country, optional annual facility or warehouse cost, future per-pallet inbound/outbound/storage cost evidence, pallet capacity, currency and notes.
+- Candidate Warehouses and Proposed Costs: Candidate Facility ID, Candidate Facility Name, Candidate Type, Candidate ZIP / Postal Code, Candidate Country, optional annual facility or warehouse cost with its currency, per-pallet inbound/outbound/storage cost evidence with matching currency fields, pallet capacity and notes.
 - Scenario Lane Costs: Origin Facility ID, Demand ID, Cost per Shipment, optional service/mode/currency.
 - Candidate Warehouse Options: Provider, Facility Name, Warehouse ZIP / Postal Code, Storage Rate per Pallet per Month, Average Stored Pallets, Annual Storage Cost, Inbound Handling Rate per Pallet, Outbound Handling Rate per Pallet, Monthly Minimum, Inbound Gateway, Ocean Freight Input, Gateway-to-Warehouse Inland Cost, Currency. Complete either rate plus average inventory, or direct annual storage cost.
 - Shipment Types: Shipment Type, Mode, Pallets, Weight, Freight Class, Description.

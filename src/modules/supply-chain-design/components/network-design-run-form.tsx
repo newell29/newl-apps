@@ -81,6 +81,13 @@ export function SupplyChainDesignNetworkDesignRunForm({
       <p className="text-xs text-mutedForeground">
         The analysis will rate valid LTL shipments from each selected candidate warehouse.
       </p>
+      <label className="flex items-start gap-2 rounded-md border border-border bg-muted/20 px-3 py-2">
+        <input type="checkbox" name="forceFreshRates" value="on" className="mt-1 h-4 w-4 rounded border-border" />
+        <span className="text-sm text-foreground">
+          <span className="font-semibold">Force fresh 7L rates</span>
+          <span className="block text-xs text-mutedForeground">Off reuses exact rates previously obtained in this project when available. On requests new 7L rates for this run.</span>
+        </span>
+      </label>
       <SubmitButton />
       {state.message && (!state.ok || !state.runId) ? (
         <p className={state.ok ? "text-sm font-medium text-success" : "text-sm font-medium text-danger"}>

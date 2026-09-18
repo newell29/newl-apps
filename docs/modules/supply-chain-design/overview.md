@@ -43,3 +43,33 @@ Future Model 02 scalable solver formulation:
 - Decision variables: facility-open decision for each permitted facility, and shipment allocation quantity from each open facility to each customer.
 - Objective: minimize transportation cost plus retained existing operating cost plus opened candidate fixed cost, with unallocated shipment volume minimized first.
 - Constraints: mandatory facilities remain open, prohibited candidates remain closed, minimum and maximum open-facility counts, allocation only through open facilities with valid lane costs, assigned plus unallocated shipment volume reconciles to historical volume, capacity is respected when enabled, no negative allocation, and deterministic result normalization.
+
+## Reconciled project currency and physical-unit foundations
+
+Project Data supports tenant-scoped USD/CAD project preferences and an optional
+fixed-direction rate (`1 CAD = X USD`). Updates require the existing module, role
+and mutation authorization; settings and audit are saved in one transaction.
+Reconciled monetary calculation workflows consume these settings and persist FX
+evidence while legacy inputs without amount-specific currency mappings retain their
+prior raw interpretation. Saving settings never relabels or changes historical
+results. The additive migration source has not been applied.
+
+Candidate LTL preparation converts supplied kg/lb and cm/in inputs to pounds and
+inches before forming a US-unit request. Each pallet piece carries per-piece
+weight, so quantity times piece weight reconciles to the representative shipment
+weight. Source-unit evidence, shipment aggregation and hazmat/missing-data gates
+remain intact. A distinct preparation version prevents reuse of the old physical
+request representation. No live rating is needed for validation.
+
+See `foundational-reconciliation-manifest.md` for the exact import allowlist and
+explicit later-phase boundaries. Business approval of the full monetary workflow
+remains separate from implementing this foundation.
+
+
+### Calculation reconciliation boundary (Phase 2)
+
+Phase 2 restores currency-aware baseline, candidate LTL preparation, batching/reuse and scenario calculations against current main. Original source currency/volume evidence is retained. Candidate preparation normalizes provider pieces to pounds/inches with each-pallet weight, derives whole-pallet aggregate profiles, and carries all warehouse source rows including supplemental Parcel evidence. Currency-aware comparison refuses incomplete monetary or warehouse evidence before winner selection. Batch reuse checks tenant/project, source hashes and mapping timestamps, FX settings, physical evidence and warehouse quantities/dwell; forced fresh rates still reconcile accepted batches for the same comparison.
+
+Legacy baseline inputs with no monetary currency mapping retain raw totals without claiming a normalized currency or FX snapshot. Existing per-run FX fields remain as fallback when no project rate is set. Deletion auditing, referenced-evidence protection, authorization and CSV formula protection remain intact. Schema and migration application are outside Phase 2.
+
+Whole-pallet distribution and the USD interpretation of provider rates require business confirmation. The project currency form, force-fresh controls, amount-specific facility/candidate template currency columns and clarified Location Strategy labels are reconciled. Expanded positional reporting, the per-run FX fallback decision and broader sample redesign remain for product review. See [the calculation reconciliation manifest](calculation-reconciliation-manifest.md) for the allowlist, compatibility decisions and validation results.

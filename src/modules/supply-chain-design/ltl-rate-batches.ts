@@ -5,7 +5,8 @@ import { JobStatus, Prisma, SupplyChainDesignModelRunStatus } from "@prisma/clie
 import {
   SCDS_LTL_RATE_PREPARATION_RESULT_VERSION,
   type SupplyChainDesignLtlPreparedRequest,
-  type SupplyChainDesignLtlRatePreparationResultSummary
+  type SupplyChainDesignLtlRatePreparationResultSummary,
+  type SupplyChainDesignLtlWarehouseCostSourceRow
 } from "@/modules/supply-chain-design/candidate-ltl-rate-preparation";
 import { escapeSpreadsheetCsvCell } from "@/modules/supply-chain-design/csv-export";
 import { pickPreferredLiveSevenLAccount } from "@/modules/ltl-rate-portal/account-selection";
@@ -21,6 +22,16 @@ import type {
 import { getLtlQuotes, type SevenLLocationCache } from "@/server/integrations/seven-l";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
+import {
+  buildSupplyChainDesignCurrencyContext,
+  normalizeSupplyChainDesignMoney,
+  type SupplyChainDesignCurrency,
+  type SupplyChainDesignCurrencyContext
+} from "@/modules/supply-chain-design/currency";
+import {
+  calculateCandidateWarehouseCostFromSourceRows,
+  type SupplyChainDesignWarehouseCostCandidateInput
+} from "@/modules/supply-chain-design/warehouse-cost-engine";
 
 export const SCDS_LTL_RATE_BATCH_JOB_TYPE = "supply-chain-design.candidate-ltl-rate-batch";
 export const SCDS_LTL_EXACT_LANE_FINGERPRINT_VERSION = "SCDS_LTL_EXACT_LANE_V1";
@@ -39,6 +50,7 @@ export type SupplyChainDesignLtlRateBatchSummary = {
   errorMessage: string | null;
   preparationRunId: string;
   preparationCreatedAt: string | null;
+  forceFreshRates: boolean;
   requestsSubmitted: number;
   processedRequests: number;
   ratedSuccessfully: number;
@@ -51,6 +63,9 @@ export type SupplyChainDesignLtlRateBatchSummary = {
   sourceRowCounts: {
     historicalRowsReviewed: number;
     ltlRowsReviewed: number;
+    totalHistoricalShipmentsRepresented: number;
+    ltlShipmentsRepresented: number;
+    parcelShipmentsRepresented: number;
     shipmentsRepresented: number;
     rateRequestsCompleted: number;
     incompleteLtlRowsExcluded: number;
@@ -59,6 +74,12 @@ export type SupplyChainDesignLtlRateBatchSummary = {
   };
   historicalShipmentVolumeCovered: number;
   unratedRepresentedShipments: number;
+  currencyEvidence?: {
+    analysisCurrency: "USD" | "CAD";
+    cadToUsdRate: number | null;
+    sevenLRateCurrency: "USD";
+    rateDirection: "1 CAD = X USD";
+  };
   accountName: string;
   lanes: SupplyChainDesignLtlRateBatchLaneSummary[];
   candidateComparisons: SupplyChainDesignCandidateComparisonSummary[];
@@ -84,18 +105,23 @@ export type SupplyChainDesignLtlRateBatchLaneSummary = {
   candidateFacilityId: string;
   candidateFacilityName: string;
   originalFacilityId: string;
+  originalOriginPostalCode: string | null;
   destination: string;
   sourceReference: string;
-  recordType: string;
+  recordType?: "Individual Shipment" | "Aggregated Activity";
   representedShipments: number;
   currentTransportationCost: number | null;
   currentTransportationCostPerShipment: number | null;
+  currentTransportationCostCurrency: string | null;
   representativePallets: number | null;
   representativeWeight: number | null;
   weightUnit: string | null;
+  inventoryDwellTimeDays: number | null;
+  warehouseCostSourceRows: SupplyChainDesignLtlWarehouseCostSourceRow[];
   dimensions: string;
   dimensionUnit: string | null;
   freightClass: string | null;
+  sourceRowIds: string[];
   request: LtlQuoteRequest;
   quotes: LtlQuoteResult[];
   errors: LtlCarrierErrorResult[];
@@ -158,26 +184,41 @@ export type ScdsLtlBatchInput = {
   accountId: string;
   accountName: string;
   carrierHashes: string[];
+  forceFreshRates?: boolean;
+  currencyEvidence?: {
+    analysisCurrency: "USD" | "CAD";
+    cadToUsdRate: number | null;
+    sevenLRateCurrency: "USD";
+    rateDirection: "1 CAD = X USD";
+  };
   comparisonSetup: SupplyChainDesignLtlComparisonSetup;
   preparationSummary?: {
     historicalRowsReviewed: number;
+    totalHistoricalShipmentsRepresented?: number;
+    ltlShipmentsRepresented?: number;
+    parcelShipmentsRepresented?: number;
     readyRequestCount: number;
     missingDataRequestCount: number;
     excludedNonLtlRowCount: number;
+    warehouseCostSourceRows?: SupplyChainDesignLtlWarehouseCostSourceRow[];
   };
   requests: Array<{
     rateRequestKey: string;
     candidateFacilityId: string;
     candidateFacilityName: string;
     originalFacilityId: string;
+    originalOriginPostalCode?: string | null;
     sourceReference: string;
-    recordType: string;
-    representedShipments: number;
+    recordType?: "Individual Shipment" | "Aggregated Activity";
+  representedShipments: number;
     currentTransportationCost: number | null;
     currentTransportationCostPerShipment: number | null;
+    currentTransportationCostCurrency?: string | null;
     representativePallets: number | null;
     representativeWeight: number | null;
     weightUnit: string | null;
+    inventoryDwellTimeDays?: number | null;
+    warehouseCostSourceRows?: SupplyChainDesignLtlWarehouseCostSourceRow[];
     dimensions: string;
     dimensionUnit: string | null;
     freightClass: string | null;
@@ -198,11 +239,14 @@ export type ScdsLtlBatchInput = {
           sourceReference: string;
           originFacilityId: string;
           originSourceType: "CURRENT" | "CANDIDATE";
-        representedShipments: number;
+        recordType?: "Individual Shipment" | "Aggregated Activity";
+  representedShipments: number;
       }>;
     };
   }>;
 };
+
+type SupplyChainDesignLtlCurrencyEvidence = NonNullable<ScdsLtlBatchInput["currencyEvidence"]>;
 
 export type SupplyChainDesignLtlComparisonSetup = {
   scenarioSelections: Array<{
@@ -213,12 +257,21 @@ export type SupplyChainDesignLtlComparisonSetup = {
   currentFacilities: Array<{
     facilityId: string;
     facilityName: string;
+    postalCode?: string | null;
     annualFacilityCost: number;
+    annualFacilityCostCurrency?: string | null;
   }>;
   candidateFacilities: Array<{
     facilityId: string;
     facilityName: string;
-    annualFixedCost: number;
+    annualFixedCost: number | null;
+    annualFixedCostCurrency?: string | null;
+    inboundFeePerPallet?: number | null;
+    inboundFeePerPalletCurrency?: string | null;
+    outboundFeePerPallet?: number | null;
+    outboundFeePerPalletCurrency?: string | null;
+    storageFeePerPalletPerMonth?: number | null;
+    storageFeePerPalletPerMonthCurrency?: string | null;
   }>;
 };
 
@@ -229,6 +282,7 @@ export async function createSupplyChainDesignScenarioMissingRateBatch(input: {
   scenarioName: string;
   account: SevenLAccountConfig;
   carrierHashes: string[];
+  forceFreshRates?: boolean;
   missingRateManifest: Array<{
     laneFingerprint: string;
     request: LtlQuoteRequest;
@@ -239,7 +293,8 @@ export async function createSupplyChainDesignScenarioMissingRateBatch(input: {
       sourceReference: string;
       originFacilityId: string;
       originSourceType: "CURRENT" | "CANDIDATE";
-      representedShipments: number;
+      recordType?: "Individual Shipment" | "Aggregated Activity";
+  representedShipments: number;
     }>;
   }>;
 }) {
@@ -260,22 +315,26 @@ export async function createSupplyChainDesignScenarioMissingRateBatch(input: {
     .sort((left, right) => left.laneFingerprint.localeCompare(right.laneFingerprint))
     .map((missing) => {
       const first = missing.affectedAlternatives[0];
+      const piece = missing.request.pieces[0] ?? null;
+      const representativeWeight =
+        piece?.weightType === "each" ? roundQuantity(piece.weight * piece.qty) : piece?.weight ?? null;
       return {
         rateRequestKey: missing.laneFingerprint,
         candidateFacilityId: first?.originFacilityId ?? "UNKNOWN",
         candidateFacilityName: first ? `${first.originSourceType} ${first.originFacilityId}` : "Unknown scenario origin",
         originalFacilityId: first?.originFacilityId ?? "",
+        originalOriginPostalCode: null,
         sourceReference: missing.affectedAlternatives.map((alternative) => alternative.sourceReference).filter(Boolean).join(", "),
-        recordType: "Scenario Missing Rate",
         representedShipments: missing.affectedAlternatives.reduce((total, alternative) => total + alternative.representedShipments, 0),
         currentTransportationCost: null,
         currentTransportationCostPerShipment: null,
-        representativePallets: null,
-        representativeWeight: null,
-        weightUnit: null,
-        dimensions: "",
-        dimensionUnit: null,
-        freightClass: missing.request.pieces[0]?.freightClass ?? null,
+        currentTransportationCostCurrency: null,
+        representativePallets: piece?.qty ?? null,
+        representativeWeight,
+        weightUnit: piece ? "lb" : null,
+        dimensions: piece ? `${piece.length} x ${piece.width} x ${piece.height}` : "",
+        dimensionUnit: piece ? "in" : null,
+        freightClass: piece?.freightClass ?? null,
         sourceRowIds: missing.affectedAlternatives.map((alternative) => alternative.profileKey),
         request: {
           ...missing.request,
@@ -302,6 +361,7 @@ export async function createSupplyChainDesignScenarioMissingRateBatch(input: {
     accountId: input.account.id,
     accountName: input.account.name,
     carrierHashes: input.carrierHashes,
+    forceFreshRates: input.forceFreshRates === true,
     comparisonSetup: {
       scenarioSelections: [],
       currentFacilities: [],
@@ -309,6 +369,9 @@ export async function createSupplyChainDesignScenarioMissingRateBatch(input: {
     },
     preparationSummary: {
       historicalRowsReviewed: 0,
+      totalHistoricalShipmentsRepresented: requests.reduce((sum, request) => sum + request.representedShipments, 0),
+      ltlShipmentsRepresented: requests.reduce((sum, request) => sum + request.representedShipments, 0),
+      parcelShipmentsRepresented: 0,
       readyRequestCount: requests.length,
       missingDataRequestCount: 0,
       excludedNonLtlRowCount: 0
@@ -361,7 +424,8 @@ export async function createSupplyChainDesignLtlRateBatch(
   context: AuthenticatedContext,
   projectId: string,
   preparationRunId: string,
-  comparisonSetup: SupplyChainDesignLtlComparisonSetup
+  comparisonSetup: SupplyChainDesignLtlComparisonSetup,
+  options: { forceFreshRates?: boolean } = {}
 ) {
   const [project, account] = await Promise.all([
     prisma.supplyChainDesignProject.findUnique({
@@ -393,9 +457,22 @@ export async function createSupplyChainDesignLtlRateBatch(
   if (!account) {
     throw new Error("The configured live 7L account is not available.");
   }
+  const analysisCurrency: SupplyChainDesignCurrency = project.analysisCurrency === "CAD" ? "CAD" : "USD";
+  const cadToUsdRate = project.cadToUsdRate == null ? null : Number(project.cadToUsdRate);
+  if (analysisCurrency === "CAD" && !cadToUsdRate) {
+    throw new Error("Network Design requires a CAD-to-USD FX rate when the project analysis currency is CAD because live 7L rates are returned in USD.");
+  }
 
   const result = preparation.resultSummary as unknown as SupplyChainDesignLtlRatePreparationResultSummary | null;
   if (result?.resultVersion !== SCDS_LTL_RATE_PREPARATION_RESULT_VERSION) {
+    throw new Error("Selected LTL preparation is incompatible with the current candidate selection.");
+  }
+  const preparationReferences = preparation.inputReferences as Record<string, unknown> | null;
+  const preparationFx = preparationReferences?.fxSnapshot as { analysisCurrency?: unknown; cadToUsdRate?: unknown } | undefined;
+  if (!preparationFx || preparationFx.analysisCurrency !== analysisCurrency || (preparationFx.cadToUsdRate ?? null) !== cadToUsdRate) {
+    throw new Error("Selected LTL preparation is incompatible with the current candidate selection.");
+  }
+  if (!(await isLtlPreparationFreshForCurrentSource(context.tenantId, projectId, preparation.inputReferences))) {
     throw new Error("Selected LTL preparation is incompatible with the current candidate selection.");
   }
   const selectedCandidateIds = new Set(comparisonSetup.candidateFacilities.map((candidate) => candidate.facilityId));
@@ -414,6 +491,9 @@ export async function createSupplyChainDesignLtlRateBatch(
   }
 
   const carrierHashes = account.carriers.filter((carrier) => carrier.enabled).map((carrier) => carrier.carrierHash);
+  const currentOriginPostalByFacilityId = new Map(
+    comparisonSetup.currentFacilities.map((facility) => [facility.facilityId, facility.postalCode ?? null])
+  );
   const input: ScdsLtlBatchInput = {
     source: "SUPPLY_CHAIN_DESIGN",
     projectId,
@@ -422,26 +502,47 @@ export async function createSupplyChainDesignLtlRateBatch(
     accountId: account.id,
     accountName: account.name,
     carrierHashes,
+    forceFreshRates: options.forceFreshRates === true,
+    currencyEvidence: {
+      analysisCurrency,
+      cadToUsdRate,
+      sevenLRateCurrency: "USD",
+      rateDirection: "1 CAD = X USD"
+    },
     comparisonSetup,
     preparationSummary: {
       historicalRowsReviewed: result.historicalRowsReviewed,
+      totalHistoricalShipmentsRepresented: result.totalHistoricalShipmentsRepresented,
+      ltlShipmentsRepresented: result.ltlShipmentsRepresented,
+      parcelShipmentsRepresented: result.parcelShipmentsRepresented,
       readyRequestCount: result.readyRequestCount,
       missingDataRequestCount: result.missingDataRequestCount,
-      excludedNonLtlRowCount: result.excludedNonLtlRowCount
+      excludedNonLtlRowCount: result.excludedNonLtlRowCount,
+      warehouseCostSourceRows: result.sourceRowOutcomes.map((row) => ({
+        sourceRowId: row.sourceRowId,
+        shipmentReference: row.shipmentOrderReference,
+        representedShipments: row.representedShipments,
+        pallets: row.pallets,
+        inventoryDwellTimeDays: row.inventoryDwellTimeDays
+      }))
     },
     requests: readyRequests.map((request) => ({
       rateRequestKey: request.rateRequestKey,
       candidateFacilityId: request.candidateFacilityId,
       candidateFacilityName: request.candidateFacilityName,
       originalFacilityId: request.originalFacilityId,
+      originalOriginPostalCode: request.originalOriginPostalCode ?? currentOriginPostalByFacilityId.get(request.originalFacilityId) ?? null,
       sourceReference: request.shipmentOrderReferences.join(", ") || request.historicalShipmentRowIds.join(", "),
       recordType: request.recordType,
       representedShipments: request.representedShipments,
       currentTransportationCost: request.currentTransportationCost,
       currentTransportationCostPerShipment: request.currentTransportationCostPerShipment,
+      currentTransportationCostCurrency: request.currentTransportationCostCurrency ?? null,
       representativePallets: request.representativePallets,
       representativeWeight: request.representativeWeight,
       weightUnit: request.weightUnit,
+      inventoryDwellTimeDays: request.inventoryDwellTimeDays ?? null,
+      warehouseCostSourceRows: normalizeWarehouseCostSourceRows(request.warehouseCostSourceRows),
       dimensions:
         request.length !== null && request.width !== null && request.height !== null
           ? `${request.length} x ${request.width} x ${request.height}`
@@ -494,22 +595,24 @@ export async function createSupplyChainDesignLtlRateBatch(
       ltlBatchQuoteLanes: true
     }
   });
-  const reusableCompletedBatch = completedBatches
-    .map((batch) => ({ batch, input: readInput(batch.input) }))
-    .find(
-      (candidate) =>
-        isReusableBatchInput(candidate.input, projectId, preparationRunId, comparisonSetup, input) &&
-        hasReusableCompletedBatch(candidate.batch, candidate.input)
-    );
-  if (reusableCompletedBatch?.input) {
-    return {
-      jobId: reusableCompletedBatch.batch.id,
-      account,
-      input: reusableCompletedBatch.input,
-      shouldProcess: false,
-      reused: true,
-      disposition: "REUSED_COMPLETED" as const
-    };
+  if (!options.forceFreshRates) {
+    const reusableCompletedBatch = completedBatches
+      .map((batch) => ({ batch, input: readInput(batch.input) }))
+      .find(
+        (candidate) =>
+          isReusableBatchInput(candidate.input, projectId, preparationRunId, comparisonSetup, input) &&
+          hasReusableCompletedBatch(candidate.batch, candidate.input)
+      );
+    if (reusableCompletedBatch?.input) {
+      return {
+        jobId: reusableCompletedBatch.batch.id,
+        account,
+        input: reusableCompletedBatch.input,
+        shouldProcess: false,
+        reused: true,
+        disposition: "REUSED_COMPLETED" as const
+      };
+    }
   }
 
   const output = buildOutput(input, {
@@ -609,13 +712,16 @@ export async function runSupplyChainDesignLtlRateBatch(
           if (!preflight.ok) {
             errors = [toLaneError(preflight.request, preflight.message)];
           } else {
-            const reusable = await findReusableSupplyChainDesignExactLaneRate({
-              tenantId: context.tenantId,
-              currentJobRunId: jobRunId,
-              accountId: input.accountId,
-              carrierHashes: input.carrierHashes,
-              request: preflight.request
-            });
+            const reusable = input.forceFreshRates
+              ? null
+              : await findReusableSupplyChainDesignExactLaneRate({
+                  tenantId: context.tenantId,
+                  projectId: input.projectId,
+                  currentJobRunId: jobRunId,
+                  accountId: input.accountId,
+                  carrierHashes: input.carrierHashes,
+                  request: preflight.request
+                });
             if (reusable) {
               selectedQuote = {
                 ...reusable.selectedQuote,
@@ -801,7 +907,7 @@ export async function getSupplyChainDesignLtlRateBatches(context: AuthenticatedC
 
   const summaries: Array<SupplyChainDesignLtlRateBatchSummary & { projectId: string }> = [];
   for (const { job, input } of normalNetworkDesignInputs) {
-    const summary = mapScdsLtlRateBatchSummary(job, input, input ? preparationSummaries.get(input.preparationRunId) : undefined);
+    const summary = safeMapScdsLtlRateBatchSummary(job, input, input ? preparationSummaries.get(input.preparationRunId) : undefined);
     if (summary && summary.projectId === projectId) {
       summaries.push(summary);
     }
@@ -845,7 +951,7 @@ export async function getSupplyChainDesignLtlRateBatchById(
     });
     linkedPreparationSummary = readPreparationResultSummary(preparationRun?.resultSummary) ?? undefined;
   }
-  const summary = mapScdsLtlRateBatchSummary(job, input, linkedPreparationSummary);
+  const summary = safeMapScdsLtlRateBatchSummary(job, input, linkedPreparationSummary);
   if (!summary || summary.projectId !== projectId) return null;
   return omitBatchProjectId(summary);
 }
@@ -980,9 +1086,11 @@ export async function exportSupplyChainDesignShipmentComparisonCsv(
     "Destination Country",
     "Source Reference",
     "Record Type",
-    "Shipments",
+    "Represented Shipments",
     "Pallets per Shipment",
-    "Weight",
+    "Represented Pallets Total",
+    "Weight per Shipment",
+    "Represented Weight Total",
     "Weight Unit",
     "Dimensions",
     "Dimension Unit",
@@ -1004,14 +1112,25 @@ export async function exportSupplyChainDesignShipmentComparisonCsv(
     "Status/Error",
     "7L Rate Date"
   ];
+  const currencyContext = toLtlCurrencyContext(batch.currencyEvidence);
   const rows = batch.lanes.map((lane) => {
-    const selectedRate = lane.selectedQuote?.total ?? lane.manualRate?.totalRate ?? null;
-    const currentCost = lane.currentTransportationCost ?? 0;
-    const candidateCost = lane.estimatedTotalTransportationCost ?? 0;
-    const differencePerShipment =
-      selectedRate === null || lane.currentTransportationCostPerShipment === null
+    const rawSelectedRate = lane.selectedQuote?.total ?? lane.manualRate?.totalRate ?? null;
+    const selectedRate = rawSelectedRate === null ? null : normalizeLtlTransportationCost(rawSelectedRate, currencyContext, lane.rateRequestKey);
+    const currentCost = normalizeLtlTransportationCost(lane.currentTransportationCost, currencyContext, lane.rateRequestKey, lane.currentTransportationCostCurrency);
+    const currentCostPerShipment = lane.currentTransportationCostPerShipment === null ? null : normalizeLtlTransportationCost(lane.currentTransportationCostPerShipment, currencyContext, lane.rateRequestKey, lane.currentTransportationCostCurrency);
+    const candidateCost = normalizeLtlTransportationCost(lane.estimatedTotalTransportationCost, currencyContext, lane.rateRequestKey);
+    const representedPalletsTotal =
+      lane.representativePallets === null
         ? null
-        : roundCurrency(selectedRate - lane.currentTransportationCostPerShipment);
+        : roundQuantity(lane.representativePallets * lane.representedShipments);
+    const representedWeightTotal =
+      lane.representativeWeight === null
+        ? null
+        : roundQuantity(lane.representativeWeight * lane.representedShipments);
+    const differencePerShipment =
+      selectedRate === null || currentCostPerShipment === null
+        ? null
+        : roundCurrency(selectedRate - currentCostPerShipment);
     const totalDifference =
       lane.estimatedTotalTransportationCost === null || lane.currentTransportationCost === null
         ? null
@@ -1025,20 +1144,22 @@ export async function exportSupplyChainDesignShipmentComparisonCsv(
       lane.originalFacilityId,
       lane.candidateFacilityId,
       lane.candidateFacilityName,
-      lane.request.originZipcode,
+      lane.originalOriginPostalCode ?? "",
       lane.request.originZipcode,
       lane.request.destinationZipcode,
       lane.request.destinationCountry,
       lane.sourceReference,
-      lane.recordType,
+      lane.recordType ?? "",
       String(lane.representedShipments),
       lane.representativePallets === null ? "" : String(lane.representativePallets),
+      representedPalletsTotal === null ? "" : String(representedPalletsTotal),
       lane.representativeWeight === null ? "" : String(lane.representativeWeight),
+      representedWeightTotal === null ? "" : String(representedWeightTotal),
       lane.weightUnit ?? "",
       lane.dimensions,
       lane.dimensionUnit ?? "",
       lane.freightClass ?? "",
-      lane.currentTransportationCostPerShipment === null ? "" : String(lane.currentTransportationCostPerShipment),
+      lane.currentTransportationCostPerShipment === null ? "" : String(currentCostPerShipment),
       selectedRate === null ? "" : String(selectedRate),
       differencePerShipment === null ? "" : String(differencePerShipment),
       lane.currentTransportationCost === null ? "" : String(currentCost),
@@ -1051,7 +1172,7 @@ export async function exportSupplyChainDesignShipmentComparisonCsv(
       "",
       lane.selectedQuote?.quoteNumber ?? "",
       selectedRemarks,
-      "USD",
+      currencyContext?.analysisCurrency ?? "USD",
       statusOrError,
       lane.selectedQuote ? batch.finishedAt?.toISOString() ?? batch.startedAt.toISOString() : ""
     ];
@@ -1081,7 +1202,8 @@ export async function exportSupplyChainDesignCandidateSummaryCsv(
     "Difference From Current",
     "Percentage Change",
     "Coverage Percentage",
-    "Warning"
+    "Warning",
+    "Currency"
   ];
   const rows = batch.candidateComparisons.map((candidate) => [
     `${candidate.candidateFacilityId} - ${candidate.candidateFacilityName}`,
@@ -1097,7 +1219,8 @@ export async function exportSupplyChainDesignCandidateSummaryCsv(
     String(candidate.totalEstimatedDifference),
     candidate.percentageChange === null ? "" : String(candidate.percentageChange),
     String(candidate.coveragePercentage),
-    candidate.warning ?? ""
+    candidate.warning ?? "",
+    batch.currencyEvidence?.analysisCurrency ?? "USD"
   ]);
   return [headers, ...rows].map((row) => row.map(escapeSpreadsheetCsvCell).join(",")).join("\n");
 }
@@ -1131,7 +1254,9 @@ export function buildSupplyChainDesignExactLaneRateFingerprint(input: {
 
 export async function findReusableSupplyChainDesignExactLaneRate(input: {
   tenantId: string;
+  projectId: string;
   currentJobRunId?: string | null;
+  allowedJobRunIds?: string[];
   accountId: string;
   carrierHashes: string[];
   request: LtlQuoteRequest;
@@ -1147,6 +1272,7 @@ export async function findReusableSupplyChainDesignExactLaneRate(input: {
         tenantId: input.tenantId,
         selectedRateSource: "7L selected rate",
         jobRun: {
+          ...(input.allowedJobRunIds?.length ? { id: { in: input.allowedJobRunIds } } : {}),
           jobType: SCDS_LTL_RATE_BATCH_JOB_TYPE,
           status: JobStatus.SUCCESS
         }
@@ -1165,7 +1291,7 @@ export async function findReusableSupplyChainDesignExactLaneRate(input: {
   for (const lane of candidateLanes ?? []) {
     if (input.currentJobRunId && lane.jobRunId === input.currentJobRunId) continue;
     const batchInput = readInput(lane.jobRun.input);
-    if (!isReusableLaneBatchContext(batchInput, input.accountId, input.carrierHashes)) continue;
+    if (!isReusableLaneBatchContext(batchInput, input.projectId, input.accountId, input.carrierHashes)) continue;
     if (!batchInput) continue;
     const quote = readLiveReusableQuote(lane.selectedQuoteJson);
     if (!quote) continue;
@@ -1187,9 +1313,10 @@ export async function findReusableSupplyChainDesignExactLaneRate(input: {
   return null;
 }
 
-function isReusableLaneBatchContext(input: ScdsLtlBatchInput | null, accountId: string, carrierHashes: string[]) {
+function isReusableLaneBatchContext(input: ScdsLtlBatchInput | null, projectId: string, accountId: string, carrierHashes: string[]) {
   return Boolean(
     input &&
+      input.projectId === projectId &&
       input.accountId === accountId &&
       JSON.stringify(input.carrierHashes.slice().sort()) === JSON.stringify(carrierHashes.slice().sort())
   );
@@ -1326,10 +1453,20 @@ function mapScdsLtlRateBatchSummary(job: {
   const preparationSummary = input.preparationSummary ?? toStoredPreparationSummary(linkedPreparationSummary);
   const comparableProfileLanes = getComparableProfileLanes(lanes);
   const rateRequestsCompleted = ratedSuccessfully + manuallyRated;
+  const comparableShipmentsRepresented = comparableProfileLanes.reduce((sum, lane) => sum + lane.representedShipments, 0);
   const sourceRowCounts = {
     historicalRowsReviewed: preparationSummary?.historicalRowsReviewed ?? lanes.length,
     ltlRowsReviewed: comparableProfileLanes.length,
-    shipmentsRepresented: comparableProfileLanes.reduce((sum, lane) => sum + lane.representedShipments, 0),
+    totalHistoricalShipmentsRepresented:
+      preparationSummary?.totalHistoricalShipmentsRepresented ??
+      comparableShipmentsRepresented,
+    ltlShipmentsRepresented:
+      preparationSummary?.ltlShipmentsRepresented ??
+      comparableShipmentsRepresented,
+    parcelShipmentsRepresented: preparationSummary?.parcelShipmentsRepresented ?? 0,
+    shipmentsRepresented:
+      preparationSummary?.totalHistoricalShipmentsRepresented ??
+      comparableShipmentsRepresented,
     rateRequestsCompleted,
     incompleteLtlRowsExcluded: preparationSummary?.missingDataRequestCount ?? 0,
     nonLtlRowsExcluded: preparationSummary?.excludedNonLtlRowCount ?? 0,
@@ -1350,6 +1487,7 @@ function mapScdsLtlRateBatchSummary(job: {
     errorMessage: job.errorMessage,
     preparationRunId: input.preparationRunId,
     preparationCreatedAt: input.preparationCreatedAt,
+    forceFreshRates: input.forceFreshRates === true,
     requestsSubmitted: input.requests.length,
     processedRequests: output?.processedLanes ?? savedLanes.length,
     ratedSuccessfully,
@@ -1362,10 +1500,16 @@ function mapScdsLtlRateBatchSummary(job: {
     sourceRowCounts,
     historicalShipmentVolumeCovered,
     unratedRepresentedShipments,
+    currencyEvidence: input.currencyEvidence,
     accountName: input.accountName,
     lanes,
-    candidateComparisons: buildCandidateComparisons(input.comparisonSetup ?? emptyComparisonSetup(), lanes),
-    coverage: buildCoverage(input.comparisonSetup ?? emptyComparisonSetup(), lanes),
+    candidateComparisons: buildCandidateComparisons(
+      input.comparisonSetup ?? emptyComparisonSetup(),
+      lanes,
+      input.currencyEvidence,
+      input.preparationSummary?.warehouseCostSourceRows
+    ),
+    coverage: buildCoverage(input.comparisonSetup ?? emptyComparisonSetup(), lanes, input.currencyEvidence),
     savedInputSelection: {
       selectedCandidateFacilityIds: input.comparisonSetup?.candidateFacilities.map((candidate) => candidate.facilityId) ?? []
     }
@@ -1410,18 +1554,23 @@ function mapLane(
     candidateFacilityId: request.candidateFacilityId,
     candidateFacilityName: request.candidateFacilityName,
     originalFacilityId: request.originalFacilityId,
+    originalOriginPostalCode: request.originalOriginPostalCode ?? null,
     destination: storedRequest.destinationZipcode,
     sourceReference: request.sourceReference,
     recordType: request.recordType,
     representedShipments: request.representedShipments,
     currentTransportationCost: request.currentTransportationCost,
     currentTransportationCostPerShipment: request.currentTransportationCostPerShipment,
+    currentTransportationCostCurrency: request.currentTransportationCostCurrency ?? null,
     representativePallets: request.representativePallets,
     representativeWeight: request.representativeWeight,
     weightUnit: request.weightUnit,
+    inventoryDwellTimeDays: request.inventoryDwellTimeDays ?? null,
+    warehouseCostSourceRows: normalizeWarehouseCostSourceRows(request.warehouseCostSourceRows),
     dimensions: request.dimensions,
     dimensionUnit: request.dimensionUnit,
     freightClass: request.freightClass,
+    sourceRowIds: request.sourceRowIds,
     request: storedRequest,
     quotes,
     errors,
@@ -1435,23 +1584,65 @@ function mapLane(
   };
 }
 
-function buildCoverage(setup: SupplyChainDesignLtlComparisonSetup, lanes: SupplyChainDesignLtlRateBatchLaneSummary[]) {
+function normalizeWarehouseCostSourceRows(value: unknown): SupplyChainDesignLtlWarehouseCostSourceRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Partial<SupplyChainDesignLtlWarehouseCostSourceRow>;
+    return [{
+      sourceRowId: typeof row.sourceRowId === "string" && row.sourceRowId.trim() ? row.sourceRowId : "",
+      shipmentReference: typeof row.shipmentReference === "string" ? row.shipmentReference : "",
+      representedShipments: typeof row.representedShipments === "number" && Number.isFinite(row.representedShipments)
+        ? row.representedShipments
+        : 0,
+      pallets: typeof row.pallets === "number" && Number.isFinite(row.pallets) ? row.pallets : null,
+      inventoryDwellTimeDays:
+        typeof row.inventoryDwellTimeDays === "number" && Number.isFinite(row.inventoryDwellTimeDays)
+          ? row.inventoryDwellTimeDays
+          : null
+    }];
+  });
+}
+
+function buildCoverage(
+  setup: SupplyChainDesignLtlComparisonSetup,
+  lanes: SupplyChainDesignLtlRateBatchLaneSummary[],
+  currencyEvidence?: SupplyChainDesignLtlCurrencyEvidence
+) {
+  const currencyContext = toLtlCurrencyContext(currencyEvidence);
   const comparableLanes = getComparableProfileLanes(lanes);
   const covered = comparableLanes.filter((lane) => lane.status === "Rated" || lane.status === "Manual");
   const excluded = comparableLanes.filter((lane) => lane.status !== "Rated" && lane.status !== "Manual");
   const currentCostByFacility = new Map(
-    setup.currentFacilities.map((facility) => [facility.facilityId, facility.annualFacilityCost])
+    setup.currentFacilities.map((facility) => [
+      facility.facilityId,
+      normalizeLtlMoney(
+        facility.annualFacilityCost,
+        facility.annualFacilityCostCurrency,
+        currencyContext,
+        `${facility.facilityId} current warehouse cost`
+      )
+    ])
   );
   const representedFacilityIds = uniqueSorted(covered.map((lane) => lane.originalFacilityId).filter(Boolean));
   const totalShipmentVolume = comparableLanes.reduce((sum, lane) => sum + lane.representedShipments, 0);
-  const totalHistoricalCost = comparableLanes.reduce((sum, lane) => sum + (lane.currentTransportationCost ?? 0), 0);
+  const totalHistoricalCost = comparableLanes.reduce(
+    (sum, lane) => sum + normalizeLtlTransportationCost(lane.currentTransportationCost, currencyContext, lane.rateRequestKey, lane.currentTransportationCostCurrency),
+    0
+  );
   const coveredShipments = covered.reduce((sum, lane) => sum + lane.representedShipments, 0);
   const coveredHistoricalTransportationCost = roundCurrency(
-    covered.reduce((sum, lane) => sum + (lane.currentTransportationCost ?? 0), 0)
+    covered.reduce(
+      (sum, lane) => sum + normalizeLtlTransportationCost(lane.currentTransportationCost, currencyContext, lane.rateRequestKey, lane.currentTransportationCostCurrency),
+      0
+    )
   );
   const excludedShipmentCount = excluded.reduce((sum, lane) => sum + lane.representedShipments, 0);
   const excludedHistoricalTransportationCost = roundCurrency(
-    excluded.reduce((sum, lane) => sum + (lane.currentTransportationCost ?? 0), 0)
+    excluded.reduce(
+      (sum, lane) => sum + normalizeLtlTransportationCost(lane.currentTransportationCost, currencyContext, lane.rateRequestKey, lane.currentTransportationCostCurrency),
+      0
+    )
   );
 
   return {
@@ -1477,10 +1668,21 @@ function getComparableProfileLanes(lanes: SupplyChainDesignLtlRateBatchLaneSumma
 
 function buildCandidateComparisons(
   setup: SupplyChainDesignLtlComparisonSetup,
-  lanes: SupplyChainDesignLtlRateBatchLaneSummary[]
+  lanes: SupplyChainDesignLtlRateBatchLaneSummary[],
+  currencyEvidence?: SupplyChainDesignLtlCurrencyEvidence,
+  warehouseCostSourceRows: SupplyChainDesignLtlWarehouseCostSourceRow[] = []
 ): SupplyChainDesignCandidateComparisonSummary[] {
+  const currencyContext = toLtlCurrencyContext(currencyEvidence);
   const currentCostByFacility = new Map(
-    setup.currentFacilities.map((facility) => [facility.facilityId, facility.annualFacilityCost])
+    setup.currentFacilities.map((facility) => [
+      facility.facilityId,
+      normalizeLtlMoney(
+        facility.annualFacilityCost,
+        facility.annualFacilityCostCurrency,
+        currencyContext,
+        `${facility.facilityId} current warehouse cost`
+      )
+    ])
   );
 
   return setup.candidateFacilities.map((candidate) => {
@@ -1491,15 +1693,21 @@ function buildCandidateComparisons(
     const representedFacilityIds = uniqueSorted(covered.map((lane) => lane.originalFacilityId).filter(Boolean));
     const missingFacilityIds = representedFacilityIds.filter((facilityId) => !currentCostByFacility.has(facilityId));
     const currentCoveredLtlCost = roundCurrency(
-      covered.reduce((sum, lane) => sum + (lane.currentTransportationCost ?? 0), 0)
+      covered.reduce(
+        (sum, lane) => sum + normalizeLtlTransportationCost(lane.currentTransportationCost, currencyContext, lane.rateRequestKey, lane.currentTransportationCostCurrency),
+        0
+      )
     );
     const candidateLtlCost = roundCurrency(
-      covered.reduce((sum, lane) => sum + (lane.estimatedTotalTransportationCost ?? 0), 0)
+      covered.reduce(
+        (sum, lane) => sum + normalizeLtlTransportationCost(lane.estimatedTotalTransportationCost, currencyContext, lane.rateRequestKey),
+        0
+      )
     );
     const currentWarehouseCost = roundCurrency(
       representedFacilityIds.reduce((sum, facilityId) => sum + (currentCostByFacility.get(facilityId) ?? 0), 0)
     );
-    const candidateWarehouseCost = roundCurrency(candidate.annualFixedCost);
+    const candidateWarehouseCost = calculateNetworkDesignCandidateWarehouseCost(candidate, covered, currencyContext, warehouseCostSourceRows);
     const currentCoveredNetworkCost = roundCurrency(currentCoveredLtlCost + currentWarehouseCost);
     const proposedCoveredNetworkCost = roundCurrency(candidateLtlCost + candidateWarehouseCost);
     const totalEstimatedDifference = roundCurrency(proposedCoveredNetworkCost - currentCoveredNetworkCost);
@@ -1584,9 +1792,19 @@ function toStoredPreparationSummary(summary: SupplyChainDesignLtlRatePreparation
   return summary
     ? {
         historicalRowsReviewed: summary.historicalRowsReviewed,
+        totalHistoricalShipmentsRepresented: summary.totalHistoricalShipmentsRepresented,
+        ltlShipmentsRepresented: summary.ltlShipmentsRepresented,
+        parcelShipmentsRepresented: summary.parcelShipmentsRepresented,
         readyRequestCount: summary.readyRequestCount,
         missingDataRequestCount: summary.missingDataRequestCount,
-        excludedNonLtlRowCount: summary.excludedNonLtlRowCount
+        excludedNonLtlRowCount: summary.excludedNonLtlRowCount,
+        warehouseCostSourceRows: summary.sourceRowOutcomes.map((row) => ({
+          sourceRowId: row.sourceRowId,
+          shipmentReference: row.shipmentOrderReference,
+          representedShipments: row.representedShipments,
+          pallets: row.pallets,
+          inventoryDwellTimeDays: row.inventoryDwellTimeDays
+        }))
       }
     : undefined;
 }
@@ -1614,16 +1832,26 @@ function isReusableBatchInput(
 
 function buildBatchCompatibilityFingerprint(input: ScdsLtlBatchInput) {
   return {
+    forceFreshRates: input.forceFreshRates === true,
+    currencyEvidence: input.currencyEvidence ?? null,
     accountId: input.accountId,
     carrierHashes: input.carrierHashes.slice().sort(),
     comparisonSetup: normalizeComparisonSetup(input.comparisonSetup),
     requests: input.requests
       .map((request) => ({
+        currentTransportationCost: request.currentTransportationCost,
+        currentTransportationCostCurrency: request.currentTransportationCostCurrency ?? null,
         candidateFacilityId: request.candidateFacilityId,
         originalFacilityId: request.originalFacilityId,
         representativePallets: request.representativePallets,
         representativeWeight: request.representativeWeight,
         weightUnit: request.weightUnit,
+        inventoryDwellTimeDays: request.inventoryDwellTimeDays ?? null,
+        warehouseCostSourceRows: normalizeWarehouseCostSourceRows(request.warehouseCostSourceRows).map((row) => ({
+          representedShipments: row.representedShipments,
+          pallets: row.pallets,
+          inventoryDwellTimeDays: row.inventoryDwellTimeDays
+        })),
         dimensions: request.dimensions,
         dimensionUnit: request.dimensionUnit,
         freightClass: request.freightClass,
@@ -1660,6 +1888,103 @@ function hasInputCurrentCostEvidence(input: ScdsLtlBatchInput | null) {
   return input !== null && input.requests.length > 0 && input.requests.every((request) => Number.isFinite(request.currentTransportationCost));
 }
 
+function safeMapScdsLtlRateBatchSummary(
+  job: Parameters<typeof mapScdsLtlRateBatchSummary>[0],
+  parsedInput?: ScdsLtlBatchInput | null,
+  linkedPreparationSummary?: SupplyChainDesignLtlRatePreparationResultSummary
+) {
+  try {
+    return mapScdsLtlRateBatchSummary(job, parsedInput, linkedPreparationSummary);
+  } catch (error) {
+    const message = expectedCurrencyValidationMessage(error);
+    if (!message) {
+      throw error;
+    }
+    const input = parsedInput ?? readInput(job.input);
+    return input ? buildFailedCurrencyValidationBatchSummary(job, input, linkedPreparationSummary, message) : null;
+  }
+}
+
+function expectedCurrencyValidationMessage(error: unknown) {
+  if (!(error instanceof Error)) return null;
+  if (
+    /\bcurrency is required\b/i.test(error.message) ||
+    /\bcurrency ".+" is not supported\b/i.test(error.message) ||
+    /\brequires FX\b/i.test(error.message) ||
+    /^Warehouse cost evidence is incomplete:/i.test(error.message)
+  ) {
+    return error.message;
+  }
+  return null;
+}
+
+function buildFailedCurrencyValidationBatchSummary(
+  job: Parameters<typeof mapScdsLtlRateBatchSummary>[0],
+  input: ScdsLtlBatchInput,
+  linkedPreparationSummary: SupplyChainDesignLtlRatePreparationResultSummary | undefined,
+  message: string
+): SupplyChainDesignLtlRateBatchSummary & { projectId: string } {
+  const lanes = input.requests.map((request) => mapLane(request, undefined));
+  const preparationSummary = input.preparationSummary ?? toStoredPreparationSummary(linkedPreparationSummary);
+  const representedShipments = preparationSummary?.totalHistoricalShipmentsRepresented ??
+    getComparableProfileLanes(lanes).reduce((sum, lane) => sum + lane.representedShipments, 0);
+  const ltlShipmentsRepresented = preparationSummary?.ltlShipmentsRepresented ?? representedShipments;
+  const parcelShipmentsRepresented = preparationSummary?.parcelShipmentsRepresented ?? 0;
+  return {
+    projectId: input.projectId,
+    id: job.id,
+    status: "ERROR",
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    errorMessage: `Network Design cannot compare costs until currency and warehouse evidence is complete. ${message} Replace or remap the Historical Shipments file with Transportation Currency for every row that has Historical Transportation Cost Total.`,
+    preparationRunId: input.preparationRunId,
+    preparationCreatedAt: input.preparationCreatedAt,
+    forceFreshRates: input.forceFreshRates === true,
+    requestsSubmitted: input.requests.length,
+    processedRequests: 0,
+    ratedSuccessfully: 0,
+    issueRequests: input.requests.length,
+    missingData: 0,
+    noRateReturned: 0,
+    sevenLErrors: 0,
+    manuallyRated: 0,
+    excluded: 0,
+    sourceRowCounts: {
+      historicalRowsReviewed: preparationSummary?.historicalRowsReviewed ?? lanes.length,
+      ltlRowsReviewed: getComparableProfileLanes(lanes).length,
+      totalHistoricalShipmentsRepresented: representedShipments,
+      ltlShipmentsRepresented,
+      parcelShipmentsRepresented,
+      shipmentsRepresented: representedShipments,
+      rateRequestsCompleted: 0,
+      incompleteLtlRowsExcluded: preparationSummary?.missingDataRequestCount ?? 0,
+      nonLtlRowsExcluded: preparationSummary?.excludedNonLtlRowCount ?? 0,
+      unratedRateRequests: input.requests.length
+    },
+    historicalShipmentVolumeCovered: 0,
+    unratedRepresentedShipments: lanes.reduce((sum, lane) => sum + lane.representedShipments, 0),
+    currencyEvidence: input.currencyEvidence,
+    accountName: input.accountName,
+    lanes,
+    candidateComparisons: [],
+    coverage: {
+      historicalLtlRowsReviewed: getComparableProfileLanes(lanes).length,
+      validLtlRowsRated: 0,
+      unratedRequests: input.requests.length,
+      currentRepresentedWarehouseCost: 0,
+      coveredShipments: 0,
+      coveredHistoricalTransportationCost: 0,
+      excludedShipmentCount: lanes.reduce((sum, lane) => sum + lane.representedShipments, 0),
+      excludedHistoricalTransportationCost: 0,
+      shipmentCoveragePercent: 0,
+      historicalCostCoveragePercent: 0
+    },
+    savedInputSelection: {
+      selectedCandidateFacilityIds: input.comparisonSetup?.candidateFacilities.map((candidate) => candidate.facilityId) ?? []
+    }
+  };
+}
+
 function hasReusableCompletedBatch(
   batch: { ltlBatchQuoteLanes?: Array<{ selectedQuoteJson: Prisma.JsonValue | null; manualRateJson: Prisma.JsonValue | null }> },
   input: ScdsLtlBatchInput | null
@@ -1693,16 +2018,129 @@ function normalizeComparisonSetup(setup: SupplyChainDesignLtlComparisonSetup | u
     currentFacilities: (setup?.currentFacilities ?? [])
       .map((facility) => ({
         facilityId: facility.facilityId,
-        annualFacilityCost: roundCurrency(facility.annualFacilityCost)
+        annualFacilityCost: roundCurrency(facility.annualFacilityCost),
+        annualFacilityCostCurrency: facility.annualFacilityCostCurrency ?? null
       }))
       .sort((left, right) => left.facilityId.localeCompare(right.facilityId)),
     candidateFacilities: (setup?.candidateFacilities ?? [])
       .map((facility) => ({
         facilityId: facility.facilityId,
-        annualFixedCost: roundCurrency(facility.annualFixedCost)
+        annualFixedCost: typeof facility.annualFixedCost === "number" ? roundCurrency(facility.annualFixedCost) : null,
+        annualFixedCostCurrency: facility.annualFixedCostCurrency ?? null,
+        inboundFeePerPallet: facility.inboundFeePerPallet ?? null,
+        inboundFeePerPalletCurrency: facility.inboundFeePerPalletCurrency ?? null,
+        outboundFeePerPallet: facility.outboundFeePerPallet ?? null,
+        outboundFeePerPalletCurrency: facility.outboundFeePerPalletCurrency ?? null,
+        storageFeePerPalletPerMonth: facility.storageFeePerPalletPerMonth ?? null,
+        storageFeePerPalletPerMonthCurrency: facility.storageFeePerPalletPerMonthCurrency ?? null
       }))
       .sort((left, right) => left.facilityId.localeCompare(right.facilityId))
   };
+}
+
+function toLtlCurrencyContext(
+  evidence: SupplyChainDesignLtlCurrencyEvidence | undefined
+): SupplyChainDesignCurrencyContext | null {
+  if (!evidence) return null;
+  return buildSupplyChainDesignCurrencyContext({
+    analysisCurrency: evidence?.analysisCurrency ?? "USD",
+    cadToUsdRate: evidence?.cadToUsdRate ?? null
+  });
+}
+
+function calculateNetworkDesignCandidateWarehouseCost(
+  candidate: SupplyChainDesignLtlComparisonSetup["candidateFacilities"][number],
+  coveredLanes: SupplyChainDesignLtlRateBatchLaneSummary[],
+  currencyContext: SupplyChainDesignCurrencyContext | null,
+  preparationWarehouseCostRows: SupplyChainDesignLtlWarehouseCostSourceRow[] = []
+) {
+  if (typeof candidate.annualFixedCost === "number" && Number.isFinite(candidate.annualFixedCost)) {
+    return roundCurrency(
+      normalizeLtlMoney(
+        candidate.annualFixedCost,
+        candidate.annualFixedCostCurrency,
+        currencyContext,
+        `${candidate.facilityId} candidate warehouse fixed cost`
+      )
+    );
+  }
+
+  const normalizedCandidate: SupplyChainDesignWarehouseCostCandidateInput = {
+    facilityId: candidate.facilityId,
+    facilitySourceType: "CANDIDATE",
+    currency: currencyContext?.analysisCurrency ?? candidate.inboundFeePerPalletCurrency ?? candidate.outboundFeePerPalletCurrency ?? candidate.storageFeePerPalletPerMonthCurrency ?? null,
+    annualFixedCost: null,
+    inboundFeePerPallet: normalizeOptionalLtlMoney(
+      candidate.inboundFeePerPallet ?? null,
+      candidate.inboundFeePerPalletCurrency,
+      currencyContext,
+      `${candidate.facilityId} inbound fee per pallet`
+    ),
+    outboundFeePerPallet: normalizeOptionalLtlMoney(
+      candidate.outboundFeePerPallet ?? null,
+      candidate.outboundFeePerPalletCurrency,
+      currencyContext,
+      `${candidate.facilityId} outbound fee per pallet`
+    ),
+    storageFeePerPalletPerMonth: normalizeOptionalLtlMoney(
+      candidate.storageFeePerPalletPerMonth ?? null,
+      candidate.storageFeePerPalletPerMonthCurrency,
+      currencyContext,
+      `${candidate.facilityId} storage fee per pallet per month`
+    )
+  };
+  const coveredWarehouseCostRows = coveredLanes.flatMap((lane) =>
+    lane.warehouseCostSourceRows.length > 0
+      ? lane.warehouseCostSourceRows
+      : [{
+          sourceRowId: lane.sourceRowIds[0] ?? lane.rateRequestKey,
+          shipmentReference: lane.sourceReference,
+          representedShipments: lane.representedShipments,
+          pallets: lane.representativePallets === null ? null : lane.representativePallets * lane.representedShipments,
+          inventoryDwellTimeDays: lane.inventoryDwellTimeDays
+        }]
+  );
+  const coveredSourceRowIds = new Set(coveredWarehouseCostRows.map((row) => row.sourceRowId).filter(Boolean));
+  const supplementalWarehouseCostRows = normalizeWarehouseCostSourceRows(preparationWarehouseCostRows)
+    .filter((row) => row.sourceRowId && !coveredSourceRowIds.has(row.sourceRowId));
+
+  const evidence = calculateCandidateWarehouseCostFromSourceRows({
+    candidate: normalizedCandidate,
+    sourceRows: [...coveredWarehouseCostRows, ...supplementalWarehouseCostRows]
+  });
+  if (currencyContext && evidence.completeWarehouseCost === null) {
+    throw new Error(`Warehouse cost evidence is incomplete: ${evidence.missingInputs.join("; ")}`);
+  }
+  return roundCurrency(evidence.completeWarehouseCost ?? 0);
+}
+
+function normalizeLtlTransportationCost(
+  amount: number | null,
+  context: SupplyChainDesignCurrencyContext | null,
+  label: string,
+  sourceCurrency: string | null | undefined = "USD"
+) {
+  return amount === null ? 0 : normalizeLtlMoney(amount, sourceCurrency, context, `${label} transportation cost`);
+}
+
+function normalizeLtlMoney(
+  amount: number,
+  sourceCurrency: string | null | undefined,
+  context: SupplyChainDesignCurrencyContext | null,
+  label: string
+) {
+  if (!context) return amount;
+  if (amount === 0 && !sourceCurrency) return 0;
+  return normalizeSupplyChainDesignMoney(amount, sourceCurrency, context, label).normalizedAmount;
+}
+
+function normalizeOptionalLtlMoney(
+  amount: number | null,
+  sourceCurrency: string | null | undefined,
+  context: SupplyChainDesignCurrencyContext | null,
+  label: string
+) {
+  return amount === null ? null : normalizeLtlMoney(amount, sourceCurrency, context, label);
 }
 
 function uniqueSorted(values: string[]) {
@@ -1737,6 +2175,14 @@ async function getScdsJobForTenant(context: AuthenticatedContext, jobRunId: stri
 }
 
 function buildOutput(input: ScdsLtlBatchInput, progress: { processedLanes: number; quotedLanes: number; issueLanes: number; quoteCount: number; errorCount: number }, completedAt: string | null = null) {
+  const firstCandidateId = input.requests[0]?.candidateFacilityId ?? null;
+  const comparableRequests = firstCandidateId
+    ? input.requests.filter((request) => request.candidateFacilityId === firstCandidateId)
+    : input.requests;
+  const comparableShipmentsRepresented = comparableRequests.reduce(
+    (sum, request) => sum + request.representedShipments,
+    0
+  );
   return {
     projectId: input.projectId,
     preparationRunId: input.preparationRunId,
@@ -1753,8 +2199,76 @@ function buildOutput(input: ScdsLtlBatchInput, progress: { processedLanes: numbe
     quoteCount: progress.quoteCount,
     errorCount: progress.errorCount,
     selectedCarrierCount: input.carrierHashes.length,
+    sourceRowCounts: {
+      historicalRowsReviewed: input.preparationSummary?.historicalRowsReviewed ?? comparableRequests.length,
+      ltlRowsReviewed: comparableRequests.length,
+      totalHistoricalShipmentsRepresented:
+        input.preparationSummary?.totalHistoricalShipmentsRepresented ??
+        comparableShipmentsRepresented,
+      ltlShipmentsRepresented:
+        input.preparationSummary?.ltlShipmentsRepresented ??
+        comparableShipmentsRepresented,
+      parcelShipmentsRepresented: input.preparationSummary?.parcelShipmentsRepresented ?? 0,
+      shipmentsRepresented:
+        input.preparationSummary?.totalHistoricalShipmentsRepresented ??
+        comparableShipmentsRepresented
+    },
     completedAt
   };
+}
+
+async function isLtlPreparationFreshForCurrentSource(tenantId: string, projectId: string, inputReferences: Prisma.JsonValue | null) {
+  const shipmentsReference = readInputReference(inputReferences, "shipments");
+  const candidateFacilitiesReference = readInputReference(inputReferences, "candidateFacilities");
+  if (!shipmentsReference || !candidateFacilitiesReference) {
+    return false;
+  }
+  const mappings = await prisma.supplyChainDesignFileMapping.findMany({
+    where: {
+      tenantId,
+      projectId,
+      id: {
+        in: [shipmentsReference.mappingId, candidateFacilitiesReference.mappingId]
+      }
+    },
+    include: {
+      file: {
+        select: {
+          contentHash: true
+        }
+      }
+    }
+  });
+  const mappingById = new Map(mappings.map((mapping) => [mapping.id, mapping]));
+  return [shipmentsReference, candidateFacilitiesReference].every((reference) => {
+    const mapping = mappingById.get(reference.mappingId);
+    return Boolean(
+      mapping &&
+      mapping.fileId === reference.fileId &&
+      mapping.updatedAt.toISOString() === reference.mappingUpdatedAt &&
+      reference.contentHash &&
+      mapping.file.contentHash === reference.contentHash
+    );
+  });
+}
+
+function readInputReference(value: Prisma.JsonValue | null, key: "shipments" | "candidateFacilities") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const object = value as Record<string, unknown>;
+  const reference = object[key];
+  if (!reference || typeof reference !== "object" || Array.isArray(reference)) return null;
+  const candidate = reference as Record<string, unknown>;
+  return typeof candidate.fileId === "string" &&
+    typeof candidate.mappingId === "string" &&
+    typeof candidate.mappingUpdatedAt === "string" &&
+    typeof candidate.contentHash === "string"
+    ? {
+        fileId: candidate.fileId,
+        mappingId: candidate.mappingId,
+        mappingUpdatedAt: candidate.mappingUpdatedAt,
+        contentHash: candidate.contentHash
+      }
+    : null;
 }
 
 function readBoundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number) {
@@ -1787,6 +2301,10 @@ async function mapWithConcurrency<T>(values: T[], concurrency: number, worker: (
 
 function roundCurrency(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function roundQuantity(value: number) {
+  return Math.round(value * 1000000) / 1000000;
 }
 
 function safePercent(numerator: number, denominator: number) {

@@ -9,6 +9,7 @@ import {
 import { SCDS_LTL_RATE_PREPARATION_RESULT_VERSION } from "@/modules/supply-chain-design/candidate-ltl-rate-preparation";
 import { getSupplyChainDesignLtlRateBatches } from "@/modules/supply-chain-design/ltl-rate-batches";
 import { WAREHOUSE_LOCATION_STRATEGY_RESULT_VERSION } from "@/modules/supply-chain-design/warehouse-location-strategy";
+import { normalizeSupplyChainDesignWeightUnit } from "@/modules/supply-chain-design/weight-units";
 import {
   readWarehouseCostFacilityOptions,
   WAREHOUSE_COST_COMPARISON_RESULT_VERSION,
@@ -124,6 +125,8 @@ export async function listSupplyChainDesignProjects(
     name: project.name,
     description: project.description,
     status: project.status,
+    analysisCurrency: project.analysisCurrency === "CAD" ? "CAD" : "USD",
+    cadToUsdRate: project.cadToUsdRate == null ? null : Number(project.cadToUsdRate),
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     createdByName: project.createdBy?.name ?? project.createdBy?.email ?? null
@@ -221,6 +224,8 @@ export async function getSupplyChainDesignProject(
     name: project.name,
     description: project.description,
     status: project.status,
+    analysisCurrency: project.analysisCurrency === "CAD" ? "CAD" : "USD",
+    cadToUsdRate: project.cadToUsdRate == null ? null : Number(project.cadToUsdRate),
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     createdByName: project.createdBy?.name ?? project.createdBy?.email ?? null,
@@ -934,8 +939,8 @@ function mapModelRunSummary(run: {
     errorMessage: run.errorMessage,
     inputReferences,
     resultSummary: toModel01ProofResult(run.resultSummary),
-    weightUnit: weightUnit.unit,
-    weightUnitWarning: weightUnit.warning
+    weightUnit: toModel01ProofResult(run.resultSummary)?.normalizedWeightUnit ?? weightUnit.unit,
+    weightUnitWarning: toModel01ProofResult(run.resultSummary)?.normalizedWeightUnit ? null : weightUnit.warning
   };
 }
 
@@ -1037,11 +1042,12 @@ function getModel01ShipmentWeightUnit(
   for (const row of rows.slice(1)) {
     const unit = (row[weightUnitIndex] ?? "").trim();
     if (unit) {
-      units.set(unit.toLowerCase(), unit);
+      const normalized = normalizeSupplyChainDesignWeightUnit(unit);
+      units.set(normalized.ok ? normalized.unit : unit.toLowerCase(), normalized.ok ? normalized.unit : unit);
     }
   }
   if (units.size === 1) {
-    return { unit: [...units.values()][0], warning: null };
+    return { unit: [...units.values()][0] ?? null, warning: null };
   }
   if (units.size > 1) {
     return {
@@ -1314,6 +1320,7 @@ function toWarehouseLocationStrategyResult(value: unknown): SupplyChainDesignWar
     candidate.resultVersion === "WAREHOUSE_LOCATION_STRATEGY_V5" ||
     candidate.resultVersion === "WAREHOUSE_LOCATION_STRATEGY_V6" ||
     candidate.resultVersion === "WAREHOUSE_LOCATION_STRATEGY_V7" ||
+    candidate.resultVersion === "WAREHOUSE_LOCATION_STRATEGY_V9" ||
     candidate.resultVersion === "WAREHOUSE_LOCATION_STRATEGY_V8"
     ? (value as SupplyChainDesignWarehouseLocationStrategyRunSummary["resultSummary"])
     : null;
@@ -1519,6 +1526,8 @@ function toModel01ProofResult(value: unknown): SupplyChainDesignModel01ProofResu
     transportationCostByCurrency: toCurrencyCosts(candidate.transportationCostByCurrency, "transportationCost"),
     facilityCostByCurrency: toCurrencyCosts(candidate.facilityCostByCurrency, "facilityOperatingCost"),
     observedNetworkCostByCurrency: toCurrencyCosts(candidate.observedNetworkCostByCurrency, "observedCost"),
+    normalizedWeightUnit: candidate.normalizedWeightUnit === "lb" ? "lb" : undefined,
+    fxSnapshot: toFxSnapshot(candidate.fxSnapshot),
     snapshotPalletUtilization: toSnapshotPalletUtilization(candidate.snapshotPalletUtilization),
     modeSummary: toModeSummary(candidate.modeSummary),
     serviceLevelSummary: toServiceLevelSummary(candidate.serviceLevelSummary),
@@ -2108,6 +2117,22 @@ function toCurrencyCosts(value: unknown, amountKey: "transportationCost" | "faci
     if (amountKey === "facilityOperatingCost") return { currency, facilityOperatingCost: amount };
     return { currency, observedCost: amount };
   });
+}
+
+function toFxSnapshot(value: unknown): SupplyChainDesignModel01ProofResultSummary["fxSnapshot"] {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const analysisCurrency = row.analysisCurrency === "CAD" ? "CAD" : row.analysisCurrency === "USD" ? "USD" : null;
+  if (!analysisCurrency) {
+    return undefined;
+  }
+  return {
+    analysisCurrency,
+    cadToUsdRate: typeof row.cadToUsdRate === "number" ? row.cadToUsdRate : null,
+    rateDirection: "1 CAD = X USD" as const
+  };
 }
 
 function toSnapshotPalletUtilization(value: unknown) {
