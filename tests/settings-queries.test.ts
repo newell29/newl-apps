@@ -182,8 +182,10 @@ describe("getSettingsShell 7L contract", () => {
         publicConfig: {
           scopes: ["User.Read", "offline_access", "Mail.Read", "Files.Read.All", "Sites.Read.All"],
           adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+          inboundOwnerMailboxTargets: ["alex@newl.ca", "faisal@newl.ca"],
           mailboxAccessMode: "SIGNED_IN_USER",
           mailSyncEnabled: true,
+          inboundCorrespondenceEnabled: true,
           fileSyncEnabled: true,
           draftingEnabled: false
         }
@@ -200,8 +202,10 @@ describe("getSettingsShell 7L contract", () => {
 
     expect(settings.microsoftGraph).toMatchObject({
       adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+      inboundOwnerMailboxTargets: ["alex@newl.ca", "faisal@newl.ca"],
       mailboxAccessMode: "SIGNED_IN_USER",
       mailSyncEnabled: true,
+      inboundCorrespondenceEnabled: true,
       fileSyncEnabled: true,
       draftingEnabled: false,
       consentConfigured: true,

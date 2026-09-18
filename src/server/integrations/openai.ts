@@ -190,6 +190,35 @@ export type WebsiteGrowthDraftResult = {
   rawResponse: Record<string, unknown>;
 };
 
+export type InboundEmailDraftContext = {
+  model: string;
+  senderFirstName: string;
+  opportunity: {
+    company: string | null;
+    contactName: string | null;
+    email: string;
+    requirements: string | null;
+    source: string | null;
+    status: string;
+    nextAction: string | null;
+  };
+  correspondence: Array<{
+    direction: "INBOUND" | "OUTBOUND";
+    subject: string;
+    body: string;
+    at: string;
+  }>;
+};
+
+export type InboundEmailDraftResult = {
+  subject: string;
+  body: string;
+  recommendedNextAction: string;
+  recommendedFollowUpDays: number;
+  rationale: string;
+  rawResponse: Record<string, unknown>;
+};
+
 export type WebsiteGrowthDraftPagePreview = {
   mode: "new_page" | "existing_page_update" | "legacy_redirect_rebuild" | "internal_link_update";
   eyebrow: string;
@@ -250,6 +279,24 @@ export type ApolloCompanySuggestionResult = {
 
 const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 const OUTREACH_QA_RETRY_DELAYS_MS = [2_000, 5_000, 15_000];
+const INBOUND_EMAIL_DRAFT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "subject",
+    "body",
+    "recommendedNextAction",
+    "recommendedFollowUpDays",
+    "rationale"
+  ],
+  properties: {
+    subject: { type: "string", minLength: 2, maxLength: 200 },
+    body: { type: "string", minLength: 10, maxLength: 5_000 },
+    recommendedNextAction: { type: "string", minLength: 2, maxLength: 500 },
+    recommendedFollowUpDays: { type: "integer", minimum: 1, maximum: 10 },
+    rationale: { type: "string", minLength: 2, maxLength: 500 }
+  }
+} as const;
 
 const OUTREACH_STRATEGY_SCHEMA = {
   type: "object",
@@ -415,6 +462,43 @@ export function getOpenAiDraftRuntimeNotes() {
   return isOpenAiDraftGenerationConfigured()
     ? "OpenAI runtime is configured through the server environment."
     : "OpenAI runtime is not configured yet. Add OPENAI_API_KEY in the server environment to enable live draft generation.";
+}
+
+export async function generateInboundEmailDraft(
+  context: InboundEmailDraftContext
+): Promise<InboundEmailDraftResult> {
+  const response = await requestStructuredOpenAiResponse({
+    model: context.model,
+    reasoningEffort: "low",
+    schemaName: "newl_inbound_email_draft",
+    schema: INBOUND_EMAIL_DRAFT_SCHEMA,
+    system:
+      "You are an inbound logistics sales specialist for Newl Group. Draft one concise, helpful plain-text email for the assigned employee to review before sending. Use only the supplied opportunity and correspondence. Answer supported questions, acknowledge missing information, and ask only the few questions needed to move the enquiry forward. Never invent pricing, capacity, transit times, service availability, customer history, or commitments. Do not claim that anyone called, quoted, booked, or completed work unless the correspondence proves it. Preserve the subject of an existing conversation with an ordinary Re: prefix. Avoid hype, fake familiarity, markdown, and generic phrases such as 'I hope this email finds you well'. End with the supplied sender first name on its own line. Recommend an internal next action and a follow-up delay, but do not tell the customer that an automated system is involved.",
+    user: JSON.stringify(context)
+  });
+  const output = response.output;
+  const subject = readNonEmptyString(output.subject);
+  const body = readNonEmptyString(output.body);
+  const recommendedNextAction = readNonEmptyString(output.recommendedNextAction);
+  const rationale = readNonEmptyString(output.rationale);
+  const recommendedFollowUpDays =
+    typeof output.recommendedFollowUpDays === "number" &&
+    Number.isInteger(output.recommendedFollowUpDays) &&
+    output.recommendedFollowUpDays >= 1 &&
+    output.recommendedFollowUpDays <= 10
+      ? output.recommendedFollowUpDays
+      : null;
+  if (!subject || !body || !recommendedNextAction || !rationale || !recommendedFollowUpDays) {
+    throw new Error("OpenAI returned an incomplete inbound email draft.");
+  }
+  return {
+    subject,
+    body,
+    recommendedNextAction,
+    recommendedFollowUpDays,
+    rationale,
+    rawResponse: response.output
+  };
 }
 
 export async function generateTier1SequenceDraft(context: Tier1DraftContext): Promise<Tier1DraftResult> {

@@ -23,6 +23,8 @@ export type MicrosoftGraphMailMessage = {
   internetMessageId?: string | null;
   conversationId?: string | null;
   receivedDateTime?: string | null;
+  sentDateTime?: string | null;
+  isDraft?: boolean | null;
   hasAttachments?: boolean | null;
   toRecipients?: MicrosoftGraphMailRecipient[] | null;
   ccRecipients?: MicrosoftGraphMailRecipient[] | null;
@@ -80,11 +82,40 @@ export async function fetchMicrosoftGraphMailboxMessages(
   return messages.slice(0, options.maxMessagesPerMailbox);
 }
 
+export async function fetchMicrosoftGraphMailboxCorrespondenceMessages(
+  accessToken: string,
+  mailbox: string,
+  options: MicrosoftGraphMailFetchOptions
+) {
+  const perFolderLimit = Math.max(1, Math.ceil(options.maxMessagesPerMailbox / 2));
+  const [inbox, sent] = await Promise.all([
+    fetchMicrosoftGraphMailboxFolderMessages(accessToken, mailbox, "Inbox", {
+      ...options,
+      maxMessagesPerMailbox: perFolderLimit
+    }),
+    fetchMicrosoftGraphMailboxFolderMessages(accessToken, mailbox, "SentItems", {
+      ...options,
+      maxMessagesPerMailbox: perFolderLimit
+    }, "sentDateTime")
+  ]);
+
+  return Array.from(
+    new Map([...inbox, ...sent].map((message) => [message.id, message])).values()
+  )
+    .sort(
+      (left, right) =>
+        Date.parse(right.sentDateTime ?? right.receivedDateTime ?? "") -
+        Date.parse(left.sentDateTime ?? left.receivedDateTime ?? "")
+    )
+    .slice(0, options.maxMessagesPerMailbox);
+}
+
 export async function fetchMicrosoftGraphMailboxFolderMessages(
   accessToken: string,
   mailbox: string,
   folderPath: string,
-  options: MicrosoftGraphMailFetchOptions
+  options: MicrosoftGraphMailFetchOptions,
+  dateField: "receivedDateTime" | "sentDateTime" = "receivedDateTime"
 ) {
   const messagePath = await resolveMicrosoftGraphMailboxFolderMessagesPath(
     accessToken,
@@ -97,7 +128,8 @@ export async function fetchMicrosoftGraphMailboxFolderMessages(
     messagePath,
     since,
     options.maxMessagesPerMailbox,
-    "id,subject,receivedDateTime,hasAttachments,from"
+    "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,sentDateTime,isDraft,hasAttachments,from,toRecipients,ccRecipients",
+    dateField
   );
 
   while (nextUrl && messages.length < options.maxMessagesPerMailbox) {
@@ -205,6 +237,37 @@ export async function createAndSendMicrosoftGraphMailboxMessage(
   };
 }
 
+export async function replyToMicrosoftGraphMailboxMessage(
+  accessToken: string,
+  mailbox: string,
+  messageId: string,
+  body: string
+) {
+  const messagePath =
+    mailbox === "me"
+      ? `me/messages/${encodeURIComponent(messageId)}/reply`
+      : `${(await resolveMicrosoftGraphMailboxMessagesPath(accessToken, mailbox)).replace(/\/messages$/, "")}/messages/${encodeURIComponent(messageId)}/reply`;
+  const response = await fetch(`https://graph.microsoft.com/v1.0/${messagePath}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ comment: body }),
+    cache: "no-store",
+    signal: AbortSignal.timeout(MICROSOFT_GRAPH_REQUEST_TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      (await extractMicrosoftGraphResponseError(response)) ??
+        `Microsoft Graph reply failed for ${mailbox} with status ${response.status}.`
+    );
+  }
+
+  return { id: null, conversationId: null, internetMessageId: null };
+}
+
 export async function resolveMicrosoftGraphMailboxMessagesPath(accessToken: string, mailbox: string) {
   const directPath = `users/${encodeURIComponent(mailbox)}/messages`;
   const probeResponse = await fetch(`https://graph.microsoft.com/v1.0/${directPath}?$top=1&$select=id`, {
@@ -257,8 +320,9 @@ export async function resolveMicrosoftGraphMailboxFolderMessagesPath(
   let folderResourcePath: string;
   const firstSegment = segments[0]!;
 
-  if (firstSegment.toLowerCase() === "inbox") {
-    folderResourcePath = `${mailboxRoot}/mailFolders/inbox`;
+  const wellKnownFolder = readWellKnownMailFolder(firstSegment);
+  if (wellKnownFolder) {
+    folderResourcePath = `${mailboxRoot}/mailFolders/${wellKnownFolder}`;
   } else {
     const rootFolder = await findMicrosoftGraphMailFolder(
       accessToken,
@@ -355,12 +419,20 @@ function buildMailboxMessagesUrl(
   path: string,
   since: Date,
   maxMessages: number,
-  select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,hasAttachments,from,toRecipients,ccRecipients"
+  select = "id,subject,bodyPreview,body,webLink,internetMessageId,conversationId,receivedDateTime,sentDateTime,isDraft,hasAttachments,from,toRecipients,ccRecipients",
+  dateField: "receivedDateTime" | "sentDateTime" = "receivedDateTime"
 ) {
   const top = Math.min(MICROSOFT_GRAPH_MAIL_PAGE_SIZE, maxMessages);
-  const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
+  const filter = encodeURIComponent(`${dateField} ge ${since.toISOString()}`);
 
-  return `https://graph.microsoft.com/v1.0/${path}?$top=${top}&$select=${select}&$orderby=receivedDateTime%20desc&$filter=${filter}`;
+  return `https://graph.microsoft.com/v1.0/${path}?$top=${top}&$select=${select}&$orderby=${dateField}%20desc&$filter=${filter}`;
+}
+
+function readWellKnownMailFolder(value: string) {
+  const normalized = value.trim().replace(/\s+/g, "").toLowerCase();
+  if (normalized === "inbox") return "inbox";
+  if (normalized === "sentitems") return "sentitems";
+  return null;
 }
 
 async function resolveMicrosoftGraphMailboxUserId(accessToken: string, mailbox: string) {

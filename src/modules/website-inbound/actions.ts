@@ -22,6 +22,13 @@ import {
   DuplicateOpportunitiesError,
   updateOpportunity
 } from "./service";
+import {
+  createWebsiteInboundEmailDraft,
+  handoffWebsiteInboundMailbox,
+  linkWebsiteInboundEmail,
+  sendWebsiteInboundEmailDraft,
+  syncWebsiteInboundCorrespondence
+} from "./correspondence";
 
 async function mutationContext() {
   const context = await getAuthenticatedContext();
@@ -44,6 +51,12 @@ function idFrom(form: FormData) {
   if (typeof id !== "string" || !id || id.length > 100)
     throw new InboundValidationError("Missing opportunity ID.");
   return id;
+}
+function valueFrom(form: FormData, name: string, max = 100) {
+  const value = form.get(name);
+  if (typeof value !== "string" || !value.trim() || value.length > max)
+    throw new InboundValidationError(`Missing ${name}.`);
+  return value.trim();
 }
 function refresh() {
   revalidatePath("/website-inbound");
@@ -106,6 +119,89 @@ export async function addOpportunityNoteAction(
     await addOpportunityNote(ctx, idFrom(form), parseNote(form));
     refresh();
     return { status: "success", message: "Note added." };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function syncOpportunityCorrespondenceAction(
+  state: OpportunityActionState,
+  form: FormData
+): Promise<OpportunityActionState> {
+  void state;
+  void form;
+  try {
+    const ctx = await mutationContext();
+    const result = await syncWebsiteInboundCorrespondence(ctx, { trigger: "manual" });
+    refresh();
+    return {
+      status: "success",
+      message: `Mail synchronized: ${result.imported} new, ${result.updated} refreshed${result.ambiguous ? `, ${result.ambiguous} need matching` : ""}${result.failures.length ? `, ${result.failures.length} mailbox issue` : ""}.`
+    };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function generateOpportunityEmailDraftAction(
+  _state: OpportunityActionState,
+  form: FormData
+): Promise<OpportunityActionState> {
+  try {
+    const ctx = await mutationContext();
+    await createWebsiteInboundEmailDraft(ctx, idFrom(form));
+    refresh();
+    return { status: "success", message: "A reviewable email draft is ready below." };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function sendOpportunityEmailDraftAction(
+  _state: OpportunityActionState,
+  form: FormData
+): Promise<OpportunityActionState> {
+  try {
+    const ctx = await mutationContext();
+    await sendWebsiteInboundEmailDraft(ctx, {
+      draftId: valueFrom(form, "draftId"),
+      subject: valueFrom(form, "subject", 200),
+      body: valueFrom(form, "body", 5_000)
+    });
+    refresh();
+    return { status: "success", message: "Microsoft 365 accepted the approved email." };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function handoffOpportunityMailboxAction(
+  _state: OpportunityActionState,
+  form: FormData
+): Promise<OpportunityActionState> {
+  try {
+    const ctx = await mutationContext();
+    await handoffWebsiteInboundMailbox(ctx, idFrom(form));
+    refresh();
+    return { status: "success", message: "Future email is assigned to your mailbox." };
+  } catch (error) {
+    return fail(error);
+  }
+}
+
+export async function linkOpportunityEmailAction(
+  _state: OpportunityActionState,
+  form: FormData
+): Promise<OpportunityActionState> {
+  try {
+    const ctx = await mutationContext();
+    await linkWebsiteInboundEmail(
+      ctx,
+      valueFrom(form, "messageId"),
+      valueFrom(form, "targetSubmissionId")
+    );
+    refresh();
+    return { status: "success", message: "Email linked to the selected opportunity." };
   } catch (error) {
     return fail(error);
   }

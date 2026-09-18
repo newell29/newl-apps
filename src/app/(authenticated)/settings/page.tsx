@@ -621,6 +621,67 @@ export default async function SettingsPage() {
               </p>
             </div>
 
+            <div className="space-y-3 rounded-md border border-border bg-background p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Inbound opportunity owner mailboxes
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-mutedForeground">
+                    Choose the tenant members whose Inbox and Sent Items may be linked to assigned
+                    inbound opportunities. This list is separate from the Assistant mailbox list
+                    above.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    name="microsoftInboundCorrespondenceEnabled"
+                    value="true"
+                    defaultChecked={settings.microsoftGraph.inboundCorrespondenceEnabled}
+                  />
+                  Enable inbound correspondence
+                </label>
+              </div>
+              <div className="grid max-h-64 gap-2 overflow-y-auto rounded-md border border-border p-3 sm:grid-cols-2">
+                {settings.tenantUsers.map((user) => (
+                  <label
+                    key={user.userId}
+                    className="flex items-start gap-2 rounded-md p-2 text-sm hover:bg-muted/50"
+                  >
+                    <input
+                      type="checkbox"
+                      name="microsoftInboundOwnerMailboxTargets"
+                      value={user.email}
+                      defaultChecked={settings.microsoftGraph.inboundOwnerMailboxTargets.some(
+                        (target) => target.toLowerCase() === user.email.toLowerCase()
+                      )}
+                      className="mt-1"
+                    />
+                    <span>
+                      <span className="block font-medium">{user.name || user.email}</span>
+                      <span className="block text-xs text-mutedForeground">{user.email}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs leading-5 text-mutedForeground">
+                A message can be sent only by the currently assigned owner after that person reviews
+                and approves the exact recipient, subject, and body. This setting never enables
+                automatic email.
+              </p>
+              <p className="rounded-md border border-border bg-muted/30 p-3 text-xs leading-5 text-mutedForeground">
+                Application mailbox runtime:{" "}
+                <span className="font-semibold text-foreground">
+                  {settings.microsoftGraph.applicationMailboxRuntimeReady ? "Ready" : "Not ready"}
+                </span>
+                .{" "}
+                {settings.microsoftGraph.applicationMailboxRuntimeReady
+                  ? "Microsoft Graph application credentials are present. The Exchange application access policy must still allow every selected owner mailbox."
+                  : "Configure the Microsoft Graph application client, secret, and tenant in Vercel before enabling live correspondence."}
+              </p>
+            </div>
+
             <div className="grid gap-3 md:grid-cols-3">
               <label className="flex items-start justify-between gap-3 rounded-md border border-border bg-background p-4 text-sm text-foreground">
                 <span>
@@ -658,7 +719,8 @@ export default async function SettingsPage() {
                 <span>
                   <span className="block font-medium">Email drafting target</span>
                   <span className="mt-1 block text-xs leading-5 text-mutedForeground">
-                    Save reviewed drafting intent for Outlook-based replies.
+                    Allow assigned owners to prepare and manually send reviewed Outlook replies.
+                    Mail.Send is still required; no message is sent automatically.
                   </span>
                 </span>
                 <input

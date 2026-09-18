@@ -66,6 +66,20 @@ enum WebsiteInboundActivityType {
   NOTE
 }
 
+enum WebsiteInboundEmailDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WebsiteInboundEmailStatus {
+  RECEIVED
+  DRAFT
+  SENDING
+  SENT
+  SEND_FAILED
+  CANCELLED
+}
+
 enum WebsiteGrowthOpportunityStatus {
   NEW
   REVIEWING
@@ -660,6 +674,7 @@ model Tenant {
   assistantThreads                               AssistantChatThread[]
   assistantMessages                              AssistantChatMessage[]
   websiteInboundSubmissions                      WebsiteInboundSubmission[]
+  websiteInboundEmailMessages                    WebsiteInboundEmailMessage[]
   supplyChainDesignProjects                      SupplyChainDesignProject[]
   supplyChainDesignMappings                      SupplyChainDesignFileMapping[]
   supplyChainDesignModelRuns                     SupplyChainDesignModelRun[]
@@ -942,10 +957,14 @@ model WebsiteInboundSubmission {
   creationKey String?
   createdByUserId String?
   lastActivityAt DateTime @default(now())
+  communicationMailbox String?
+  lastInboundEmailAt DateTime?
+  lastOutboundEmailAt DateTime?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   owner Membership? @relation(fields: [tenantId, ownerUserId], references: [tenantId, userId], onDelete: NoAction)
   activities WebsiteInboundActivity[]
+  correspondence WebsiteInboundEmailMessage[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, creationKey])
@@ -971,6 +990,51 @@ model WebsiteInboundActivity {
   submission WebsiteInboundSubmission @relation(fields: [tenantId, submissionId], references: [tenantId, id], onDelete: Cascade)
 
   @@index([tenantId, submissionId, createdAt])
+}
+
+model WebsiteInboundEmailMessage {
+  id                    String                       @id @default(cuid())
+  tenantId              String
+  submissionId          String?
+  direction             WebsiteInboundEmailDirection
+  status                WebsiteInboundEmailStatus
+  mailboxAddress        String
+  graphMessageId        String?
+  internetMessageId     String?
+  conversationId        String?
+  subject               String
+  bodyText              String
+  bodyPreview           String?
+  senderAddress         String
+  senderName            String?
+  recipients            Json
+  ccRecipients          Json?
+  webLink               String?
+  hasAttachments        Boolean                      @default(false)
+  messageAt             DateTime
+  matchCandidates       Json?
+  draftSource           String?
+  draftRationale        String?
+  suggestedNextAction   String?
+  suggestedFollowUpOn   DateTime?                    @db.Date
+  basedOnMessageId      String?
+  createdByUserId       String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  sentByUserId          String?
+  sentAt                DateTime?
+  failureReason         String?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  tenant     Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  submission WebsiteInboundSubmission? @relation(fields: [tenantId, submissionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, mailboxAddress, graphMessageId])
+  @@index([tenantId, submissionId, messageAt])
+  @@index([tenantId, mailboxAddress, conversationId])
+  @@index([tenantId, status, messageAt])
 }
 
 model SupplyChainDesignProject {

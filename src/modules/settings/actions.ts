@@ -610,15 +610,20 @@ export async function testAssistantProviderConnectionAction(
 export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
   const context = await authorizeSettingsMutation();
   const adminMailboxTargets = readTextareaList(formData.get("microsoftAdminMailboxTargets"));
+  const inboundOwnerMailboxTargets = readFormDataList(
+    formData.getAll("microsoftInboundOwnerMailboxTargets")
+  );
   const mailboxAccessMode = readMicrosoftMailboxAccessMode(formData.get("microsoftMailboxAccessMode"));
   const mailLookbackDays = readRequiredInteger(formData, "microsoftMailLookbackDays", 1, 365);
   const maxMailMessagesPerMailbox = readRequiredInteger(formData, "microsoftMaxMailMessagesPerMailbox", 1, 2000);
   const mailSyncEnabled = formData.get("microsoftMailSyncEnabled") === "true";
+  const inboundCorrespondenceEnabled =
+    formData.get("microsoftInboundCorrespondenceEnabled") === "true";
   const fileSyncEnabled = formData.get("microsoftFileSyncEnabled") === "true";
   const draftingEnabled = formData.get("microsoftDraftingEnabled") === "true";
 
-  if (!mailSyncEnabled && !fileSyncEnabled) {
-    throw new Error("Enable at least one Microsoft 365 sync source.");
+  if (!mailSyncEnabled && !fileSyncEnabled && !inboundCorrespondenceEnabled) {
+    throw new Error("Enable at least one Microsoft 365 data source.");
   }
 
   const existing = await prisma.integrationCredential.findFirst({
@@ -639,14 +644,19 @@ export async function saveMicrosoftGraphSettingsAction(formData: FormData) {
     tenantId: context.tenantId,
     provider: IntegrationProvider.MICROSOFT_GRAPH,
     name: MICROSOFT_GRAPH_CREDENTIAL_NAME,
-    status: mailSyncEnabled || fileSyncEnabled ? IntegrationStatus.ACTIVE : IntegrationStatus.DISABLED,
+    status:
+      mailSyncEnabled || fileSyncEnabled || inboundCorrespondenceEnabled
+        ? IntegrationStatus.ACTIVE
+        : IntegrationStatus.DISABLED,
     publicConfig: buildMicrosoftGraphConfig({
       scopes: DEFAULT_MICROSOFT_GRAPH_SCOPES,
       adminMailboxTargets,
+      inboundOwnerMailboxTargets,
       mailboxAccessMode,
       mailLookbackDays,
       maxMailMessagesPerMailbox,
       mailSyncEnabled,
+      inboundCorrespondenceEnabled,
       fileSyncEnabled,
       draftingEnabled
     })
@@ -678,6 +688,17 @@ function readTextareaList(value: FormDataEntryValue | null) {
     .split(/[\n,]/)
     .map((entry) => entry.trim())
     .filter((entry, index, array) => entry.length > 0 && array.indexOf(entry) === index);
+}
+
+function readFormDataList(values: FormDataEntryValue[]) {
+  return Array.from(
+    new Set(
+      values
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
 }
 
 export async function saveTenantUserAccessAction(formData: FormData) {

@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createAndSendMicrosoftGraphMailboxMessage,
+  fetchMicrosoftGraphMailboxCorrespondenceMessages,
   fetchMicrosoftGraphMailboxFolderMessages,
   fetchMicrosoftGraphMessageAttachments,
-  fetchMicrosoftGraphMessageAttachmentContent
+  fetchMicrosoftGraphMessageAttachmentContent,
+  replyToMicrosoftGraphMailboxMessage
 } from "@/server/integrations/microsoft-graph-mail";
 
 describe("Microsoft Graph mail attachment downloads", () => {
@@ -137,6 +139,31 @@ describe("Microsoft Graph mailbox folders", () => {
       { lookbackDays: 21, maxMessagesPerMailbox: 50 }
     )).rejects.toThrow("could not find the Semrush mail folder");
   });
+
+  it("combines Inbox and Sent Items so replies and owner sends are both tracked", async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes("mailFolders/inbox/messages")) {
+        return Promise.resolve(new Response(JSON.stringify({
+          value: [{ id: "in-1", receivedDateTime: "2026-09-18T12:00:00Z" }]
+        }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        value: [{ id: "out-1", sentDateTime: "2026-09-18T13:00:00Z" }]
+      }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMicrosoftGraphMailboxCorrespondenceMessages(
+      "token",
+      "me",
+      { lookbackDays: 30, maxMessagesPerMailbox: 20 }
+    )).resolves.toEqual([
+      expect.objectContaining({ id: "out-1" }),
+      expect.objectContaining({ id: "in-1" })
+    ]);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("mailFolders/sentitems/messages"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("sentDateTime%20desc"))).toBe(true);
+  });
 });
 
 describe("Microsoft Graph outbound mail", () => {
@@ -219,5 +246,21 @@ describe("Microsoft Graph outbound mail", () => {
       }
     )).rejects.toThrow("Mailbox permission denied");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("replies through the original mailbox message when a linked thread exists", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      replyToMicrosoftGraphMailboxMessage("token", "me", "message-1", "Reviewed reply")
+    ).resolves.toMatchObject({ id: null });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://graph.microsoft.com/v1.0/me/messages/message-1/reply",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ comment: "Reviewed reply" })
+      })
+    );
   });
 });

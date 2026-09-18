@@ -6,6 +6,11 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   note: vi.fn(),
+  syncMail: vi.fn(),
+  draftMail: vi.fn(),
+  sendMail: vi.fn(),
+  handoffMail: vi.fn(),
+  linkMail: vi.fn(),
   revalidate: vi.fn(),
   redirect: vi.fn()
 }));
@@ -21,12 +26,24 @@ vi.mock("@/modules/website-inbound/service", () => ({
   addOpportunityNote: mocks.note,
   DuplicateOpportunitiesError: class extends Error {}
 }));
+vi.mock("@/modules/website-inbound/correspondence", () => ({
+  syncWebsiteInboundCorrespondence: mocks.syncMail,
+  createWebsiteInboundEmailDraft: mocks.draftMail,
+  sendWebsiteInboundEmailDraft: mocks.sendMail,
+  handoffWebsiteInboundMailbox: mocks.handoffMail,
+  linkWebsiteInboundEmail: mocks.linkMail
+}));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidate }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 import {
   createOpportunityAction,
   updateOpportunityAction,
-  addOpportunityNoteAction
+  addOpportunityNoteAction,
+  generateOpportunityEmailDraftAction,
+  handoffOpportunityMailboxAction,
+  linkOpportunityEmailAction,
+  sendOpportunityEmailDraftAction,
+  syncOpportunityCorrespondenceAction
 } from "@/modules/website-inbound/actions";
 import { AuthorizationError } from "@/server/auth/authorization";
 const context = { tenantId: "tenant-a", userId: "user-a", role: "ADMIN" };
@@ -43,6 +60,11 @@ function form() {
     revision: "2",
     creationKey: "00000000-0000-4000-8000-000000000001",
     note: "Follow up on quote",
+    draftId: "draft-a",
+    subject: "Re: Synthetic request",
+    body: "A reviewed reply.",
+    messageId: "message-a",
+    targetSubmissionId: "row-a",
     tenantId: "attacker-tenant",
     actorUserId: "attacker-user"
   }))
@@ -75,6 +97,23 @@ describe("inbound action security", () => {
       expect(mocks.note).not.toHaveBeenCalled();
     }
   );
+  it.each([
+    syncOpportunityCorrespondenceAction,
+    generateOpportunityEmailDraftAction,
+    handoffOpportunityMailboxAction,
+    linkOpportunityEmailAction,
+    sendOpportunityEmailDraftAction
+  ])("applies the same authenticated mutation boundary to correspondence", async (action) => {
+    mocks.mutate.mockRejectedValueOnce(
+      new AuthorizationError("Read-only users cannot perform this action.")
+    );
+    const result = await action(initial, form());
+    expect(result.status).toBe("error");
+    expect(result.message).toContain("Read-only");
+    expect(mocks.syncMail).not.toHaveBeenCalled();
+    expect(mocks.draftMail).not.toHaveBeenCalled();
+    expect(mocks.sendMail).not.toHaveBeenCalled();
+  });
   it("uses the authenticated actor and tenant, not form-supplied values", async () => {
     const result = await updateOpportunityAction(initial, form());
     expect(result.status).toBe("success");
@@ -104,5 +143,14 @@ describe("inbound action security", () => {
     await expect(createOpportunityAction(initial, data)).rejects.toThrow("NEXT_REDIRECT");
     expect(mocks.redirect).toHaveBeenCalledWith(expect.stringContaining("selected=new-row"));
     expect(mocks.redirect).toHaveBeenCalledWith(expect.stringContaining("view=ALL"));
+  });
+  it("passes the exact human-reviewed subject and body to the approved send service", async () => {
+    const result = await sendOpportunityEmailDraftAction(initial, form());
+    expect(result.status).toBe("success");
+    expect(mocks.sendMail).toHaveBeenCalledWith(context, {
+      draftId: "draft-a",
+      subject: "Re: Synthetic request",
+      body: "A reviewed reply."
+    });
   });
 });

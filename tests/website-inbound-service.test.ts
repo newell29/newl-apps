@@ -14,10 +14,15 @@ const db = vi.hoisted(() => ({
   },
   membership: { findUnique: vi.fn(), findMany: vi.fn() },
   websiteInboundActivity: { create: vi.fn(), findMany: vi.fn(), count: vi.fn() },
+  websiteInboundEmailMessage: { findMany: vi.fn() },
   auditLog: { create: vi.fn() }
 }));
 const transaction = vi.hoisted(() => vi.fn());
+const mailboxConfiguration = vi.hoisted(() => vi.fn());
 vi.mock("@/server/db", () => ({ prisma: { ...db, $transaction: transaction } }));
+vi.mock("@/modules/website-inbound/correspondence", () => ({
+  getWebsiteInboundMailboxConfiguration: mailboxConfiguration
+}));
 import {
   addOpportunityNote,
   createOpportunity,
@@ -67,12 +72,22 @@ function existing(overrides: Partial<WebsiteInboundSubmission> = {}): WebsiteInb
     revision: 2,
     creationKey: null,
     createdByUserId: null,
+    communicationMailbox: null,
+    lastInboundEmailAt: null,
+    lastOutboundEmailAt: null,
     ...overrides
   };
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mailboxConfiguration.mockResolvedValue({
+    enabled: false,
+    draftingEnabled: false,
+    reason: "Not configured",
+    mailboxes: [],
+    ownerMailboxes: {}
+  });
   transaction.mockImplementation(async (fn: (tx: typeof db) => Promise<unknown>) => fn(db));
   db.websiteInboundSubmission.findUnique.mockResolvedValue(null);
   db.websiteInboundSubmission.findFirst.mockResolvedValue(existing());
@@ -82,6 +97,7 @@ beforeEach(() => {
     existing({ ...data, id: "new-row" })
   );
   db.websiteInboundSubmission.updateMany.mockResolvedValue({ count: 1 });
+  db.websiteInboundEmailMessage.findMany.mockResolvedValue([]);
   db.membership.findUnique.mockResolvedValue({ id: "member-a" });
 });
 
