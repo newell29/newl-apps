@@ -7,14 +7,17 @@ export type MicrosoftGraphMailboxAccessMode = "SIGNED_IN_USER" | "ADMIN_SELECTED
 export type MicrosoftGraphSettings = {
   scopes: string[];
   adminMailboxTargets: string[];
+  inboundOwnerMailboxTargets: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
   mailLookbackDays: number;
   maxMailMessagesPerMailbox: number;
   mailSyncEnabled: boolean;
+  inboundCorrespondenceEnabled: boolean;
   fileSyncEnabled: boolean;
   draftingEnabled: boolean;
   status: IntegrationStatus;
   runtimeReady: boolean;
+  applicationMailboxRuntimeReady: boolean;
   runtimeNotes: string;
   consentConfigured: boolean;
   crossMailboxReady: boolean;
@@ -29,10 +32,12 @@ type MicrosoftGraphCredentialRecord = {
 type MicrosoftGraphConfigInput = {
   scopes: string[];
   adminMailboxTargets: string[];
+  inboundOwnerMailboxTargets?: string[];
   mailboxAccessMode: MicrosoftGraphMailboxAccessMode;
   mailLookbackDays: number;
   maxMailMessagesPerMailbox: number;
   mailSyncEnabled: boolean;
+  inboundCorrespondenceEnabled?: boolean;
   fileSyncEnabled: boolean;
   draftingEnabled: boolean;
 };
@@ -58,6 +63,7 @@ export function parseMicrosoftGraphSettings(
 
   const scopes = readStringArray(config.scopes, DEFAULT_MICROSOFT_GRAPH_SCOPES);
   const adminMailboxTargets = readStringArray(config.adminMailboxTargets, []);
+  const inboundOwnerMailboxTargets = readStringArray(config.inboundOwnerMailboxTargets, []);
   const mailboxAccessMode = readMailboxAccessMode(config.mailboxAccessMode);
   const mailLookbackDays = readInteger(
     config.mailLookbackDays,
@@ -72,27 +78,32 @@ export function parseMicrosoftGraphSettings(
     2_000
   );
   const mailSyncEnabled = readBoolean(config.mailSyncEnabled) ?? true;
+  const inboundCorrespondenceEnabled = readBoolean(config.inboundCorrespondenceEnabled) ?? false;
   const fileSyncEnabled = readBoolean(config.fileSyncEnabled) ?? true;
   const draftingEnabled = readBoolean(config.draftingEnabled) ?? false;
   const status = credential?.status ?? IntegrationStatus.DISABLED;
   const runtimeReady = hasDelegatedGraphRuntimeConfigured();
+  const applicationMailboxRuntimeReady = hasApplicationMailboxRuntimeConfigured();
   const consentConfigured = scopes.length > 0;
   const crossMailboxReady =
     mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES" &&
     adminMailboxTargets.length > 0 &&
-    hasApplicationMailboxRuntimeConfigured();
+    applicationMailboxRuntimeReady;
 
   return {
     scopes,
     adminMailboxTargets,
+    inboundOwnerMailboxTargets,
     mailboxAccessMode,
     mailLookbackDays,
     maxMailMessagesPerMailbox,
     mailSyncEnabled,
+    inboundCorrespondenceEnabled,
     fileSyncEnabled,
     draftingEnabled,
     status,
     runtimeReady,
+    applicationMailboxRuntimeReady,
     runtimeNotes: buildRuntimeNotes({
       runtimeReady,
       mailboxAccessMode,
@@ -108,10 +119,18 @@ export function buildMicrosoftGraphConfig(input: MicrosoftGraphConfigInput) {
   return {
     scopes: Array.from(new Set(input.scopes.filter((scope) => scope.trim().length > 0))),
     adminMailboxTargets: Array.from(new Set(input.adminMailboxTargets.filter((target) => target.trim().length > 0))),
+    inboundOwnerMailboxTargets: Array.from(
+      new Set(
+        (input.inboundOwnerMailboxTargets ?? [])
+          .map((target) => target.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    ),
     mailboxAccessMode: input.mailboxAccessMode,
     mailLookbackDays: input.mailLookbackDays,
     maxMailMessagesPerMailbox: input.maxMailMessagesPerMailbox,
     mailSyncEnabled: input.mailSyncEnabled,
+    inboundCorrespondenceEnabled: input.inboundCorrespondenceEnabled ?? false,
     fileSyncEnabled: input.fileSyncEnabled,
     draftingEnabled: input.draftingEnabled
   };

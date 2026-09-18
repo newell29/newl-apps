@@ -410,9 +410,12 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     const formData = new FormData();
     formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
     formData.set("microsoftAdminMailboxTargets", "shared@newl.ca\nops@newl.ca");
+    formData.append("microsoftInboundOwnerMailboxTargets", "alex@newl.ca");
+    formData.append("microsoftInboundOwnerMailboxTargets", "faisal@newl.ca");
     formData.set("microsoftMailLookbackDays", "180");
     formData.set("microsoftMaxMailMessagesPerMailbox", "750");
     formData.set("microsoftMailSyncEnabled", "true");
+    formData.set("microsoftInboundCorrespondenceEnabled", "true");
     formData.set("microsoftFileSyncEnabled", "true");
 
     await saveMicrosoftGraphSettingsAction(formData);
@@ -424,15 +427,43 @@ describe("saveTradeMiningScoringSettingsAction", () => {
     expect(args.data.name).toBe("Microsoft 365 Assistant");
     expect(args.data.publicConfig).toMatchObject({
       adminMailboxTargets: ["shared@newl.ca", "ops@newl.ca"],
+      inboundOwnerMailboxTargets: ["alex@newl.ca", "faisal@newl.ca"],
       mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
       mailLookbackDays: 180,
       maxMailMessagesPerMailbox: 750,
       mailSyncEnabled: true,
+      inboundCorrespondenceEnabled: true,
       fileSyncEnabled: true,
       draftingEnabled: false
     });
     expect(args.data.publicConfig.scopes).toContain("Mail.Read");
     expect(revalidatePath).toHaveBeenCalledWith("/assistant");
+  });
+
+  it("allows inbound correspondence without enabling Assistant mail or file sync", async () => {
+    findIntegrationCredential.mockResolvedValueOnce(null);
+    const formData = new FormData();
+    formData.set("microsoftMailboxAccessMode", "ADMIN_SELECTED_MAILBOXES");
+    formData.append("microsoftInboundOwnerMailboxTargets", "owner@newl.ca");
+    formData.set("microsoftMailLookbackDays", "90");
+    formData.set("microsoftMaxMailMessagesPerMailbox", "300");
+    formData.set("microsoftInboundCorrespondenceEnabled", "true");
+
+    await saveMicrosoftGraphSettingsAction(formData);
+
+    expect(createIntegrationCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "ACTIVE",
+          publicConfig: expect.objectContaining({
+            mailSyncEnabled: false,
+            fileSyncEnabled: false,
+            inboundCorrespondenceEnabled: true,
+            inboundOwnerMailboxTargets: ["owner@newl.ca"]
+          })
+        })
+      })
+    );
   });
 
   it("syncs Apollo reps and preserves manual email routing fields", async () => {

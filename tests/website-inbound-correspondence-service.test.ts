@@ -19,10 +19,13 @@ vi.mock("@/server/db", () => ({ prisma: { ...db, $transaction: transaction } }))
 vi.mock("@/server/integrations/microsoft-graph", () => ({
   MICROSOFT_GRAPH_CREDENTIAL_NAME: "Microsoft 365 Assistant",
   parseMicrosoftGraphSettings: () => ({
-    adminMailboxTargets: ["owner@example.com"],
+    adminMailboxTargets: ["shared@example.com"],
+    inboundOwnerMailboxTargets: ["owner@example.com"],
     mailboxAccessMode: "ADMIN_SELECTED_MAILBOXES",
     mailSyncEnabled: true,
+    inboundCorrespondenceEnabled: true,
     draftingEnabled: true,
+    applicationMailboxRuntimeReady: true,
     crossMailboxReady: true,
     runtimeNotes: "Ready"
   })
@@ -36,7 +39,10 @@ vi.mock("@/server/integrations/microsoft-graph-mail", () => ({
   fetchMicrosoftGraphMailboxCorrespondenceMessages: vi.fn()
 }));
 
-import { sendWebsiteInboundEmailDraft } from "@/modules/website-inbound/correspondence";
+import {
+  getWebsiteInboundMailboxConfiguration,
+  sendWebsiteInboundEmailDraft
+} from "@/modules/website-inbound/correspondence";
 
 const ownerContext = {
   tenantId: "tenant-a",
@@ -86,6 +92,19 @@ beforeEach(() => {
 });
 
 describe("approved inbound email sends", () => {
+  it("uses the dedicated inbound owner allowlist instead of Assistant mailboxes", async () => {
+    db.membership.findMany.mockResolvedValue([
+      { userId: "owner-a", user: { email: "owner@example.com" } },
+      { userId: "shared-user", user: { email: "shared@example.com" } }
+    ]);
+
+    await expect(getWebsiteInboundMailboxConfiguration("tenant-a")).resolves.toMatchObject({
+      enabled: true,
+      mailboxes: ["owner@example.com"],
+      ownerMailboxes: { "owner-a": "owner@example.com" }
+    });
+  });
+
   it("rejects approval by anyone except the assigned owner", async () => {
     db.websiteInboundEmailMessage.findFirst.mockResolvedValueOnce(draft);
     await expect(

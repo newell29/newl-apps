@@ -58,7 +58,7 @@ export async function getWebsiteInboundMailboxConfiguration(
   ]);
   const settings = parseMicrosoftGraphSettings(credential);
   const mailboxes = Array.from(
-    new Set(settings.adminMailboxTargets.map(normalizeEmail).filter(Boolean))
+    new Set(settings.inboundOwnerMailboxTargets.map(normalizeEmail).filter(Boolean))
   );
   const mailboxSet = new Set(mailboxes);
   const ownerMailboxes = Object.fromEntries(
@@ -68,9 +68,9 @@ export async function getWebsiteInboundMailboxConfiguration(
   );
   const enabled =
     credential?.status === IntegrationStatus.ACTIVE &&
-    settings.mailSyncEnabled &&
+    settings.inboundCorrespondenceEnabled &&
     settings.mailboxAccessMode === "ADMIN_SELECTED_MAILBOXES" &&
-    settings.crossMailboxReady &&
+    settings.applicationMailboxRuntimeReady &&
     mailboxes.length > 0;
   return {
     enabled,
@@ -79,9 +79,15 @@ export async function getWebsiteInboundMailboxConfiguration(
       ? null
       : credential?.status !== IntegrationStatus.ACTIVE
         ? "Microsoft 365 is not active for this organization."
+        : !settings.inboundCorrespondenceEnabled
+          ? "Inbound opportunity correspondence is disabled in Microsoft 365 settings."
         : settings.mailboxAccessMode !== "ADMIN_SELECTED_MAILBOXES"
           ? "Inbound correspondence requires selected organization mailboxes."
-          : settings.runtimeNotes,
+          : mailboxes.length === 0
+            ? "Select at least one inbound opportunity owner mailbox in Microsoft 365 settings."
+            : !settings.applicationMailboxRuntimeReady
+              ? "Microsoft Graph application mailbox credentials are not configured in the server environment."
+              : settings.runtimeNotes,
     mailboxes,
     ownerMailboxes
   };
@@ -119,7 +125,7 @@ export async function syncWebsiteInboundCorrespondence(
   );
   if (mailboxResults.every((result) => result.error)) {
     throw new InboundValidationError(
-      "Microsoft 365 could not read either approved owner mailbox. Review the mailbox permissions and try again."
+      "Microsoft 365 could not read any approved owner mailbox. Review the mailbox permissions and try again."
     );
   }
 
