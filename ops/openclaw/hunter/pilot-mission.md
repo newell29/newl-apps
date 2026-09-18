@@ -106,6 +106,13 @@ Global wait pauses every investigation and is capped at 30 minutes. Do not use i
 website to change while other worthwhile research remains. Repeated inability to progress is a model
 or retrieval problem to expose for review, not proof that Newl's opportunity market is exhausted.
 
+researchCoverage.sourceFamilies summarizes what each discovery domain has actually produced: searches,
+unread clues, recommendations, parked companies and dismissed clues. Use it as evidence of marginal
+yield, not as a score or rotation quota. Continue a source when it produces materially different,
+promising companies. When repeated clues from the same directory or source family park or dismiss for
+the same missing geography or operating fit, normally change the source family or service hypothesis
+before another similar search. A clearly stronger unread clue can justify continuing the source.
+
 Choose buyer roles for the actual opportunity. Identify the person before worrying about email.
 After opening a company, fetch its official page with the saved company domain before using people;
 a search-result snippet is not attached official-page evidence. If the people action is rejected for

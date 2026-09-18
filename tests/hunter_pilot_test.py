@@ -267,6 +267,27 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(coverage["directions"]["gta"]["attempts"], 0)
         self.assertEqual(coverage["directions"]["charlotte"]["recentQueries"], ["synthetic retail expansion"])
 
+    def test_source_family_performance_exposes_yield_without_forcing_rotation(self):
+        evidence = self.action("search", query="synthetic distributor", direction="gta")["evidenceIds"]
+        self.action("dismiss_clue", evidenceIds=evidence,
+            reason="No supported local movement or external logistics fit",
+            name="Synthetic Supply", domain="supply.example")
+        row = self.p.context()["researchCoverage"]["sourceFamilies"][0]
+        self.assertEqual(row, {"source": "supply.example", "searches": 1, "unreadClues": 0,
+            "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 1,
+            "lastSearchAt": self.time.isoformat()})
+        self.assertIn("observed source outcomes, not quotas", self.p.context()["workSelection"])
+        self.assertIn("evidence of marginal", MISSION)
+
+    def test_source_family_performance_counts_each_company_once_per_source(self):
+        company = self.open()
+        page = self.action("fetch", url="https://supply.example/about", company="supply.example")["evidenceIds"][0]
+        self.decision(evidence=page)
+        row = self.p.context()["researchCoverage"]["sourceFamilies"][0]
+        self.assertEqual(row["recommendedCompanies"], 1)
+        self.assertEqual(row["parkedCompanies"], 0)
+        self.assertEqual(row["searches"], 1)
+
     def test_old_partial_search_history_is_not_invented_or_reset(self):
         self.p.state["attempts"] = {
             "old-complete": {"action": "search", "at": self.time.isoformat(), "query": "synthetic old search", "result": {"direction": "ocean"}},
