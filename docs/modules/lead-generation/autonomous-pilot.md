@@ -125,6 +125,28 @@ clues by discovery domain. The model uses those observed outcomes as marginal-yi
 sources remain available, while repeated same-shaped dead ends should prompt a different source family
 or service hypothesis. This adds no score, quota, model stage, database record or external write.
 
+The first post-source-memory afternoon showed that result hosts alone are incomplete source memory. An
+empty `site:madeinnc.org` search disappeared from the summary, and the model later repeated that source;
+an Atlanta Market site search was also retried after weak generic results. `sourceFamilies` now records
+explicit `site:` targets, targeted-search count and empty-search count even when retrieval returns no
+usable row. Its bounded view keeps both historically frequent and recently attempted sources so an old
+high-volume directory cannot hide the source the model just exhausted.
+
+The same run left search snippets for already recommended or dismissed companies in `unreadClues` when
+the snippet lived on a third-party domain. Unread selection now excludes evidence already attached to a
+non-active company and conservatively matches sufficiently specific saved or dismissed company names and
+domain labels in third-party clue text. Unrelated rows from the same broad search remain available. This
+is research-queue cleanup, not suppression, permanent company rejection or fuzzy identity merging.
+
+The worker also used its entire remaining allowance on searches, fetches and dismissals after its last
+company recommendation because those actions all counted as mechanically useful. The context now exposes
+`researchMomentum`: cumulative and current-local-day actions, searches, fetches and dismissals since the
+last company open, decision or buyer-role lookup. Instructions treat a long no-company-progress run as
+falling marginal yield and allow the model to wait when no materially stronger clue remains. A new
+business day uses the prior stall to change approach but does not wait immediately without a fresh attempt.
+No deterministic lead quota, score or forced stop was added; a strong active or unread clue can still be
+followed.
+
 The first full scheduled day exposed two further quality gaps. Broad Charlotte facility and economic-
 development searches repeatedly surfaced internal distribution centers, offices, distant facilities and
 large self-operated networks. The mission now favors company-first discovery through brands, importers,
@@ -432,3 +454,32 @@ Validation: 72 Python cases and 47 focused Vitest checks passed (the latter incl
 `prisma:generate`, `typecheck`, `lint`, `build` and `git diff --check` passed. Client generation used the
 unchanged Hunter schema; no production migration, credential change, enrollment or communication occurred.
 The local-worker PR has no browser behavior changes; Vercel Preview remains a build compatibility check.
+
+### Resolved-clue and marginal-yield validation, 2026-09-18
+
+After source-family memory was adopted, a 34-decision supervised sample produced two research-qualified
+ocean opportunities. The remaining scheduled afternoon completed 24 more decisions—nine searches, three
+page fetches and twelve dismissals—but opened no company and consumed the remaining 120-call/40-search
+daily ceilings. It correctly rejected weak companies, but zero new commercial progress demonstrated that
+mechanically useful actions were still hiding declining discovery yield.
+
+The revised code replayed the unchanged private journal without network or state mutation. It now exposes
+Made in NC as two targeted searches with two empty results, Atlanta Market as two targeted searches with
+one empty result and one dismissal, and the exact recent site families that the prior top-ten summary hid.
+Resolved Cafe Amsterdam, Coast by DK, GTA GSM and G.T. Wholesale evidence no longer reappears as unread;
+unrelated rows from the same broad searches remain available. Momentum shows 25 actions, ten searches,
+three fetches and twelve dismissals since the last company progress, with zero of them on the simulated
+Monday local day.
+
+Five non-executing Terra shadow proposals were used while refining the prompt. They did not reserve or
+reset live pilot budget, execute retrieval, mutate the live journal, or create external writes. The final
+fresh-Monday replay used zeroed daily counters plus preserved Friday history and proposed a direct company
+search for Matrix Furniture Group's Ontario warehouse/500-plus-retailer network as a GTA trucking hypothesis.
+This is materially different from another generic Charlotte directory search and still requires evidence;
+it is not a qualified opportunity. The end-of-day replay chose to wait when the live daily ceilings were
+already exhausted. These replays validate work selection under the saved context, not Monday's retrieval
+quality or a commercial result.
+
+Validation passed 86 Python cases and 47 focused Hunter Vitest checks, plus Python compilation,
+typecheck, lint, the production build and `git diff --check`. The schema, API routes, tenant controls,
+runtime limits and external-write surface are unchanged; no migration or Preview validation is required.

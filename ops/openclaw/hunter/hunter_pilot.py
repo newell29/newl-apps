@@ -610,16 +610,30 @@ class Pilot:
                 return None
             return (urlparse(evidence.get("url", "")).hostname or "").removeprefix("www.") or None
 
+        def query_hosts(query):
+            # Search-result hosts alone lose the intended source when a site query is empty or
+            # returns an aggregator. Retain explicit site: targets as observed attempts.
+            return {value.lower().removeprefix("www.") for value in
+                    re.findall(r"(?<![\w.-])site:([a-z0-9.-]+\.[a-z]{2,})", query or "", re.IGNORECASE)}
+
+        def row_for(family):
+            return rows.setdefault(family, {"source": family, "searches": 0,
+                "targetedSearches": 0, "emptySearches": 0, "unreadClues": 0,
+                "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 0,
+                "lastSearchAt": None})
+
         rows = {}
         for attempt in self.state["attempts"].values():
             if attempt.get("action") != "search":
                 continue
-            families = {host(eid) for eid in (attempt.get("result") or {}).get("evidenceIds", [])}
+            result = attempt.get("result") or {}
+            targeted = query_hosts(attempt.get("query"))
+            families = {host(eid) for eid in result.get("evidenceIds", [])} | targeted
             for family in families - {None}:
-                row = rows.setdefault(family, {"source": family, "searches": 0, "unreadClues": 0,
-                    "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 0,
-                    "lastSearchAt": None})
+                row = row_for(family)
                 row["searches"] += 1
+                row["targetedSearches"] += int(family in targeted)
+                row["emptySearches"] += int(bool(result.get("empty")))
                 row["lastSearchAt"] = max(filter(None, [row["lastSearchAt"], attempt.get("at")]), default=None)
 
         for item in self.state.get("dismissedClues", []):
@@ -640,7 +654,48 @@ class Pilot:
             if family in rows:
                 rows[family]["unreadClues"] += 1
 
-        return sorted(rows.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)[:10]
+        # Preserve the historically busiest sources while also showing recent explicit site targets.
+        # Otherwise result hosts from one broad query can hide the exact source the model is repeating.
+        by_volume = sorted(rows.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)
+        by_recency = sorted(rows.values(), key=lambda row: row["lastSearchAt"] or "", reverse=True)
+        selected = {row["source"]: row for row in by_volume[:5]}
+        for row in by_recency:
+            if len(selected) == 10:
+                break
+            if row["targetedSearches"]:
+                selected.setdefault(row["source"], row)
+        for row in by_recency:
+            if len(selected) == 10:
+                break
+            selected.setdefault(row["source"], row)
+        return sorted(selected.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)
+
+    @staticmethod
+    def normalize_identity_text(value):
+        tokens = re.findall(r"[a-z0-9]+", str(value or "").casefold())
+        normalized, initials = [], []
+        for token in tokens:
+            if len(token) == 1:
+                initials.append(token)
+                continue
+            if initials:
+                normalized.append("".join(initials))
+                initials = []
+            normalized.append(token)
+        if initials:
+            normalized.append("".join(initials))
+        return " ".join(normalized)
+
+    @classmethod
+    def identity_markers(cls, name=None, company_domain=None):
+        """Return conservative phrases for hiding already resolved company clues."""
+        markers = set()
+        for value in (name, (company_domain or "").split(".")[0].replace("-", " ")):
+            normalized = cls.normalize_identity_text(value)
+            tokens = normalized.split()
+            if len(normalized) >= 6 and (len(tokens) >= 2 or len(normalized) >= 8):
+                markers.add(normalized)
+        return markers
 
     def unread_clues(self):
         from urllib.parse import urlparse
@@ -648,14 +703,27 @@ class Pilot:
         dismissed = self.state.get("dismissedClues", [])
         dismissed_ids = {eid for item in dismissed for eid in item.get("evidenceIds", [])}
         dismissed_domains = {item.get("domain") for item in dismissed if item.get("domain")}
+        resolved_companies = [company for company in self.state["companies"].values()
+                              if company.get("status") != "active"]
+        resolved_ids = {eid for company in resolved_companies for eid in company.get("evidenceIds", [])}
+        resolved_markers = set()
+        for company in resolved_companies:
+            resolved_markers.update(self.identity_markers(company.get("name"), company.get("domain")))
+        for item in dismissed:
+            resolved_markers.update(self.identity_markers(item.get("name"), item.get("domain")))
         for evidence in reversed(list(self.state["evidence"].values())):
             if evidence["kind"] != "search":
                 continue
-            if evidence["id"] in dismissed_ids:
+            if evidence["id"] in dismissed_ids or evidence["id"] in resolved_ids:
                 continue
             url = evidence["url"]
             host = (urlparse(url).hostname or "").removeprefix("www.")
             if host in dismissed_domains:
+                continue
+            clue_text = self.normalize_identity_text(" ".join(str(evidence.get(key) or "")
+                for key in ("title", "excerpt")))
+            padded = f" {clue_text} "
+            if any(f" {marker} " in padded for marker in resolved_markers):
                 continue
             company = self.state["companies"].get(evidence.get("company")) or self.state["companies"].get(host)
             if company and company["status"] != "active":
@@ -670,6 +738,33 @@ class Pilot:
             if len(clues) == 8:
                 break
         return clues
+
+    def research_momentum(self):
+        """Expose declining marginal yield without imposing a score or stopping rule."""
+        actions = [event for event in self.state["events"] if event.get("kind") == "action"]
+
+        def company_progress(event):
+            state = (event.get("result") or {}).get("state")
+            return ((event.get("action") == "open_company" and state == "opened") or
+                    (event.get("action") == "decide" and state in
+                     {"active", "parked", "rejected", "recommended", "needs_clearance"}) or
+                    (event.get("action") == "people" and state not in
+                     {None, "cached_or_already_attempted", "unavailable"}))
+
+        progress_index = next((index for index in range(len(actions) - 1, -1, -1)
+                               if company_progress(actions[index])), -1)
+        since = actions[progress_index + 1:]
+        local_day = self.clock().astimezone(ZONE).date()
+        today = [event for event in since if event.get("at") and
+                 parse_time(event["at"]).astimezone(ZONE).date() == local_day]
+        return {"actionsSinceCompanyProgress": len(since),
+                "searchesSinceCompanyProgress": sum(event.get("action") == "search" for event in since),
+                "fetchesSinceCompanyProgress": sum(event.get("action") == "fetch" for event in since),
+                "dismissalsSinceCompanyProgress": sum(event.get("action") == "dismiss_clue" for event in since),
+                "actionsTodaySinceCompanyProgress": len(today),
+                "searchesTodaySinceCompanyProgress": sum(event.get("action") == "search" for event in today),
+                "dismissalsTodaySinceCompanyProgress": sum(event.get("action") == "dismiss_clue" for event in today),
+                "lastCompanyProgressAt": actions[progress_index].get("at") if progress_index >= 0 else None}
 
     def context(self):
         self.ingest_feedback()
@@ -701,8 +796,9 @@ class Pilot:
             "dismissedClues": self.state.get("dismissedClues", [])[-20:],
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
+            "researchMomentum": self.research_momentum(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. researchCoverage.sourceFamilies summarizes observed source outcomes, not quotas: reuse sources that yield promising companies, and leave a source family whose recent clues repeatedly park or dismiss unless an unread clue contains materially different operating evidence. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
+            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. researchCoverage.sourceFamilies summarizes observed source outcomes, including explicit site: targets and empty searches, not quotas: reuse sources that yield promising companies, and leave a source family whose recent clues repeatedly park, dismiss or return empty unless an unread clue contains materially different operating evidence. researchMomentum reports both cumulative and current-local-day actions since the last company was opened, decided or buyer-researched. At the start of a fresh business day, use prior low yield to choose a materially different company, source or service hypothesis rather than waiting solely because yesterday stalled. Once current-day searches and dismissals also show falling marginal yield and no materially stronger unread clue remains, wait instead of consuming the allowance. unreadClues is a menu, not an inbox: do not dismiss every same-shaped weak clue merely to clear it when source history already demonstrates the problem. Coverage counts are not quotas or proof that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -879,6 +975,7 @@ class Pilot:
             "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
             "buyerResearch": buyer_research,
             "searchesByDirection": {d: r["attempts"] for d, r in self.research_coverage()["directions"].items()},
+            "researchMomentum": self.research_momentum(),
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "modelProvider": self.config.get("modelProvider", "OLLAMA"),
             "comparisonCases": len(self.state.get("modelComparisons", [])),
