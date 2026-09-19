@@ -533,6 +533,78 @@ def render_diagnostics(pilot, run, compact_snapshot):
     atomic_write(pilot.comparison_directory() / "human-review-model-map.json", model_map)
 
 
+def record_run_source(run, source_commit):
+    if run.get("sourceCommit") == source_commit:
+        return
+    source_commits = run.setdefault("sourceCommits", [run.get("sourceCommit")])
+    if source_commit not in source_commits:
+        source_commits.append(source_commit)
+    run["sourceCommit"] = source_commit
+
+
+def warm_compact_confirmation(directory):
+    pilot = Pilot(directory)
+    pilot.guard()
+    settings = pilot.comparison_settings()
+    compatibility = validate_matched_models(settings["localModel"])
+    continuation = pilot.state.get("modelDiagnosticContinuation")
+    if not continuation or not continuation.get("runs"):
+        raise RuntimeError("NO_COMPLETED_DIAGNOSTIC_RUN")
+    run = continuation["runs"][-1]
+    if run.get("status") != "completed":
+        raise RuntimeError("DIAGNOSTIC_RUN_NOT_COMPLETED")
+    compact_inputs = sorted((pilot.comparison_directory() / "inputs").glob("cmpc-*.json"))
+    if not compact_inputs:
+        raise RuntimeError("NO_COMPACT_COMPARISON_INPUT")
+    compact_snapshot = json.loads(compact_inputs[-1].read_text())
+    compact = compact_snapshot["packet"]
+    source_commit = safe_run(["/usr/bin/git", "-C", str(Path(__file__).resolve().parents[3]),
+                              "rev-parse", "HEAD"], 5).strip()
+    record_run_source(run, source_commit)
+    initial_loaded = ollama_api("/api/ps", timeout=3).get("models", [])
+    if initial_loaded:
+        raise RuntimeError("LOCAL_MODEL_ALREADY_LOADED")
+    run["status"] = "running"
+    pilot.save()
+    models = [
+        ("q4", Q4_MODEL, Q4_QUANTIZATION, Q4_DIGEST),
+        ("q8", settings["localModel"], settings["localQuantization"],
+         settings["localModelDigest"]),
+    ]
+    for label, model, quantization, model_digest in models:
+        cold = run_attempt(pilot, run, packet=compact,
+            comparison_id=compact_snapshot["comparisonId"],
+            original_hash=compact_snapshot["originalPromptHash"],
+            experiment="C_compact_warm_confirmation",
+            input_variant=COMPACT_VERSION, variant=f"{label}_compact_confirmation_cold",
+            model=model, provider="OLLAMA", quantization=quantization,
+            digest_value=model_digest, expect_warm=False)
+        if cold.get("status") == "success":
+            run_attempt(pilot, run, packet=compact,
+                comparison_id=compact_snapshot["comparisonId"],
+                original_hash=compact_snapshot["originalPromptHash"],
+                experiment="C_compact_warm_confirmation",
+                input_variant=COMPACT_VERSION, variant=f"{label}_compact_confirmation_warm",
+                model=model, provider="OLLAMA", quantization=quantization,
+                digest_value=model_digest, expect_warm=True)
+        else:
+            run.setdefault("skips", []).append({"variant": f"{label}_compact_confirmation_warm",
+                "reason": "cold_confirmation_did_not_complete"})
+        run["modelLifecycle"].append(unload_test_model(model))
+        if ollama_api("/api/ps", timeout=3).get("models", []):
+            raise RuntimeError("DIAGNOSTIC_MODEL_REMAINED_LOADED")
+    run["status"] = "completed"
+    run["completedAt"] = iso(now())
+    run["running"] = None
+    continuation["compatibility"] = compatibility
+    pilot.save()
+    render_diagnostics(pilot, run, compact_snapshot)
+    pilot.report()
+    return {"state": "completed", "runId": run["runId"],
+        "additionalAttempts": continuation["additionalAttempts"],
+        "attemptIds": run["attemptIds"], "usedToday": pilot.budget()}
+
+
 def run(directory):
     pilot = Pilot(directory)
     pilot.guard()
@@ -560,10 +632,7 @@ def run(directory):
         continuation["runs"].append(run)
         pilot.save()
     elif run.get("sourceCommit") != source_commit:
-        source_commits = run.setdefault("sourceCommits", [run.get("sourceCommit")])
-        if source_commit not in source_commits:
-            source_commits.append(source_commit)
-        run["sourceCommit"] = source_commit
+        record_run_source(run, source_commit)
         pilot.save()
     snapshot = json.loads(inputs[0].read_text())
     original_hash = snapshot["promptHash"]
@@ -647,6 +716,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--env-file", action="append", default=[])
+    parser.add_argument("--warm-compact-confirmation", action="store_true")
     args = parser.parse_args()
     load_env(args.env_file)
     directory = Path(args.state_dir).expanduser().resolve()
@@ -657,7 +727,9 @@ def main():
         except BlockingIOError:
             print(json.dumps({"state": "already_running"}))
             return
-        print(json.dumps(run(directory)))
+        result = (warm_compact_confirmation(directory) if args.warm_compact_confirmation
+                  else run(directory))
+        print(json.dumps(result))
 
 
 if __name__ == "__main__":

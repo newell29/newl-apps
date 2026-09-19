@@ -17,7 +17,7 @@ from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, d
 from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
     TOOLS, SCHEMA)
 from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
-    compact_packet, reserve_diagnostic, run_attempt, unload_test_model,
+    compact_packet, record_run_source, reserve_diagnostic, run_attempt, unload_test_model,
     validate_matched_models)
 from pilot_subscription_model import (SubscriptionModel, subscription_environment,
     require_subscription, output_schema, run_bounded, DISABLED_FEATURES)
@@ -974,6 +974,13 @@ class SubscriptionTests(unittest.TestCase):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_resumed_diagnostic_records_each_source_commit(self):
+        run = {"sourceCommit": "first"}
+        record_run_source(run, "second")
+        record_run_source(run, "second")
+        self.assertEqual(run["sourceCommit"], "second")
+        self.assertEqual(run["sourceCommits"], ["first", "second"])
+
     def test_diagnostic_model_unload_uses_named_ollama_api_request(self):
         with patch("hunter_model_diagnostics.ollama_api", side_effect=[
                 {"models": [{"name": "synthetic-q4"}]},
