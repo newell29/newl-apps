@@ -18,12 +18,12 @@ describe("Scout workboard projection", () => {
       item("owner", "RELATIONSHIP", "NEEDS_REVIEW", NOW.toISOString())
     ], { ...DEFAULT_MISSION, enabled: true }, { usedSteps: 0, active: 1, available: true }, NOW);
 
-    expect(result.available.map(value => value.id)).toEqual(["due-wait", "ready"]);
+    expect(result.due.map(value => value.id)).toEqual(["due-wait", "ready"]);
     expect(result.scheduled.map(value => value.id)).toEqual(["future"]);
     expect(result.external.map(value => value.id)).toEqual(["external"]);
     expect(result.working.map(value => value.id)).toEqual(["working"]);
     expect(result.ownerActions.map(value => value.id)).toEqual(["owner"]);
-    expect(result.wakeStatus).toContain("choose one of 2 available items");
+    expect(result.wakeStatus).toContain("choose one of 2 due items");
   });
 
   it("uses the same route deduplication as the worker selection packet", () => {
@@ -32,9 +32,9 @@ describe("Scout workboard projection", () => {
       { ...item("second", "PAGE", "READY", NOW.toISOString()), route: "/first" }
     ], { ...DEFAULT_MISSION, enabled: true }, { usedSteps: 0, active: 0, available: true }, NOW);
 
-    expect(result.available).toHaveLength(1);
+    expect(result.due).toHaveLength(1);
     expect(result.heldCandidates).toHaveLength(1);
-    expect(result.available[0].route).toBe("/first");
+    expect(result.due[0].route).toBe("/first");
     expect(result.heldCandidates[0].route).toBe("/first");
   });
 
@@ -52,7 +52,7 @@ describe("Scout workboard projection", () => {
     expect(result.wakeStatus).toContain("without using an AI research step");
   });
 
-  it("explains budget and active-capacity stops before an available item", () => {
+  it("explains budget and active-capacity stops before a due item", () => {
     const ready = [item("ready", "PAGE", "READY", NOW.toISOString())];
     expect(projectScoutWorkboard(ready, { ...DEFAULT_MISSION, enabled: true, dailySteps: 3 }, { usedSteps: 3, active: 0, available: false }, NOW).wakeStatus).toContain("research budget is used");
     expect(projectScoutWorkboard(ready, { ...DEFAULT_MISSION, enabled: true, maxActive: 2 }, { usedSteps: 0, active: 2, available: false }, NOW).wakeStatus).toContain("active-work limit is reached");

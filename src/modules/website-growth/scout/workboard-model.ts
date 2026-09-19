@@ -10,11 +10,11 @@ export function projectScoutWorkboard(items: WorkboardItem[], mission: Mission, 
   const open = items.filter(item => !["DONE", "DISMISSED"].includes(item.state));
   const ownerActions: WorkboardItem[] = [];
   const working: WorkboardItem[] = [];
-  const available = scoutCandidates(items, now).filter(item => !needsOwner(item)) as WorkboardItem[];
+  const due = scoutCandidates(items, now).filter(item => !needsOwner(item)) as WorkboardItem[];
   const heldCandidates: WorkboardItem[] = [];
   const scheduled: WorkboardItem[] = [];
   const external: WorkboardItem[] = [];
-  const selectableIds = new Set(available.map(item => item.id));
+  const selectableIds = new Set(due.map(item => item.id));
 
   for (const item of open) {
     if (needsOwner(item)) ownerActions.push(item);
@@ -38,8 +38,8 @@ export function projectScoutWorkboard(items: WorkboardItem[], mission: Mission, 
   if (!mission.enabled) wakeStatus = "Scout would stop because research is paused.";
   else if (capacity && capacity.usedSteps >= mission.dailySteps) wakeStatus = "Scout would stop because the rolling 24-hour research budget is used.";
   else if (capacity && capacity.active >= mission.maxActive) wakeStatus = "Scout would stop because the active-work limit is reached.";
-  else if (available.length) wakeStatus = `Scout would choose one of ${available.length} available item${available.length === 1 ? "" : "s"}, work one step, and save the result.`;
+  else if (due.length) wakeStatus = `Scout would choose one of ${due.length} due item${due.length === 1 ? "" : "s"}, work one step, and save the result.`;
   else wakeStatus = "Scout would refresh and reconcile saved sources, find nothing due, and stop without using an AI research step.";
 
-  return { ownerActions, working, available, heldCandidates, scheduled, external, sourceCounts, wakeStatus };
+  return { ownerActions, working, due, heldCandidates, scheduled, external, sourceCounts, wakeStatus };
 }
