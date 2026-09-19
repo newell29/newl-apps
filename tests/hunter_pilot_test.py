@@ -17,7 +17,8 @@ from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, d
 from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
     TOOLS, SCHEMA)
 from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
-    compact_packet, reserve_diagnostic, run_attempt, validate_matched_models)
+    compact_packet, reserve_diagnostic, run_attempt, unload_test_model,
+    validate_matched_models)
 from pilot_subscription_model import (SubscriptionModel, subscription_environment,
     require_subscription, output_schema, run_bounded, DISABLED_FEATURES)
 
@@ -973,6 +974,16 @@ class SubscriptionTests(unittest.TestCase):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_diagnostic_model_unload_uses_named_ollama_api_request(self):
+        with patch("hunter_model_diagnostics.ollama_api", side_effect=[
+                {"done": True, "done_reason": "unload"}, {"models": []}]) as api, \
+             patch("hunter_model_diagnostics.time.sleep"):
+            result = unload_test_model("synthetic-q4")
+        self.assertTrue(result["unloaded"])
+        self.assertEqual(result["method"], "ollama_api_keep_alive_zero")
+        api.assert_any_call("/api/generate", {"model": "synthetic-q4", "keep_alive": 0},
+            timeout=30)
+
     def test_compaction_preserves_decision_evidence_and_ages_only_old_resolutions(self):
         dismissed = [{"at": f"2026-09-{index:02d}T00:00:00+00:00", "name": f"Example {index}",
             "domain": f"example{index}.test", "evidenceIds": [f"ev-{index}"],

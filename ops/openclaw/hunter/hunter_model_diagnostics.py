@@ -285,12 +285,12 @@ def cancellation_observation(model, baseline_pids):
 
 
 def unload_test_model(model):
-    result = subprocess.run(["/opt/homebrew/bin/ollama", "stop", model], capture_output=True,
-        text=True, timeout=30, check=False)
+    response = ollama_api("/api/generate", {"model": model, "keep_alive": 0}, timeout=30)
     time.sleep(2)
     loaded = ollama_api("/api/ps", timeout=3).get("models", [])
     remains = any(row.get("name") == model or row.get("model") == model for row in loaded)
-    return {"model": model, "exitCode": result.returncode, "unloaded": not remains,
+    return {"model": model, "method": "ollama_api_keep_alive_zero",
+        "completionReason": response.get("done_reason"), "unloaded": not remains,
         "at": iso(now())}
 
 
