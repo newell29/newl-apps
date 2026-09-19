@@ -984,6 +984,15 @@ class DiagnosticTests(unittest.TestCase):
         self.assertFalse(sample["ollamaProcesses"][0]["newForDiagnostic"])
         self.assertEqual(sample["ollamaProcesses"][0]["cpuPercent"], 87.5)
 
+    def test_memory_sample_identifies_new_ollama_inference_process_as_runner(self):
+        command = "43 0.1 59.6 30000000 /path/to/ollama_llama_server --model synthetic"
+        with patch("hunter_model_diagnostics.safe_run", side_effect=[
+                "System-wide memory free percentage: 15%", "used = 10.00M", command]), \
+             patch("hunter_model_diagnostics.ollama_api", return_value={"models": []}):
+            sample = memory_sample(0, {42})
+        self.assertEqual(sample["ollamaProcesses"][0]["role"], "runner")
+        self.assertTrue(sample["ollamaProcesses"][0]["newForDiagnostic"])
+
     def test_resumed_diagnostic_records_each_source_commit(self):
         run = {"sourceCommit": "first"}
         record_run_source(run, "second")

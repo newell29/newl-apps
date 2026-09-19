@@ -183,9 +183,10 @@ def memory_sample(started, baseline_pids):
         except ValueError:
             continue
         command = fields[4].casefold()
+        is_runner = "ollama runner" in command or pid not in baseline_pids
         processes.append({"pid": pid, "newForDiagnostic": pid not in baseline_pids,
-            "role": "runner" if "ollama runner" in command else "server",
-            "command": "ollama-runner" if "ollama runner" in command else "ollama",
+            "role": "runner" if is_runner else "server",
+            "command": "ollama-runner" if is_runner else "ollama",
             "cpuPercent": cpu, "memoryPercent": memory, "rssBytes": rss * 1024})
     return {"elapsedSeconds": round(time.monotonic() - started, 3),
         "memoryFreePercent": int(match.group(1)) if match else None,
