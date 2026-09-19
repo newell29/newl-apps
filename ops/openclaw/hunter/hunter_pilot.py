@@ -307,18 +307,21 @@ class LocalModel:
             "contextLength": self.num_ctx, "maxOutputTokens": self.num_predict,
             "timeoutSeconds": self.timeout}
 
-    def loaded_models(self):
+    def loaded_state(self):
         try:
             payload = self.api("/api/ps", timeout=3)
-            return payload.get("models", []) if isinstance(payload, dict) else []
+            models = payload.get("models", []) if isinstance(payload, dict) else []
         except (OSError, ValueError, TypeError, urllib.error.URLError):
-            return []
+            return {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None}
+        process = next((row for row in models if isinstance(row, dict) and
+                        (row.get("name") == self.model or row.get("model") == self.model)), None)
+        return {"cold": process is None,
+                "loadedSizeBytes": process.get("size") if process else None,
+                "loadedVramBytes": process.get("size_vram") if process else None}
 
-    def __call__(self, context):
+    def __call__(self, context, loaded_before=None):
         total_started = time.monotonic()
-        loaded_before = self.loaded_models()
-        cold = not any(row.get("name") == self.model or row.get("model") == self.model
-                       for row in loaded_before if isinstance(row, dict))
+        loaded_before = loaded_before or self.loaded_state()
         system_prompt = MISSION + "\n" + TOOLS
         user_prompt = json.dumps(context, ensure_ascii=False)
         request = urllib.request.Request("http://127.0.0.1:11434/api/chat", method="POST",
@@ -342,9 +345,7 @@ class LocalModel:
         output_tokens = payload.get("eval_count", 0)
         tokens_per_second = (round(output_tokens / generation_seconds, 3)
             if generation_seconds and type(output_tokens) is int else None)
-        loaded_after = self.loaded_models()
-        process = next((row for row in loaded_after if isinstance(row, dict) and
-                        (row.get("name") == self.model or row.get("model") == self.model)), None)
+        loaded_after = self.loaded_state()
         return decision, {
             "provider": "OLLAMA", "requestedModel": self.model,
             "reportedModel": payload.get("model"), "thinking": self.thinking,
@@ -361,12 +362,13 @@ class LocalModel:
             "generationSeconds": generation_seconds,
             "generatedTokensPerSecond": tokens_per_second,
             "timeToFirstTokenSeconds": None, "timeToFirstTokenMeasured": False,
-            "cold": cold, "contextLength": self.num_ctx, "maxOutputTokens": self.num_predict,
+            "cold": loaded_before["cold"], "contextLength": self.num_ctx,
+            "maxOutputTokens": self.num_predict,
             "temperature": 0.2, "keepAlive": "10m",
             "providerPromptChars": len(system_prompt) + len(user_prompt),
             "providerPromptBytes": len(system_prompt.encode("utf-8")) + len(user_prompt.encode("utf-8")),
-            "loadedSizeBytes": process.get("size") if process else None,
-            "loadedVramBytes": process.get("size_vram") if process else None,
+            "loadedSizeBytes": loaded_after["loadedSizeBytes"],
+            "loadedVramBytes": loaded_after["loadedVramBytes"],
             "ollamaMetrics": {key: payload.get(key) for key in ["total_duration", "load_duration",
                 "prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration", "done_reason"]}}
 
@@ -1264,11 +1266,14 @@ class Pilot:
             timeout=settings["timeoutSeconds"], num_ctx=context_length,
             num_predict=max_output_tokens,
             model_digest=settings["localModelDigest"], quantization=settings["localQuantization"])
+        read_loaded_state = getattr(type(local), "loaded_state", None)
+        loaded_before = (read_loaded_state(local) if callable(read_loaded_state) else
+            {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None})
         started = time.monotonic()
         output = usage = quality = None
         status, error = "success", None
         try:
-            output, usage = local(context)
+            output, usage = local(context, loaded_before=loaded_before)
             quality = self.proposal_quality(output, context)
             if not quality["schemaValid"] or not quality["evidenceReferencesValid"]:
                 status = "schema_failure"
@@ -1285,6 +1290,8 @@ class Pilot:
             status, error = "error", type(exception).__name__
         elapsed = time.monotonic() - started
         if usage is None:
+            loaded_after = (read_loaded_state(local) if callable(read_loaded_state) else
+                {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None})
             usage = {"provider": "OLLAMA", "requestedModel": settings["localModel"],
                 "reportedModel": None, "thinking": job["thinking"],
                 "localModelDigest": settings["localModelDigest"],
@@ -1293,7 +1300,9 @@ class Pilot:
                 "temperature": 0.2, "keepAlive": "10m",
                 "requestElapsedSeconds": round(elapsed, 6), "validationSeconds": None,
                 "modelTotalSeconds": round(elapsed, 6), "timeToFirstTokenSeconds": None,
-                "timeToFirstTokenMeasured": False, "cold": None}
+                "timeToFirstTokenMeasured": False, "cold": loaded_before["cold"],
+                "loadedSizeBytes": loaded_after["loadedSizeBytes"],
+                "loadedVramBytes": loaded_after["loadedVramBytes"]}
         budget = self.budget()
         actual_seconds = min(settings["timeoutSeconds"], int(elapsed) + 1)
         budget["modelSeconds"] -= settings["timeoutSeconds"] - actual_seconds

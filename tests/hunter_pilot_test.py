@@ -675,6 +675,32 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(shadow["status"], "timeout")
         self.assertEqual([e["action"] for e in self.p.state["events"] if e["kind"] == "action"], ["wait"])
 
+    def test_failed_shadow_preserves_pre_request_load_state(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+
+        class TimeoutLocal:
+            def __init__(self):
+                self.states = iter([
+                    {"cold": True, "loadedSizeBytes": None, "loadedVramBytes": None},
+                    {"cold": False, "loadedSizeBytes": 31_000, "loadedVramBytes": 31_000}])
+
+            def loaded_state(self):
+                return next(self.states)
+
+            def __call__(self, context, loaded_before=None):
+                self.loaded_before = loaded_before
+                raise TimeoutError
+
+        local = TimeoutLocal()
+        with patch("hunter_pilot.LocalModel", return_value=local):
+            self.p.process_shadow_queue()
+        attempt = json.loads((self.path / "model-comparison/attempts.jsonl").read_text().splitlines()[-1])
+        self.assertTrue(local.loaded_before["cold"])
+        self.assertTrue(attempt["cold"])
+        self.assertEqual(attempt["loadedSizeBytes"], 31_000)
+        self.assertEqual(attempt["loadedVramBytes"], 31_000)
+
     def test_socket_timeout_in_shadow_does_not_stop_primary_wake(self):
         self.enable_comparison()
         self.p.tick(force=True, max_steps=1)
