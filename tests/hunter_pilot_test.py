@@ -683,6 +683,17 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(case["shadows"][0]["error"], "timeout")
         self.assertIsNone(self.p.state.get("lastError"))
 
+    def test_ollama_http_status_is_recorded_without_response_body(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+        failure = urllib.error.HTTPError("http://127.0.0.1:11434/api/chat", 400,
+            "synthetic private diagnostic", {}, None)
+        with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=failure)):
+            self.p.process_shadow_queue()
+        shadow = self.p.state["pairedComparisons"][0]["shadows"][0]
+        self.assertEqual(shadow["error"], "HTTP_400")
+        self.assertNotIn("private diagnostic", json.dumps(shadow))
+
     def test_completed_comparison_limit_does_not_call_shadows(self):
         self.enable_comparison()
         self.p.state["pairedComparisons"] = [{"status": "completed"}] * 10
@@ -734,6 +745,24 @@ class PilotTests(unittest.TestCase):
         self.assertEqual([call.kwargs["thinking"] for call in factory.call_args_list], [True, False])
         self.assertEqual([row["variant"] for row in self.p.state["pairedComparisons"][0]["shadows"]],
                          ["baseline", "thinking_off_diagnostic"])
+
+    def test_explicit_context_recovery_variant_records_its_own_settings(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+        job = self.p.state["pairedComparisonQueue"][0]
+        job.update(variant="thinking_off_context_32768_diagnostic", thinking=False,
+                   contextLength=32768, maxOutputTokens=1000)
+        local = Mock(return_value=({"action": "wait", "purpose": "No more evidence",
+            "args": {"reason": "No more evidence", "minutes": 30}},
+            {"provider": "OLLAMA", "thinking": False, "contextLength": 32768,
+             "maxOutputTokens": 1000, "modelTotalSeconds": 1}))
+        with patch("hunter_pilot.LocalModel", return_value=local) as factory:
+            self.p.process_shadow_queue()
+        self.assertEqual(factory.call_args.kwargs["num_ctx"], 32768)
+        self.assertEqual(factory.call_args.kwargs["num_predict"], 1000)
+        attempt = json.loads((self.path / "model-comparison/attempts.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(attempt["variant"], "thinking_off_context_32768_diagnostic")
+        self.assertEqual(attempt["modelSettings"]["contextLength"], 32768)
 
     def test_search_comparison_counts_cost_and_does_not_repeat_after_restart(self):
         self.config.update(searchProvider="BRAVE", searchCostMicros=5000)

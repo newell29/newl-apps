@@ -1257,9 +1257,12 @@ class Pilot:
         self.save()
         attempt_id = "att-" + uuid.uuid4().hex
         queue_wait = max(0, (self.clock() - parse_time(job["enqueuedAt"])).total_seconds())
+        context_length = job.get("contextLength", settings["contextLength"])
+        max_output_tokens = job.get("maxOutputTokens", settings["maxOutputTokens"]
+            if job["thinking"] else settings.get("diagnosticMaxOutputTokens", 1000))
         local = LocalModel(settings["localModel"], thinking=job["thinking"],
-            timeout=settings["timeoutSeconds"], num_ctx=settings["contextLength"],
-            num_predict=settings["maxOutputTokens"] if job["thinking"] else settings.get("diagnosticMaxOutputTokens", 1000),
+            timeout=settings["timeoutSeconds"], num_ctx=context_length,
+            num_predict=max_output_tokens,
             model_digest=settings["localModelDigest"], quantization=settings["localQuantization"])
         started = time.monotonic()
         output = usage = quality = None
@@ -1273,6 +1276,8 @@ class Pilot:
             status, error = "timeout", "timeout"
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exception:
             status, error = "schema_failure", type(exception).__name__
+        except urllib.error.HTTPError as exception:
+            status, error = "error", "HTTP_" + str(exception.code)
         except urllib.error.URLError as exception:
             timed_out = isinstance(getattr(exception, "reason", None), (TimeoutError, socket.timeout))
             status, error = ("timeout", "timeout") if timed_out else ("error", type(exception).__name__)
@@ -1284,8 +1289,7 @@ class Pilot:
                 "reportedModel": None, "thinking": job["thinking"],
                 "localModelDigest": settings["localModelDigest"],
                 "localQuantization": settings["localQuantization"],
-                "contextLength": settings["contextLength"],
-                "maxOutputTokens": settings["maxOutputTokens"] if job["thinking"] else settings.get("diagnosticMaxOutputTokens", 1000),
+                "contextLength": context_length, "maxOutputTokens": max_output_tokens,
                 "temperature": 0.2, "keepAlive": "10m",
                 "requestElapsedSeconds": round(elapsed, 6), "validationSeconds": None,
                 "modelTotalSeconds": round(elapsed, 6), "timeToFirstTokenSeconds": None,

@@ -389,6 +389,11 @@ inference. STOP, tenant policy, expiry and the original cash/search/page/people 
 queued shadow. Partial, failed, deferred and backpressure-skipped work remains visible and is not silently
 retried.
 
+If the frozen packet is rejected before inference because its provider-tokenized size exceeds the
+historical 16,384-token runtime context, a supervised recovery may reuse that saved packet with an
+explicitly labelled larger context that remains within the installed model's reported capacity. That
+attempt is a separate diagnostic, not a replacement for or silent repair of the baseline.
+
 New comparison evidence is kept separate from the legacy `modelComparisons` records. The private
 `model-comparison/attempts.jsonl` records one row per attempt, including queue/request/validation/tool and
 total times, provider-supported token usage, cold/warm state, Ollama's raw nanosecond fields and converted
