@@ -1,5 +1,12 @@
 "use server";
 
+import {
+  buildSupplyChainDesignCurrencyContext,
+  supplyChainDesignFxSnapshot,
+  type SupplyChainDesignCurrency,
+  type SupplyChainDesignCurrencyContext
+} from "@/modules/supply-chain-design/currency";
+
 import { createHash } from "node:crypto";
 
 import {
@@ -130,6 +137,7 @@ function createLocationStrategyReportFingerprint(input: {
   maxRegions: 1 | 2 | 3;
   weightingMethod: WarehouseLocationStrategyWeightingMethod;
   countryScope: WarehouseLocationStrategyCountryScope;
+  analysisCurrency?: SupplyChainDesignCurrency | null;
   cadToUsdRate?: number | null;
 }) {
   return sha256(JSON.stringify({
@@ -141,6 +149,7 @@ function createLocationStrategyReportFingerprint(input: {
     maxRegions: input.maxRegions,
     weightingMethod: input.weightingMethod,
     countryScope: input.countryScope,
+    analysisCurrency: input.weightingMethod === "CURRENT_TRANSPORTATION_COST" ? input.analysisCurrency ?? "USD" : null,
     cadToUsdRate: input.weightingMethod === "CURRENT_TRANSPORTATION_COST" ? input.cadToUsdRate ?? null : null,
     assumptions: {
       minimumIncrementalImprovement: WAREHOUSE_LOCATION_STRATEGY_INCREMENTAL_THRESHOLD,
@@ -366,6 +375,54 @@ export type SupplyChainDesignCleanupState = {
   ok: boolean;
   message: string;
 };
+
+export async function updateSupplyChainDesignProjectCurrencySettingsAction(formData: FormData) {
+  const context = await getAuthenticatedContext();
+  await requireSupplyChainDesignStudioAccess(context);
+  await requireMutationAccess(context);
+
+  const projectId = text(formData, "projectId");
+  if (!projectId) return { ok: false, message: "Missing project ID." };
+
+  let currencyContext: SupplyChainDesignCurrencyContext;
+  try {
+    currencyContext = buildSupplyChainDesignCurrencyContext({
+      analysisCurrency: text(formData, "analysisCurrency") ?? "USD",
+      cadToUsdRate: text(formData, "cadToUsdRate")
+    });
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Currency settings are invalid." };
+  }
+
+  const saved = await prisma.$transaction(async (tx) => {
+    const updated = await tx.supplyChainDesignProject.updateMany({
+      where: { tenantId: context.tenantId, id: projectId },
+      data: {
+        analysisCurrency: currencyContext.analysisCurrency,
+        cadToUsdRate: currencyContext.cadToUsdRate
+      }
+    });
+    if (updated.count !== 1) return false;
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        actorUserId: context.userId,
+        action: "supply-chain-design.project.currency-settings.updated",
+        entityType: "SupplyChainDesignProject",
+        entityId: projectId,
+        after: {
+          moduleKey: ModuleKey.SUPPLY_CHAIN_DESIGN,
+          projectId,
+          currencySettings: supplyChainDesignFxSnapshot(currencyContext)
+        }
+      }
+    });
+    return true;
+  });
+  if (!saved) return { ok: false, message: "Supply Chain Design project was not found." };
+  revalidatePath(`/supply-chain-design/${projectId}`);
+  return { ok: true, message: "Project currency settings saved." };
+}
 
 type SaveSupplyChainDesignMappingInput = {
   tenantId: string;
@@ -1207,6 +1264,8 @@ export async function runSupplyChainDesignModel01ProofAction(
     },
     select: {
       id: true,
+      analysisCurrency: true,
+      cadToUsdRate: true,
       mappings: {
         where: {
           tableType: {
@@ -1221,7 +1280,8 @@ export async function runSupplyChainDesignModel01ProofAction(
             select: {
               id: true,
               originalFileName: true,
-              fileBytes: true
+              fileBytes: true,
+              contentHash: true
             }
           }
         }
@@ -1232,7 +1292,6 @@ export async function runSupplyChainDesignModel01ProofAction(
   if (!project) {
     return { ok: false, message: "Supply Chain Design project was not found." };
   }
-
   const currentNetworkActivityMappings = getValidMappings(project.mappings, "CURRENT_NETWORK_ACTIVITY", [
     "origin_facility_id",
     "facility_name"
@@ -1283,6 +1342,28 @@ export async function runSupplyChainDesignModel01ProofAction(
   if (missingInputs.length > 0) {
     return { ok: false, message: `Missing required Current Network Baseline input: ${missingInputs.join(" and ")}.` };
   }
+
+  const selectedMonetaryMappings = [
+    currentNetworkActivityMapping,
+    facilitiesMapping,
+    shipmentsMapping,
+    inventoryMapping,
+    facilityCostsMapping
+  ];
+  const hasSelectedCurrencyMappings = selectedMonetaryMappings.some(
+    (mapping) =>
+      mapping &&
+      toFieldMappings(mapping.fieldMappings).some(
+        (field) => field.standardField === "currency" || field.standardField.endsWith("_currency")
+      )
+  );
+  const currencyContext = hasSelectedCurrencyMappings
+    ? buildSupplyChainDesignCurrencyContext({
+        analysisCurrency: project.analysisCurrency,
+        cadToUsdRate: project.cadToUsdRate == null ? null : Number(project.cadToUsdRate)
+      })
+    : null;
+  const fxSnapshot = currencyContext ? supplyChainDesignFxSnapshot(currencyContext) : undefined;
 
   const inputReferences = {
     currentNetworkActivity: currentNetworkActivityMapping
@@ -1374,7 +1455,8 @@ export async function runSupplyChainDesignModel01ProofAction(
             selected: mapping.id === customersMapping.id
           }))
         }
-      : null
+      : null,
+    fxSnapshot
   };
 
   try {
@@ -1436,7 +1518,8 @@ export async function runSupplyChainDesignModel01ProofAction(
             fileBytes: Buffer.from(customersMapping.file.fileBytes),
             fieldMappings: toFieldMappings(customersMapping.fieldMappings)
           }
-        : null
+        : null,
+      currencyContext
     });
 
     const createdRun = await prisma.supplyChainDesignModelRun.create({
@@ -1520,6 +1603,8 @@ export async function runSupplyChainDesignWarehouseLocationStrategyAction(
     },
     select: {
       id: true,
+      analysisCurrency: true,
+      cadToUsdRate: true,
       mappings: {
         where: {
           tableType: "SHIPMENTS",
@@ -1530,7 +1615,8 @@ export async function runSupplyChainDesignWarehouseLocationStrategyAction(
             select: {
               id: true,
               originalFileName: true,
-              fileBytes: true
+              fileBytes: true,
+              contentHash: true
             }
           }
         }
@@ -1538,6 +1624,12 @@ export async function runSupplyChainDesignWarehouseLocationStrategyAction(
     }
   });
   if (!project) return { ok: false, message: "Supply Chain Design project was not found." };
+  const currencyContext = buildSupplyChainDesignCurrencyContext({
+    analysisCurrency: project.analysisCurrency,
+    cadToUsdRate: project.cadToUsdRate == null ? cadToUsdRate : Number(project.cadToUsdRate)
+  });
+  const effectiveCadToUsdRate = currencyContext.cadToUsdRate;
+  const fxSnapshot = supplyChainDesignFxSnapshot(currencyContext);
   const shipmentsMapping = project.mappings.find(
     (mapping) => mapping.id === shipmentsMappingId && mapping.tableType === "SHIPMENTS"
   ) ?? null;
@@ -1561,7 +1653,8 @@ export async function runSupplyChainDesignWarehouseLocationStrategyAction(
     maxRegions,
     weightingMethod,
     countryScope,
-    cadToUsdRate
+    analysisCurrency: currencyContext.analysisCurrency,
+    cadToUsdRate: effectiveCadToUsdRate
   });
   const inputReferences = {
     shipments: {
@@ -1580,7 +1673,8 @@ export async function runSupplyChainDesignWarehouseLocationStrategyAction(
     maxRegions,
     weightingMethod,
     countryScope,
-    cadToUsdRate: weightingMethod === "CURRENT_TRANSPORTATION_COST" ? cadToUsdRate : null,
+    cadToUsdRate: weightingMethod === "CURRENT_TRANSPORTATION_COST" ? effectiveCadToUsdRate : null,
+    fxSnapshot: weightingMethod === "CURRENT_TRANSPORTATION_COST" ? fxSnapshot : null,
     reportFingerprint
   };
 
@@ -1620,7 +1714,8 @@ export async function runSupplyChainDesignWarehouseLocationStrategyAction(
       maxRegions,
       weightingMethod,
       countryScope,
-      cadToUsdRate: weightingMethod === "CURRENT_TRANSPORTATION_COST" ? cadToUsdRate : null
+      analysisCurrency: currencyContext.analysisCurrency,
+      cadToUsdRate: weightingMethod === "CURRENT_TRANSPORTATION_COST" ? effectiveCadToUsdRate : null
     });
     const createdRun = await prisma.supplyChainDesignModelRun.create({
       data: {
@@ -1695,6 +1790,8 @@ export async function runSupplyChainDesignWarehouseCostComparisonAction(
     },
     select: {
       id: true,
+      analysisCurrency: true,
+      cadToUsdRate: true,
       mappings: {
         where: {
           id: {
@@ -1717,6 +1814,11 @@ export async function runSupplyChainDesignWarehouseCostComparisonAction(
     }
   });
   if (!project) return { ok: false, message: "Supply Chain Design project was not found." };
+  const currencyContext = buildSupplyChainDesignCurrencyContext({
+    analysisCurrency: project.analysisCurrency,
+    cadToUsdRate: project.cadToUsdRate == null ? cadToUsdRate : Number(project.cadToUsdRate)
+  });
+  const fxSnapshot = supplyChainDesignFxSnapshot(currencyContext);
 
   const facilitiesMapping = project.mappings.find((mapping) => mapping.id === facilitiesMappingId && mapping.tableType === "FACILITIES") ?? null;
   const candidateFacilitiesMapping = project.mappings.find((mapping) => mapping.id === candidateFacilitiesMappingId && mapping.tableType === "CANDIDATE_FACILITIES") ?? null;
@@ -1727,7 +1829,8 @@ export async function runSupplyChainDesignWarehouseCostComparisonAction(
     facilities: toScenarioInputReference(facilitiesMapping, [facilitiesMapping]),
     candidateFacilities: toScenarioInputReference(candidateFacilitiesMapping, [candidateFacilitiesMapping]),
     selectedFacilityOptionIds,
-    cadToUsdRate
+    cadToUsdRate: currencyContext.cadToUsdRate,
+    fxSnapshot
   };
 
   try {
@@ -1744,7 +1847,8 @@ export async function runSupplyChainDesignWarehouseCostComparisonAction(
     const resultSummary = runWarehouseCostComparison({
       facilities: facilityOptions,
       selectedFacilityOptionIds,
-      cadToUsdRate
+      analysisCurrency: currencyContext.analysisCurrency,
+      cadToUsdRate: currencyContext.cadToUsdRate
     });
     const createdRun = await prisma.supplyChainDesignModelRun.create({
       data: {
@@ -1792,6 +1896,7 @@ export async function runSupplyChainDesignNetworkScenarioComparisonAction(
   const scenarioAFacilityOptionIds = stringValues(formData, "scenarioAFacilityOptionIds");
   const scenarioBFacilityOptionIds = stringValues(formData, "scenarioBFacilityOptionIds");
   const forceNewRun = text(formData, "forceNewRun") === "on";
+  const forceFreshRates = text(formData, "forceFreshRates") === "on";
   const submittedNetworkScenarioComparison = {
     shipmentsMappingId,
     facilitiesMappingId,
@@ -1829,6 +1934,8 @@ export async function runSupplyChainDesignNetworkScenarioComparisonAction(
     },
     select: {
       id: true,
+      analysisCurrency: true,
+      cadToUsdRate: true,
       mappings: {
         where: {
           id: {
@@ -1845,6 +1952,13 @@ export async function runSupplyChainDesignNetworkScenarioComparisonAction(
     }
   });
   if (!project) return { ok: false, message: "Supply Chain Design project was not found.", submittedNetworkScenarioComparison };
+  const currencyContext = buildSupplyChainDesignCurrencyContext({
+    analysisCurrency: project.analysisCurrency,
+    cadToUsdRate: project.cadToUsdRate == null ? cadToUsdRate : Number(project.cadToUsdRate)
+  });
+  if (currencyContext.analysisCurrency === "CAD" && !currencyContext.cadToUsdRate) {
+    return { ok: false, message: "Network Scenario Comparison requires the project FX rate before converting 7L USD rates to CAD.", submittedNetworkScenarioComparison };
+  }
 
   const shipmentsMapping = project.mappings.find((mapping) => mapping.id === shipmentsMappingId && mapping.tableType === "SHIPMENTS") ?? null;
   const facilitiesMapping = project.mappings.find((mapping) => mapping.id === facilitiesMappingId && mapping.tableType === "FACILITIES") ?? null;
@@ -1865,12 +1979,14 @@ export async function runSupplyChainDesignNetworkScenarioComparisonAction(
       scenarioBName,
       scenarioAFacilityOptionIds,
       scenarioBFacilityOptionIds,
-      cadToUsdRate,
+      analysisCurrency: currencyContext.analysisCurrency,
+      cadToUsdRate: currencyContext.cadToUsdRate,
       submittedNetworkScenarioComparison
     });
     const result = await orchestrateSupplyChainDesignNetworkScenarioComparison({
       ...orchestrationInput,
-      forceNewRun
+      forceNewRun,
+      forceFreshRates
     });
 
     revalidatePath(`/supply-chain-design/${projectId}`);
@@ -1942,6 +2058,8 @@ export async function resumeSupplyChainDesignNetworkScenarioComparisonAction(inp
     },
     select: {
       id: true,
+      analysisCurrency: true,
+      cadToUsdRate: true,
       mappings: {
         where: {
           id: {
@@ -1973,6 +2091,8 @@ export async function resumeSupplyChainDesignNetworkScenarioComparisonAction(inp
     if (!scenarioA || !scenarioB) return { ok: false, message: "Saved Network Scenario Comparison scenarios could not be read." };
     const scenarioAFacilityOptionIds = scenarioA.selectedFacilities.map((facility) => `${facility.sourceType}:${facility.facilityId}`);
     const scenarioBFacilityOptionIds = scenarioB.selectedFacilities.map((facility) => `${facility.sourceType}:${facility.facilityId}`);
+    const forceFreshRates = run.ratingEvidence.reconciliation.forceFreshRates === true;
+    const completedRateBatchIds = run.ratingEvidence.ratingBatchIds;
     const orchestrationInput = await buildNetworkScenarioComparisonOrchestrationInput({
       context,
       projectId: input.projectId,
@@ -1983,13 +2103,16 @@ export async function resumeSupplyChainDesignNetworkScenarioComparisonAction(inp
       scenarioBName: scenarioB.scenarioName,
       scenarioAFacilityOptionIds,
       scenarioBFacilityOptionIds,
+      analysisCurrency: run.fxInput?.analysisCurrency ?? "USD",
       cadToUsdRate: run.fxInput?.cadToUsdRate ?? null
     });
     const result = await orchestrateSupplyChainDesignNetworkScenarioComparison({
       ...orchestrationInput,
       comparisonRunId: run.id,
       submitMissingRates: false,
-      finalizeWithMissingRates: true
+      finalizeWithMissingRates: true,
+      forceFreshRates,
+      completedRateBatchIds
     });
     revalidatePath(`/supply-chain-design/${input.projectId}`);
     return {
@@ -2670,6 +2793,8 @@ export async function generateSupplyChainDesignCandidateLtlRatePreparationAction
     },
     select: {
       id: true,
+      analysisCurrency: true,
+      cadToUsdRate: true,
       mappings: {
         where: {
           tableType: {
@@ -2684,7 +2809,8 @@ export async function generateSupplyChainDesignCandidateLtlRatePreparationAction
             select: {
               id: true,
               originalFileName: true,
-              fileBytes: true
+              fileBytes: true,
+              contentHash: true
             }
           }
         }
@@ -2695,6 +2821,10 @@ export async function generateSupplyChainDesignCandidateLtlRatePreparationAction
   if (!project) {
     return { ok: false, message: "Supply Chain Design project was not found." };
   }
+  const currencyContext = buildSupplyChainDesignCurrencyContext({
+    analysisCurrency: project.analysisCurrency,
+    cadToUsdRate: project.cadToUsdRate == null ? null : Number(project.cadToUsdRate)
+  });
 
   const shipmentsMappings = getValidMappings(project.mappings, "SHIPMENTS", ["origin_facility_id"]);
   const candidateFacilitiesMappings = getValidMappings(project.mappings, "CANDIDATE_FACILITIES", [
@@ -2738,7 +2868,8 @@ export async function generateSupplyChainDesignCandidateLtlRatePreparationAction
       tenantId: context.tenantId,
       projectId,
       shipments: toMappedScenarioFile(shipmentsMapping),
-      candidateFacilities: toMappedScenarioFile(candidateFacilitiesMapping)
+      candidateFacilities: toMappedScenarioFile(candidateFacilitiesMapping),
+      currencyContext
     });
 
     const createdRun = await prisma.supplyChainDesignLtlRatePreparationRun.create({
@@ -2798,6 +2929,7 @@ export async function startSupplyChainDesignLtlRateBatchAction(
   await requireMutationAccess(context);
 
   const projectId = text(formData, "projectId");
+  const forceFreshRates = text(formData, "forceFreshRates") === "on";
   let preparationRunId = text(formData, "preparationRunId");
   if (!projectId || !preparationRunId) {
     return { ok: false, message: "Select a reviewed LTL preparation before requesting 7L rates." };
@@ -2807,7 +2939,7 @@ export async function startSupplyChainDesignLtlRateBatchAction(
     const comparisonSetup = await buildSupplyChainDesignLtlComparisonSetup(context, projectId, formData);
     let batch: Awaited<ReturnType<typeof createSupplyChainDesignLtlRateBatch>>;
     try {
-      batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup);
+      batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup, { forceFreshRates });
     } catch (error) {
       if (
         preparationRunId &&
@@ -2822,7 +2954,7 @@ export async function startSupplyChainDesignLtlRateBatchAction(
           return preparationResponse;
         }
         preparationRunId = preparationResponse.runId;
-        batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup);
+        batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup, { forceFreshRates });
       } else {
         throw error;
       }
@@ -2861,6 +2993,7 @@ export async function runSupplyChainDesignNetworkDesignAction(
   await requireMutationAccess(context);
 
   const projectId = text(formData, "projectId");
+  const forceFreshRates = text(formData, "forceFreshRates") === "on";
   if (!projectId) {
     return { ok: false, message: "Missing project ID." };
   }
@@ -2881,7 +3014,7 @@ export async function runSupplyChainDesignNetworkDesignAction(
     const comparisonSetup = await buildSupplyChainDesignLtlComparisonSetup(context, projectId, formData);
     let batch: Awaited<ReturnType<typeof createSupplyChainDesignLtlRateBatch>>;
     try {
-      batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup);
+      batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup, { forceFreshRates });
     } catch (error) {
       if (
         preparationRunId &&
@@ -2896,7 +3029,7 @@ export async function runSupplyChainDesignNetworkDesignAction(
           return preparationResponse;
         }
         preparationRunId = preparationResponse.runId;
-        batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup);
+        batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup, { forceFreshRates });
       } else {
         throw error;
       }
@@ -3433,7 +3566,12 @@ function readNetworkDesignCurrentFacilities(mapping: {
   const columns = toColumnIndex(fieldMappings, headers);
   const facilityIdIndex = columns.get("facility_id");
   const facilityNameIndex = columns.get("facility_name");
+  const postalCodeIndex = columns.get("postal_code");
   const annualCostIndex = columns.get("annual_facility_warehouse_cost") ?? columns.get("annual_fixed_cost");
+  const annualCostCurrencyIndex =
+    columns.get("annual_facility_warehouse_cost_currency") ??
+    columns.get("annual_fixed_cost_currency") ??
+    columns.get("currency");
   if (facilityIdIndex === undefined || facilityNameIndex === undefined) {
     throw new Error("Current Facilities and Warehouse Costs mapping must include facility ID and facility name.");
   }
@@ -3441,7 +3579,9 @@ function readNetworkDesignCurrentFacilities(mapping: {
     .map((row) => ({
       facilityId: row[facilityIdIndex]?.trim() ?? "",
       facilityName: row[facilityNameIndex]?.trim() ?? "",
-      annualFacilityCost: parseCurrencyNumber(annualCostIndex === undefined ? "" : row[annualCostIndex])
+      postalCode: postalCodeIndex === undefined ? null : row[postalCodeIndex]?.trim() || null,
+      annualFacilityCost: parseCurrencyNumber(annualCostIndex === undefined ? "" : row[annualCostIndex]),
+      annualFacilityCostCurrency: annualCostCurrencyIndex === undefined ? null : row[annualCostCurrencyIndex]?.trim() || null
     }))
     .filter((facility) => facility.facilityId);
 }
@@ -3456,6 +3596,16 @@ function readNetworkDesignCandidateFacilities(mapping: {
   const facilityIdIndex = columns.get("candidate_facility_id");
   const facilityNameIndex = columns.get("candidate_facility_name");
   const annualCostIndex = columns.get("annual_fixed_cost") ?? columns.get("annual_facility_warehouse_cost");
+  const annualCostCurrencyIndex =
+    columns.get("annual_fixed_cost_currency") ??
+    columns.get("annual_facility_warehouse_cost_currency") ??
+    columns.get("currency");
+  const inboundFeeIndex = columns.get("inbound_fee_per_pallet");
+  const inboundFeeCurrencyIndex = columns.get("inbound_fee_per_pallet_currency") ?? columns.get("currency");
+  const outboundFeeIndex = columns.get("outbound_fee_per_pallet");
+  const outboundFeeCurrencyIndex = columns.get("outbound_fee_per_pallet_currency") ?? columns.get("currency");
+  const storageFeeIndex = columns.get("storage_fee_per_pallet_per_month");
+  const storageFeeCurrencyIndex = columns.get("storage_fee_per_pallet_per_month_currency") ?? columns.get("currency");
   if (facilityIdIndex === undefined || facilityNameIndex === undefined) {
     throw new Error("Candidate Warehouses and Proposed Costs mapping must include candidate facility ID and candidate name.");
   }
@@ -3463,7 +3613,14 @@ function readNetworkDesignCandidateFacilities(mapping: {
     .map((row) => ({
       facilityId: row[facilityIdIndex]?.trim() ?? "",
       facilityName: row[facilityNameIndex]?.trim() ?? "",
-      annualFixedCost: parseCurrencyNumber(annualCostIndex === undefined ? "" : row[annualCostIndex])
+      annualFixedCost: parseOptionalCurrencyNumber(annualCostIndex === undefined ? "" : row[annualCostIndex]),
+      annualFixedCostCurrency: annualCostCurrencyIndex === undefined ? null : row[annualCostCurrencyIndex]?.trim() || null,
+      inboundFeePerPallet: parseOptionalCurrencyNumber(inboundFeeIndex === undefined ? "" : row[inboundFeeIndex]),
+      inboundFeePerPalletCurrency: inboundFeeCurrencyIndex === undefined ? null : row[inboundFeeCurrencyIndex]?.trim() || null,
+      outboundFeePerPallet: parseOptionalCurrencyNumber(outboundFeeIndex === undefined ? "" : row[outboundFeeIndex]),
+      outboundFeePerPalletCurrency: outboundFeeCurrencyIndex === undefined ? null : row[outboundFeeCurrencyIndex]?.trim() || null,
+      storageFeePerPalletPerMonth: parseOptionalCurrencyNumber(storageFeeIndex === undefined ? "" : row[storageFeeIndex]),
+      storageFeePerPalletPerMonthCurrency: storageFeeCurrencyIndex === undefined ? null : row[storageFeeCurrencyIndex]?.trim() || null
     }))
     .filter((facility) => facility.facilityId);
 }
@@ -3495,22 +3652,30 @@ function parseCurrencyNumber(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function parseOptionalCurrencyNumber(value: string | undefined) {
+  if (!value?.trim()) return null;
+  const parsed = Number(value.replace(/[$,]/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function toScenarioInputReference<
   TMapping extends {
     id: string;
     fileId: string;
     updatedAt: Date;
-    file: { originalFileName: string };
+    file: { originalFileName: string; contentHash?: string | null };
   }
 >(mapping: TMapping, mappings: TMapping[]) {
   return {
     fileId: mapping.fileId,
     fileName: mapping.file.originalFileName,
+    contentHash: mapping.file.contentHash ?? "",
     mappingId: mapping.id,
     mappingUpdatedAt: mapping.updatedAt.toISOString(),
     candidateFiles: mappings.map((candidate) => ({
       fileId: candidate.fileId,
       fileName: candidate.file.originalFileName,
+      contentHash: candidate.file.contentHash ?? "",
       mappingId: candidate.id,
       mappingUpdatedAt: candidate.updatedAt.toISOString(),
       selected: candidate.id === mapping.id
@@ -3566,6 +3731,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
   scenarioBName: string;
   scenarioAFacilityOptionIds: string[];
   scenarioBFacilityOptionIds: string[];
+  analysisCurrency: SupplyChainDesignCurrency;
   cadToUsdRate: number | null;
   submittedNetworkScenarioComparison?: SupplyChainDesignModelRunState["submittedNetworkScenarioComparison"];
 }): Promise<SupplyChainDesignNetworkScenarioComparisonOrchestrationInput> {
@@ -3579,7 +3745,11 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
     tenantId: input.context.tenantId,
     projectId: input.projectId,
     shipments: toMappedScenarioFile(input.shipmentsMapping),
-    candidateFacilities: toMappedScenarioFile(input.candidateFacilitiesMapping)
+    candidateFacilities: toMappedScenarioFile(input.candidateFacilitiesMapping),
+    currencyContext: {
+      analysisCurrency: input.analysisCurrency,
+      cadToUsdRate: input.cadToUsdRate
+    }
   });
   const scenarioPreparedProfiles = toSupplyChainDesignNetworkScenarioPreparedProfiles(prepared.preparedRequests);
   const currentOrigins = normalizeSupplyChainDesignCurrentFacilityRatingOrigins(toMappedScenarioFile(input.facilitiesMapping)).origins;
@@ -3630,6 +3800,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
       scenarioName: input.scenarioAName,
       transportationInput: {
         tenantId: input.context.tenantId,
+        projectId: input.projectId,
         scenarioId: "scenario-a",
         scenarioName: input.scenarioAName,
         selectedOrigins: toSelectedScenarioOrigins(input.scenarioAFacilityOptionIds, currentOrigins, candidateOrigins),
@@ -3654,6 +3825,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
       scenarioName: input.scenarioBName,
       transportationInput: {
         tenantId: input.context.tenantId,
+        projectId: input.projectId,
         scenarioId: "scenario-b",
         scenarioName: input.scenarioBName,
         selectedOrigins: toSelectedScenarioOrigins(input.scenarioBFacilityOptionIds, currentOrigins, candidateOrigins),
@@ -3675,7 +3847,7 @@ async function buildNetworkScenarioComparisonOrchestrationInput(input: {
     },
     account,
     carrierHashes,
-    fxInput: input.cadToUsdRate ? { cadToUsdRate: input.cadToUsdRate } : null,
+    fxInput: input.cadToUsdRate ? { cadToUsdRate: input.cadToUsdRate, analysisCurrency: input.analysisCurrency } : null,
     resultInputs: {
       preparedRequestCount: scenarioPreparedProfiles.length,
       candidateExpandedPreparedRequestCount: prepared.preparedRequests.length
@@ -3748,13 +3920,18 @@ function toCombinedScenarioFacilities(
             facilityId: facility.facilityId,
             facilitySourceType: "CANDIDATE" as const,
             currency: facility.currency,
-        annualFacilityWarehouseCost: facility.annualFacilityWarehouseCost,
-        annualFixedCost: facility.annualFixedCost,
-        inboundFeePerPallet: facility.inboundFeePerPallet,
-        outboundFeePerPallet: facility.outboundFeePerPallet,
-        storageFeePerPalletPerMonth: facility.storageFeePerPalletPerMonth
-      }
-    });
+            annualFacilityWarehouseCostCurrency: facility.annualFacilityWarehouseCostCurrency,
+            annualFixedCostCurrency: facility.annualFixedCostCurrency,
+            inboundFeePerPalletCurrency: facility.inboundFeePerPalletCurrency,
+            outboundFeePerPalletCurrency: facility.outboundFeePerPalletCurrency,
+            storageFeePerPalletPerMonthCurrency: facility.storageFeePerPalletPerMonthCurrency,
+            annualFacilityWarehouseCost: facility.annualFacilityWarehouseCost,
+            annualFixedCost: facility.annualFixedCost,
+            inboundFeePerPallet: facility.inboundFeePerPallet,
+            outboundFeePerPallet: facility.outboundFeePerPallet,
+            storageFeePerPalletPerMonth: facility.storageFeePerPalletPerMonth
+          }
+        });
 }
 
 function toComparisonSelectedFacilities(

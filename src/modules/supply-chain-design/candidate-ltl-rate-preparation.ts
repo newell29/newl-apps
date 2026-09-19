@@ -3,18 +3,27 @@ import { SupplyChainDesignTableType } from "@prisma/client";
 
 import { parseCsvRows } from "@/modules/supply-chain-design/csv-intake";
 import { getSourceColumn } from "@/modules/supply-chain-design/model-01-proof";
-import { calculateLtlFreightClass } from "@/modules/ltl-rate-portal/freight-class";
 import type { LtlFreightPiece, LtlQuoteRequest } from "@/modules/ltl-rate-portal/types";
 import { normalizeSupplyChainDesignCandidateRatingOrigins } from "@/modules/supply-chain-design/rating-origins";
 import type { SupplyChainDesignFieldMapping } from "@/modules/supply-chain-design/types";
+import { normalizeSupplyChainDesignWeightUnit } from "@/modules/supply-chain-design/weight-units";
+import {
+  normalizeSupplyChainDesignDimensionUnit,
+  normalizeSupplyChainDesignLtlPhysicalProfile
+} from "@/modules/supply-chain-design/ltl-physical-normalization";
+import {
+  normalizeSupplyChainDesignMoney,
+  type SupplyChainDesignCurrencyContext
+} from "@/modules/supply-chain-design/currency";
 
-export const SCDS_LTL_RATE_PREPARATION_RESULT_VERSION = "SCDS_CANDIDATE_LTL_RATE_PREPARATION_V2";
+export const SCDS_LTL_RATE_PREPARATION_RESULT_VERSION = "SCDS_CANDIDATE_LTL_RATE_PREPARATION_V5";
 
 export type SupplyChainDesignLtlRatePreparationInput = {
   tenantId: string;
   projectId: string;
   candidateFacilities: SupplyChainDesignPreparationMappedFile;
   shipments: SupplyChainDesignPreparationMappedFile;
+  currencyContext?: SupplyChainDesignCurrencyContext | null;
 };
 
 export type SupplyChainDesignPreparationMappedFile = {
@@ -37,19 +46,23 @@ export type SupplyChainDesignLtlPreparedRequest = {
   candidateFacilityName: string;
   originPostalCode: string;
   originCountry: string;
+  originalOriginPostalCode: string | null;
   originalFacilityId: string;
   historicalShipmentRowIds: string[];
   sourceRowCount: number;
   shipmentOrderReferences: string[];
-  recordType: string;
+  recordType: "Individual Shipment" | "Aggregated Activity";
   representedShipments: number;
   currentTransportationCost: number | null;
   currentTransportationCostPerShipment: number | null;
+  currentTransportationCostCurrency: string | null;
   destinationPostalCode: string;
   destinationCountry: string;
   representativePallets: number | null;
   representativeWeight: number | null;
   weightUnit: string | null;
+  inventoryDwellTimeDays: number | null;
+  warehouseCostSourceRows: SupplyChainDesignLtlWarehouseCostSourceRow[];
   length: number | null;
   width: number | null;
   height: number | null;
@@ -62,9 +75,20 @@ export type SupplyChainDesignLtlPreparedRequest = {
   normalizedRequest: LtlQuoteRequest | null;
 };
 
+export type SupplyChainDesignLtlWarehouseCostSourceRow = {
+  sourceRowId: string;
+  shipmentReference: string;
+  representedShipments: number;
+  pallets: number | null;
+  inventoryDwellTimeDays: number | null;
+};
+
 export type SupplyChainDesignLtlRatePreparationResultSummary = {
   resultVersion: typeof SCDS_LTL_RATE_PREPARATION_RESULT_VERSION;
   historicalRowsReviewed: number;
+  totalHistoricalShipmentsRepresented: number;
+  ltlShipmentsRepresented: number;
+  parcelShipmentsRepresented: number;
   candidateWarehouseCount: number;
   readyRequestCount: number;
   missingDataRequestCount: number;
@@ -77,14 +101,15 @@ export type SupplyChainDesignLtlRatePreparationResultSummary = {
 
 export type SupplyChainDesignLtlSourceRowOutcome = {
   sourceRowId: string;
+  recordType: "Individual Shipment" | "Aggregated Activity";
   shipmentOrderReference: string;
-  recordType: string;
   transportationMode: string;
   representedShipments: number;
   destination: string;
   pallets: number | null;
   weight: number | null;
   weightUnit: string;
+  inventoryDwellTimeDays: number | null;
   dimensions: string;
   status: "Prepared" | "Excluded" | "Missing data";
   reason: string;
@@ -107,6 +132,7 @@ export function prepareSupplyChainDesignCandidateLtlRateRequests(
 ): SupplyChainDesignLtlRatePreparationResultSummary {
   const candidates = readCandidateFacilities(input.candidateFacilities);
   const shipments = readMappedRows(input.shipments, ["origin_facility_id"]);
+  const currencyContext = input.currencyContext ?? null;
   const preparedByKey = new Map<string, SupplyChainDesignLtlPreparedRequest>();
   const sourceRowOutcomes: SupplyChainDesignLtlSourceRowOutcome[] = [];
   let excludedNonLtlRowCount = 0;
@@ -123,28 +149,38 @@ export function prepareSupplyChainDesignCandidateLtlRateRequests(
     }
 
     for (const candidate of candidates) {
-      const request = prepareOneRequest({
-        tenantId: input.tenantId,
+      const requests = prepareRequestsForSource({
+    tenantId: input.tenantId,
         projectId: input.projectId,
         candidate,
-        source
+        source,
+        currencyContext
       });
 
-      const existing = preparedByKey.get(request.rateRequestKey);
-      if (existing) {
-        duplicateRequestsConsolidated += 1;
-        existing.historicalShipmentRowIds.push(...request.historicalShipmentRowIds);
-        existing.sourceRowCount += request.sourceRowCount;
-        existing.representedShipments = roundQuantity(existing.representedShipments + request.representedShipments);
-        for (const reference of request.shipmentOrderReferences) {
-          if (reference && !existing.shipmentOrderReferences.includes(reference)) {
-            existing.shipmentOrderReferences.push(reference);
+      for (const request of requests) {
+        const existing = preparedByKey.get(request.rateRequestKey);
+        if (existing) {
+          duplicateRequestsConsolidated += 1;
+          existing.historicalShipmentRowIds.push(...request.historicalShipmentRowIds);
+          existing.sourceRowCount += request.sourceRowCount;
+          existing.representedShipments = roundQuantity(existing.representedShipments + request.representedShipments);
+          existing.currentTransportationCost = combineNullableSums(existing.currentTransportationCost, request.currentTransportationCost);
+          existing.currentTransportationCostPerShipment =
+            existing.currentTransportationCost === null
+              ? null
+              : roundQuantity(existing.currentTransportationCost / existing.representedShipments);
+          existing.currentTransportationCostCurrency = request.currentTransportationCostCurrency;
+          existing.warehouseCostSourceRows.push(...request.warehouseCostSourceRows);
+          for (const reference of request.shipmentOrderReferences) {
+            if (reference && !existing.shipmentOrderReferences.includes(reference)) {
+              existing.shipmentOrderReferences.push(reference);
+            }
           }
+          continue;
         }
-        continue;
-      }
 
-      preparedByKey.set(request.rateRequestKey, request);
+        preparedByKey.set(request.rateRequestKey, request);
+      }
     }
 
     sourceRowOutcomes.push(toSourceRowOutcome(source, "Prepared", "LTL row prepared once for each candidate warehouse."));
@@ -153,10 +189,23 @@ export function prepareSupplyChainDesignCandidateLtlRateRequests(
   const preparedRequests = [...preparedByKey.values()].sort((left, right) =>
     left.rateRequestKey.localeCompare(right.rateRequestKey)
   );
+  const totalHistoricalShipmentsRepresented = sourceRowOutcomes.reduce(
+    (sum, outcome) => sum + outcome.representedShipments,
+    0
+  );
+  const ltlShipmentsRepresented = sourceRowOutcomes
+    .filter((outcome) => isLtlMode(outcome.transportationMode))
+    .reduce((sum, outcome) => sum + outcome.representedShipments, 0);
+  const parcelShipmentsRepresented = sourceRowOutcomes
+    .filter((outcome) => isParcelMode(outcome.transportationMode))
+    .reduce((sum, outcome) => sum + outcome.representedShipments, 0);
 
   return {
     resultVersion: SCDS_LTL_RATE_PREPARATION_RESULT_VERSION,
     historicalRowsReviewed: shipments.rows.length,
+    totalHistoricalShipmentsRepresented,
+    ltlShipmentsRepresented,
+    parcelShipmentsRepresented,
     candidateWarehouseCount: candidates.length,
     readyRequestCount: preparedRequests.filter((request) => request.preparationStatus === "Ready for rating").length,
     missingDataRequestCount: preparedRequests.filter((request) => request.preparationStatus === "Missing data").length,
@@ -167,6 +216,8 @@ export function prepareSupplyChainDesignCandidateLtlRateRequests(
     assumptions: [
       "No live 7L request was made.",
       "Historical origin is replaced by the selected candidate warehouse origin.",
+      "Historical row totals are split into deterministic whole-pallet shipment profiles for LTL rating.",
+      "Parcel transportation rating is deferred to a future UPS integration.",
       "No optional accessorials are requested in this preparation stage.",
       "Stackability is set to the integration-compatible non-stackable value internally."
     ]
@@ -196,8 +247,9 @@ function networkScenarioProfileSourceKey(request: SupplyChainDesignLtlPreparedRe
     request.shipmentOrderReferences.join("|"),
     request.destinationPostalCode,
     request.destinationCountry,
-    request.recordType,
-    request.representedShipments
+    request.representedShipments,
+    request.representativePallets,
+    request.representativeWeight
   ].join("::");
 }
 
@@ -213,13 +265,14 @@ function toSourceRowOutcome(
   return {
     sourceRowId: source.sourceRowId,
     shipmentOrderReference: source.shipmentOrderReference,
-    recordType: source.recordType,
     transportationMode: source.mode,
-    representedShipments: source.recordType === "Aggregated Activity" ? source.shipmentQuantity ?? 0 : 1,
+    recordType: source.recordType,
+    representedShipments: source.recordType === "Individual Shipment" ? 1 : source.shipmentQuantity ?? 0,
     destination: `${source.destinationPostalCode} ${source.destinationCountry ?? ""}`.trim(),
     pallets: source.pallets,
     weight: source.weight,
     weightUnit: source.weightUnit,
+    inventoryDwellTimeDays: source.inventoryDwellTimeDays,
     dimensions:
       source.length !== null && source.width !== null && source.height !== null
         ? `${source.length} x ${source.width} x ${source.height} ${source.dimensionUnit}`.trim()
@@ -229,26 +282,27 @@ function toSourceRowOutcome(
   };
 }
 
-function prepareOneRequest({
+function prepareRequestsForSource({
   tenantId,
   projectId,
   candidate,
-  source
+  source,
+  currencyContext
 }: {
   tenantId: string;
   projectId: string;
   candidate: CandidateFacility;
   source: ShipmentSourceRow;
-}): SupplyChainDesignLtlPreparedRequest {
+  currencyContext: SupplyChainDesignCurrencyContext | null;
+}): SupplyChainDesignLtlPreparedRequest[] {
   const statusProblems: string[] = [];
 
   if (!isLtlMode(source.mode)) {
-    return basePreparedRequest(candidate, source, "Excluded - not LTL", "Transportation Mode is not LTL.", null, null);
+    return [basePreparedRequest(candidate, source, "Excluded - not LTL", "Transportation Mode is not LTL.", null, null)];
   }
 
   const representedShipments = resolveRepresentedShipments(source, statusProblems);
-  const representativeWeight = resolveRepresentativeWeight(source, representedShipments, statusProblems);
-  const representativePallets = resolveRepresentativePallets(source, representedShipments, statusProblems);
+  const derivedProfiles = deriveWholeShipmentProfiles(source, representedShipments, statusProblems);
   const weightUnit = normalizeWeightUnit(source.weightUnit, source.weight, statusProblems);
   const dimensionUnit = normalizeDimensionUnit(source.dimensionUnit, source.length, source.width, source.height, statusProblems);
   const hazardousMaterials = normalizeHazmat(source.hazardousMaterials, statusProblems);
@@ -257,10 +311,6 @@ function prepareOneRequest({
   if (hazardousMaterials === "Yes") {
     statusProblems.push("hazardous shipment requires additional information");
   }
-  if (representativePallets === null || !Number.isFinite(representativePallets) || representativePallets <= 0) {
-    statusProblems.push("Pallets must be greater than zero for freight class calculation");
-  }
-
   if (!source.destinationPostalCode) {
     statusProblems.push("Destination ZIP / Postal Code is missing");
   }
@@ -268,104 +318,120 @@ function prepareOneRequest({
     statusProblems.push("Destination Country is missing");
   }
 
-  const freightClass =
-    statusProblems.length === 0 && representativeWeight !== null && dimensions
-      ? calculateFreightClass({
-          weight: representativeWeight,
-          weightUnit: weightUnit!,
-          quantity: representativePallets!,
-          length: dimensions.length,
-          width: dimensions.width,
-          height: dimensions.height,
-          dimensionUnit: dimensionUnit!
-        })
-      : null;
-
-  if (statusProblems.length === 0 && !freightClass) {
-    statusProblems.push("freight class could not be calculated from the supplied dimensions and weight");
+  if (statusProblems.length > 0) {
+    return [
+      basePreparedRequest(
+        candidate,
+        source,
+        "Missing data",
+        statusProblems.join("; "),
+        null,
+        null
+      )
+    ];
   }
 
-  const piece: LtlFreightPiece | null =
-    statusProblems.length === 0 && representativeWeight !== null && dimensions && freightClass
-      ? {
-          qty: representativePallets!,
-          weight: representativeWeight,
-          weightType: "total",
-          length: dimensions.length,
-          width: dimensions.width,
-          height: dimensions.height,
-          dimType: "PLT",
-          freightClass,
-          hazmat: false,
-          stack: false
-        }
-      : null;
+  return derivedProfiles.map((profile) => {
+    const physicalProfile = normalizeSupplyChainDesignLtlPhysicalProfile({
+      pallets: profile.representativePallets,
+      weight: profile.representativeWeight,
+      weightUnit: weightUnit!,
+      length: dimensions!.length,
+      width: dimensions!.width,
+      height: dimensions!.height,
+      dimensionUnit: dimensionUnit!
+    });
+    const freightClass = physicalProfile?.freightClass ?? null;
 
-  const normalizedRequest: LtlQuoteRequest | null =
-    piece && source.destinationCountry
-      ? {
-          customerReference: source.shipmentOrderReference || source.sourceRowId,
-          originCity: "",
-          originState: "",
-          originZipcode: candidate.originPostalCode,
-          originCountry: candidate.originCountry,
-          destinationCity: "",
-          destinationState: "",
-          destinationZipcode: source.destinationPostalCode,
-          destinationCountry: source.destinationCountry,
-          pickupDate: "Not scheduled",
-          uom: weightUnit === "kg" || dimensionUnit === "cm" ? "METRIC" : "US",
-          accessorialCodes: [],
-          pieces: [piece]
-        }
-      : null;
+    const requestProblems = freightClass ? [] : ["freight class could not be calculated from the supplied dimensions and weight"];
+    const piece: LtlFreightPiece | null =
+      requestProblems.length === 0 && physicalProfile ? physicalProfile.piece : null;
 
-  const requestKey = buildRateRequestKey({
-    tenantId,
-    projectId,
-    candidate,
-    source,
-    representedShipments,
-    currentTransportationCost: resolveCurrentTransportationCost(source),
-    currentTransportationCostPerShipment: resolveCurrentTransportationCostPerShipment(source, representedShipments),
-    representativePallets,
-    representativeWeight,
-    weightUnit,
-    dimensions,
-    dimensionUnit,
-    hazardousMaterials,
-    freightClass
-  });
+    const normalizedRequest: LtlQuoteRequest | null =
+      piece && source.destinationCountry
+        ? {
+            customerReference: `${source.shipmentOrderReference || source.sourceRowId}:profile-${profile.profileNumber}`,
+            originCity: "",
+            originState: "",
+            originZipcode: candidate.originPostalCode,
+            originCountry: candidate.originCountry,
+            destinationCity: "",
+            destinationState: "",
+            destinationZipcode: source.destinationPostalCode,
+            destinationCountry: source.destinationCountry,
+            pickupDate: "Not scheduled",
+            uom: "US",
+            accessorialCodes: [],
+            pieces: [piece]
+          }
+        : null;
 
-  return {
-    ...basePreparedRequest(
+    const currentCostPerShipment = resolveCurrentTransportationCostPerShipment(source, representedShipments, currencyContext);
+    const currentTransportationCost =
+      currentCostPerShipment === null ? null : roundQuantity(currentCostPerShipment * profile.representedShipments);
+    const requestKey = buildRateRequestKey({
+      tenantId,
+      projectId,
       candidate,
       source,
-      statusProblems.length > 0 ? "Missing data" : "Ready for rating",
-      statusProblems.length > 0 ? statusProblems.join("; ") : null,
-      freightClass,
-      normalizedRequest
-    ),
-    rateRequestKey: requestKey,
-    representedShipments,
-    currentTransportationCost: resolveCurrentTransportationCost(source),
-    currentTransportationCostPerShipment: resolveCurrentTransportationCostPerShipment(source, representedShipments),
-    representativePallets,
-    representativeWeight,
-    weightUnit,
-    length: dimensions?.length ?? null,
-    width: dimensions?.width ?? null,
-    height: dimensions?.height ?? null,
-    dimensionUnit,
-    hazardousMaterials,
-    ratingAssumptions: [
-      source.recordType === "Aggregated Activity"
-        ? "Aggregated Activity uses representative per-shipment weight and dimensions; total shipments are retained for annualization."
-        : "Individual Shipment represents one shipment.",
-      "No optional accessorials requested.",
-      "Stackability is set internally to non-stackable."
-    ]
-  };
+      representedShipments: profile.representedShipments,
+      currentTransportationCost,
+      currentTransportationCostPerShipment: currentCostPerShipment,
+      currentTransportationCostCurrency: currencyContext?.analysisCurrency ?? source.transportationCostCurrency,
+      representativePallets: profile.representativePallets,
+      representativeWeight: physicalProfile?.weightLb ?? null,
+      weightUnit: physicalProfile ? "lb" : null,
+      dimensions: physicalProfile
+        ? {
+            length: physicalProfile.lengthIn,
+            width: physicalProfile.widthIn,
+            height: physicalProfile.heightIn
+          }
+        : null,
+      dimensionUnit: physicalProfile ? "in" : null,
+      hazardousMaterials,
+      freightClass
+    });
+
+    return {
+      ...basePreparedRequest(
+        candidate,
+        source,
+        requestProblems.length > 0 ? "Missing data" : "Ready for rating",
+        requestProblems.length > 0 ? requestProblems.join("; ") : null,
+        freightClass,
+        normalizedRequest
+      ),
+      rateRequestKey: requestKey,
+      representedShipments: profile.representedShipments,
+      currentTransportationCost,
+      currentTransportationCostPerShipment: currentCostPerShipment,
+      currentTransportationCostCurrency: currencyContext?.analysisCurrency ?? source.transportationCostCurrency,
+      representativePallets: profile.representativePallets,
+      representativeWeight: physicalProfile?.weightLb ?? null,
+      weightUnit: physicalProfile ? "lb" : null,
+      inventoryDwellTimeDays: source.inventoryDwellTimeDays,
+      warehouseCostSourceRows: [{
+        sourceRowId: source.sourceRowId,
+        shipmentReference: source.shipmentOrderReference,
+        representedShipments: profile.representedShipments,
+        pallets: profile.representativePallets * profile.representedShipments,
+        inventoryDwellTimeDays: source.inventoryDwellTimeDays
+      }],
+      length: physicalProfile?.lengthIn ?? null,
+      width: physicalProfile?.widthIn ?? null,
+      height: physicalProfile?.heightIn ?? null,
+      dimensionUnit: physicalProfile ? "in" : null,
+      hazardousMaterials,
+      ratingAssumptions: [
+        "7L rating uses normalized physical values in pounds, inches, and UOM US.",
+        "Historical row totals are split into deterministic whole-pallet shipment profiles for LTL rating.",
+        "Parcel transportation rating is deferred to a future UPS integration.",
+        "No optional accessorials requested.",
+        "Stackability is set internally to non-stackable."
+      ]
+    };
+  });
 }
 
 function basePreparedRequest(
@@ -382,19 +448,29 @@ function basePreparedRequest(
     candidateFacilityName: candidate.candidateFacilityName,
     originPostalCode: candidate.originPostalCode,
     originCountry: candidate.originCountry,
+    originalOriginPostalCode: null,
     originalFacilityId: source.originFacilityId,
     historicalShipmentRowIds: [source.sourceRowId],
     sourceRowCount: 1,
     shipmentOrderReferences: source.shipmentOrderReference ? [source.shipmentOrderReference] : [],
     recordType: source.recordType,
-    representedShipments: source.recordType === "Aggregated Activity" ? source.shipmentQuantity ?? 0 : 1,
+    representedShipments: source.recordType === "Individual Shipment" ? 1 : source.shipmentQuantity ?? 0,
     currentTransportationCost: null,
     currentTransportationCostPerShipment: null,
+    currentTransportationCostCurrency: null,
     destinationPostalCode: source.destinationPostalCode,
     destinationCountry: source.destinationCountry ?? "",
     representativePallets: null,
     representativeWeight: null,
     weightUnit: null,
+    inventoryDwellTimeDays: source.inventoryDwellTimeDays,
+    warehouseCostSourceRows: [{
+      sourceRowId: source.sourceRowId,
+      shipmentReference: source.shipmentOrderReference,
+      representedShipments: source.recordType === "Individual Shipment" ? 1 : source.shipmentQuantity ?? 0,
+      pallets: source.pallets,
+      inventoryDwellTimeDays: source.inventoryDwellTimeDays
+    }],
     length: null,
     width: null,
     height: null,
@@ -408,25 +484,28 @@ function basePreparedRequest(
   };
 }
 
-function resolveCurrentTransportationCost(source: ShipmentSourceRow) {
+function resolveCurrentTransportationCostPerShipment(
+  source: ShipmentSourceRow,
+  representedShipments: number,
+  currencyContext: SupplyChainDesignCurrencyContext | null
+) {
   if (source.transportationCost === null) {
     return null;
   }
-  return roundQuantity(source.transportationCost);
-}
-
-function resolveCurrentTransportationCostPerShipment(source: ShipmentSourceRow, representedShipments: number) {
-  if (source.transportationCost === null) {
-    return null;
-  }
-  const divisor = source.recordType === "Aggregated Activity" ? representedShipments : 1;
-  return divisor > 0 ? roundQuantity(source.transportationCost / divisor) : null;
+  if (!currencyContext) return representedShipments > 0 ? source.transportationCost / representedShipments : null;
+  const normalized = normalizeSupplyChainDesignMoney(
+    source.transportationCost,
+    source.transportationCostCurrency,
+    currencyContext,
+    `Historical shipment ${source.shipmentOrderReference || source.sourceRowId} transportation cost`
+  );
+  return representedShipments > 0 ? roundQuantity(normalized.normalizedAmount / representedShipments) : null;
 }
 
 type ShipmentSourceRow = {
   sourceRowId: string;
-  shipmentOrderReference: string;
   recordType: "Individual Shipment" | "Aggregated Activity";
+  shipmentOrderReference: string;
   shipmentQuantity: number | null;
   originFacilityId: string;
   destinationPostalCode: string;
@@ -441,14 +520,16 @@ type ShipmentSourceRow = {
   hazardousMaterials: string;
   mode: string;
   transportationCost: number | null;
+  transportationCostCurrency: string | null;
+  inventoryDwellTimeDays: number | null;
 };
 
 function readShipmentRow(row: string[], columns: Map<string, number>, sourceRowId: string): ShipmentSourceRow {
   return {
     sourceRowId,
-    shipmentOrderReference: valueAt(row, columns, "shipment_id") || valueAt(row, columns, "shipment_reference"),
     recordType: normalizeRecordType(valueAt(row, columns, "record_type")),
-    shipmentQuantity: parseOptionalNumber(valueAt(row, columns, "shipment_quantity")),
+    shipmentOrderReference: valueAt(row, columns, "shipment_id") || valueAt(row, columns, "shipment_reference"),
+    shipmentQuantity: parseOptionalInteger(valueAt(row, columns, "shipment_quantity")),
     originFacilityId: valueAt(row, columns, "origin_facility_id"),
     destinationPostalCode: valueAt(row, columns, "postal_or_region_code"),
     destinationCountry: normalizeCountry(valueAt(row, columns, "country")),
@@ -461,7 +542,9 @@ function readShipmentRow(row: string[], columns: Map<string, number>, sourceRowI
     dimensionUnit: valueAt(row, columns, "dimension_unit"),
     hazardousMaterials: valueAt(row, columns, "hazardous_materials"),
     mode: valueAt(row, columns, "mode"),
-    transportationCost: parseOptionalCurrencyNumber(valueAt(row, columns, "transportation_cost"))
+    transportationCost: parseOptionalCurrencyNumber(valueAt(row, columns, "transportation_cost")),
+    transportationCostCurrency: valueAt(row, columns, "transportation_cost_currency") || valueAt(row, columns, "currency") || null,
+    inventoryDwellTimeDays: parseOptionalNumber(valueAt(row, columns, "inventory_dwell_time_days"))
   };
 }
 
@@ -512,13 +595,15 @@ function normalizeHeader(value: string) {
   return value.replace(/^\uFEFF/, "").trim();
 }
 
-function normalizeRecordType(value: string): ShipmentSourceRow["recordType"] {
-  return value.trim().toLowerCase() === "aggregated activity" ? "Aggregated Activity" : "Individual Shipment";
-}
-
 function isLtlMode(value: string) {
   const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, " ");
   return normalized === "ltl" || normalized === "less than truckload";
+}
+
+function isParcelMode(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  // TODO: route parcel rows through a future UPS integration instead of 7L.
+  return normalized === "parcel" || normalized === "small parcel";
 }
 
 function normalizeCountry(value: string): "US" | "CA" | "MX" | null {
@@ -537,6 +622,14 @@ function parseOptionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseOptionalInteger(value: string) {
+  if (!value.trim()) {
+    return null;
+  }
+  const parsed = Number(value.replace(/,/g, "").trim());
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
 function parseOptionalCurrencyNumber(value: string) {
   if (!value.trim()) {
     return null;
@@ -545,60 +638,93 @@ function parseOptionalCurrencyNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeRecordType(value: string): ShipmentSourceRow["recordType"] {
+  return value.trim().toLowerCase() === "aggregated activity" ? "Aggregated Activity" : "Individual Shipment";
+}
+
 function resolveRepresentedShipments(source: ShipmentSourceRow, problems: string[]) {
-  if (source.recordType === "Individual Shipment") {
-    return 1;
-  }
+  if (source.recordType === "Individual Shipment") return 1;
   if (source.shipmentQuantity === null || source.shipmentQuantity <= 0) {
-    problems.push("Aggregated Activity requires Shipments greater than zero");
+    problems.push("Shipments Represented must be a positive whole number");
     return 0;
   }
   return source.shipmentQuantity;
 }
 
-function resolveRepresentativeWeight(source: ShipmentSourceRow, representedShipments: number, problems: string[]) {
-  if (source.weight === null || source.weight <= 0) {
-    problems.push("Weight is missing or invalid");
-    return null;
-  }
-  if (source.recordType === "Aggregated Activity") {
-    if (representedShipments <= 0) {
-      return null;
-    }
-    return source.weight / representedShipments;
-  }
-  return source.weight;
-}
+type DerivedShipmentProfile = {
+  profileNumber: number;
+  representedShipments: number;
+  representativePallets: number;
+  representativeWeight: number;
+};
 
-function resolveRepresentativePallets(source: ShipmentSourceRow, representedShipments: number, problems: string[]) {
+function deriveWholeShipmentProfiles(source: ShipmentSourceRow, representedShipments: number, problems: string[]) {
+  if (source.weight === null || source.weight <= 0) {
+    problems.push("Weight Total is missing or invalid");
+    return [];
+  }
   if (source.pallets === null) {
-    return null;
+    problems.push("Pallets Total is missing");
+    return [];
   }
-  if (source.pallets < 0) {
-    problems.push("Pallets cannot be negative");
-    return null;
+  if (!Number.isInteger(source.pallets) || source.pallets <= 0) {
+    problems.push("Pallets Total must be a positive whole number");
+    return [];
   }
-  if (source.recordType === "Aggregated Activity") {
-    if (representedShipments <= 0) {
-      return null;
+  if (representedShipments <= 0) {
+    return [];
+  }
+
+  const base = Math.floor(source.pallets / representedShipments);
+  const remainder = source.pallets % representedShipments;
+  if (base <= 0) {
+    problems.push("Pallets Total must be at least the number of Shipments Represented for LTL rating");
+    return [];
+  }
+
+  const profiles: DerivedShipmentProfile[] = [];
+  let allocatedWeight = 0;
+  for (let index = 0; index < representedShipments; index += 1) {
+    const pallets = base + (index < remainder ? 1 : 0);
+    const weight =
+      index === representedShipments - 1
+        ? roundQuantity(source.weight - allocatedWeight)
+        : roundQuantity((source.weight * pallets) / source.pallets);
+    allocatedWeight = roundQuantity(allocatedWeight + weight);
+    profiles.push({
+      profileNumber: index + 1,
+      representedShipments: 1,
+      representativePallets: pallets,
+      representativeWeight: weight
+    });
+  }
+
+  const consolidated = new Map<string, DerivedShipmentProfile>();
+  for (const profile of profiles) {
+    const key = `${profile.representativePallets}:${profile.representativeWeight}`;
+    const existing = consolidated.get(key);
+    if (existing) {
+      existing.representedShipments += 1;
+      continue;
     }
-    return source.pallets / representedShipments;
+    consolidated.set(key, { ...profile });
   }
-  return source.pallets;
+  return [...consolidated.values()];
 }
 
 function normalizeWeightUnit(value: string, weight: number | null, problems: string[]) {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) {
-    if (weight !== null) {
-      problems.push("Weight Unit is required when Weight is supplied");
+  const normalized = normalizeSupplyChainDesignWeightUnit(value);
+  if (!normalized.ok) {
+    if (normalized.reason === "UNSUPPORTED") {
+      problems.push(`Weight Unit "${normalized.sourceValue}" is not supported`);
+    } else if (weight !== null) {
+      problems.push(
+        "Weight Unit is required when Weight is supplied"
+      );
     }
     return null;
   }
-  if (["lb", "lbs", "pound", "pounds"].includes(normalized)) return "lb";
-  if (["kg", "kgs", "kilogram", "kilograms"].includes(normalized)) return "kg";
-  problems.push(`Weight Unit "${value}" is not supported`);
-  return null;
+  return normalized.unit;
 }
 
 function normalizeDimensionUnit(value: string, length: number | null, width: number | null, height: number | null, problems: string[]) {
@@ -609,8 +735,8 @@ function normalizeDimensionUnit(value: string, length: number | null, width: num
     }
     return null;
   }
-  if (["in", "inch", "inches"].includes(normalized)) return "in";
-  if (["cm", "centimeter", "centimeters"].includes(normalized)) return "cm";
+  const unit = normalizeSupplyChainDesignDimensionUnit(normalized);
+  if (unit) return unit;
   problems.push(`Dimension Unit "${value}" is not supported`);
   return null;
 }
@@ -660,16 +786,15 @@ export function calculateFreightClass({
   height: number;
   dimensionUnit: string;
 }) {
-  const result = calculateLtlFreightClass({
-    totalWeight: weight,
+  return normalizeSupplyChainDesignLtlPhysicalProfile({
+    pallets: quantity,
+    weight,
     weightUnit,
-    quantity,
     length,
     width,
     height,
     dimensionUnit
-  });
-  return result.ok ? result.freightClass : null;
+  })?.freightClass ?? null;
 }
 
 function buildRateRequestKey(input: {
@@ -680,6 +805,7 @@ function buildRateRequestKey(input: {
   representedShipments: number;
   currentTransportationCost: number | null;
   currentTransportationCostPerShipment: number | null;
+  currentTransportationCostCurrency: string | null;
   representativePallets: number | null;
   representativeWeight: number | null;
   weightUnit: string | null;
@@ -689,6 +815,7 @@ function buildRateRequestKey(input: {
   freightClass: string | null;
 }) {
   const identity = {
+    physicalNormalizationVersion: "POUNDS_INCHES_EACH_V1",
     tenantId: input.tenantId,
     projectId: input.projectId,
     candidateFacilityId: input.candidate.candidateFacilityId,
@@ -709,4 +836,11 @@ function buildRateRequestKey(input: {
 
 function roundQuantity(value: number) {
   return Math.round(value * 1000000) / 1000000;
+}
+
+function combineNullableSums(left: number | null, right: number | null) {
+  if (left === null || right === null) {
+    return null;
+  }
+  return roundQuantity(left + right);
 }

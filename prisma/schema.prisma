@@ -1044,6 +1044,8 @@ model SupplyChainDesignProject {
   description     String?
   status          SupplyChainDesignProjectStatus @default(DRAFT)
   createdByUserId String?
+  analysisCurrency String                        @default("USD")
+  cadToUsdRate     Decimal?                       @db.Decimal(12, 6)
   createdAt       DateTime                       @default(now())
   updatedAt       DateTime                       @updatedAt
 
