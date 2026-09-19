@@ -1406,7 +1406,9 @@ class Pilot:
             rows += ["Configured local baseline: `" + settings.get("localModel", "UNKNOWN") + "` (" +
                 settings.get("localQuantization", "UNKNOWN") + ", digest `" +
                 settings.get("localModelDigest", "UNKNOWN") + "`, thinking " +
-                str(settings.get("localThinking")).lower() + ", 16,384-token runtime context).", ""]
+                str(settings.get("localThinking")).lower() + ", " +
+                f"{settings.get('contextLength', 'UNKNOWN')}-token runtime context, " +
+                f"{settings.get('maxOutputTokens', 'UNKNOWN')} output-token ceiling).", ""]
         for case in self.state.get("pairedComparisons", []):
             rows += ["### " + case["comparisonId"], "",
                 f"Input hash: `{case['promptHash']}` · source commit: `{case.get('sourceCommit')}` · status: `{case['status']}`", "",

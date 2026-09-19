@@ -353,11 +353,11 @@ Approved runtime configuration (private file; preserve tenant, expiry, evidence 
     "queueLimit": 1,
     "localModel": "qwen3.8-rvn:q8_0-multilingual",
     "localQuantization": "Q8_0",
-    "localThinking": true,
+    "localThinking": false,
     "timeoutSeconds": 180,
-    "contextLength": 16384,
-    "maxOutputTokens": 4096,
-    "diagnosticThinkingOffCases": 1
+    "contextLength": 32768,
+    "maxOutputTokens": 1000,
+    "diagnosticThinkingOffCases": 0
   }
 }
 ```
@@ -380,10 +380,13 @@ one explicitly configured local model. A full queue records a skipped sample ins
 backlog. The supervisor processes one local inference between primary research wakes, so local latency
 cannot delay the rest of the current Terra wake. A local proposal is never passed to the executor.
 
-The baseline is the explicitly recorded installed Qwen tag, digest and quantization. It uses thinking,
-a 4,096 generated-token ceiling, 16,384-token runtime context and a 180-second timeout. A timeout is an
-incomplete attempt. One separately labelled thinking-off diagnostic may reuse the first saved packet;
-it is not treated as an equivalent reasoning setting or folded into baseline results. Every model call,
+The baseline is the explicitly recorded installed Qwen tag, digest and quantization. The activation
+evaluation first preserved the historical 16,384-context, thinking-requested configuration. Provider
+preflight reported that this Q8 tag exposes completion but not thinking, and the first packet exceeded
+that context before inference. The continuing comparison therefore explicitly uses thinking off,
+a 1,000 generated-token ceiling, 32,768-token runtime context and a 180-second timeout. These variants
+remain separate in the report; they are not treated as equivalent settings or folded into one result.
+A timeout is an incomplete attempt. Every model call,
 including local shadows and diagnostics, reserves the existing durable model-call/time budget before
 inference. STOP, tenant policy, expiry and the original cash/search/page/people limits apply before every
 queued shadow. Partial, failed, deferred and backpressure-skipped work remains visible and is not silently
