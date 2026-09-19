@@ -411,6 +411,49 @@ repetition, correct abandonment, latency and incomplete outputs. Allow two subse
 Terra research to evaluate completed investigations and owner intervention before declaring success.
 Preserve the business acceptance criteria above; research activity is not sales effectiveness.
 
+### Saved-decision quantization and compact-input diagnostics
+
+The owner authorized a bounded continuation on 2026-09-19 to separate local quantization, prompt size,
+model loading, generation and cancellation effects. `hunter_model_diagnostics.py` replays only exact
+frozen inputs already under `model-comparison/inputs`; it cannot search, execute the proposed action,
+change a company disposition or create live research outside business hours. It takes the existing
+`worker.lock`, applies the normal STOP/expiry/tenant guard, reserves the same durable model call/time
+budget before every inference and preserves three calls plus 540 seconds for the next primary wake. A
+continuation can make at most twelve additional calls, including warm confirmations and diagnostics.
+
+The installed Q4/Q8 match gate compares architecture, parameter size, tokenizer, prompt template and
+quantization-calibration fingerprints and requires exact configured tags, digests and quantization.
+Missing immutable upstream revision metadata remains a stated limitation; a similar model name alone
+does not pass. Local comparisons keep thinking off, temperature 0.2, 32,768 context, a 1,000-token output
+ceiling and the 180-second incomplete-attempt timeout. Historical Terra/Q8 attempts are referenced only
+when their input hash and settings match, and reference rows are explicitly marked `reused`.
+
+`deterministic-compact-v1` preserves the action schema and tools, current evidence records and excerpts,
+company identities, unresolved work, URLs, evidence IDs, dates, unread clues, prior searches, coverage,
+momentum, recent failures and feedback. It removes repeated mission wording, deduplicates work-selection
+instructions and replaces the detailed reasons of only the ten oldest already-resolved clues with an
+identity/evidence-preserving non-repeat marker. It does not use any model output to select evidence and is
+not promoted to primary research. The compact packet gets its own hash and links to the original.
+
+The diagnostic monitor records pre-request cold/warm state, Ollama provider durations and token counts,
+loaded/VRAM bytes, memory-free samples, swap delta and Ollama process CPU. After a client timeout it
+observes runner CPU separately. CPU becoming idle is evidence that work stopped but not proof of protocol-
+level cancellation because Ollama exposes no request-active field; continued inference-like CPU prevents
+the next local call and triggers an explicit unload of only the diagnostic model. Q4 and Q8 are never kept
+loaded together. The shared Ollama service and unrelated models/processes are not stopped.
+
+Diagnostics append machine-readable attempts to the existing private JSONL/CSV and write
+`diagnostics.md`, a blinded `human-review.md` and a private model map. Invalid structured output retains
+provider usage/timing metadata but never stores hidden reasoning or raw invalid response text. The live
+Terra primary and scheduled Q8 shadow configuration remain unchanged after the replay.
+
+```sh
+/Library/Developer/CommandLineTools/usr/bin/python3 \
+  ops/openclaw/hunter/hunter_model_diagnostics.py \
+  --state-dir /absolute/private/pilot-directory \
+  --env-file /absolute/private/hunter.env
+```
+
 `compare-search --query-file <private-json-path>` compares up to ten identical query strings through
 DuckDuckGo and Brave, five results per provider, using the same journal, lock, policy checks and cash/
 search limits. This explicit experiment is the only intentional paired duplicate lookup; completed or
