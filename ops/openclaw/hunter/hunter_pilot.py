@@ -1414,7 +1414,10 @@ class Pilot:
                 f"Input hash: `{case['promptHash']}` · source commit: `{case.get('sourceCommit')}` · status: `{case['status']}`", "",
                 f"Frozen input: `{case['inputPath']}`", "",
                 "Human review: **" + case.get("humanReview", "UNREVIEWED") + "** · feedback: " +
-                (case.get("humanFeedback") or "not supplied"), "",
+                (case.get("humanFeedback") or "not supplied"), ""]
+            if case.get("measurementNotes"):
+                rows += ["Measurement notes:", ""] + ["- " + note for note in case["measurementNotes"]] + [""]
+            rows += [
                 "Cloud primary:", "", "```json",
                 json.dumps((case.get("primary") or {}).get("output") or case.get("primary"), indent=2),
                 "```", ""]

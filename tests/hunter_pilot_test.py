@@ -646,8 +646,10 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.p.state["pairedComparisons"][0]["shadows"][0]["status"], "schema_failure")
         attempts = [json.loads(line) for line in (self.path / "model-comparison/attempts.jsonl").read_text().splitlines()]
         self.assertEqual([row["provider"] for row in attempts], ["CHATGPT_SUBSCRIPTION", "OLLAMA"])
+        case["measurementNotes"] = ["Synthetic measurement note"]
         self.p.report()
         self.assertIn("Matched cloud/local decision comparison", (self.path / "review.md").read_text())
+        self.assertIn("Synthetic measurement note", (self.path / "review.md").read_text())
         self.assertIn("requestedModel", (self.path / "model-comparison/comparison.csv").read_text())
         self.assertIn(case["comparisonId"], (self.path / "model-comparison/summary.md").read_text())
 
