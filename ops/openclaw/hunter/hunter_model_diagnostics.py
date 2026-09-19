@@ -285,6 +285,11 @@ def cancellation_observation(model, baseline_pids):
 
 
 def unload_test_model(model):
+    before = ollama_api("/api/ps", timeout=3).get("models", [])
+    was_loaded = any(row.get("name") == model or row.get("model") == model for row in before)
+    if not was_loaded:
+        return {"model": model, "method": "no_op_not_loaded", "completionReason": None,
+            "unloaded": True, "at": iso(now())}
     response = ollama_api("/api/generate", {"model": model, "keep_alive": 0}, timeout=30)
     time.sleep(2)
     loaded = ollama_api("/api/ps", timeout=3).get("models", [])
@@ -553,6 +558,12 @@ def run(directory):
             "competingWorkloadBefore": top_workloads(),
             "machineBaseline": memory_sample(time.monotonic(), ollama_pids())}
         continuation["runs"].append(run)
+        pilot.save()
+    elif run.get("sourceCommit") != source_commit:
+        source_commits = run.setdefault("sourceCommits", [run.get("sourceCommit")])
+        if source_commit not in source_commits:
+            source_commits.append(source_commit)
+        run["sourceCommit"] = source_commit
         pilot.save()
     snapshot = json.loads(inputs[0].read_text())
     original_hash = snapshot["promptHash"]

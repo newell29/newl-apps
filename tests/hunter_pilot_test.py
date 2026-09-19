@@ -976,6 +976,7 @@ class SubscriptionTests(unittest.TestCase):
 class DiagnosticTests(unittest.TestCase):
     def test_diagnostic_model_unload_uses_named_ollama_api_request(self):
         with patch("hunter_model_diagnostics.ollama_api", side_effect=[
+                {"models": [{"name": "synthetic-q4"}]},
                 {"done": True, "done_reason": "unload"}, {"models": []}]) as api, \
              patch("hunter_model_diagnostics.time.sleep"):
             result = unload_test_model("synthetic-q4")
@@ -983,6 +984,14 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(result["method"], "ollama_api_keep_alive_zero")
         api.assert_any_call("/api/generate", {"model": "synthetic-q4", "keep_alive": 0},
             timeout=30)
+
+    def test_diagnostic_model_unload_does_not_load_an_absent_model(self):
+        with patch("hunter_model_diagnostics.ollama_api",
+                return_value={"models": []}) as api:
+            result = unload_test_model("synthetic-q4")
+        self.assertTrue(result["unloaded"])
+        self.assertEqual(result["method"], "no_op_not_loaded")
+        api.assert_called_once_with("/api/ps", timeout=3)
 
     def test_compaction_preserves_decision_evidence_and_ages_only_old_resolutions(self):
         dismissed = [{"at": f"2026-09-{index:02d}T00:00:00+00:00", "name": f"Example {index}",
