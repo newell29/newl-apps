@@ -67,7 +67,12 @@ with open(sys.argv[1], encoding="utf-8") as handle:
 providers = ((status.get("auth") or {}).get("oauth") or {}).get("providers") or []
 openai = next((row for row in providers if row.get("provider") == "openai"), None)
 effective = (openai or {}).get("effectiveProfiles") or []
-if not any(row.get("type") == "oauth" and row.get("status") == "ok" for row in effective):
+if not any(
+    row.get("type") in ("oauth", "token")
+    and row.get("type") != "api_key"
+    and row.get("status") in ("ok", "static")
+    for row in effective
+):
     raise SystemExit("Scout does not have an effective OpenAI OAuth profile. API-key fallback is disabled for Website Growth.")
 PY
 then
@@ -140,7 +145,11 @@ if [[ "${summary_status}" -eq 0 ]]; then
     exit 1
   fi
 else
-  safe_message="Website Growth backlink work ended, but its deterministic summary could not be created. Do not rerun the outreach cycle automatically because an external action may already have completed. Review Newl Apps and the protected Scout session ${session_key}."
+  safe_message="BACKLINK OUTREACH — SUMMARY FAILED
+Result: The work phase ended, but Newl Apps could not create the deterministic summary. An email or directory action may already have completed.
+Action required: Review Newl Apps and protected Scout session ${session_key}. Do not rerun this outreach cycle automatically.
+
+Safety status: No uncertain external action was retried."
   send_website_growth_teams_message "${safe_message}" || true
   echo "The Website Growth backlink summary failed after the Scout work phase. Session: ${session_key}" >&2
   exit 1

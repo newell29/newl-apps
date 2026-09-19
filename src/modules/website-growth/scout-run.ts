@@ -25,6 +25,7 @@ import {
   canonicalizeWebsiteGrowthDiscoveryUrl
 } from "@/modules/website-growth/backlink-discovery";
 import {
+  buildWebsiteGrowthBacklinkScoutTeamsMessage,
   buildWebsiteGrowthBacklinkTeamsLines,
   MAX_ACTIVE_BACKLINK_QUEUE,
   MAX_BACKLINK_PROSPECTS_PER_RUN,
@@ -754,32 +755,38 @@ export async function completeWebsiteGrowthScoutRun({
     baseUrl: reviewBaseUrl,
     includeKeywordImport: keywordAdditions.length > 0
   });
-  const teamsMessage = buildWebsiteGrowthScoutTeamsMessage({
-    drafts: savedDrafts.map((draft) => ({ id: draft.id, title: draft.title, summary: draft.summary })),
-    semrushQueried: parsed.semrush.queried,
-    semrushSource: parsed.semrush.source,
-    semrushObservedAt: parsed.semrush.observedAt,
-    semrushSummary: parsed.semrush.summary,
-    sourceSummary: readRecord(job.output).evidenceRefresh,
-    weeklyPlan: readRecord(job.output).weeklyPlan,
-    candidateCount: readOptionalInteger(readRecord(job.output).candidateCount) ?? 0,
-    questionCandidateCount: questionCandidateIds.size,
-    questionDraftCount,
-    recoveryCandidateCount: recoveryCandidateIds.size,
-    recoveryDraftCount,
-    seoRecovery: readRecord(readRecord(job.output).evidenceRefresh).seoRecovery,
-    researchSignalCount: readOptionalInteger(readRecord(job.output).researchSignalCount) ?? 0,
-    researchInventory: readRecord(readRecord(job.output).researchInventory),
-    keywordAdditionCount: keywordAdditions.length,
-    tracking: parsed.semrush.tracking,
-    backlinkLines: buildWebsiteGrowthBacklinkTeamsLines({
-      review: parsed.backlinks,
-      persisted: backlinkSummary,
-      reviewBaseUrl
-    }),
-    reportLinks,
-    reviewBaseUrl
-  });
+  const teamsMessage = runLane === "BACKLINKS"
+    ? buildWebsiteGrowthBacklinkScoutTeamsMessage({
+        review: parsed.backlinks,
+        persisted: backlinkSummary,
+        reviewBaseUrl
+      })
+    : buildWebsiteGrowthScoutTeamsMessage({
+        drafts: savedDrafts.map((draft) => ({ id: draft.id, title: draft.title, summary: draft.summary })),
+        semrushQueried: parsed.semrush.queried,
+        semrushSource: parsed.semrush.source,
+        semrushObservedAt: parsed.semrush.observedAt,
+        semrushSummary: parsed.semrush.summary,
+        sourceSummary: readRecord(job.output).evidenceRefresh,
+        weeklyPlan: readRecord(job.output).weeklyPlan,
+        candidateCount: readOptionalInteger(readRecord(job.output).candidateCount) ?? 0,
+        questionCandidateCount: questionCandidateIds.size,
+        questionDraftCount,
+        recoveryCandidateCount: recoveryCandidateIds.size,
+        recoveryDraftCount,
+        seoRecovery: readRecord(readRecord(job.output).evidenceRefresh).seoRecovery,
+        researchSignalCount: readOptionalInteger(readRecord(job.output).researchSignalCount) ?? 0,
+        researchInventory: readRecord(readRecord(job.output).researchInventory),
+        keywordAdditionCount: keywordAdditions.length,
+        tracking: parsed.semrush.tracking,
+        backlinkLines: buildWebsiteGrowthBacklinkTeamsLines({
+          review: parsed.backlinks,
+          persisted: backlinkSummary,
+          reviewBaseUrl
+        }),
+        reportLinks,
+        reviewBaseUrl
+      });
 
   await prisma.$transaction(async (tx) => {
     await tx.automationJobRun.update({
@@ -1122,35 +1129,49 @@ export function buildWebsiteGrowthScoutTeamsMessage({
     candidateCount: recoveryCandidateCount,
     draftCount: recoveryDraftCount
   });
+  const reviewRoot = `${normalizeBaseUrl(reviewBaseUrl)}/website-growth`;
+  const resultLine = drafts.length > 0
+    ? `${drafts.length} website recommendation${drafts.length === 1 ? "" : "s"} need your review.`
+    : "No new website recommendation needs your review today.";
+  const actionLine = drafts.length > 0
+    ? `Review and approve or reject the briefs below. Approval starts a developer build, but nothing is merged or published: ${reviewRoot}`
+    : "None. Scout completed the review and rejected or deferred every candidate that did not justify a safe, non-duplicate change.";
   const lines = [
-    `Website Growth Scout weekday report: ${drafts.length} idea${drafts.length === 1 ? "" : "s"} promoted for approval.`,
-    `Evidence used: Search Console, GA4, first-party website forms, and ${semrushEvidenceLabel}.`,
+    "WEBSITE CONTENT SCOUT — COMPLETED",
+    `Result: ${resultLine}`,
+    `Action required: ${actionLine}`,
+    "",
+    "WHAT SCOUT CHECKED",
+    `• Evidence: Search Console, GA4, website forms, current website code, and ${semrushEvidenceLabel}.`,
     evidenceRefreshLine,
-    `Research funnel: ${researchSignalCount ?? 0} stored signals (${monitoringCount} monitoring); ${reviewedCount} new records reviewed; ${selectedCount} shortlisted; ${candidateCount ?? 0} sent to Codex; ${drafts.length} promoted.`,
-    `Question and AI-answer lane: ${questionCandidateCount ?? 0} question-led candidate${(questionCandidateCount ?? 0) === 1 ? "" : "s"} reviewed; ${questionDraftCount ?? 0} promoted.`,
+    "",
+    "RESEARCH DECISION",
+    `• Stored signals: ${researchSignalCount ?? 0} total; ${monitoringCount} remain monitoring-only.`,
+    `• This planning cycle: ${reviewedCount} records reviewed; ${selectedCount} shortlisted; ${candidateCount ?? 0} deeply reviewed by Codex; ${drafts.length} promoted.`,
+    `• Question and AI-answer candidates: ${questionCandidateCount ?? 0} reviewed; ${questionDraftCount ?? 0} promoted.`,
     ...recoveryLines,
-    "The research inventory is intentionally much larger than the approval queue because duplicate queries are clustered by page/topic, weak or branded signals are filtered, weekly lane limits are applied, and Codex promotes only evidence-backed work.",
-    semrushSummary ? `SEMrush: ${semrushSummary}` : null,
+    "Why the numbers differ: Scout groups duplicate queries by topic and page, removes weak or branded signals, and does not propose work already approved, building, or published.",
+    "",
+    "SEMRUSH AND KEYWORDS",
+    semrushSummary ? `• ${semrushSummary}` : null,
     tracking
-      ? `Position Tracking: ${trackedCount} keywords; visibility ${formatMetric(tracking.visibility)} (${formatSignedChange(tracking.visibility, tracking.previousVisibility)}); ${tracking.improved ?? 0} improved and ${tracking.declined ?? 0} declined.`
+      ? `• Position Tracking: ${trackedCount} keywords; visibility ${formatMetric(tracking.visibility)} (${formatSignedChange(tracking.visibility, tracking.previousVisibility)}); ${tracking.improved ?? 0} improved and ${tracking.declined ?? 0} declined.`
       : null,
-    `Keyword tracking: ${keywordAdditionCount ?? 0} approved-page keyword${(keywordAdditionCount ?? 0) === 1 ? "" : "s"} are ready to add after automatic deduplication against SEMrush.`,
+    `• Keyword tracking: ${keywordAdditionCount ?? 0} approved-page keyword${(keywordAdditionCount ?? 0) === 1 ? "" : "s"} ready after automatic SEMrush deduplication.`,
     backlinkLines ?? null,
     reportLinks
-      ? `Excel downloads (available for 7 days):\nSEO performance: ${reportLinks.performance}${reportLinks.keywordImport ? `\nSEMrush keyword import: ${reportLinks.keywordImport}` : ""}`
+      ? `\nREPORTS — AVAILABLE FOR 7 DAYS\n• SEO performance: ${reportLinks.performance}${reportLinks.keywordImport ? `\n• SEMrush keyword import: ${reportLinks.keywordImport}` : ""}`
       : null,
     "",
     ...(drafts.length > 0
       ? drafts.flatMap((draft, index) => [
-          `${index + 1}. ${draft.title}`,
+          `${index + 1}. RECOMMENDATION — ${draft.title}`,
           draft.summary,
-          `${normalizeBaseUrl(reviewBaseUrl)}/website-growth/drafts/${encodeURIComponent(draft.id)}`,
+          `Review brief: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth/drafts/${encodeURIComponent(draft.id)}`,
           ""
         ])
-      : ["No new page brief needs your approval today.", ""]),
-    drafts.length > 0
-      ? "Approve a brief only when its content, claims, route, and proposed layout are correct. Approval starts the developer build automatically; it does not merge or publish the page."
-      : "The SEO performance workbook is available from the secure download link even when no new idea is promoted."
+      : []),
+    "Next content review: Monday and Wednesday at 9:15 AM ET."
   ];
 
   return lines.filter((line): line is string => line !== null).join("\n").trim();
@@ -1193,18 +1214,31 @@ export function buildWebsiteGrowthScoutWeekdayCheckInMessage({
   const recoveryLines = buildSeoRecoveryTeamsLines({
     snapshot: readRecord(sourceSummary).seoRecovery
   });
+  const reviewUrl = `${normalizeBaseUrl(reviewBaseUrl)}/website-growth`;
 
   return [
-    "Website Growth Scout weekday check-in: first-party evidence refreshed; no SEMrush API units or Codex research were used.",
+    "WEBSITE GROWTH CHECK-IN — COMPLETED",
+    "Result: First-party evidence and queue counts were refreshed. This was not a content-recommendation or backlink-search run.",
+    `Action required: ${backlinkReviewCount > 0 ? `Review ${backlinkReviewCount} backlink prospect${backlinkReviewCount === 1 ? "" : "s"}: ${reviewUrl}/backlinks` : "None."}`,
+    "",
+    "WHAT RAN",
+    "• Search Console, GA4, website forms, the SEMrush mailbox, and queue status were checked.",
+    "• Codex research: not run.",
+    "• SEMrush API/MCP: not run; retained reports were reused.",
     formatEvidenceRefresh(sourceSummary),
-    `Research queue: ${researchSignalCount} stored signals (${monitoringCount} monitoring); ${reviewingCount} awaiting Scout research; ${selectedCount} newly shortlisted by deterministic planning.`,
-    `Question and AI-answer lane: ${questionSelectedCount} question-led candidate${questionSelectedCount === 1 ? "" : "s"} newly shortlisted for the next deep Scout review.`,
+    "",
+    "CURRENT QUEUES",
+    `• Content signals: ${researchSignalCount} stored; ${monitoringCount} monitoring; ${reviewingCount} awaiting Scout research; ${selectedCount} newly shortlisted.`,
+    `• Question and AI-answer candidates newly shortlisted: ${questionSelectedCount}.`,
+    `• Backlink prospects needing review: ${backlinkReviewCount}.`,
     ...recoveryLines,
+    "",
+    "SEMRUSH EMAIL REPORTS",
     cacheLine,
     mailLine,
-    `Backlinks: ${backlinkReviewCount} curated prospect${backlinkReviewCount === 1 ? "" : "s"} currently need review.`,
-    `Review page: ${normalizeBaseUrl(reviewBaseUrl)}/website-growth`,
-    "New AI-reviewed ideas and the refreshed SEO workbook are produced by the Monday and Wednesday content Scout runs."
+    "",
+    `Review workspace: ${reviewUrl}`,
+    "Next content review: Monday or Wednesday at 9:15 AM ET. Next backlink search: Tuesday at 10:15 AM ET."
   ].filter((line): line is string => Boolean(line)).join("\n");
 }
 

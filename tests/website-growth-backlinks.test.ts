@@ -23,6 +23,7 @@ import {
 } from "@/modules/website-growth/backlink-blockers";
 import {
   buildWebsiteGrowthBacklinkDedupeKey,
+  buildWebsiteGrowthBacklinkScoutTeamsMessage,
   buildWebsiteGrowthBacklinkTeamsLines,
   getWebsiteGrowthBacklinkQualificationFailure,
   parseWebsiteGrowthBacklinkReview,
@@ -169,7 +170,41 @@ describe("Website Growth backlink curation", () => {
     });
 
     expect(lines).toContain("42 prospects reviewed");
-    expect(lines).toContain("No new backlink decision is required this week.");
+    expect(lines).toContain("Action required: none. No new backlink opportunity needs review.");
+  });
+
+  it("builds a dedicated backlink discovery message that cannot be mistaken for outreach", () => {
+    const review = {
+      queried: true,
+      source: "WEB_DISCOVERY" as const,
+      observedAt: "2026-07-24T15:00:00.000Z",
+      summary: "Two curated directory prospects remained after review.",
+      rawProspectsReviewed: 42,
+      duplicatesRejected: 12,
+      qualityRejected: 28,
+      prospects: [buildProspect(), buildProspect({ sourceDomain: "second.example.org" })]
+    };
+    const persisted = {
+      rawProspectsReviewed: 42,
+      suppliedByScout: 2,
+      created: 2,
+      refreshed: 0,
+      skippedByQualityGate: 0,
+      skippedExistingDecision: 0,
+      archivedAsStale: 0,
+      activeQueueCount: 2
+    };
+
+    const message = buildWebsiteGrowthBacklinkScoutTeamsMessage({
+      review,
+      persisted,
+      reviewBaseUrl: "https://apps.newlgroup.com/"
+    });
+
+    expect(message).toContain("BACKLINK SCOUT — COMPLETED");
+    expect(message).toContain("Action required: Review and approve or reject 2 new prospects");
+    expect(message).toContain("Outreach sent: none");
+    expect(message).toContain("separate weekday outreach job");
   });
 
   it("keeps paid placements outside the automated executor", () => {

@@ -402,11 +402,11 @@ function buildFailureTeamsMessage({
   disableExecutor: boolean;
   developmentJobId: string | null;
 }) {
-  const action =
+  const nextStep =
     (classification === "CODE_DEFECT" ||
       classification === "INVESTIGATION_REQUIRED") &&
     developmentJobId
-      ? `Rivet queued development job ${developmentJobId} to prepare a draft PR.`
+      ? `Rivet queued development job ${developmentJobId} to diagnose the defect and prepare a draft PR for review.`
       : classification === "CODE_DEFECT" ||
           classification === "INVESTIGATION_REQUIRED"
         ? "The code defect was recorded, but the one-time Rivet auto-triage setting is not enabled."
@@ -417,13 +417,20 @@ function buildFailureTeamsMessage({
             : classification === "RUNTIME_TRANSIENT"
               ? "The transient runtime failure was recorded. No outreach was automatically retried."
               : "The failure was recorded for review before outreach can safely continue.";
+  const actionRequired = classification === "AUTHORIZATION_REQUIRED" ||
+    classification === "AMBIGUOUS_EXTERNAL_ACTION" ||
+    disableExecutor;
   return [
-    "Website Growth backlink run failed.",
-    action,
+    "BACKLINK OUTREACH — FAILED",
+    "Result: The outreach run did not complete. Scout did not retry any email or directory action whose outcome was uncertain.",
+    `Action required: ${actionRequired ? "Yes — review the next step and schedule status below." : developmentJobId ? "None now. Rivet is preparing a draft fix for review." : "No immediate action. The failure was recorded for review."}`,
+    "",
+    `Failure category: ${classification.replaceAll("_", " ").toLowerCase()}.`,
+    `Next step: ${nextStep}`,
     disableExecutor
-      ? "Circuit breaker: the weekday executor was disabled after the same failure repeated. It must be reviewed before it is enabled again."
-      : "The next scheduled run remains available; no uncertain send was retried.",
-    "Nothing was merged or deployed."
+      ? "Schedule status: paused by the circuit breaker after the same failure repeated. Review is required before outreach is enabled again."
+      : "Schedule status: the next weekday run remains enabled.",
+    "Safety status: No uncertain communication was retried. Nothing was merged or deployed."
   ].join("\n");
 }
 

@@ -23,7 +23,11 @@ report_runtime_failure() {
   trap - EXIT
   if [[ ${exit_status} -ne 0 && ${runtime_handed_off} -eq 0 ]]; then
     send_website_growth_teams_message \
-      "Website Growth Scout could not start during ${runtime_stage}. The dedicated runtime did not reach the read-only Scout, and no website work was approved, merged, or published. Review the OpenClaw job log." \
+      "WEBSITE GROWTH SCOUT — FAILED TO START
+Result: The local runtime stopped during ${runtime_stage}; Scout did not begin its read-only review.
+Action required: Review the OpenClaw job log. Retrying before the runtime issue is corrected is unlikely to help.
+
+Safety status: No website work was approved, merged, or published." \
       >/dev/null 2>&1 || true
   fi
   exit ${exit_status}
