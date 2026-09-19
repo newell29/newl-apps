@@ -347,7 +347,18 @@ Approved runtime configuration (private file; preserve tenant, expiry, evidence 
   "reasoningEffort": "medium",
   "searchProvider": "BRAVE",
   "searchCostMicros": 5000,
-  "comparisonCases": 10
+  "pairedComparison": {
+    "enabled": true,
+    "maxCases": 10,
+    "queueLimit": 1,
+    "localModel": "qwen3.8-rvn:q8_0-multilingual",
+    "localQuantization": "Q8_0",
+    "localThinking": false,
+    "timeoutSeconds": 180,
+    "contextLength": 32768,
+    "maxOutputTokens": 1000,
+    "diagnosticThinkingOffCases": 0
+  }
 }
 ```
 
@@ -361,14 +372,38 @@ worker lock, then repoint only `com.newl.hunter-pilot-evaluation` to the exact t
 
 ### Matched evaluation without another production workflow
 
-For up to ten eligible wakes, capture the exact same context for Terra, local Qwen 3.8 Q4 and local Qwen
-3.8 Q8. Only Terra's action is executed. Both local alternatives use thinking with a 4,096 generated-token
-ceiling and 180-second timeout. They are recorded for human comparison and never score, approve, overrule
-or execute a lead action. Each inference charges the same durable daily counters before starting. A
-comparison wake therefore normally uses all three model calls for one real action and two shadow
-proposals; after ten cases the normal three-action wakes resume automatically. Partial/failed comparisons
-remain visible and are not silently repeated. Local connection and socket timeouts are contained in the
-shadow record and cannot stop the primary Terra wake. STOP, tenant policy and expiry apply before shadow calls too.
+The current comparison freezes the mission, tool descriptions, schema and pre-decision context before
+Terra runs. It writes that packet to the restricted private pilot directory with a shared comparison ID
+and full SHA-256 hash. Terra remains the only primary researcher and its validated action is executed
+before any local inference begins. The same saved context is then placed on a durable one-item queue for
+one explicitly configured local model. A full queue records a skipped sample instead of growing a
+backlog. The supervisor processes one local inference between primary research wakes, so local latency
+cannot delay the rest of the current Terra wake. A local proposal is never passed to the executor.
+
+The baseline is the explicitly recorded installed Qwen tag, digest and quantization. The activation
+evaluation first preserved the historical 16,384-context, thinking-requested configuration. Provider
+preflight reported that this Q8 tag exposes completion but not thinking, and the first packet exceeded
+that context before inference. The continuing comparison therefore explicitly uses thinking off,
+a 1,000 generated-token ceiling, 32,768-token runtime context and a 180-second timeout. These variants
+remain separate in the report; they are not treated as equivalent settings or folded into one result.
+A timeout is an incomplete attempt. Every model call,
+including local shadows and diagnostics, reserves the existing durable model-call/time budget before
+inference. STOP, tenant policy, expiry and the original cash/search/page/people limits apply before every
+queued shadow. Partial, failed, deferred and backpressure-skipped work remains visible and is not silently
+retried.
+
+If the frozen packet is rejected before inference because its provider-tokenized size exceeds the
+historical 16,384-token runtime context, a supervised recovery may reuse that saved packet with an
+explicitly labelled larger context that remains within the installed model's reported capacity. That
+attempt is a separate diagnostic, not a replacement for or silent repair of the baseline.
+
+New comparison evidence is kept separate from the legacy `modelComparisons` records. The private
+`model-comparison/attempts.jsonl` records one row per attempt, including queue/request/validation/tool and
+total times, provider-supported token usage, cold/warm state, Ollama's raw nanosecond fields and converted
+durations, schema/evidence-reference checks and final structured output. `comparison.csv` provides a flat
+table and `summary.md` is also appended to the existing `review.md`. Unsupported-claim and business-quality
+fields remain `UNREVIEWED` until rubric or human review. Buffered Codex and Ollama calls do not claim time
+to first token. Subscription cost remains unknown plan usage, not zero-cost or unlimited usage.
 
 This evaluates decisions on identical packets. It is not a randomized end-to-end model ranking or ten
 owner-labelled companies. Assess buyer/provider classification, supported Newl fit, sensible next action,

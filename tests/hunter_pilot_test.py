@@ -614,65 +614,183 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.p.state['evidence'][result['evidenceIds'][0]]['company'], 'supply.example')
 
     def enable_comparison(self):
-        self.config["comparisonCases"] = 10
+        self.config["pairedComparison"] = {
+            "enabled": True, "maxCases": 10, "queueLimit": 1,
+            "localModel": "qwen3.8-rvn:q8_0-multilingual",
+            "localModelDigest": "sha256:synthetic", "localQuantization": "Q8_0",
+            "localThinking": True, "timeoutSeconds": 180, "contextLength": 16384,
+            "maxOutputTokens": 4096, "diagnosticMaxOutputTokens": 1000,
+            "diagnosticThinkingOffCases": 0}
         atomic_write(self.path / "config.json", self.config)
         self.p.config = self.config
 
-    def test_comparison_uses_same_context_without_executing_shadows(self):
+    def test_comparison_freezes_input_and_queues_one_non_executing_shadow(self):
         self.enable_comparison()
         shadow = Mock(return_value=({"action": "send", "args": {}}, {}))
-        with patch("hunter_pilot.LocalModel", return_value=shadow):
-            self.p.tick(force=True)
-        self.assertEqual(self.p.budget()["modelCalls"], 3)
+        self.p.tick(force=True, max_steps=1)
+        self.assertEqual(self.p.budget()["modelCalls"], 1)
         self.assertEqual(self.model.call_count, 1)
-        self.assertEqual(shadow.call_count, 2)
-        self.assertEqual(shadow.call_args_list[0].args, self.model.call_args.args)
+        self.assertEqual(len(self.p.state["pairedComparisonQueue"]), 1)
+        case = self.p.state["pairedComparisons"][0]
+        snapshot = json.loads(Path(case["inputPath"]).read_text())
+        self.assertEqual(snapshot["packet"]["context"], self.model.call_args.args[0])
+        self.assertEqual(case["promptHash"], __import__("hashlib").sha256(json.dumps(
+            snapshot["packet"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+        with patch("hunter_pilot.LocalModel", return_value=shadow):
+            self.p.process_shadow_queue()
+        self.assertEqual(self.p.budget()["modelCalls"], 2)
+        self.assertEqual(shadow.call_count, 1)
+        self.assertEqual(shadow.call_args.args[0], self.model.call_args.args[0])
         self.assertEqual(self.model.call_args.args[0]["usedToday"]["modelCalls"], 0)
         self.assertEqual([e["action"] for e in self.p.state["events"] if e["kind"] == "action"], ["wait"])
-        self.assertEqual(len(self.p.state["modelComparisons"]), 1)
+        self.assertEqual(self.p.state["pairedComparisons"][0]["shadows"][0]["status"], "schema_failure")
+        attempts = [json.loads(line) for line in (self.path / "model-comparison/attempts.jsonl").read_text().splitlines()]
+        self.assertEqual([row["provider"] for row in attempts], ["CHATGPT_SUBSCRIPTION", "OLLAMA"])
+        case["measurementNotes"] = ["Synthetic measurement note"]
+        self.p.report()
+        self.assertIn("Matched cloud/local decision comparison", (self.path / "review.md").read_text())
+        self.assertIn("Synthetic measurement note", (self.path / "review.md").read_text())
+        self.assertIn("requestedModel", (self.path / "model-comparison/comparison.csv").read_text())
+        self.assertIn(case["comparisonId"], (self.path / "model-comparison/summary.md").read_text())
 
-    def test_partial_comparison_stops_at_shared_budget_and_survives_restart(self):
+    def test_comparison_defers_at_shared_budget_and_survives_restart(self):
         self.enable_comparison()
-        self.p.budget()["modelCalls"] = 38
-        with patch("hunter_pilot.LocalModel", return_value=self.model):
-            self.p.tick(force=True)
+        self.p.budget()["modelCalls"] = 39
+        self.p.tick(force=True, max_steps=1)
         self.assertEqual(self.p.budget()["modelCalls"], 40)
-        case = self.p.state["modelComparisons"][0]
-        self.assertEqual(len(case["shadows"]), 1)
-        self.assertEqual(case["incomplete"], "modelCalls")
+        self.assertFalse(self.p.process_shadow_queue())
+        case = self.p.state["pairedComparisons"][0]
+        self.assertEqual(case["status"], "shadow_deferred")
+        self.assertEqual(self.p.state["pairedComparisonQueue"][0]["reason"], "modelCalls")
         restarted = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
-        self.assertEqual(restarted.state["modelComparisons"], [case])
+        self.assertEqual(restarted.state["pairedComparisons"], [case])
 
-    def test_failed_shadow_is_visible_and_does_not_repeat_or_execute(self):
+    def test_failed_shadow_is_visible_and_does_not_execute(self):
         self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
         with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=TimeoutError)):
-            self.p.tick(force=True)
-        self.assertEqual(self.p.budget()["modelCalls"], 3)
-        self.assertEqual(len(self.p.state["modelComparisons"][0]["shadows"]), 2)
-        self.assertEqual(self.p.state["modelComparisons"][0]["shadows"][0]["error"], "TimeoutError")
+            self.p.process_shadow_queue()
+        self.assertEqual(self.p.budget()["modelCalls"], 2)
+        shadow = self.p.state["pairedComparisons"][0]["shadows"][0]
+        self.assertEqual(shadow["status"], "timeout")
+        self.assertEqual([e["action"] for e in self.p.state["events"] if e["kind"] == "action"], ["wait"])
+
+    def test_failed_shadow_preserves_pre_request_load_state(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+
+        class TimeoutLocal:
+            def __init__(self):
+                self.states = iter([
+                    {"cold": True, "loadedSizeBytes": None, "loadedVramBytes": None},
+                    {"cold": False, "loadedSizeBytes": 31_000, "loadedVramBytes": 31_000}])
+
+            def loaded_state(self):
+                return next(self.states)
+
+            def __call__(self, context, loaded_before=None):
+                self.loaded_before = loaded_before
+                raise TimeoutError
+
+        local = TimeoutLocal()
+        with patch("hunter_pilot.LocalModel", return_value=local):
+            self.p.process_shadow_queue()
+        attempt = json.loads((self.path / "model-comparison/attempts.jsonl").read_text().splitlines()[-1])
+        self.assertTrue(local.loaded_before["cold"])
+        self.assertTrue(attempt["cold"])
+        self.assertEqual(attempt["loadedSizeBytes"], 31_000)
+        self.assertEqual(attempt["loadedVramBytes"], 31_000)
 
     def test_socket_timeout_in_shadow_does_not_stop_primary_wake(self):
         self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
         with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=socket.timeout)):
-            self.p.tick(force=True)
-        case = self.p.state["modelComparisons"][0]
-        self.assertEqual(len(case["shadows"]), 2)
+            self.p.process_shadow_queue()
+        case = self.p.state["pairedComparisons"][0]
+        self.assertEqual(len(case["shadows"]), 1)
         self.assertEqual(case["shadows"][0]["error"], "timeout")
         self.assertIsNone(self.p.state.get("lastError"))
 
+    def test_ollama_http_status_is_recorded_without_response_body(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+        failure = urllib.error.HTTPError("http://127.0.0.1:11434/api/chat", 400,
+            "synthetic private diagnostic", {}, None)
+        with patch("hunter_pilot.LocalModel", return_value=Mock(side_effect=failure)):
+            self.p.process_shadow_queue()
+        shadow = self.p.state["pairedComparisons"][0]["shadows"][0]
+        self.assertEqual(shadow["error"], "HTTP_400")
+        self.assertNotIn("private diagnostic", json.dumps(shadow))
+
     def test_completed_comparison_limit_does_not_call_shadows(self):
         self.enable_comparison()
-        self.p.state["modelComparisons"] = [{}] * 10
+        self.p.state["pairedComparisons"] = [{"status": "completed"}] * 10
         with patch("hunter_pilot.LocalModel") as factory:
-            self.p.tick(force=True)
+            self.p.tick(force=True, max_steps=1)
+            self.p.process_shadow_queue()
         factory.assert_not_called()
 
     def test_stop_between_primary_and_shadow_prevents_more_inference(self):
         self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
         self.p.stop_requested = True
         with self.assertRaisesRegex(RuntimeError, "STOP_REQUESTED"):
-            self.p.tick(force=True)
-        self.model.assert_not_called()
+            self.p.process_shadow_queue()
+        self.assertEqual(self.model.call_count, 1)
+
+    def test_queue_backpressure_skips_new_sample_without_growing_backlog(self):
+        self.enable_comparison()
+        self.p.state["pairedComparisonQueue"] = [{"comparisonId": "existing", "state": "pending"}]
+        self.p.tick(force=True, max_steps=1)
+        self.assertEqual(len(self.p.state["pairedComparisonQueue"]), 1)
+        self.assertEqual(self.p.state["pairedComparisonSkips"][0]["reason"], "backpressure_queue_full")
+
+    def test_interrupted_running_shadow_is_recorded_without_retry(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+        self.p.state["pairedComparisonQueue"][0].update(state="running", startedAt=self.time.isoformat())
+        self.p.save()
+        with patch("hunter_pilot.LocalModel") as factory:
+            self.assertFalse(self.p.process_shadow_queue())
+        factory.assert_not_called()
+        case = self.p.state["pairedComparisons"][0]
+        self.assertEqual(case["status"], "completed_incomplete")
+        self.assertEqual(case["shadows"][0]["status"], "cancellation")
+        self.assertEqual(self.p.state["pairedComparisonQueue"], [])
+
+    def test_thinking_off_diagnostic_reuses_saved_input_as_separate_variant(self):
+        self.enable_comparison()
+        self.config["pairedComparison"]["diagnosticThinkingOffCases"] = 1
+        atomic_write(self.path / "config.json", self.config)
+        self.p.config = self.config
+        self.p.tick(force=True, max_steps=1)
+        local = Mock(return_value=({"action": "wait", "purpose": "No more evidence",
+            "args": {"reason": "No more evidence", "minutes": 30}}, {}))
+        with patch("hunter_pilot.LocalModel", return_value=local) as factory:
+            self.p.process_shadow_queue()
+            self.assertEqual(self.p.state["pairedComparisonQueue"][0]["variant"], "thinking_off_diagnostic")
+            self.p.process_shadow_queue()
+        self.assertEqual([call.kwargs["thinking"] for call in factory.call_args_list], [True, False])
+        self.assertEqual([row["variant"] for row in self.p.state["pairedComparisons"][0]["shadows"]],
+                         ["baseline", "thinking_off_diagnostic"])
+
+    def test_explicit_context_recovery_variant_records_its_own_settings(self):
+        self.enable_comparison()
+        self.p.tick(force=True, max_steps=1)
+        job = self.p.state["pairedComparisonQueue"][0]
+        job.update(variant="thinking_off_context_32768_diagnostic", thinking=False,
+                   contextLength=32768, maxOutputTokens=1000)
+        local = Mock(return_value=({"action": "wait", "purpose": "No more evidence",
+            "args": {"reason": "No more evidence", "minutes": 30}},
+            {"provider": "OLLAMA", "thinking": False, "contextLength": 32768,
+             "maxOutputTokens": 1000, "modelTotalSeconds": 1}))
+        with patch("hunter_pilot.LocalModel", return_value=local) as factory:
+            self.p.process_shadow_queue()
+        self.assertEqual(factory.call_args.kwargs["num_ctx"], 32768)
+        self.assertEqual(factory.call_args.kwargs["num_predict"], 1000)
+        attempt = json.loads((self.path / "model-comparison/attempts.jsonl").read_text().splitlines()[-1])
+        self.assertEqual(attempt["variant"], "thinking_off_context_32768_diagnostic")
+        self.assertEqual(attempt["modelSettings"]["contextLength"], 32768)
 
     def test_search_comparison_counts_cost_and_does_not_repeat_after_restart(self):
         self.config.update(searchProvider="BRAVE", searchCostMicros=5000)
@@ -801,10 +919,54 @@ class SubscriptionTests(unittest.TestCase):
         response.read.return_value = json.dumps({"message": {"content": "{}"}}).encode()
         with patch("hunter_pilot.urllib.request.urlopen", return_value=response) as call:
             LocalModel("synthetic", thinking=True)({})
-        payload = json.loads(call.call_args.args[0].data)
+        chat_call = next(row for row in call.call_args_list if row.args[0].full_url.endswith("/api/chat"))
+        payload = json.loads(chat_call.args[0].data)
         self.assertTrue(payload["think"])
         self.assertEqual(payload["options"]["num_predict"], 4096)
-        self.assertEqual(call.call_args.kwargs["timeout"], 180)
+        self.assertEqual(chat_call.kwargs["timeout"], 180)
+
+    def test_ollama_nanoseconds_tokens_and_cold_state_are_recorded(self):
+        def response(payload):
+            result = Mock()
+            result.__enter__ = Mock(return_value=result)
+            result.__exit__ = Mock(return_value=False)
+            result.read.return_value = json.dumps(payload).encode()
+            return result
+        replies = [
+            response({"models": []}),
+            response({"model": "synthetic", "message": {"content": json.dumps({
+                "action": "wait", "purpose": "No useful evidence",
+                "args": {"reason": "No useful evidence", "minutes": 30}})},
+                "total_duration": 12_000_000_000, "load_duration": 2_000_000_000,
+                "prompt_eval_count": 120, "prompt_eval_duration": 4_000_000_000,
+                "eval_count": 60, "eval_duration": 6_000_000_000, "done_reason": "stop"}),
+            response({"models": [{"name": "synthetic", "size": 1000, "size_vram": 1000}]})]
+        with patch("hunter_pilot.urllib.request.urlopen", side_effect=replies):
+            _, usage = LocalModel("synthetic", thinking=True, model_digest="sha256:test",
+                quantization="Q8_0")({"synthetic": True})
+        self.assertTrue(usage["cold"])
+        self.assertEqual(usage["modelLoadSeconds"], 2)
+        self.assertEqual(usage["promptProcessingSeconds"], 4)
+        self.assertEqual(usage["generationSeconds"], 6)
+        self.assertEqual(usage["generatedTokensPerSecond"], 10)
+        self.assertEqual(usage["ollamaMetrics"]["total_duration"], 12_000_000_000)
+        self.assertEqual(usage["inputTokens"], 120)
+        self.assertEqual(usage["outputTokens"], 60)
+        self.assertEqual(usage["loadedVramBytes"], 1000)
+        self.assertIsNone(usage["timeToFirstTokenSeconds"])
+
+    def test_local_preflight_requires_exact_installed_digest_and_quantization(self):
+        model = LocalModel("synthetic:q8", thinking=True, model_digest="sha256:exact",
+            quantization="Q8_0")
+        model.api = Mock(side_effect=[
+            {"models": [{"name": "synthetic:q8", "digest": "sha256:exact"}]},
+            {"details": {"quantization_level": "Q8_0", "parameter_size": "26.9B"}}])
+        result = model.preflight()
+        self.assertEqual(result["digest"], "sha256:exact")
+        self.assertEqual(result["quantization"], "Q8_0")
+        model.api = Mock(return_value={"models": [{"name": "synthetic:q8", "digest": "sha256:changed"}]})
+        with self.assertRaisesRegex(RuntimeError, "LOCAL_MODEL_DIGEST_MISMATCH"):
+            model.preflight()
 
 
 if __name__ == "__main__":
