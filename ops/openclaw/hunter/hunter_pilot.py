@@ -267,9 +267,17 @@ def fetch_public_page(url):
     return parser.content()[:6000], parse_page_published_at(document), final_url
 
 
+class LocalModelResponseError(Exception):
+    def __init__(self, code, usage):
+        super().__init__(code)
+        self.code = code
+        self.usage = usage
+
+
 class LocalModel:
     def __init__(self, model, thinking=False, *, timeout=180, num_ctx=16384,
-            num_predict=None, model_digest=None, quantization=None):
+            num_predict=None, model_digest=None, quantization=None,
+            mission=None, tools=None, schema=None):
         self.model = model
         self.thinking = thinking
         self.timeout = timeout
@@ -277,6 +285,9 @@ class LocalModel:
         self.num_predict = num_predict if num_predict is not None else (4096 if thinking else 1000)
         self.model_digest = model_digest
         self.quantization = quantization
+        self.mission = MISSION if mission is None else mission
+        self.tools = TOOLS if tools is None else tools
+        self.schema = SCHEMA if schema is None else schema
 
     def api(self, path, data=None, timeout=10):
         request = urllib.request.Request("http://127.0.0.1:11434" + path,
@@ -322,11 +333,11 @@ class LocalModel:
     def __call__(self, context, loaded_before=None):
         total_started = time.monotonic()
         loaded_before = loaded_before or self.loaded_state()
-        system_prompt = MISSION + "\n" + TOOLS
+        system_prompt = self.mission + "\n" + self.tools
         user_prompt = json.dumps(context, ensure_ascii=False)
         request = urllib.request.Request("http://127.0.0.1:11434/api/chat", method="POST",
             headers={"Content-Type": "application/json"}, data=json.dumps({
-                "model": self.model, "stream": False, "think": self.thinking, "format": SCHEMA,
+                "model": self.model, "stream": False, "think": self.thinking, "format": self.schema,
                 "messages": [{"role": "system", "content": system_prompt},
                              {"role": "user", "content": user_prompt}],
                 "options": {"temperature": 0.2, "num_ctx": self.num_ctx,
@@ -337,16 +348,13 @@ class LocalModel:
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             raw = response.read(100_000)
         request_elapsed = time.monotonic() - request_started
-        validation_started = time.monotonic()
         payload = json.loads(raw)
-        decision = json.loads(payload["message"]["content"])
-        validation_elapsed = time.monotonic() - validation_started
         generation_seconds = seconds_from_ns(payload.get("eval_duration"))
         output_tokens = payload.get("eval_count", 0)
         tokens_per_second = (round(output_tokens / generation_seconds, 3)
             if generation_seconds and type(output_tokens) is int else None)
         loaded_after = self.loaded_state()
-        return decision, {
+        usage = {
             "provider": "OLLAMA", "requestedModel": self.model,
             "reportedModel": payload.get("model"), "thinking": self.thinking,
             "localModelDigest": self.model_digest, "localQuantization": self.quantization,
@@ -354,8 +362,8 @@ class LocalModel:
             "cachedInputTokens": None, "outputTokens": output_tokens,
             "reasoningTokens": None,
             "requestElapsedSeconds": round(request_elapsed, 6),
-            "validationSeconds": round(validation_elapsed, 6),
-            "modelTotalSeconds": round(time.monotonic() - total_started, 6),
+            "validationSeconds": None,
+            "modelTotalSeconds": None,
             "providerTotalSeconds": seconds_from_ns(payload.get("total_duration")),
             "modelLoadSeconds": seconds_from_ns(payload.get("load_duration")),
             "promptProcessingSeconds": seconds_from_ns(payload.get("prompt_eval_duration")),
@@ -369,8 +377,19 @@ class LocalModel:
             "providerPromptBytes": len(system_prompt.encode("utf-8")) + len(user_prompt.encode("utf-8")),
             "loadedSizeBytes": loaded_after["loadedSizeBytes"],
             "loadedVramBytes": loaded_after["loadedVramBytes"],
+            "completionReason": payload.get("done_reason"),
             "ollamaMetrics": {key: payload.get(key) for key in ["total_duration", "load_duration",
                 "prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration", "done_reason"]}}
+        validation_started = time.monotonic()
+        try:
+            decision = json.loads(payload["message"]["content"])
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+            usage["validationSeconds"] = round(time.monotonic() - validation_started, 6)
+            usage["modelTotalSeconds"] = round(time.monotonic() - total_started, 6)
+            raise LocalModelResponseError(type(error).__name__, usage) from None
+        usage["validationSeconds"] = round(time.monotonic() - validation_started, 6)
+        usage["modelTotalSeconds"] = round(time.monotonic() - total_started, 6)
+        return decision, usage
 
 
 def configured_model(config):
@@ -1176,6 +1195,7 @@ class Pilot:
             "cold": usage.get("cold"), "loadedSizeBytes": usage.get("loadedSizeBytes"),
             "loadedVramBytes": usage.get("loadedVramBytes"),
             "providerMetrics": usage.get("ollamaMetrics"),
+            "completionReason": usage.get("completionReason"),
             "status": status, "error": error, "retryIndex": 0, "retryCount": 0,
             "billing": usage.get("billing"), "knownModelCostUsd": None,
             "knownToolCostUsd": 0,
@@ -1279,6 +1299,9 @@ class Pilot:
                 status = "schema_failure"
         except (TimeoutError, socket.timeout):
             status, error = "timeout", "timeout"
+        except LocalModelResponseError as exception:
+            usage = exception.usage
+            status, error = "schema_failure", exception.code
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exception:
             status, error = "schema_failure", type(exception).__name__
         except urllib.error.HTTPError as exception:
@@ -1369,14 +1392,18 @@ class Pilot:
     def comparison_report_rows(self):
         attempts = self.comparison_attempts()
         columns = ["runId", "comparisonId", "attemptId", "timestampUtc", "sourceCommit",
-            "provider", "requestedModel", "reportedModel", "variant", "localQuantization",
+            "provider", "requestedModel", "reportedModel", "variant", "experiment",
+            "inputVariant", "originalPromptHash", "reused", "reusedFromAttemptId",
+            "localQuantization", "sourceCheckpoint",
             "promptHash", "promptChars", "promptBytes", "queueWaitSeconds",
             "requestElapsedSeconds", "validationSeconds", "modelTotalSeconds",
             "toolOrSearchSeconds", "totalSeconds", "modelLoadSeconds",
             "promptProcessingSeconds", "generationSeconds", "inputTokens",
             "cachedInputTokens", "outputTokens", "reasoningTokens",
             "generatedTokensPerSecond", "cold", "status", "error", "retryIndex",
-            "retryCount", "billing", "knownModelCostUsd", "knownToolCostUsd", "schemaValid",
+            "retryCount", "completionReason", "billing", "knownModelCostUsd", "knownToolCostUsd",
+            "minimumMemoryFreePercent", "swapDeltaBytes", "peakLoadedSizeBytes",
+            "peakLoadedVramBytes", "nativeGpuResident", "cancellationStatus", "schemaValid",
             "evidenceReferencesValid", "toolUsableWithoutRepair", "humanReview"]
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=columns)
@@ -1384,9 +1411,17 @@ class Pilot:
         for attempt in attempts:
             quality = attempt.get("quality") or {}
             row = {key: attempt.get(key) for key in columns}
+            resources = attempt.get("resourceMetrics") or {}
+            cancellation = attempt.get("cancellationObservation") or {}
             row.update(schemaValid=quality.get("schemaValid"),
                 evidenceReferencesValid=quality.get("evidenceReferencesValid"),
-                toolUsableWithoutRepair=quality.get("toolUsableWithoutRepair"))
+                toolUsableWithoutRepair=quality.get("toolUsableWithoutRepair"),
+                minimumMemoryFreePercent=resources.get("minimumMemoryFreePercent"),
+                swapDeltaBytes=resources.get("swapDeltaBytes"),
+                peakLoadedSizeBytes=resources.get("peakLoadedSizeBytes"),
+                peakLoadedVramBytes=resources.get("peakLoadedVramBytes"),
+                nativeGpuResident=resources.get("nativeGpuResident"),
+                cancellationStatus=cancellation.get("status"))
             writer.writerow(row)
         atomic_write_text(self.comparison_directory() / "comparison.csv", output.getvalue())
 
@@ -1433,9 +1468,12 @@ class Pilot:
             for shadow in case.get("shadows", []):
                 rows += [f"Local {shadow['variant']} (thinking {str(shadow.get('thinking')).lower()}, {shadow['status']}):",
                     "", "```json", json.dumps(shadow.get("output") or {"error": shadow.get("error")}, indent=2), "```", ""]
-        summary = "\n".join(["# Hunter model comparison", ""] + rows) + "\n"
+        diagnostic_path = self.comparison_directory() / "diagnostics.md"
+        diagnostic_rows = (diagnostic_path.read_text().splitlines() if diagnostic_path.exists() else [])
+        summary = "\n".join(["# Hunter model comparison", ""] + rows +
+            ([""] + diagnostic_rows if diagnostic_rows else [])) + "\n"
         atomic_write_text(self.comparison_directory() / "summary.md", summary)
-        return rows
+        return rows + ([""] + diagnostic_rows if diagnostic_rows else [])
 
     def status(self):
         counts = {s: sum(c["status"] == s for c in self.state["companies"].values())
