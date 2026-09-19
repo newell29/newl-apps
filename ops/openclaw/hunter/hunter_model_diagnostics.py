@@ -174,19 +174,19 @@ def memory_sample(started, baseline_pids):
     except (OSError, ValueError, TypeError, urllib.error.URLError):
         models = []
     processes = []
-    for line in safe_run(["/bin/ps", "-Ao", "pid=,comm=,%cpu=,%mem=,rss="], 5).splitlines():
-        if "ollama" not in line.casefold():
-            continue
-        fields = line.split()
-        if len(fields) < 5:
+    for line in safe_run(["/bin/ps", "-Ao", "pid=,%cpu=,%mem=,rss=,command="], 5).splitlines():
+        fields = line.split(None, 4)
+        if len(fields) < 5 or "ollama" not in fields[4].casefold():
             continue
         try:
-            pid, cpu, memory, rss = int(fields[0]), float(fields[-3]), float(fields[-2]), int(fields[-1])
+            pid, cpu, memory, rss = int(fields[0]), float(fields[1]), float(fields[2]), int(fields[3])
         except ValueError:
             continue
+        command = fields[4].casefold()
         processes.append({"pid": pid, "newForDiagnostic": pid not in baseline_pids,
-            "command": Path(" ".join(fields[1:-3])).name, "cpuPercent": cpu,
-            "memoryPercent": memory, "rssBytes": rss * 1024})
+            "role": "runner" if "ollama runner" in command else "server",
+            "command": "ollama-runner" if "ollama runner" in command else "ollama",
+            "cpuPercent": cpu, "memoryPercent": memory, "rssBytes": rss * 1024})
     return {"elapsedSeconds": round(time.monotonic() - started, 3),
         "memoryFreePercent": int(match.group(1)) if match else None,
         "swapUsedBytes": swap_used,
@@ -222,6 +222,8 @@ class ResourceMonitor:
         models = [model for row in self.samples for model in row["loadedModels"]]
         processes = [process for row in self.samples for process in row["ollamaProcesses"]
                      if process["newForDiagnostic"]]
+        runners = [process for row in self.samples for process in row["ollamaProcesses"]
+                   if process["role"] == "runner"]
         return {"sampleCount": len(self.samples),
             "memoryFreePercentBefore": free[0] if free else None,
             "minimumMemoryFreePercent": min(free) if free else None,
@@ -232,13 +234,14 @@ class ResourceMonitor:
             "peakLoadedSizeBytes": max((row.get("size") or 0 for row in models), default=None),
             "peakLoadedVramBytes": max((row.get("size_vram") or 0 for row in models), default=None),
             "maxNewOllamaCpuPercent": max((row["cpuPercent"] for row in processes), default=None),
+            "maxRunnerCpuPercent": max((row["cpuPercent"] for row in runners), default=None),
             "nativeGpuResident": any(row.get("size") and row.get("size_vram") == row.get("size") for row in models),
             "samples": self.samples}
 
 
 def ollama_pids():
     result = set()
-    for line in safe_run(["/bin/ps", "-Ao", "pid=,comm="], 5).splitlines():
+    for line in safe_run(["/bin/ps", "-Ao", "pid=,command="], 5).splitlines():
         if "ollama" in line.casefold():
             try:
                 result.add(int(line.split()[0]))
@@ -269,9 +272,9 @@ def cancellation_observation(model, baseline_pids):
     for _ in range(8):
         sample = memory_sample(started, baseline_pids)
         samples.append(sample)
-        diagnostic_cpu = sum(row["cpuPercent"] for row in sample["ollamaProcesses"]
-                             if row["newForDiagnostic"])
-        quiet = quiet + 1 if diagnostic_cpu < 5 else 0
+        runner_cpu = sum(row["cpuPercent"] for row in sample["ollamaProcesses"]
+                         if row["role"] == "runner")
+        quiet = quiet + 1 if runner_cpu < 5 else 0
         if quiet >= 2:
             return {"status": "runner_cpu_quiescent", "secondsObserved": round(time.monotonic() - started, 3),
                 "backendCancellationVerified": False,
@@ -376,7 +379,7 @@ def append_reuse(pilot, run, source_attempt, experiment, variant, original_hash)
 
 def run_attempt(pilot, run, *, packet, comparison_id, original_hash, experiment,
         input_variant, variant, model, provider, quantization=None, digest_value=None,
-        expect_warm=None):
+        expect_warm=None, local_timeout=180):
     prompt_hash = full_digest(packet)
     key = diagnostic_key(experiment, prompt_hash, model, variant)
     if key in run["completedKeys"]:
@@ -391,7 +394,7 @@ def run_attempt(pilot, run, *, packet, comparison_id, original_hash, experiment,
             binary=pilot.config.get("codexBinary"), effort=pilot.config.get("reasoningEffort", "medium"))
         loaded_before = {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None}
     else:
-        adapter = LocalModel(model, thinking=False, timeout=180, num_ctx=32768,
+        adapter = LocalModel(model, thinking=False, timeout=local_timeout, num_ctx=32768,
             num_predict=1000, model_digest=digest_value, quantization=quantization,
             mission=packet["mission"], tools=packet["tools"], schema=packet["schema"])
         loaded_before = adapter.loaded_state()
@@ -463,6 +466,7 @@ def run_attempt(pilot, run, *, packet, comparison_id, original_hash, experiment,
         completionReason=usage.get("completionReason"), expectedWarm=expect_warm,
         resourceMetrics=monitor.summary(), cancellationObservation=cancellation,
         forcedUnloadAfterTimeout=forced_unload,
+        requestTimeoutSeconds=local_timeout if provider == "OLLAMA" else None,
         sourceCheckpoint=SOURCE_CHECKPOINT)
     pilot.append_comparison_attempt(record)
     run["completedKeys"].append(key)
@@ -605,6 +609,51 @@ def warm_compact_confirmation(directory):
         "attemptIds": run["attemptIds"], "usedToday": pilot.budget()}
 
 
+def q8_cancellation_probe(directory):
+    pilot = Pilot(directory)
+    pilot.guard()
+    settings = pilot.comparison_settings()
+    validate_matched_models(settings["localModel"])
+    continuation = pilot.state.get("modelDiagnosticContinuation")
+    if not continuation or not continuation.get("runs"):
+        raise RuntimeError("NO_COMPLETED_DIAGNOSTIC_RUN")
+    run = continuation["runs"][-1]
+    if run.get("status") != "completed":
+        raise RuntimeError("DIAGNOSTIC_RUN_NOT_COMPLETED")
+    compact_inputs = sorted((pilot.comparison_directory() / "inputs").glob("cmpc-*.json"))
+    if not compact_inputs:
+        raise RuntimeError("NO_COMPACT_COMPARISON_INPUT")
+    compact_snapshot = json.loads(compact_inputs[-1].read_text())
+    source_commit = safe_run(["/usr/bin/git", "-C", str(Path(__file__).resolve().parents[3]),
+                              "rev-parse", "HEAD"], 5).strip()
+    record_run_source(run, source_commit)
+    if ollama_api("/api/ps", timeout=3).get("models", []):
+        raise RuntimeError("LOCAL_MODEL_ALREADY_LOADED")
+    run["status"] = "running"
+    pilot.save()
+    result = run_attempt(pilot, run, packet=compact_snapshot["packet"],
+        comparison_id=compact_snapshot["comparisonId"],
+        original_hash=compact_snapshot["originalPromptHash"],
+        experiment="D_q8_cancellation_probe", input_variant=COMPACT_VERSION,
+        variant="q8_compact_15s_cancellation_probe", model=settings["localModel"],
+        provider="OLLAMA", quantization=settings["localQuantization"],
+        digest_value=settings["localModelDigest"], expect_warm=False, local_timeout=15)
+    run["modelLifecycle"].append(unload_test_model(settings["localModel"]))
+    if ollama_api("/api/ps", timeout=3).get("models", []):
+        raise RuntimeError("DIAGNOSTIC_MODEL_REMAINED_LOADED")
+    run["status"] = "completed"
+    run["completedAt"] = iso(now())
+    run["running"] = None
+    pilot.save()
+    render_diagnostics(pilot, run, compact_snapshot)
+    pilot.report()
+    return {"state": "completed", "runId": run["runId"],
+        "attemptId": result["attemptId"], "status": result["status"],
+        "cancellationObservation": result.get("cancellationObservation"),
+        "additionalAttempts": continuation["additionalAttempts"],
+        "usedToday": pilot.budget()}
+
+
 def run(directory):
     pilot = Pilot(directory)
     pilot.guard()
@@ -717,6 +766,7 @@ def main():
     parser.add_argument("--state-dir", required=True)
     parser.add_argument("--env-file", action="append", default=[])
     parser.add_argument("--warm-compact-confirmation", action="store_true")
+    parser.add_argument("--q8-cancellation-probe", action="store_true")
     args = parser.parse_args()
     load_env(args.env_file)
     directory = Path(args.state_dir).expanduser().resolve()
@@ -727,8 +777,14 @@ def main():
         except BlockingIOError:
             print(json.dumps({"state": "already_running"}))
             return
-        result = (warm_compact_confirmation(directory) if args.warm_compact_confirmation
-                  else run(directory))
+        if args.warm_compact_confirmation and args.q8_cancellation_probe:
+            raise RuntimeError("CHOOSE_ONE_DIAGNOSTIC_MODE")
+        if args.warm_compact_confirmation:
+            result = warm_compact_confirmation(directory)
+        elif args.q8_cancellation_probe:
+            result = q8_cancellation_probe(directory)
+        else:
+            result = run(directory)
         print(json.dumps(result))
 
 

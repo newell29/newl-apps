@@ -17,8 +17,8 @@ from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, d
 from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
     TOOLS, SCHEMA)
 from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
-    compact_packet, record_run_source, reserve_diagnostic, run_attempt, unload_test_model,
-    validate_matched_models)
+    compact_packet, memory_sample, record_run_source, reserve_diagnostic, run_attempt,
+    unload_test_model, validate_matched_models)
 from pilot_subscription_model import (SubscriptionModel, subscription_environment,
     require_subscription, output_schema, run_bounded, DISABLED_FEATURES)
 
@@ -974,6 +974,16 @@ class SubscriptionTests(unittest.TestCase):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_memory_sample_identifies_existing_ollama_runner_for_cancellation(self):
+        command = "42 87.5 12.0 100000 /usr/local/bin/ollama runner --model synthetic"
+        with patch("hunter_model_diagnostics.safe_run", side_effect=[
+                "System-wide memory free percentage: 50%", "used = 10.00M", command]), \
+             patch("hunter_model_diagnostics.ollama_api", return_value={"models": []}):
+            sample = memory_sample(0, {42})
+        self.assertEqual(sample["ollamaProcesses"][0]["role"], "runner")
+        self.assertFalse(sample["ollamaProcesses"][0]["newForDiagnostic"])
+        self.assertEqual(sample["ollamaProcesses"][0]["cpuPercent"], 87.5)
+
     def test_resumed_diagnostic_records_each_source_commit(self):
         run = {"sourceCommit": "first"}
         record_run_source(run, "second")
