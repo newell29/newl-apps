@@ -163,6 +163,8 @@ describe("Website Growth backlink failure manager", () => {
       notify: true,
       disableExecutor: false
     });
+    expect(result.teamsMessage).toContain("BACKLINK OUTREACH — FAILED");
+    expect(result.teamsMessage).toContain("Action required: None now");
     expect(result.teamsMessage).toContain("Rivet queued");
   });
 
@@ -181,7 +183,8 @@ describe("Website Growth backlink failure manager", () => {
 
     expect(result.disableExecutor).toBe(true);
     expect(result.developmentJobId).toBeNull();
-    expect(result.teamsMessage).toContain("Circuit breaker");
+    expect(result.teamsMessage).toContain("Action required: Yes");
+    expect(result.teamsMessage).toContain("paused by the circuit breaker");
   });
 
   it("redacts credentials before incident evidence is stored", async () => {

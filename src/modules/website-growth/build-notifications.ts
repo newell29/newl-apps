@@ -204,23 +204,40 @@ function buildNotificationMessage({
     : `${normalizeBaseUrl(reviewBaseUrl)}/website-growth`;
 
   if (event === "DISPATCHED") {
-    return `Website Growth build started for ${routePath}. Codex is building the approved brief. Track it in Newl Apps: ${reviewUrl}`;
+    return [
+      "WEBSITE PAGE BUILD — STARTED",
+      `Result: Codex started building the approved change for ${routePath}.`,
+      "Action required: None yet. Wait for the separate preview-ready message.",
+      "",
+      `Track status: ${reviewUrl}`,
+      "Publishing status: Nothing is live. The build can only produce a draft pull request and Vercel preview."
+    ].join("\n");
   }
   if (event === "PREVIEW_READY") {
     const previewUrl = readHttpsUrl(output.previewUrl);
     const pullRequestUrl = readHttpsUrl(output.pullRequestUrl);
     return [
-      `Website Growth preview is ready for ${routePath}.`,
+      "WEBSITE PAGE BUILD — PREVIEW READY",
+      `Result: The proposed change for ${routePath} is ready for your visual review.`,
+      "Action required: Review the Vercel preview. If you approve it, merge the draft PR in GitHub; only you control the merge.",
+      "",
       previewUrl ? `Preview: ${previewUrl}` : null,
       pullRequestUrl ? `Draft PR: ${pullRequestUrl}` : null,
-      `Review status: ${reviewUrl}`,
-      "Nothing is live until you merge the approved PR."
+      `Newl Apps status: ${reviewUrl}`,
+      "Publishing status: Nothing is live until you merge the approved PR."
     ].filter(Boolean).join("\n");
   }
   const errorCode = typeof output.errorCode === "string" && output.errorCode.trim()
     ? ` (${output.errorCode.slice(0, 80)})`
     : "";
-  return `Website Growth build failed for ${routePath}${errorCode}. Review the recorded failure in Newl Apps: ${reviewUrl}`;
+  return [
+    "WEBSITE PAGE BUILD — FAILED",
+    `Result: The build for ${routePath} stopped${errorCode}. No preview was approved or published.`,
+    "Action required: Open the Newl Apps status page to see the recorded failure and recommended next step.",
+    "",
+    `Review failure: ${reviewUrl}`,
+    "Publishing status: Nothing was merged or deployed."
+  ].join("\n");
 }
 
 function readSafeRoute(value: unknown) {
