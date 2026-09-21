@@ -190,9 +190,9 @@ export async function fetchTeamshipShippingOrdersForReview({
   fetchImpl = fetch
 }: TeamshipFetchOptions): Promise<TeamshipShippingOrderDetail[]> {
   const resolvedCredentials = credentials ?? (await resolveTenantTeamshipCredentials(tenantId ? { tenantId } : null));
-  const apiBaseUrl = resolveTeamshipApiBaseUrl(resolvedCredentials);
+  const readSession = await createTeamshipReadSession({ tenantId, credentials: resolvedCredentials, fetchImpl });
+  const apiBaseUrl = readSession.apiBaseUrl;
   const webBaseUrl = resolveTeamshipWebBaseUrl(apiBaseUrl);
-  const token = await loginToTeamship(fetchImpl, resolvedCredentials, apiBaseUrl);
   const targetOrderReferences = normalizeTeamshipOrderReferences(orderReferences, srNumbers);
   const shouldEnrichFromUiPage = targetOrderReferences.length > 0;
   const matchedTargetReferenceKeys = new Set<string>();
@@ -259,7 +259,8 @@ export async function fetchTeamshipShippingOrdersForReview({
 
         const detail = await getTeamshipShippingOrder({
           apiBaseUrl,
-          token,
+          token: readSession.token,
+          readSession,
           id: String(orderId),
           fetchImpl
         });
@@ -322,6 +323,7 @@ export async function fetchTeamshipShippingOrdersForReview({
           ? "ALL_MATCHES_FOUND"
           : "EMPTY_PAGE";
     } catch (error) {
+      if (error instanceof TeamshipReadAuthenticationError) throw error;
       console.warn("Teamship targeted active-dashboard lookup failed; using the legacy active API scan.", {
         requestedReferenceCount: targetOrderReferences.length,
         error: error instanceof Error ? error.message : String(error)
@@ -343,7 +345,8 @@ export async function fetchTeamshipShippingOrdersForReview({
     }
     const rows = await listTeamshipShippingOrders({
       apiBaseUrl,
-      token,
+      token: readSession.token,
+      readSession,
       limit: Math.min(pageLimit, remainingLegacyRows),
       offset,
       fetchImpl
@@ -382,7 +385,13 @@ export async function fetchTeamshipShippingOrdersForReview({
         continue;
       }
 
-      const detail = await getTeamshipShippingOrder({ apiBaseUrl, token, id: String(orderId), fetchImpl });
+      const detail = await getTeamshipShippingOrder({
+        apiBaseUrl,
+        token: readSession.token,
+        readSession,
+        id: String(orderId),
+        fetchImpl
+      });
       let mergedDetail = mergeTeamshipDetailWithSummary(detail, row);
       mergedDetail = {
         ...mergedDetail,
@@ -457,6 +466,7 @@ export async function fetchTeamshipShippingOrdersForReview({
     try {
       await collectTargetedDashboardMatches("shipped");
     } catch (error) {
+      if (error instanceof TeamshipReadAuthenticationError) throw error;
       console.warn("Teamship completed-order archive lookup failed.", {
         requestedReferenceCount: targetOrderReferences.length,
         matchedReferenceCount: matchedTargetReferenceKeys.size,
@@ -927,6 +937,9 @@ async function getTeamshipShippingOrder({
   return json.data;
 }
 
+// Authentication failures must not become a fallback scan or a partial/missing review.
+class TeamshipReadAuthenticationError extends Error {}
+
 async function fetchAuthorizedTeamshipRead({
   url,
   token,
@@ -946,7 +959,7 @@ async function fetchAuthorizedTeamshipRead({
   });
   if (!readSession) return send(token);
 
-  let authorizationToken = token;
+  let authorizationToken = readSession.token;
   let unauthorizedReadRetried = false;
   let transientRetryIndex = 0;
   while (true) {
@@ -966,14 +979,27 @@ async function fetchAuthorizedTeamshipRead({
     if (response.status === 401 && !unauthorizedReadRetried) {
       unauthorizedReadRetried = true;
       if (readSession.token === authorizationToken) {
-        readSession.token = await loginToTeamship(
-          readSession.fetchImpl,
-          readSession.credentials,
-          readSession.apiBaseUrl
-        );
+        try {
+          readSession.token = await loginToTeamship(
+            readSession.fetchImpl,
+            readSession.credentials,
+            readSession.apiBaseUrl
+          );
+        } catch (error) {
+          throw new TeamshipReadAuthenticationError(
+            error instanceof Error ? error.message : "Teamship API read authentication refresh failed."
+          );
+        }
       }
       authorizationToken = readSession.token;
       continue;
+    }
+
+    if (response.status === 401) {
+      throw new TeamshipReadAuthenticationError("Teamship API read remained unauthorized after one authentication refresh.");
+    }
+    if (response.status === 403) {
+      throw new TeamshipReadAuthenticationError("Teamship API read was forbidden (403).");
     }
 
     if (isRetryableTeamshipReadStatus(response.status) && transientRetryIndex < TEAMSHIP_READ_RETRY_DELAYS_MS.length) {
