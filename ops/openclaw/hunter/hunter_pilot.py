@@ -7,15 +7,19 @@ configuration, mutate Newl Apps/Apollo, reveal emails, or communicate externally
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
 import fcntl
 import hashlib
 from html.parser import HTMLParser
+import io
 import json
 import os
 from pathlib import Path
 import re
 import signal
+import socket
+import statistics
 import sys
 import time
 import urllib.request
@@ -32,6 +36,7 @@ ZONE = ZoneInfo("America/Toronto")
 REPO = Path(__file__).resolve().parents[3]
 MISSION = Path(__file__).with_name("pilot-mission.md").read_text()
 VERSION = "hunter-autonomous-pilot-v3"
+COMPARISON_VERSION = "matched-decision-v1"
 DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
 ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "decide", "wait"]
@@ -119,6 +124,15 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:24]
 
 
+def full_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def seconds_from_ns(value):
+    return round(value / 1_000_000_000, 6) if type(value) is int and value >= 0 else None
+
+
 def domain(value):
     value = str(value).strip().lower().removeprefix("https://").removeprefix("http://").removeprefix("www.").rstrip("/")
     if len(value) > 253 or not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", value) or value.endswith(".local"):
@@ -138,6 +152,17 @@ def atomic_write(path, data):
     with open(temporary, "w", encoding="utf-8") as handle:
         os.chmod(temporary, 0o600)
         json.dump(data, handle, ensure_ascii=False, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def atomic_write_text(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with open(temporary, "w", encoding="utf-8", newline="") as handle:
+        os.chmod(temporary, 0o600)
+        handle.write(value)
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, path)
@@ -243,24 +268,109 @@ def fetch_public_page(url):
 
 
 class LocalModel:
-    def __init__(self, model, thinking=False):
+    def __init__(self, model, thinking=False, *, timeout=180, num_ctx=16384,
+            num_predict=None, model_digest=None, quantization=None):
         self.model = model
         self.thinking = thinking
+        self.timeout = timeout
+        self.num_ctx = num_ctx
+        self.num_predict = num_predict if num_predict is not None else (4096 if thinking else 1000)
+        self.model_digest = model_digest
+        self.quantization = quantization
 
-    def __call__(self, context):
+    def api(self, path, data=None, timeout=10):
+        request = urllib.request.Request("http://127.0.0.1:11434" + path,
+            method="POST" if data is not None else "GET",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            data=json.dumps(data).encode() if data is not None else None)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read(200_000))
+
+    def preflight(self):
+        tags = self.api("/api/tags")
+        installed = next((row for row in tags.get("models", [])
+            if row.get("name") == self.model or row.get("model") == self.model), None)
+        if not installed:
+            raise RuntimeError("LOCAL_MODEL_UNAVAILABLE")
+        if self.model_digest and installed.get("digest") != self.model_digest:
+            raise RuntimeError("LOCAL_MODEL_DIGEST_MISMATCH")
+        details = self.api("/api/show", {"model": self.model}).get("details", {})
+        installed_details = installed.get("details", {})
+        reported_quantization = details.get("quantization_level") or installed_details.get("quantization_level")
+        if self.quantization and reported_quantization != self.quantization:
+            raise RuntimeError("LOCAL_MODEL_QUANTIZATION_MISMATCH")
+        return {"provider": "OLLAMA", "model": self.model, "digest": installed.get("digest"),
+            "quantization": reported_quantization,
+            "parameterSize": details.get("parameter_size") or installed_details.get("parameter_size"),
+            "installedContextLength": details.get("context_length") or installed_details.get("context_length"),
+            "capabilities": installed.get("capabilities", []), "thinkingRequested": self.thinking,
+            "contextLength": self.num_ctx, "maxOutputTokens": self.num_predict,
+            "timeoutSeconds": self.timeout}
+
+    def loaded_state(self):
+        try:
+            payload = self.api("/api/ps", timeout=3)
+            models = payload.get("models", []) if isinstance(payload, dict) else []
+        except (OSError, ValueError, TypeError, urllib.error.URLError):
+            return {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None}
+        process = next((row for row in models if isinstance(row, dict) and
+                        (row.get("name") == self.model or row.get("model") == self.model)), None)
+        return {"cold": process is None,
+                "loadedSizeBytes": process.get("size") if process else None,
+                "loadedVramBytes": process.get("size_vram") if process else None}
+
+    def __call__(self, context, loaded_before=None):
+        total_started = time.monotonic()
+        loaded_before = loaded_before or self.loaded_state()
+        system_prompt = MISSION + "\n" + TOOLS
+        user_prompt = json.dumps(context, ensure_ascii=False)
         request = urllib.request.Request("http://127.0.0.1:11434/api/chat", method="POST",
             headers={"Content-Type": "application/json"}, data=json.dumps({
                 "model": self.model, "stream": False, "think": self.thinking, "format": SCHEMA,
-                "messages": [{"role": "system", "content": MISSION + "\n" + TOOLS},
-                             {"role": "user", "content": json.dumps(context, ensure_ascii=False)}],
-                "options": {"temperature": 0.2, "num_ctx": 16384, "num_predict": 4096 if self.thinking else 1000},
+                "messages": [{"role": "system", "content": system_prompt},
+                             {"role": "user", "content": user_prompt}],
+                "options": {"temperature": 0.2, "num_ctx": self.num_ctx,
+                            "num_predict": self.num_predict},
                 "keep_alive": "10m"
             }).encode())
-        with urllib.request.urlopen(request, timeout=180) as response:
-            payload = json.loads(response.read(100_000))
-        return json.loads(payload["message"]["content"]), {
-            "provider": "OLLAMA", "thinking": self.thinking,
-            "inputTokens": payload.get("prompt_eval_count", 0), "outputTokens": payload.get("eval_count", 0)}
+        request_started = time.monotonic()
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            raw = response.read(100_000)
+        request_elapsed = time.monotonic() - request_started
+        validation_started = time.monotonic()
+        payload = json.loads(raw)
+        decision = json.loads(payload["message"]["content"])
+        validation_elapsed = time.monotonic() - validation_started
+        generation_seconds = seconds_from_ns(payload.get("eval_duration"))
+        output_tokens = payload.get("eval_count", 0)
+        tokens_per_second = (round(output_tokens / generation_seconds, 3)
+            if generation_seconds and type(output_tokens) is int else None)
+        loaded_after = self.loaded_state()
+        return decision, {
+            "provider": "OLLAMA", "requestedModel": self.model,
+            "reportedModel": payload.get("model"), "thinking": self.thinking,
+            "localModelDigest": self.model_digest, "localQuantization": self.quantization,
+            "inputTokens": payload.get("prompt_eval_count", 0),
+            "cachedInputTokens": None, "outputTokens": output_tokens,
+            "reasoningTokens": None,
+            "requestElapsedSeconds": round(request_elapsed, 6),
+            "validationSeconds": round(validation_elapsed, 6),
+            "modelTotalSeconds": round(time.monotonic() - total_started, 6),
+            "providerTotalSeconds": seconds_from_ns(payload.get("total_duration")),
+            "modelLoadSeconds": seconds_from_ns(payload.get("load_duration")),
+            "promptProcessingSeconds": seconds_from_ns(payload.get("prompt_eval_duration")),
+            "generationSeconds": generation_seconds,
+            "generatedTokensPerSecond": tokens_per_second,
+            "timeToFirstTokenSeconds": None, "timeToFirstTokenMeasured": False,
+            "cold": loaded_before["cold"], "contextLength": self.num_ctx,
+            "maxOutputTokens": self.num_predict,
+            "temperature": 0.2, "keepAlive": "10m",
+            "providerPromptChars": len(system_prompt) + len(user_prompt),
+            "providerPromptBytes": len(system_prompt.encode("utf-8")) + len(user_prompt.encode("utf-8")),
+            "loadedSizeBytes": loaded_after["loadedSizeBytes"],
+            "loadedVramBytes": loaded_after["loadedVramBytes"],
+            "ollamaMetrics": {key: payload.get(key) for key in ["total_duration", "load_duration",
+                "prompt_eval_count", "prompt_eval_duration", "eval_count", "eval_duration", "done_reason"]}}
 
 
 def configured_model(config):
@@ -610,16 +720,30 @@ class Pilot:
                 return None
             return (urlparse(evidence.get("url", "")).hostname or "").removeprefix("www.") or None
 
+        def query_hosts(query):
+            # Search-result hosts alone lose the intended source when a site query is empty or
+            # returns an aggregator. Retain explicit site: targets as observed attempts.
+            return {value.lower().removeprefix("www.") for value in
+                    re.findall(r"(?<![\w.-])site:([a-z0-9.-]+\.[a-z]{2,})", query or "", re.IGNORECASE)}
+
+        def row_for(family):
+            return rows.setdefault(family, {"source": family, "searches": 0,
+                "targetedSearches": 0, "emptySearches": 0, "unreadClues": 0,
+                "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 0,
+                "lastSearchAt": None})
+
         rows = {}
         for attempt in self.state["attempts"].values():
             if attempt.get("action") != "search":
                 continue
-            families = {host(eid) for eid in (attempt.get("result") or {}).get("evidenceIds", [])}
+            result = attempt.get("result") or {}
+            targeted = query_hosts(attempt.get("query"))
+            families = {host(eid) for eid in result.get("evidenceIds", [])} | targeted
             for family in families - {None}:
-                row = rows.setdefault(family, {"source": family, "searches": 0, "unreadClues": 0,
-                    "recommendedCompanies": 0, "parkedCompanies": 0, "dismissedClues": 0,
-                    "lastSearchAt": None})
+                row = row_for(family)
                 row["searches"] += 1
+                row["targetedSearches"] += int(family in targeted)
+                row["emptySearches"] += int(bool(result.get("empty")))
                 row["lastSearchAt"] = max(filter(None, [row["lastSearchAt"], attempt.get("at")]), default=None)
 
         for item in self.state.get("dismissedClues", []):
@@ -640,7 +764,48 @@ class Pilot:
             if family in rows:
                 rows[family]["unreadClues"] += 1
 
-        return sorted(rows.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)[:10]
+        # Preserve the historically busiest sources while also showing recent explicit site targets.
+        # Otherwise result hosts from one broad query can hide the exact source the model is repeating.
+        by_volume = sorted(rows.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)
+        by_recency = sorted(rows.values(), key=lambda row: row["lastSearchAt"] or "", reverse=True)
+        selected = {row["source"]: row for row in by_volume[:5]}
+        for row in by_recency:
+            if len(selected) == 10:
+                break
+            if row["targetedSearches"]:
+                selected.setdefault(row["source"], row)
+        for row in by_recency:
+            if len(selected) == 10:
+                break
+            selected.setdefault(row["source"], row)
+        return sorted(selected.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)
+
+    @staticmethod
+    def normalize_identity_text(value):
+        tokens = re.findall(r"[a-z0-9]+", str(value or "").casefold())
+        normalized, initials = [], []
+        for token in tokens:
+            if len(token) == 1:
+                initials.append(token)
+                continue
+            if initials:
+                normalized.append("".join(initials))
+                initials = []
+            normalized.append(token)
+        if initials:
+            normalized.append("".join(initials))
+        return " ".join(normalized)
+
+    @classmethod
+    def identity_markers(cls, name=None, company_domain=None):
+        """Return conservative phrases for hiding already resolved company clues."""
+        markers = set()
+        for value in (name, (company_domain or "").split(".")[0].replace("-", " ")):
+            normalized = cls.normalize_identity_text(value)
+            tokens = normalized.split()
+            if len(normalized) >= 6 and (len(tokens) >= 2 or len(normalized) >= 8):
+                markers.add(normalized)
+        return markers
 
     def unread_clues(self):
         from urllib.parse import urlparse
@@ -648,14 +813,27 @@ class Pilot:
         dismissed = self.state.get("dismissedClues", [])
         dismissed_ids = {eid for item in dismissed for eid in item.get("evidenceIds", [])}
         dismissed_domains = {item.get("domain") for item in dismissed if item.get("domain")}
+        resolved_companies = [company for company in self.state["companies"].values()
+                              if company.get("status") != "active"]
+        resolved_ids = {eid for company in resolved_companies for eid in company.get("evidenceIds", [])}
+        resolved_markers = set()
+        for company in resolved_companies:
+            resolved_markers.update(self.identity_markers(company.get("name"), company.get("domain")))
+        for item in dismissed:
+            resolved_markers.update(self.identity_markers(item.get("name"), item.get("domain")))
         for evidence in reversed(list(self.state["evidence"].values())):
             if evidence["kind"] != "search":
                 continue
-            if evidence["id"] in dismissed_ids:
+            if evidence["id"] in dismissed_ids or evidence["id"] in resolved_ids:
                 continue
             url = evidence["url"]
             host = (urlparse(url).hostname or "").removeprefix("www.")
             if host in dismissed_domains:
+                continue
+            clue_text = self.normalize_identity_text(" ".join(str(evidence.get(key) or "")
+                for key in ("title", "excerpt")))
+            padded = f" {clue_text} "
+            if any(f" {marker} " in padded for marker in resolved_markers):
                 continue
             company = self.state["companies"].get(evidence.get("company")) or self.state["companies"].get(host)
             if company and company["status"] != "active":
@@ -670,6 +848,33 @@ class Pilot:
             if len(clues) == 8:
                 break
         return clues
+
+    def research_momentum(self):
+        """Expose declining marginal yield without imposing a score or stopping rule."""
+        actions = [event for event in self.state["events"] if event.get("kind") == "action"]
+
+        def company_progress(event):
+            state = (event.get("result") or {}).get("state")
+            return ((event.get("action") == "open_company" and state == "opened") or
+                    (event.get("action") == "decide" and state in
+                     {"active", "parked", "rejected", "recommended", "needs_clearance"}) or
+                    (event.get("action") == "people" and state not in
+                     {None, "cached_or_already_attempted", "unavailable"}))
+
+        progress_index = next((index for index in range(len(actions) - 1, -1, -1)
+                               if company_progress(actions[index])), -1)
+        since = actions[progress_index + 1:]
+        local_day = self.clock().astimezone(ZONE).date()
+        today = [event for event in since if event.get("at") and
+                 parse_time(event["at"]).astimezone(ZONE).date() == local_day]
+        return {"actionsSinceCompanyProgress": len(since),
+                "searchesSinceCompanyProgress": sum(event.get("action") == "search" for event in since),
+                "fetchesSinceCompanyProgress": sum(event.get("action") == "fetch" for event in since),
+                "dismissalsSinceCompanyProgress": sum(event.get("action") == "dismiss_clue" for event in since),
+                "actionsTodaySinceCompanyProgress": len(today),
+                "searchesTodaySinceCompanyProgress": sum(event.get("action") == "search" for event in today),
+                "dismissalsTodaySinceCompanyProgress": sum(event.get("action") == "dismiss_clue" for event in today),
+                "lastCompanyProgressAt": actions[progress_index].get("at") if progress_index >= 0 else None}
 
     def context(self):
         self.ingest_feedback()
@@ -701,8 +906,9 @@ class Pilot:
             "dismissedClues": self.state.get("dismissedClues", [])[-20:],
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
+            "researchMomentum": self.research_momentum(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. researchCoverage.sourceFamilies summarizes observed source outcomes, not quotas: reuse sources that yield promising companies, and leave a source family whose recent clues repeatedly park or dismiss unless an unread clue contains materially different operating evidence. After a resolved dead end, choose a materially different company, source or service hypothesis. Coverage counts are not quotas or proof that a market is exhausted.",
+            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. researchCoverage.sourceFamilies summarizes observed source outcomes, including explicit site: targets and empty searches, not quotas: reuse sources that yield promising companies, and leave a source family whose recent clues repeatedly park, dismiss or return empty unless an unread clue contains materially different operating evidence. researchMomentum reports both cumulative and current-local-day actions since the last company was opened, decided or buyer-researched. At the start of a fresh business day, use prior low yield to choose a materially different company, source or service hypothesis rather than waiting solely because yesterday stalled. Once current-day searches and dismissals also show falling marginal yield and no materially stronger unread clue remains, wait instead of consuming the allowance. unreadClues is a menu, not an inbox: do not dismiss every same-shaped weak clue merely to clear it when source history already demonstrates the problem. Coverage counts are not quotas or proof that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -744,13 +950,25 @@ class Pilot:
         productive = False
         starting_calls = self.budget()["modelCalls"]
         compared = False
+        run_id = "run-" + uuid.uuid4().hex
         for _ in range(max_steps):
             if time.monotonic() >= deadline or self.budget()["modelCalls"] - starting_calls >= max_steps:
                 break
-            context = json.loads(json.dumps(self.context()))  # identical immutable packet for all three models
-            action, usage = self.infer(self.model, self.config["model"], context)
+            context = json.loads(json.dumps(self.context()))
+            comparison = self.begin_comparison(context, run_id) if not compared else None
+            compared = True
+            model_started = time.monotonic()
+            try:
+                action, usage = self.infer(self.model, self.config["model"], context)
+            except Exception as error:
+                if comparison:
+                    self.fail_primary_comparison(comparison, error, time.monotonic() - model_started)
+                raise
             self.event("proposed_action", proposal=action)
             waiting = False
+            tool_started = time.monotonic()
+            result = None
+            execution_error = None
             try:
                 result = self.execute(action)
                 unproductive = unproductive + 1 if result.get("state") in {"cached_or_already_attempted", "unavailable", "already_known"} or result.get("empty") else 0
@@ -762,11 +980,17 @@ class Pilot:
             except (ValueError, KeyError, TypeError) as error:
                 self.event("action_rejected", reason=str(error)[:300])
                 unproductive += 1
-            # Temporary matched evaluation, not another production decision stage.
-            # Execute the primary action first; local proposals are never executed.
-            if not compared and max_steps >= 3 and self.budget()["modelCalls"] - starting_calls == 1:
-                self.compare_models(context, action, deadline)
-                compared = True
+                result = {"state": "rejected", "reason": str(error)[:300]}
+            except Exception as error:
+                execution_error = error
+                result = {"state": "error", "reason": type(error).__name__}
+            tool_elapsed = time.monotonic() - tool_started
+            # Freeze and queue the local shadow only after the cloud action has completed.
+            # The shadow never enters execute() and cannot delay the remaining primary steps.
+            if comparison:
+                self.complete_primary_comparison(comparison, action, usage, tool_elapsed, result)
+            if execution_error:
+                raise execution_error
             if waiting:
                 break
             if unproductive >= 2:
@@ -796,31 +1020,313 @@ class Pilot:
         self.event("model", model=name, version=VERSION, usage=usage, evaluation=evaluation)
         return action, usage
 
-    def compare_models(self, context, primary, deadline):
-        limit = self.config.get("comparisonCases", 0)
-        if not isinstance(limit, int) or not 0 <= limit <= 10:
+    def comparison_settings(self):
+        settings = self.config.get("pairedComparison")
+        if not settings or not settings.get("enabled"):
+            return None
+        required = ["maxCases", "localModel", "localModelDigest", "localQuantization",
+                    "localThinking", "timeoutSeconds", "contextLength", "maxOutputTokens"]
+        if any(key not in settings for key in required):
+            raise ValueError("Paired comparison configuration is incomplete")
+        if type(settings["maxCases"]) is not int or not 0 <= settings["maxCases"] <= 10:
             raise ValueError("Comparison must be limited to at most ten cases")
-        cases = self.state.setdefault("modelComparisons", [])
-        if len(cases) >= limit:
-            return
-        case = {"at": iso(self.clock()), "contextId": digest(context), "context": context,
-                "primaryModel": self.config["model"], "primary": primary, "shadows": []}
-        cases.append(case)
-        self.save()  # partial cases remain visible and never silently retried
-        for name in ["qwen3.8-rvn:q4_k_m-multilingual", "qwen3.8-rvn:q8_0-multilingual"]:
-            if time.monotonic() + 180 > deadline:
-                case["incomplete"] = "wake_time"
-                break
+        if settings.get("queueLimit", 1) != 1 or settings["timeoutSeconds"] != 180:
+            raise ValueError("Comparison requires one queued local inference and a 180-second timeout")
+        if type(settings.get("diagnosticThinkingOffCases", 0)) is not int or not 0 <= settings.get("diagnosticThinkingOffCases", 0) <= 2:
+            raise ValueError("Thinking-off diagnostics must be limited to at most two saved inputs")
+        return settings
+
+    def comparison_directory(self):
+        path = self.directory / "model-comparison"
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(path, 0o700)
+        return path
+
+    def append_comparison_attempt(self, record):
+        path = self.comparison_directory() / "attempts.jsonl"
+        with open(path, "a", encoding="utf-8") as handle:
+            os.chmod(path, 0o600)
+            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def supplied_evidence_ids(self, value):
+        result = set()
+        def visit(item, key=None):
+            if isinstance(item, dict):
+                for nested_key, nested in item.items():
+                    visit(nested, nested_key)
+            elif isinstance(item, list):
+                for nested in item:
+                    visit(nested, key)
+            elif isinstance(item, str) and key in {"id", "evidenceId", "evidenceIds", "quoteEvidenceId"}:
+                result.add(item)
+        visit(value)
+        return result
+
+    def proposal_quality(self, proposal, context):
+        errors = []
+        if not isinstance(proposal, dict) or proposal.get("action") not in ACTIONS or not isinstance(proposal.get("args"), dict):
+            errors.append("Invalid action contract")
+            action, args = None, {}
+        else:
+            action, args = proposal["action"], proposal["args"]
+            required, optional = CONTRACTS[action]
+            missing = [key for key in required if key not in args]
+            extra = sorted(set(args) - set(required + optional))
+            if missing:
+                errors.append("Missing arguments: " + ", ".join(missing))
+            if extra:
+                errors.append("Unexpected arguments: " + ", ".join(extra))
+            if not isinstance(proposal.get("purpose"), str) or not proposal["purpose"].strip():
+                errors.append("Missing purpose")
+        supplied = self.supplied_evidence_ids(context)
+        referenced = []
+        if isinstance(args.get("evidenceIds"), list):
+            referenced += [value for value in args["evidenceIds"] if isinstance(value, str)]
+        if isinstance(args.get("quoteEvidenceId"), str):
+            referenced.append(args["quoteEvidenceId"])
+        invented = sorted(set(referenced) - supplied)
+        repeated = False
+        if action in {"search", "fetch", "people"} and not errors:
             try:
-                proposal, usage = self.infer(LocalModel(name, thinking=True), name, context, evaluation=True)
-                case["shadows"].append({"model": name, "proposal": proposal, "usage": usage})
-            except BudgetExceeded as error:
-                case["incomplete"] = str(error)
-                break
-            except (OSError, urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError) as error:
-                case["shadows"].append({"model": name, "error": type(error).__name__})
-            finally:
-                self.save()
+                key = self.cache_key(action, args)
+                repeated = bool(key and key in self.state["attempts"])
+            except (KeyError, TypeError, ValueError):
+                errors.append("Invalid arguments for cache key")
+        uncertainty = args.get("uncertainty")
+        return {"schemaValid": not errors, "invalidToolArguments": errors,
+            "evidenceReferences": referenced, "inventedEvidenceReferences": invented,
+            "evidenceReferencesValid": not invented,
+            "repeatedOrUnnecessaryAction": repeated,
+            "uncertaintyRecognition": "PRESENT" if isinstance(uncertainty, str) and uncertainty.strip() else "UNREVIEWED",
+            "unsupportedFactualClaims": "UNREVIEWED",
+            "businessQuality": "UNREVIEWED",
+            "toolUsableWithoutRepair": not errors and not invented and not repeated,
+            "businessUsability": "UNREVIEWED"}
+
+    def begin_comparison(self, context, run_id):
+        settings = self.comparison_settings()
+        if not settings:
+            return None
+        cases = self.state.setdefault("pairedComparisons", [])
+        if len(cases) >= settings["maxCases"]:
+            return None
+        queue = self.state.setdefault("pairedComparisonQueue", [])
+        if queue:
+            self.state.setdefault("pairedComparisonSkips", []).append({
+                "at": iso(self.clock()), "runId": run_id, "reason": "backpressure_queue_full"})
+            self.save()
+            return None
+        comparison_id = "cmp-" + uuid.uuid4().hex
+        packet = {"comparisonVersion": COMPARISON_VERSION, "mission": MISSION, "tools": TOOLS,
+                  "schema": SCHEMA, "context": context}
+        canonical = json.dumps(packet, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        snapshot = {"comparisonId": comparison_id, "runId": run_id,
+            "createdAt": iso(self.clock()), "sourceCommit": self.config.get("runtimeCommit"),
+            "promptHash": full_digest(packet),
+            "promptChars": len(canonical), "promptBytes": len(canonical.encode("utf-8")),
+            "providerDifferences": [
+                "Codex receives the frozen packet in one buffered CLI prompt and requires a decision envelope.",
+                "Ollama receives the same mission/tools as a system message and the same context as a user message.",
+                "Provider tokenizers and reasoning controls are not equivalent; time to first token is not measured."],
+            "packet": packet}
+        input_path = self.comparison_directory() / "inputs" / f"{comparison_id}.json"
+        atomic_write(input_path, snapshot)
+        case = {key: snapshot[key] for key in ["comparisonId", "runId", "createdAt", "sourceCommit",
+                "promptHash", "promptChars", "promptBytes", "providerDifferences"]}
+        case.update(inputPath=str(input_path), status="primary_started", primary=None, shadows=[],
+                    humanReview="UNREVIEWED", humanFeedback=None)
+        cases.append(case)
+        self.save()
+        return case
+
+    def attempt_record(self, case, *, attempt_id, provider, requested_model, variant,
+            status, output, usage, quality, queue_wait=0, tool_seconds=0, error=None):
+        usage = usage or {}
+        model_total = usage.get("modelTotalSeconds")
+        return {"runId": case["runId"], "comparisonId": case["comparisonId"],
+            "attemptId": attempt_id, "timestampUtc": iso(self.clock()),
+            "sourceCommit": case.get("sourceCommit"), "comparisonVersion": COMPARISON_VERSION,
+            "provider": provider, "requestedModel": requested_model,
+            "reportedModel": usage.get("reportedModel"), "variant": variant,
+            "localQuantization": usage.get("localQuantization"),
+            "localModelDigest": usage.get("localModelDigest"),
+            "promptHash": case["promptHash"], "promptChars": case["promptChars"],
+            "promptBytes": case["promptBytes"],
+            "modelSettings": {key: usage.get(key) for key in ["reasoningEffort", "thinking",
+                "temperature", "contextLength", "maxOutputTokens", "keepAlive"] if key in usage},
+            "queueWaitSeconds": round(queue_wait, 6),
+            "requestElapsedSeconds": usage.get("requestElapsedSeconds"),
+            "validationSeconds": usage.get("validationSeconds"),
+            "modelTotalSeconds": model_total,
+            "toolOrSearchSeconds": round(tool_seconds, 6),
+            "totalSeconds": round(queue_wait + (model_total or 0) + tool_seconds, 6),
+            "modelLoadSeconds": usage.get("modelLoadSeconds"),
+            "promptProcessingSeconds": usage.get("promptProcessingSeconds"),
+            "generationSeconds": usage.get("generationSeconds"),
+            "providerTotalSeconds": usage.get("providerTotalSeconds"),
+            "inputTokens": usage.get("inputTokens"),
+            "cachedInputTokens": usage.get("cachedInputTokens"),
+            "outputTokens": usage.get("outputTokens"),
+            "reasoningTokens": usage.get("reasoningTokens"),
+            "generatedTokensPerSecond": usage.get("generatedTokensPerSecond"),
+            "timeToFirstTokenSeconds": usage.get("timeToFirstTokenSeconds"),
+            "timeToFirstTokenMeasured": usage.get("timeToFirstTokenMeasured", False),
+            "cold": usage.get("cold"), "loadedSizeBytes": usage.get("loadedSizeBytes"),
+            "loadedVramBytes": usage.get("loadedVramBytes"),
+            "providerMetrics": usage.get("ollamaMetrics"),
+            "status": status, "error": error, "retryIndex": 0, "retryCount": 0,
+            "billing": usage.get("billing"), "knownModelCostUsd": None,
+            "knownToolCostUsd": 0,
+            "finalOutput": output, "quality": quality,
+            "humanReview": "UNREVIEWED", "humanFeedback": None}
+
+    def complete_primary_comparison(self, case, action, usage, tool_seconds, tool_result):
+        quality = self.proposal_quality(action, json.loads(Path(case["inputPath"]).read_text())["packet"]["context"])
+        attempt = self.attempt_record(case, attempt_id="att-" + uuid.uuid4().hex,
+            provider="CHATGPT_SUBSCRIPTION", requested_model=self.config["model"],
+            variant="primary", status="success" if quality["schemaValid"] else "schema_failure",
+            output=action, usage=usage, quality=quality, tool_seconds=tool_seconds)
+        attempt["toolResult"] = tool_result
+        if action.get("action") == "search" and self.config.get("searchProvider") == "BRAVE":
+            attempt["knownToolCostUsd"] = self.config.get("searchCostMicros", 0) / 1_000_000
+        self.append_comparison_attempt(attempt)
+        case["primary"] = {"attemptId": attempt["attemptId"], "output": action,
+                           "quality": quality, "toolSeconds": round(tool_seconds, 6),
+                           "toolResult": tool_result}
+        case["status"] = "shadow_pending"
+        settings = self.comparison_settings()
+        self.state.setdefault("pairedComparisonQueue", []).append({
+            "comparisonId": case["comparisonId"], "variant": "baseline",
+            "thinking": settings["localThinking"], "enqueuedAt": iso(self.clock()),
+            "state": "pending", "deferrals": 0})
+        self.save()
+
+    def fail_primary_comparison(self, case, error, elapsed):
+        code = str(error) if re.fullmatch(r"[A-Z_0-9]+", str(error)) else type(error).__name__
+        attempt = self.attempt_record(case, attempt_id="att-" + uuid.uuid4().hex,
+            provider="CHATGPT_SUBSCRIPTION", requested_model=self.config["model"],
+            variant="primary", status="timeout" if "TIMEOUT" in code else "error",
+            output=None, usage={"modelTotalSeconds": round(elapsed, 6)}, quality=None, error=code)
+        self.append_comparison_attempt(attempt)
+        case["primary"] = {"attemptId": attempt["attemptId"], "error": code}
+        case["status"] = "primary_failed"
+        self.save()
+
+    def process_shadow_queue(self):
+        settings = self.comparison_settings()
+        queue = self.state.setdefault("pairedComparisonQueue", [])
+        if not settings or not queue:
+            return False
+        job = queue[0]
+        if job.get("nextAttemptAt") and parse_time(job["nextAttemptAt"]) > self.clock():
+            return False
+        case = next((row for row in self.state.get("pairedComparisons", [])
+                     if row["comparisonId"] == job["comparisonId"]), None)
+        if not case:
+            queue.pop(0)
+            self.save()
+            return False
+        if job.get("state") == "running":
+            attempt = self.attempt_record(case, attempt_id="att-" + uuid.uuid4().hex,
+                provider="OLLAMA", requested_model=settings["localModel"], variant=job["variant"],
+                status="cancellation", output=None, usage={}, quality=None,
+                queue_wait=max(0, (parse_time(job.get("startedAt", iso(self.clock()))) -
+                    parse_time(job["enqueuedAt"])).total_seconds()),
+                error="interrupted_before_result_was_recorded")
+            self.append_comparison_attempt(attempt)
+            case["shadows"].append({"attemptId": attempt["attemptId"], "variant": job["variant"],
+                "thinking": job["thinking"], "status": "cancellation",
+                "error": "interrupted_before_result_was_recorded", "output": None, "quality": None})
+            case["status"] = "completed_incomplete"
+            queue.pop(0)
+            self.save()
+            return False
+        self.guard()
+        try:
+            self.reserve("modelCalls")
+        except BudgetExceeded as error:
+            job.update(state="deferred", reason=str(error),
+                nextAttemptAt=iso(next_business_start(self.clock())),
+                deferrals=job.get("deferrals", 0) + 1)
+            case["status"] = "shadow_deferred"
+            self.save()
+            return False
+        snapshot = json.loads(Path(case["inputPath"]).read_text())
+        context = snapshot["packet"]["context"]
+        job.update(state="running", startedAt=iso(self.clock()))
+        self.save()
+        attempt_id = "att-" + uuid.uuid4().hex
+        queue_wait = max(0, (self.clock() - parse_time(job["enqueuedAt"])).total_seconds())
+        context_length = job.get("contextLength", settings["contextLength"])
+        max_output_tokens = job.get("maxOutputTokens", settings["maxOutputTokens"]
+            if job["thinking"] else settings.get("diagnosticMaxOutputTokens", 1000))
+        local = LocalModel(settings["localModel"], thinking=job["thinking"],
+            timeout=settings["timeoutSeconds"], num_ctx=context_length,
+            num_predict=max_output_tokens,
+            model_digest=settings["localModelDigest"], quantization=settings["localQuantization"])
+        read_loaded_state = getattr(type(local), "loaded_state", None)
+        loaded_before = (read_loaded_state(local) if callable(read_loaded_state) else
+            {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None})
+        started = time.monotonic()
+        output = usage = quality = None
+        status, error = "success", None
+        try:
+            output, usage = local(context, loaded_before=loaded_before)
+            quality = self.proposal_quality(output, context)
+            if not quality["schemaValid"] or not quality["evidenceReferencesValid"]:
+                status = "schema_failure"
+        except (TimeoutError, socket.timeout):
+            status, error = "timeout", "timeout"
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exception:
+            status, error = "schema_failure", type(exception).__name__
+        except urllib.error.HTTPError as exception:
+            status, error = "error", "HTTP_" + str(exception.code)
+        except urllib.error.URLError as exception:
+            timed_out = isinstance(getattr(exception, "reason", None), (TimeoutError, socket.timeout))
+            status, error = ("timeout", "timeout") if timed_out else ("error", type(exception).__name__)
+        except OSError as exception:
+            status, error = "error", type(exception).__name__
+        elapsed = time.monotonic() - started
+        if usage is None:
+            loaded_after = (read_loaded_state(local) if callable(read_loaded_state) else
+                {"cold": None, "loadedSizeBytes": None, "loadedVramBytes": None})
+            usage = {"provider": "OLLAMA", "requestedModel": settings["localModel"],
+                "reportedModel": None, "thinking": job["thinking"],
+                "localModelDigest": settings["localModelDigest"],
+                "localQuantization": settings["localQuantization"],
+                "contextLength": context_length, "maxOutputTokens": max_output_tokens,
+                "temperature": 0.2, "keepAlive": "10m",
+                "requestElapsedSeconds": round(elapsed, 6), "validationSeconds": None,
+                "modelTotalSeconds": round(elapsed, 6), "timeToFirstTokenSeconds": None,
+                "timeToFirstTokenMeasured": False, "cold": loaded_before["cold"],
+                "loadedSizeBytes": loaded_after["loadedSizeBytes"],
+                "loadedVramBytes": loaded_after["loadedVramBytes"]}
+        budget = self.budget()
+        actual_seconds = min(settings["timeoutSeconds"], int(elapsed) + 1)
+        budget["modelSeconds"] -= settings["timeoutSeconds"] - actual_seconds
+        attempt = self.attempt_record(case, attempt_id=attempt_id, provider="OLLAMA",
+            requested_model=settings["localModel"], variant=job["variant"], status=status,
+            output=output, usage=usage, quality=quality, queue_wait=queue_wait, error=error)
+        self.append_comparison_attempt(attempt)
+        case["shadows"].append({"attemptId": attempt_id, "variant": job["variant"],
+            "thinking": job["thinking"], "status": status, "error": error,
+            "output": output, "quality": quality})
+        queue.pop(0)
+        diagnostics = settings.get("diagnosticThinkingOffCases", 0)
+        completed_diagnostics = sum(any(shadow.get("variant") == "thinking_off_diagnostic"
+            for shadow in row.get("shadows", [])) for row in self.state.get("pairedComparisons", []))
+        if job["variant"] == "baseline" and job["thinking"] and completed_diagnostics < diagnostics:
+            queue.append({"comparisonId": case["comparisonId"], "variant": "thinking_off_diagnostic",
+                "thinking": False, "enqueuedAt": iso(self.clock()), "state": "pending", "deferrals": 0})
+            case["status"] = "diagnostic_pending"
+        else:
+            case["status"] = "completed"
+        self.save()
+        self.event("comparison_shadow", comparisonId=case["comparisonId"],
+                   variant=job["variant"], status=status)
+        return True
 
     def compare_search(self, queries):
         if not isinstance(queries, list) or not 1 <= len(queries) <= 10:
@@ -854,6 +1360,83 @@ class Pilot:
                     self.save()
         self.event("search_comparison", cases=len(trials), recommendations=0)
 
+    def comparison_attempts(self):
+        path = self.comparison_directory() / "attempts.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def comparison_report_rows(self):
+        attempts = self.comparison_attempts()
+        columns = ["runId", "comparisonId", "attemptId", "timestampUtc", "sourceCommit",
+            "provider", "requestedModel", "reportedModel", "variant", "localQuantization",
+            "promptHash", "promptChars", "promptBytes", "queueWaitSeconds",
+            "requestElapsedSeconds", "validationSeconds", "modelTotalSeconds",
+            "toolOrSearchSeconds", "totalSeconds", "modelLoadSeconds",
+            "promptProcessingSeconds", "generationSeconds", "inputTokens",
+            "cachedInputTokens", "outputTokens", "reasoningTokens",
+            "generatedTokensPerSecond", "cold", "status", "error", "retryIndex",
+            "retryCount", "billing", "knownModelCostUsd", "knownToolCostUsd", "schemaValid",
+            "evidenceReferencesValid", "toolUsableWithoutRepair", "humanReview"]
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        for attempt in attempts:
+            quality = attempt.get("quality") or {}
+            row = {key: attempt.get(key) for key in columns}
+            row.update(schemaValid=quality.get("schemaValid"),
+                evidenceReferencesValid=quality.get("evidenceReferencesValid"),
+                toolUsableWithoutRepair=quality.get("toolUsableWithoutRepair"))
+            writer.writerow(row)
+        atomic_write_text(self.comparison_directory() / "comparison.csv", output.getvalue())
+
+        rows = ["## Matched cloud/local decision comparison", "",
+            "OpenAI remains the only live decision model. Local outputs are non-executing shadows. "
+            "Business-quality judgments remain UNREVIEWED until owner feedback is recorded.", ""]
+        grouped = {}
+        for attempt in attempts:
+            grouped.setdefault((attempt["provider"], attempt["variant"]), []).append(attempt)
+        if not grouped:
+            rows += ["No new paired attempts recorded yet.", ""]
+        else:
+            rows += ["| Provider / variant | Attempts | Completed | Schema valid | Median model latency | Range | Failures |",
+                "|---|---:|---:|---:|---:|---:|---:|"]
+            for (provider, variant), group in sorted(grouped.items()):
+                latencies = [row["modelTotalSeconds"] for row in group
+                    if isinstance(row.get("modelTotalSeconds"), (int, float))]
+                completed = sum(row.get("status") == "success" for row in group)
+                schema_valid = sum(bool((row.get("quality") or {}).get("schemaValid")) for row in group)
+                median = f"{statistics.median(latencies):.2f}s" if latencies else "UNKNOWN"
+                span = f"{min(latencies):.2f}–{max(latencies):.2f}s" if latencies else "UNKNOWN"
+                rows.append(f"| {provider} / {variant} | {len(group)} | {completed} | {schema_valid} | {median} | {span} | {len(group) - completed} |")
+            rows.append("")
+        settings = self.config.get("pairedComparison", {})
+        if settings:
+            rows += ["Configured local baseline: `" + settings.get("localModel", "UNKNOWN") + "` (" +
+                settings.get("localQuantization", "UNKNOWN") + ", digest `" +
+                settings.get("localModelDigest", "UNKNOWN") + "`, thinking " +
+                str(settings.get("localThinking")).lower() + ", " +
+                f"{settings.get('contextLength', 'UNKNOWN')}-token runtime context, " +
+                f"{settings.get('maxOutputTokens', 'UNKNOWN')} output-token ceiling).", ""]
+        for case in self.state.get("pairedComparisons", []):
+            rows += ["### " + case["comparisonId"], "",
+                f"Input hash: `{case['promptHash']}` · source commit: `{case.get('sourceCommit')}` · status: `{case['status']}`", "",
+                f"Frozen input: `{case['inputPath']}`", "",
+                "Human review: **" + case.get("humanReview", "UNREVIEWED") + "** · feedback: " +
+                (case.get("humanFeedback") or "not supplied"), ""]
+            if case.get("measurementNotes"):
+                rows += ["Measurement notes:", ""] + ["- " + note for note in case["measurementNotes"]] + [""]
+            rows += [
+                "Cloud primary:", "", "```json",
+                json.dumps((case.get("primary") or {}).get("output") or case.get("primary"), indent=2),
+                "```", ""]
+            for shadow in case.get("shadows", []):
+                rows += [f"Local {shadow['variant']} (thinking {str(shadow.get('thinking')).lower()}, {shadow['status']}):",
+                    "", "```json", json.dumps(shadow.get("output") or {"error": shadow.get("error")}, indent=2), "```", ""]
+        summary = "\n".join(["# Hunter model comparison", ""] + rows) + "\n"
+        atomic_write_text(self.comparison_directory() / "summary.md", summary)
+        return rows
+
     def status(self):
         counts = {s: sum(c["status"] == s for c in self.state["companies"].values())
                   for s in ["active", "parked", "rejected", "recommended", "needs_clearance", "blocked"]}
@@ -879,9 +1462,16 @@ class Pilot:
             "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
             "buyerResearch": buyer_research,
             "searchesByDirection": {d: r["attempts"] for d, r in self.research_coverage()["directions"].items()},
+            "researchMomentum": self.research_momentum(),
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "modelProvider": self.config.get("modelProvider", "OLLAMA"),
             "comparisonCases": len(self.state.get("modelComparisons", [])),
+            "pairedComparison": {"enabled": bool(self.config.get("pairedComparison", {}).get("enabled")),
+                "completedCases": sum(row.get("status") == "completed" for row in self.state.get("pairedComparisons", [])),
+                "totalCases": len(self.state.get("pairedComparisons", [])),
+                "queueDepth": len(self.state.get("pairedComparisonQueue", [])),
+                "skippedForBackpressure": len(self.state.get("pairedComparisonSkips", [])),
+                "localModel": self.config.get("pairedComparison", {}).get("localModel")},
             "dismissedClues": len(self.state.get("dismissedClues", [])),
             "searchComparisonCases": len(self.state.get("searchComparisons", {})),
             "publicDiscoveryOnly": self.config.get("publicDiscoveryOnly", False),
@@ -917,8 +1507,8 @@ class Pilot:
         for case in self.state.get("modelComparisons", []):
             rows += ["### " + case["contextId"], "", "```json",
                      json.dumps({k: v for k, v in case.items() if k != "context"}, indent=2), "```", ""]
-        path.write_text("\n".join(rows))
-        os.chmod(path, 0o600)
+        rows += self.comparison_report_rows()
+        atomic_write_text(path, "\n".join(rows) + "\n")
         return str(path)
 
 
@@ -1014,7 +1604,16 @@ def main():
         if args.command == "preflight":
             pilot.guard()
             info = pilot.model.preflight() if isinstance(pilot.model, SubscriptionModel) else {"provider": "OLLAMA"}
-            print(json.dumps({**info, "state": "preflight_passed", "inferenceRun": False}))
+            comparison = pilot.comparison_settings()
+            local = None
+            if comparison:
+                local = LocalModel(comparison["localModel"], thinking=comparison["localThinking"],
+                    timeout=comparison["timeoutSeconds"], num_ctx=comparison["contextLength"],
+                    num_predict=comparison["maxOutputTokens"],
+                    model_digest=comparison["localModelDigest"],
+                    quantization=comparison["localQuantization"]).preflight()
+            print(json.dumps({**info, "localComparison": local,
+                "state": "preflight_passed", "inferenceRun": False}))
             return
         if args.command == "compare-search":
             if not args.query_file:
@@ -1034,6 +1633,8 @@ def main():
                 if now() >= parse_time(pilot.config["expiresAt"]):
                     raise RuntimeError("PILOT_EXPIRED")
                 pilot.tick(force=args.force and args.command == "once", max_steps=args.max_steps)
+                if args.command == "serve":
+                    pilot.process_shadow_queue()
             except BudgetExceeded as error:
                 pilot.state["health"] = "budget_wait"
                 pilot.state["nextWakeAt"] = iso(next_business_start(now()))
