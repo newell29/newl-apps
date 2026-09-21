@@ -14,7 +14,11 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops/openclaw/hunter"))
 from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, digest, UTC, ZONE
-from hunter_pilot import LocalModel, configured_model, MISSION, TOOLS, SCHEMA
+from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
+    TOOLS, SCHEMA)
+from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
+    compact_packet, memory_sample, record_run_source, reserve_diagnostic, run_attempt,
+    unload_test_model, validate_matched_models)
 from pilot_subscription_model import (SubscriptionModel, subscription_environment,
     require_subscription, output_schema, run_bounded, DISABLED_FEATURES)
 
@@ -967,6 +971,182 @@ class SubscriptionTests(unittest.TestCase):
         model.api = Mock(return_value={"models": [{"name": "synthetic:q8", "digest": "sha256:changed"}]})
         with self.assertRaisesRegex(RuntimeError, "LOCAL_MODEL_DIGEST_MISMATCH"):
             model.preflight()
+
+
+class DiagnosticTests(unittest.TestCase):
+    def test_memory_sample_identifies_existing_ollama_runner_for_cancellation(self):
+        command = "42 87.5 12.0 100000 /usr/local/bin/ollama runner --model synthetic"
+        with patch("hunter_model_diagnostics.safe_run", side_effect=[
+                "System-wide memory free percentage: 50%", "used = 10.00M", command]), \
+             patch("hunter_model_diagnostics.ollama_api", return_value={"models": []}):
+            sample = memory_sample(0, {42})
+        self.assertEqual(sample["ollamaProcesses"][0]["role"], "runner")
+        self.assertFalse(sample["ollamaProcesses"][0]["newForDiagnostic"])
+        self.assertEqual(sample["ollamaProcesses"][0]["cpuPercent"], 87.5)
+
+    def test_memory_sample_identifies_new_ollama_inference_process_as_runner(self):
+        command = "43 0.1 59.6 30000000 /path/to/ollama_llama_server --model synthetic"
+        with patch("hunter_model_diagnostics.safe_run", side_effect=[
+                "System-wide memory free percentage: 15%", "used = 10.00M", command]), \
+             patch("hunter_model_diagnostics.ollama_api", return_value={"models": []}):
+            sample = memory_sample(0, {42})
+        self.assertEqual(sample["ollamaProcesses"][0]["role"], "runner")
+        self.assertTrue(sample["ollamaProcesses"][0]["newForDiagnostic"])
+
+    def test_resumed_diagnostic_records_each_source_commit(self):
+        run = {"sourceCommit": "first"}
+        record_run_source(run, "second")
+        record_run_source(run, "second")
+        self.assertEqual(run["sourceCommit"], "second")
+        self.assertEqual(run["sourceCommits"], ["first", "second"])
+
+    def test_diagnostic_model_unload_uses_named_ollama_api_request(self):
+        with patch("hunter_model_diagnostics.ollama_api", side_effect=[
+                {"models": [{"name": "synthetic-q4"}]},
+                {"done": True, "done_reason": "unload"}, {"models": []}]) as api, \
+             patch("hunter_model_diagnostics.time.sleep"):
+            result = unload_test_model("synthetic-q4")
+        self.assertTrue(result["unloaded"])
+        self.assertEqual(result["method"], "ollama_api_keep_alive_zero")
+        api.assert_any_call("/api/generate", {"model": "synthetic-q4", "keep_alive": 0},
+            timeout=30)
+
+    def test_diagnostic_model_unload_does_not_load_an_absent_model(self):
+        with patch("hunter_model_diagnostics.ollama_api",
+                return_value={"models": []}) as api:
+            result = unload_test_model("synthetic-q4")
+        self.assertTrue(result["unloaded"])
+        self.assertEqual(result["method"], "no_op_not_loaded")
+        api.assert_called_once_with("/api/ps", timeout=3)
+
+    def test_compaction_preserves_decision_evidence_and_ages_only_old_resolutions(self):
+        dismissed = [{"at": f"2026-09-{index:02d}T00:00:00+00:00", "name": f"Example {index}",
+            "domain": f"example{index}.test", "evidenceIds": [f"ev-{index}"],
+            "reason": f"Detailed evidence-backed reason {index}"} for index in range(1, 13)]
+        context = {"mode": "read-only", "activeCompanies": [], "dueForRevisit": [],
+            "buyerResearchQueue": [], "otherCompanies": [{"domain": "saved.test", "status": "parked"}],
+            "evidence": [{"id": "ev-current", "url": "https://example.test/source",
+                "excerpt": "Synthetic contradiction remains present."}],
+            "unreadClues": [{"id": "ev-current", "url": "https://example.test/source"}],
+            "previousSearches": ["synthetic first", "synthetic second"],
+            "recentEvents": [{"kind": "action_rejected", "action": "fetch"}],
+            "feedback": [], "dismissedClues": dismissed, "workSelection": "long repeated guidance"}
+        packet = {"comparisonVersion": "matched-decision-v1", "mission": MISSION,
+            "tools": TOOLS, "schema": SCHEMA, "context": context}
+        snapshot = {"promptHash": "original", "packet": packet}
+        compact, manifest = compact_packet(snapshot)
+        self.assertEqual(compact["tools"], TOOLS)
+        self.assertEqual(compact["schema"], SCHEMA)
+        self.assertEqual(compact["context"]["evidence"], context["evidence"])
+        self.assertEqual(compact["context"]["unreadClues"], context["unreadClues"])
+        self.assertEqual(compact["context"]["otherCompanies"], context["otherCompanies"])
+        self.assertEqual(compact["context"]["previousSearches"], context["previousSearches"])
+        self.assertNotIn("reason", compact["context"]["dismissedClues"][0])
+        self.assertEqual(compact["context"]["dismissedClues"][-10:], dismissed[-10:])
+        self.assertLess(len(COMPACT_MISSION), len(MISSION))
+        self.assertTrue(manifest["deterministic"])
+        self.assertFalse(manifest["modelAssisted"])
+
+    def test_q4_match_requires_architecture_tokenizer_template_calibration_and_size(self):
+        metadata = {"details": {"parameter_size": "26.9B", "quantization_level": "Q8_0"},
+            "architectureFingerprint": "a", "tokenizerFingerprint": "t",
+            "templateFingerprint": "p", "calibrationFingerprint": "c"}
+        q4 = {**metadata, "details": {"parameter_size": "26.9B", "quantization_level": "Q4_K_M"}}
+        with patch("hunter_model_diagnostics.model_metadata", side_effect=[metadata, q4]), \
+             patch("hunter_model_diagnostics.ollama_api", return_value={"models": [{
+                 "name": "qwen3.8-rvn:q4_k_m-multilingual",
+                 "digest": "9ca337737b7d1d8a2a51df9fead5566a64e4765647222350231ec4c7ad40369a",
+                 "size": 17_000_000_000}]}):
+            self.assertTrue(validate_matched_models("synthetic-q8")["matched"])
+        mismatched = {**q4, "tokenizerFingerprint": "different"}
+        with patch("hunter_model_diagnostics.model_metadata", side_effect=[metadata, mismatched]):
+            with self.assertRaisesRegex(RuntimeError, "Q4_CHECKPOINT_METADATA_MISMATCH"):
+                validate_matched_models("synthetic-q8")
+
+    def test_diagnostics_reserve_budget_and_preserve_next_primary_wake(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            config = {"tenantId": "tenant-a", "tenantSlug": "synthetic", "model": "synthetic",
+                "expiresAt": "2026-09-24T00:00:00+00:00", "searchProvider": "DUCKDUCKGO",
+                "limits": {"searches": 40, "pages": 60, "people": 20, "modelCalls": 20,
+                    "modelSeconds": 3600, "dailyUsdMicros": 1_000_000, "totalUsdMicros": 1_000_000}}
+            atomic_write(path / "config.json", config)
+            atomic_write(path / "state.json", {"tenantId": "tenant-a", "companies": {},
+                "evidence": {}, "attempts": {}, "budgets": {}, "usdMicros": 0,
+                "events": [], "feedback": []})
+            pilot = Pilot(path, Mock(return_value={"tenantId": "tenant-a", "tenantSlug": "synthetic"}),
+                Mock(), Mock(), Mock(), lambda: dt.datetime(2026, 9, 16, 15, tzinfo=UTC))
+            continuation = {"additionalAttempts": 0}
+            reserve_diagnostic(pilot, continuation)
+            self.assertEqual(continuation["additionalAttempts"], 1)
+            self.assertEqual(pilot.budget()["modelCalls"], 1)
+            continuation["additionalAttempts"] = MAX_ADDITIONAL_ATTEMPTS
+            with self.assertRaisesRegex(RuntimeError, "DIAGNOSTIC_ATTEMPT_LIMIT"):
+                reserve_diagnostic(pilot, continuation)
+
+    def test_invalid_local_json_keeps_provider_timings_without_raw_output(self):
+        def response(payload):
+            result = Mock()
+            result.__enter__ = Mock(return_value=result)
+            result.__exit__ = Mock(return_value=False)
+            result.read.return_value = json.dumps(payload).encode()
+            return result
+        replies = [response({"models": []}), response({"model": "synthetic",
+            "message": {"content": "not-json"}, "total_duration": 5_000_000_000,
+            "load_duration": 1_000_000_000, "prompt_eval_count": 80,
+            "prompt_eval_duration": 2_000_000_000, "eval_count": 20,
+            "eval_duration": 2_000_000_000, "done_reason": "length"}),
+            response({"models": [{"name": "synthetic", "size": 1000, "size_vram": 1000}]})]
+        with patch("hunter_pilot.urllib.request.urlopen", side_effect=replies):
+            with self.assertRaises(LocalModelResponseError) as caught:
+                LocalModel("synthetic")({"synthetic": True})
+        self.assertEqual(caught.exception.usage["inputTokens"], 80)
+        self.assertEqual(caught.exception.usage["outputTokens"], 20)
+        self.assertEqual(caught.exception.usage["completionReason"], "length")
+        self.assertNotIn("not-json", json.dumps(caught.exception.usage))
+
+    def test_saved_replay_logs_shadow_output_without_executing_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            config = {"tenantId": "tenant-a", "tenantSlug": "synthetic", "model": "synthetic",
+                "expiresAt": "2026-09-24T00:00:00+00:00", "searchProvider": "DUCKDUCKGO",
+                "limits": {"searches": 40, "pages": 60, "people": 20, "modelCalls": 20,
+                    "modelSeconds": 3600, "dailyUsdMicros": 1_000_000, "totalUsdMicros": 1_000_000}}
+            atomic_write(path / "config.json", config)
+            atomic_write(path / "state.json", {"tenantId": "tenant-a", "companies": {},
+                "evidence": {}, "attempts": {}, "budgets": {}, "usdMicros": 0,
+                "events": [], "feedback": [], "modelDiagnosticContinuation": {"additionalAttempts": 0}})
+            bridge = Mock(return_value={"tenantId": "tenant-a", "tenantSlug": "synthetic"})
+            pilot = Pilot(path, bridge, Mock(), Mock(), Mock(),
+                lambda: dt.datetime(2026, 9, 16, 15, tzinfo=UTC))
+            packet = {"mission": "Synthetic safe mission", "tools": TOOLS, "schema": SCHEMA,
+                "context": {"evidence": [], "previousSearches": []}}
+            run = {"runId": "diag-synthetic", "sourceCommit": "synthetic", "completedKeys": [],
+                "attemptIds": [], "running": None}
+            adapter = Mock(return_value=({"action": "wait", "purpose": "No useful evidence",
+                "args": {"reason": "No useful evidence", "minutes": 30}},
+                {"modelTotalSeconds": 1, "requestElapsedSeconds": 0.9,
+                 "validationSeconds": 0.01, "thinking": False, "contextLength": 32768,
+                 "maxOutputTokens": 1000, "temperature": 0.2, "keepAlive": "10m",
+                 "cold": True, "localModelDigest": "digest", "localQuantization": "Q4_K_M"}))
+            adapter.loaded_state.return_value = {"cold": True, "loadedSizeBytes": None,
+                "loadedVramBytes": None}
+            monitor = Mock()
+            monitor.summary.return_value = {"minimumMemoryFreePercent": 50,
+                "nativeGpuResident": True}
+            with patch("hunter_model_diagnostics.LocalModel", return_value=adapter), \
+                 patch("hunter_model_diagnostics.ResourceMonitor", return_value=monitor), \
+                 patch("hunter_model_diagnostics.ollama_pids", return_value=set()), \
+                 patch.object(pilot, "execute") as execute:
+                result = run_attempt(pilot, run, packet=packet, comparison_id="cmp-synthetic",
+                    original_hash="original", experiment="A_quantization_full", input_variant="full",
+                    variant="q4_full_cold", model="synthetic-q4", provider="OLLAMA",
+                    quantization="Q4_K_M", digest_value="digest", expect_warm=False)
+            execute.assert_not_called()
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(pilot.budget()["modelCalls"], 1)
+            self.assertEqual(json.loads((path / "model-comparison/attempts.jsonl").read_text())
+                             ["finalOutput"]["action"], "wait")
 
 
 if __name__ == "__main__":
