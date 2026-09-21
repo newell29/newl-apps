@@ -16,14 +16,19 @@ export type WaitBlocker = {
   resolutionAction: string;
   resolvableByScout: boolean;
 };
+const LEGACY_PRIORITY_PLACEHOLDER = "Confirm priority services and markets before prioritizing campaigns.";
+const LEGACY_QUALIFICATION_PLACEHOLDER = "Requires owner definition. Form submissions are enquiries, not qualified leads.";
 export type Mission = {
-  version: 1; objective: string; priorities: string; qualifiedLead: string;
+  version: 2; objective: string; priorities: string; qualifiedLead: string;
+  successCriteria: string; competitorWatchlist: string;
   enabled: boolean; dailySteps: number; maxActive: number;
 };
 export const DEFAULT_MISSION: Mission = {
-  version: 1, objective: "Grow qualified inbound enquiries through useful content and relevant industry relationships.",
-  priorities: "Confirm priority services and markets before prioritizing campaigns.",
-  qualifiedLead: "Requires owner definition. Form submissions are enquiries, not qualified leads.",
+  version: 2, objective: "Grow qualified inbound enquiries through useful content and relevant industry relationships.",
+  priorities: "Allocate attention roughly 60% to warehousing, 30% to ocean and air freight, and 10% to trucking, while choosing quality over filling a quota. Lead with Charlotte and the Southeast for warehousing and fulfillment prospects that need case picking, Amazon or retailer replenishment, full-pallet distribution, or scalable D2C. In Mississauga, the GTA, and Southern Ontario, prioritize case-pick, pallet, B2B retail or wholesale replenishment, cross-border support, and local trucking; treat high-touch D2C and partner capacity as account-specific. For ocean and air, focus on smaller and midsized importers on proven China–US/Canada and UK/Netherlands–Canada lanes; treat Latin America as an evidence-led experiment. Consider referral partners separately from direct buyers.",
+  qualifiedLead: "A qualified enquiry is a real business—not spam, a student, vendor solicitation, or a direct competitor—with an identifiable business contact, a plausible current or planned need for Newl warehousing or fulfillment, ocean or air freight, or GTA trucking, a geography or lane Newl can serve, and enough operating detail or timing to justify a discovery call or quote. Mark it Qualified only after a person confirms service fit; Quote sent and Won remain separate outcomes. Do not invent a minimum volume or buying urgency when the evidence does not provide one.",
+  successCriteria: "Use complete 28-day comparison windows and treat these as pilot decision guides, not automatic pass/fail gates. A strong business win is at least one newly human-qualified enquiry, Quote sent, or Won outcome linked to the page. A useful page-level win is either 2 or more additional website enquiries, or at least two leading indicators improving materially: organic clicks or sessions increasing by both 10 and 25% from a baseline of at least 20; click-through rate increasing by 1 percentage point with at least 100 impressions; or average position improving by 3 places with at least 100 impressions. Do not call low-volume or missing evidence a failure. Iterate when engagement or search improves without a business outcome; consider stopping or replacing the hypothesis only after two complete windows show no meaningful improvement or a material decline in enquiries or qualified outcomes.",
+  competitorWatchlist: "Use these as comparable market and search references, not as a claim that they are identical businesses:\n• Bonded Logistics — bondedlogistics.com — Charlotte warehousing, packaging, and transportation\n• Piedmont Distribution Centers — pdcfulfillment.com — Charlotte ecommerce fulfillment and warehousing\n• Grey Wolf 3PL — greywolf3pl.com — Mississauga warehousing, fulfillment, cross-dock, and distribution\n• G&S Direct — gsdirect.ca — Mississauga warehousing, trucking, cross-border, and final-mile services\n• Access Air — accessair.ca — Toronto and Mississauga international ocean and air forwarding\n• Setara Logistics — setara.ca — GTA ocean, air, rail, road, and drayage",
   enabled: false, dailySteps: 6, maxActive: 3
 };
 export type Work = {
@@ -51,8 +56,14 @@ export function parseMission(value: unknown): Mission {
   const dailySteps = Number(input.dailySteps), maxActive = Number(input.maxActive);
   if (typeof input.enabled !== "boolean" || !Number.isInteger(dailySteps) || dailySteps < 1 || dailySteps > 20 ||
       !Number.isInteger(maxActive) || maxActive < 1 || maxActive > 10) throw new ScoutWorkError("Choose 1–20 daily steps and 1–10 active items.");
-  return { version: 1, objective: text(input.objective, "Objective", 1500), priorities: text(input.priorities, "Priorities", 2500),
-    qualifiedLead: text(input.qualifiedLead, "Qualified enquiry definition", 1500), enabled: input.enabled, dailySteps, maxActive };
+  const priorities = text(input.priorities, "Priorities", 2500);
+  const qualifiedLead = text(input.qualifiedLead, "Qualified enquiry definition", 1500);
+  return { version: 2, objective: text(input.objective, "Objective", 1500),
+    priorities: priorities === LEGACY_PRIORITY_PLACEHOLDER ? DEFAULT_MISSION.priorities : priorities,
+    qualifiedLead: qualifiedLead === LEGACY_QUALIFICATION_PLACEHOLDER ? DEFAULT_MISSION.qualifiedLead : qualifiedLead,
+    successCriteria: input.successCriteria === undefined ? DEFAULT_MISSION.successCriteria : text(input.successCriteria, "Success criteria", 4000),
+    competitorWatchlist: input.competitorWatchlist === undefined ? DEFAULT_MISSION.competitorWatchlist : text(input.competitorWatchlist, "Competitor watchlist", 4000),
+    enabled: input.enabled, dailySteps, maxActive };
 }
 export function readWork(value: unknown): Work | null {
   const input = record(value);
