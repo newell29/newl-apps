@@ -21,6 +21,9 @@ describe("Scout marketing workboard", () => {
     expect(html).toContain("No work needs your decision"); expect(html).toContain("Save direction");
     expect(html).toContain("What happens when Scout wakes"); expect(html).toContain("Where new work comes from");
     expect(html).toContain("stop because research is paused");
+    expect(html).toContain("Charlotte and the Southeast"); expect(html).toContain("person confirms service fit");
+    expect(html).toContain("Pilot success guidance"); expect(html).toContain("Bonded Logistics");
+    expect(html).toContain('name="successCriteria"'); expect(html).toContain('name="competitorWatchlist"');
   });
   it("shows the exact proposed recipient and response with an explicit send confirmation", async () => {
     const item = { ...newWork("RELATIONSHIP", "publisher-synthetic", "Publisher follow-up", "Prepare useful response", null), id: "work-synthetic",

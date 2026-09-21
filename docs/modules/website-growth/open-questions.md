@@ -60,3 +60,11 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 - Which exact legal name, public descriptions, locations, phone number, service categories, logos, social profiles, and current certifications may the executor use? Requires owner completion of the protected business profile.
 - Should any directory accounts be created automatically after reviewing the first 20 prospects, or should account creation remain a per-site escalation? Requires owner confirmation.
 - Which free directory terms may the executor accept, if any? Current implementation blocks terms acceptance by default and requires owner confirmation.
+
+## Resolved Scout pilot decisions
+
+- On 2026-09-21 the owner authorized an initial editable operating profile based on the existing Newl product brief and pilot mission.
+- Priority allocation starts at approximately 60% warehousing, 30% ocean/air freight, and 10% trucking, with the detailed market and service assumptions stored in the Scout mission.
+- The mission now defines a qualified enquiry as a human-confirmed service fit from a real identifiable business in a serviceable market or lane; Quote sent and Won remain separate states.
+- Numerical page and business outcome thresholds are pilot decision guidance rather than executable pass/fail rules. They should be recalibrated after sufficient real traffic and enquiry volume accumulates.
+- The initial named watchlist is Bonded Logistics, Piedmont Distribution Centers, Grey Wolf 3PL, G&S Direct, Access Air, and Setara Logistics. Current public evidence must still be checked during each relevant task.

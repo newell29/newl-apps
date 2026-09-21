@@ -21,6 +21,10 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Recovery opportunities are reconciled on every evidence refresh: stale `NEW` or `REVIEWING` items move to `MONITORING`, and monitored items return to `NEW` only when current evidence again qualifies.
 - Paid Campaigns excludes every record marked Test or with an internal marketing-exclusion reason. It may report lead outcomes and recommend Increase, Maintain, Reduce, or Investigate, but Scout cannot change budgets, bids, campaigns, audiences, or keywords.
 - **Requires owner confirmation:** paid funnel reporting currently treats Quote sent and Won as having reached Qualified, and Won as having reached Quote sent. Legacy lifecycle values are not reinterpreted.
+- Scout's editable initial operating profile allocates attention approximately 60% to warehousing, 30% to ocean/air freight, and 10% to trucking. Charlotte/Southeast warehousing and fulfillment leads; Mississauga/GTA and Southern Ontario focus on case-pick, pallet, B2B replenishment, cross-border support and local trucking. Ocean/air initially emphasizes smaller and midsized importers on established China–US/Canada and UK/Netherlands–Canada lanes. Quality outranks quota, and account-specific capacity must be confirmed.
+- A qualified enquiry requires a real identifiable business contact, plausible need for a Newl service, a serviceable market or lane, and enough operating detail or timing for a discovery call or quote. A person records Qualified only after confirming fit. Quote sent and Won remain separate outcomes.
+- Scout's numerical success criteria are editable pilot guidance, not automatic gates. The system must preserve missing/low-volume evidence and cannot infer a failure, causal lift, qualification, or revenue from traffic alone.
+- The initial competitor watchlist is Bonded Logistics, Piedmont Distribution Centers, Grey Wolf 3PL, G&S Direct, Access Air, and Setara Logistics. Scout uses the mission list as task-level public-research context and must validate current evidence; it is not continuous monitoring or a claim of identical capability.
 
 ## Data model
 

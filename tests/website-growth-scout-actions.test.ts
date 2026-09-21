@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { reviewScoutWorkAction } from "@/modules/website-growth/scout/actions";
+import { reviewScoutWorkAction, saveScoutMissionAction } from "@/modules/website-growth/scout/actions";
 import { ScoutWorkError } from "@/modules/website-growth/scout/model";
-const mocks = vi.hoisted(() => ({ context: vi.fn(), review: vi.fn(), invalidate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ context: vi.fn(), review: vi.fn(), saveMission: vi.fn(), invalidate: vi.fn() }));
 vi.mock("@/server/tenant-context", () => ({ getAuthenticatedContext: mocks.context }));
 vi.mock("@/server/auth/authorization", () => ({ requireModule: vi.fn(), requireMutationAccess: vi.fn(), requireRole: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: mocks.invalidate }));
-vi.mock("@/modules/website-growth/scout/store", () => ({ reviewScoutWork: mocks.review }));
+vi.mock("@/modules/website-growth/scout/store", () => ({ reviewScoutWork: mocks.review, saveScoutMission: mocks.saveMission }));
 vi.mock("@/modules/website-growth/scout/reply", () => ({ approveAndSendScoutReply: vi.fn() }));
 const form = () => {
   const data = new FormData(); data.set("id", "synthetic-work"); data.set("revision", "3");
@@ -13,6 +13,19 @@ const form = () => {
 };
 beforeEach(() => { vi.resetAllMocks(); mocks.context.mockResolvedValue({ tenantId: "tenant-a", userId: "owner-synthetic", role: "ADMIN" }); });
 describe("Scout owner review form", () => {
+  it("saves the complete business profile for the tenant", async () => {
+    const input = new FormData();
+    input.set("objective", "Grow suitable enquiries"); input.set("priorities", "Warehousing first");
+    input.set("qualifiedLead", "Confirmed service fit"); input.set("successCriteria", "One qualified enquiry");
+    input.set("competitorWatchlist", "Example Logistics — example.com"); input.set("dailySteps", "6");
+    input.set("maxActive", "3"); input.set("enabled", "on");
+    await saveScoutMissionAction(input);
+    expect(mocks.saveMission).toHaveBeenCalledWith("tenant-a", "owner-synthetic", {
+      objective: "Grow suitable enquiries", priorities: "Warehousing first", qualifiedLead: "Confirmed service fit",
+      successCriteria: "One qualified enquiry", competitorWatchlist: "Example Logistics — example.com",
+      dailySteps: 6, maxActive: 3, enabled: true
+    });
+  });
   it("saves the explicit decision without requiring a submit-button field", async () => {
     expect(await reviewScoutWorkAction(form())).toEqual({ error: null });
     expect(mocks.review).toHaveBeenCalledWith("tenant-a", "owner-synthetic", "synthetic-work", 3, "REVISE", "Use this saved next action.");

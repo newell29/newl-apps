@@ -41,12 +41,19 @@ export default async function ScoutWorkPage() {
     <section className="rounded-lg border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Marketing direction</h2><span className="rounded-full bg-muted px-3 py-1 text-sm">{workspace.mission.enabled ? "Research enabled" : "Research paused"}</span></div>
       <p className="mt-2 text-mutedForeground">{workspace.mission.objective}</p>
-      {!workspace.configured && <p className="mt-3 text-sm text-mutedForeground">Confirm the priorities and enquiry definition below before enabling Scout. Sending and publishing keep their existing approval steps.</p>}
+      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2">
+        <div className="rounded-md bg-muted/40 p-3"><dt className="font-semibold">Qualified enquiry</dt><dd className="mt-1 whitespace-pre-wrap text-mutedForeground">{workspace.mission.qualifiedLead}</dd></div>
+        <div className="rounded-md bg-muted/40 p-3"><dt className="font-semibold">Pilot success guidance</dt><dd className="mt-1 whitespace-pre-wrap text-mutedForeground">{workspace.mission.successCriteria}</dd></div>
+      </dl>
+      <details className="mt-3 text-sm"><summary className="cursor-pointer font-semibold">Priority detail and competitor watchlist</summary><div className="mt-2 space-y-3 text-mutedForeground"><p className="whitespace-pre-wrap">{workspace.mission.priorities}</p><p className="whitespace-pre-wrap">{workspace.mission.competitorWatchlist}</p></div></details>
+      {!workspace.configured && <p className="mt-3 text-sm text-mutedForeground">This recommended initial profile is ready for review. Edit any assumption below before enabling Scout. Sending and publishing keep their existing approval steps.</p>}
       {canReview && <details className="mt-4" open={!workspace.configured}><summary className="cursor-pointer text-sm font-semibold">Edit priorities and research budget</summary>
         <form action={saveScoutMissionAction} className="mt-4 grid gap-4 md:grid-cols-2">
           <label className="md:col-span-2">Objective<textarea name="objective" defaultValue={workspace.mission.objective} required maxLength={1500} className={field} /></label>
           <label>Priority services, markets, and audiences<textarea name="priorities" defaultValue={workspace.mission.priorities} required maxLength={2500} rows={3} className={field} /></label>
           <label>What counts as a qualified enquiry<textarea name="qualifiedLead" defaultValue={workspace.mission.qualifiedLead} required maxLength={1500} rows={3} className={field} /></label>
+          <label className="md:col-span-2">Pilot success guidance<textarea name="successCriteria" defaultValue={workspace.mission.successCriteria} required maxLength={4000} rows={5} className={field} /><span className="mt-1 block text-xs text-mutedForeground">These are decision guides. Scout must still explain evidence quality, volume, and uncertainty.</span></label>
+          <label className="md:col-span-2">Named competitor watchlist<textarea name="competitorWatchlist" defaultValue={workspace.mission.competitorWatchlist} required maxLength={4000} rows={7} className={field} /><span className="mt-1 block text-xs text-mutedForeground">Keep the business name, domain, market, and comparison reason. Scout validates current public evidence for each task.</span></label>
           <label>Research steps per rolling day<input name="dailySteps" type="number" min={1} max={20} defaultValue={workspace.mission.dailySteps} required className={field} /></label>
           <label>Maximum items being worked or awaiting review<input name="maxActive" type="number" min={1} max={10} defaultValue={workspace.mission.maxActive} required className={field} /></label>
           <label className="flex items-center gap-2"><input name="enabled" type="checkbox" defaultChecked={workspace.mission.enabled} />Enable research and draft preparation</label>

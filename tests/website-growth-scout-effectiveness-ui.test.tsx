@@ -10,6 +10,8 @@ describe("Scout effectiveness view", () => {
     expect(html).toContain("No site review is saved"); expect(html).toContain("not evidence of zero traffic");
     expect(html).toContain("Page performance"); expect(html).toContain("Opportunities"); expect(html).toContain("Work &amp; impact");
     expect(html).not.toContain("Refresh saved evidence"); expect(html).toContain("not historical conversion stages");
+    expect(html).toContain("How Scout evaluates progress"); expect(html).toContain("28-day comparison windows");
+    expect(html).toContain("Who Scout compares"); expect(html).toContain("Bonded Logistics");
   });
   it("renders only the authorized refresh control and reports a work-history gap", () => {
     const html = renderToStaticMarkup(<EffectivenessReview {...props} canReview workspaceAvailable={false} />);

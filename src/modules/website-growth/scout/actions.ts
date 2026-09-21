@@ -19,7 +19,8 @@ async function reviewer() {
 export async function saveScoutMissionAction(form: FormData) {
   const context = await reviewer();
   await saveScoutMission(context.tenantId, context.userId, { objective: form.get("objective"), priorities: form.get("priorities"),
-    qualifiedLead: form.get("qualifiedLead"), dailySteps: Number(form.get("dailySteps")), maxActive: Number(form.get("maxActive")), enabled: form.get("enabled") === "on" });
+    qualifiedLead: form.get("qualifiedLead"), successCriteria: form.get("successCriteria"), competitorWatchlist: form.get("competitorWatchlist"),
+    dailySteps: Number(form.get("dailySteps")), maxActive: Number(form.get("maxActive")), enabled: form.get("enabled") === "on" });
   revalidatePath("/website-growth");
   revalidatePath("/website-growth/marketing");
 }
