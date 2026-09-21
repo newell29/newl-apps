@@ -3,11 +3,19 @@ import { createHash } from "node:crypto";
 export const MISSION_JOB = "WEBSITE_GROWTH_SCOUT_MISSION";
 export const WORK_JOB = "WEBSITE_GROWTH_SCOUT_WORK";
 export const STEP_JOB = "WEBSITE_GROWTH_SCOUT_STEP";
+export const WAKE_JOB = "WEBSITE_GROWTH_SCOUT_WAKE";
 export const LEASE_MS = 30 * 60 * 1000;
 export const DAY_MS = 86_400_000;
 export const WORK_KINDS = ["PAGE", "RELATIONSHIP", "MEASUREMENT", "RESEARCH"] as const;
 export type WorkKind = typeof WORK_KINDS[number];
 export type WorkState = "READY" | "WORKING" | "NEEDS_REVIEW" | "WAITING" | "DONE" | "DISMISSED";
+export const WAIT_BLOCKER_TYPES = ["DATA_REFRESH", "PUBLIC_RESEARCH", "LOW_VOLUME", "OWNER_INPUT", "EXTERNAL_SYSTEM", "TECHNICAL"] as const;
+export type WaitBlocker = {
+  type: typeof WAIT_BLOCKER_TYPES[number];
+  evidenceNeeded: string;
+  resolutionAction: string;
+  resolvableByScout: boolean;
+};
 export type Mission = {
   version: 1; objective: string; priorities: string; qualifiedLead: string;
   enabled: boolean; dailySteps: number; maxActive: number;
@@ -85,6 +93,15 @@ export function parseResult(value: unknown, now = new Date()) {
   const artifact = input.artifact === null || input.artifact === undefined ? null : record(input.artifact);
   if (artifact && JSON.stringify(artifact).length > 90_000) throw new ScoutWorkError("Result artifact is too large.");
   if (input.decision === "DELIVER" && (!artifact || !Object.keys(artifact).length)) throw new ScoutWorkError("Deliver a concrete artifact for review.");
+  const blockerInput = record(input.waitBlocker);
+  const waitBlocker = input.decision === "WAIT" && WAIT_BLOCKER_TYPES.includes(blockerInput.type as WaitBlocker["type"])
+    ? {
+        type: blockerInput.type as WaitBlocker["type"],
+        evidenceNeeded: text(blockerInput.evidenceNeeded, "Evidence needed", 1500),
+        resolutionAction: text(blockerInput.resolutionAction, "Resolution action", 1500),
+        resolvableByScout: blockerInput.resolvableByScout === true
+      }
+    : null;
   const state: WorkState = input.decision === "DELIVER" ? "NEEDS_REVIEW" : input.decision === "DISMISS" ? "DISMISSED" : input.decision === "CONTINUE" ? "READY" : "WAITING";
-  return { summary, nextAction, artifact, state: state as WorkState, nextReviewAt: new Date(now.getTime() + (state === "READY" ? 0 : days * DAY_MS)).toISOString() };
+  return { summary, nextAction, artifact, waitBlocker, state: state as WorkState, nextReviewAt: new Date(now.getTime() + (state === "READY" ? 0 : days * DAY_MS)).toISOString() };
 }

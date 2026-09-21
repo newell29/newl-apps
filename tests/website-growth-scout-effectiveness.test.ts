@@ -38,6 +38,19 @@ describe("whole-site review evidence", () => {
     traffic(value, "search_console", { clicks: 2 }, { clicks: 1 }); traffic(value, "ga4", { sessions: 3 }, { sessions: 1 });
     expect(reviewPages(value, now).pages[0].direction).toBe("Insufficient evidence");
   });
+  it("labels falling visits with improving engagement and enquiries as mixed, with separate facets", () => {
+    const value = review();
+    traffic(value, "search_console", { clicks: 94, impressions: 3587, ctr: 0.026, position: 7.6 }, { clicks: 90, impressions: 3903, ctr: 0.023, position: 7.8 });
+    traffic(value, "ga4", { sessions: 1308, engagedSessions: 225, engagementRate: 0.172 }, { sessions: 910, engagedSessions: 283, engagementRate: 0.311 });
+    traffic(value, "enquiries", { enquiries: 5, qualified: 0, quoted: 0, won: 0 }, { enquiries: 9, qualified: 0, quoted: 1, won: 1 });
+    const page = reviewPages(value, now).pages[0];
+    expect(page.direction).toBe("Mixed");
+    expect(page.facets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "visits", direction: "Declining" }),
+      expect.objectContaining({ key: "engagement", direction: "Improving" }),
+      expect.objectContaining({ key: "enquiries", direction: "Improving" })
+    ]));
+  });
   it("does not turn completely missing or partially missing analytics into zero traffic", () => {
     const value = review();
     expect(reviewPages(value, now).pages[0].comparisons.map(row => row.metric)).toEqual(["enquiries", "qualified", "quoted", "won", "disqualified"]);

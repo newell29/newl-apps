@@ -19,6 +19,7 @@ temporary_directory="$(mktemp -d)"
 executor_install_result="${temporary_directory}/executor-install-result.json"
 cron_snapshot="${temporary_directory}/cron-snapshot.json"
 model_status_snapshot="${temporary_directory}/model-status.json"
+model_auth_validator="${script_directory}/validate-scout-openai-auth.py"
 cleanup() {
   rm -rf "${temporary_directory}"
 }
@@ -68,7 +69,7 @@ fi
 node -e '
 const fs = require("node:fs");
 const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-if (value.status !== "OWNER_APPROVED_2026-07-24") throw new Error("Business profile is not owner approved.");
+if (!String(value.status || "").startsWith("OWNER_APPROVED_")) throw new Error("Business profile is not owner approved.");
 if (value.outreachMailbox !== "partnerships@newlgroup.com") throw new Error("Unexpected outreach mailbox.");
 if (value.outreachPolicy?.manualOpportunityApproval !== true) throw new Error("Manual opportunity approval must remain enabled.");
 if (value.submissionRules?.allowPayment !== false) throw new Error("Payment must remain disabled.");
@@ -127,16 +128,7 @@ openclaw config set \
   '"openai/gpt-5.4-mini"' \
   --strict-json
 openclaw models status --agent scout --json > "${model_status_snapshot}"
-/usr/bin/python3 - "${model_status_snapshot}" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    status = json.load(handle)
-providers = ((status.get("auth") or {}).get("oauth") or {}).get("providers") or []
-openai = next((row for row in providers if row.get("provider") == "openai"), None)
-effective = (openai or {}).get("effectiveProfiles") or []
-if not any(row.get("type") == "oauth" and row.get("status") == "ok" for row in effective):
-    raise SystemExit("Scout needs a healthy effective OpenAI OAuth profile. API-key fallback is disabled for Website Growth.")
-PY
+/usr/bin/python3 "${model_auth_validator}" "${model_status_snapshot}"
 scout_tools_policy="$(node -e '
 console.log(JSON.stringify({
   profile: "minimal",

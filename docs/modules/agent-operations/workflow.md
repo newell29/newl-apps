@@ -4,10 +4,12 @@
 
 1. The authenticated route requires the tenant's `ASSISTANT` module entitlement.
 2. `src/modules/agent-operations/queries.ts` issues a separate `tenantId`-scoped read for each supported run source.
-3. Source-specific statuses are normalized to `SCHEDULED`, `RUNNING`, `SUCCESS`, `FAILED`, `SKIPPED`, or `MISSED`.
+3. Source-specific statuses are normalized to `SCHEDULED`, `RUNNING`, `SUCCESS`, `FAILED`, `SKIPPED`, or `MISSED`. Website Scout wake and step audit records are shown as distinct history events, so an idle scheduler check is not confused with completed research.
 4. Failure and skip text is normalized, redacted, and truncated before it reaches the UI.
 5. Run-history filters are applied to the merged result set before the newest 15 records are selected.
 6. **Show 15 more** increases the visible limit in 15-record increments while preserving the date range, agent, status, attention-only state, and search query.
 7. Selecting a row opens a tenant-safe detail panel with the reason, impact summary, next-step guidance, timestamps, source type, and identifier.
+
+Declared schedule cards describe the current repository runtime design. Backlink outreach is reported as configured only after a recent successful execution; enabling/disabling the external cron itself remains an owner-controlled OpenClaw operation.
 
 The merged reader currently loads at most 500 recent rows from each source and exposes at most 150 matching rows in one page. Requires owner confirmation: whether a larger retained history or cursor-based export is needed.

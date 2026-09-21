@@ -56,6 +56,16 @@ it("shows recorded source measurements separately from the model with missing so
   expect(html).toContain("Wait for more evidence."); expect(html).toContain("2026-01-01");
 });
 
+it("shows who owns a saved evidence blocker instead of a generic wait", async () => {
+  const item = { ...newWork("PAGE", "opportunity", "Pick and pack page", "Improve query fit", "/services/fulfillment"), id: "waiting", state: "WAITING" as const,
+    nextReviewAt: "2099-01-01T00:00:00.000Z", evidence: { waitBlocker: { type: "DATA_REFRESH", evidenceNeeded: "Matched query/page periods", resolutionAction: "Read the saved Search Console comparison", resolvableByScout: true } } };
+  mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, items: [item], truncated: false });
+  const html = renderToStaticMarkup(await ScoutWorkPage());
+  expect(html).toContain("Waiting for data refresh");
+  expect(html).toContain("Matched query/page periods");
+  expect(html).toContain("Scout owns this follow-up");
+});
+
 it("does not present due research as an owner decision", async () => {
   mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
     items: [{ ...newWork("PAGE", "opportunity-synthetic", "Investigate page", "Improve clarity", "/resources/guide"), id: "work-synthetic" }] });

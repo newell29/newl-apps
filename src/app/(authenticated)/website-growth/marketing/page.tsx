@@ -108,11 +108,12 @@ function WorkSource({ label, count, children }: { label: string; count: number; 
 }
 function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEmail?: string | null }; canReview: boolean }) {
   const artifact = record(item.artifact);
-  const handoff = record(item.evidence.handoff), supervisor = record(item.evidence.supervisor);
+  const handoff = record(item.evidence.handoff), supervisor = record(item.evidence.supervisor), waitBlocker = record(item.evidence.waitBlocker);
   return <article className="rounded-lg border border-border bg-card p-4 shadow-sm">
     <p className="text-xs font-semibold uppercase tracking-wide text-primary">{kindLabels[item.kind]}</p><h3 className="mt-2 font-semibold">{item.title}</h3>
     {item.route && <p className="mt-1 break-all text-xs text-mutedForeground">{item.route}</p>}<p className="mt-3 text-sm">{item.hypothesis}</p>
     <p className="mt-3 text-sm"><strong>Next:</strong> {item.nextAction}</p>
+    {item.state === "WAITING" && typeof waitBlocker.type === "string" && <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-xs"><p className="font-semibold">Waiting for {String(waitBlocker.type).toLowerCase().replaceAll("_", " ")}</p><p className="mt-1">Evidence needed: {String(waitBlocker.evidenceNeeded ?? item.nextAction)}</p><p className="mt-1 text-mutedForeground">Resolution: {String(waitBlocker.resolutionAction ?? item.nextAction)} · {waitBlocker.resolvableByScout === true ? "Scout owns this follow-up." : "Human input is required."}</p></div>}
     {item.state === "WAITING" && !item.evidence.externalWait && <p className="mt-2 text-xs text-mutedForeground">{needsOwner(item) ? "Waiting for your decision." : isDue(item) ? "Due now for the next scheduled wake." : `Scout checks again ${new Date(item.nextReviewAt).toLocaleDateString("en-CA", { timeZone: "UTC" })}`}</p>}
     {typeof supervisor.verdict === "string" && <p className="mt-2 text-xs text-mutedForeground">Quality review: {supervisor.verdict.toLowerCase()} — {String(supervisor.reason ?? "")}</p>}
     {item.kind === "MEASUREMENT" && typeof artifact.outcome === "string" && <p className="mt-2 text-sm font-semibold">{artifact.outcome} · {String(artifact.confidence ?? "Unspecified").toLowerCase()} confidence</p>}

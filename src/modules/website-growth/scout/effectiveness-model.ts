@@ -11,7 +11,9 @@ export type ReviewSource = { status: "AVAILABLE" | "UNAVAILABLE" | "UNBOUND"; at
   observedAt: string | null; data: SourceData | null };
 export type SiteReview = { version: 1; attemptedAt: string; nextRefreshAt: string; windows: ReviewWindows;
   sources: Record<SourceName, ReviewSource>; inventory: { routes: string[]; source: string; observedAt: string | null } };
-export type PageReview = { route: string; direction: "Improving" | "Declining" | "Mixed" | "No clear change" | "Insufficient evidence";
+export type ReviewDirection = "Improving" | "Declining" | "Mixed" | "No clear change" | "Insufficient evidence";
+export type PageReviewFacet = { key: "search" | "visits" | "engagement" | "enquiries"; label: string; direction: ReviewDirection; metrics: string[] };
+export type PageReview = { route: string; direction: ReviewDirection; facets: PageReviewFacet[];
   comparisons: Array<{ source: SourceName; metric: string; before: number; after: number; difference: number; percentChange: number | null }>;
   opportunities: string[]; gaps: string[]; weight: number };
 
@@ -66,19 +68,76 @@ export function reviewPages(review: SiteReview, now = new Date()) {
           percentChange: value === 0 ? null : (current - value) / value * 100 });
       }
     }
-    const traffic = comparisons.filter(row => ["clicks", "sessions"].includes(row.metric));
-    const movement = traffic.filter(row => row.before >= 20 && Math.abs(row.difference) >= 10 && Math.abs(row.percentChange ?? 0) >= 25);
-    const up = movement.some(row => row.difference > 0), down = movement.some(row => row.difference < 0);
-    const direction: PageReview["direction"] = up && down ? "Mixed" : down ? "Declining" : up ? "Improving" : traffic.some(row => row.before >= 20 && row.after >= 20) ? "No clear change" : "Insufficient evidence";
+    const facets = reviewFacets(comparisons);
+    const up = facets.some(facet => facet.direction === "Improving" || facet.direction === "Mixed");
+    const down = facets.some(facet => facet.direction === "Declining" || facet.direction === "Mixed");
+    const direction: PageReview["direction"] = up && down ? "Mixed" : down ? "Declining" : up ? "Improving" :
+      facets.some(facet => facet.direction === "No clear change") ? "No clear change" : "Insufficient evidence";
     const metric = (key: string) => comparisons.find(row => row.source === "search_console" && row.metric === key)?.after;
     if ((metric("impressions") ?? 0) >= 100 && (metric("ctr") ?? 1) < 0.02 && (metric("position") ?? 100) <= 20) {
       opportunities.push("Investigate search intent, query mix and competing results: exposure is not translating into many clicks.");
     }
-    if (direction === "Improving") opportunities.push("Check customer fit and identify whether the successful approach transfers to a related page.");
-    return { route, direction, comparisons, opportunities, gaps, weight: movement.reduce((sum, row) => sum + Math.abs(row.difference), 0) + opportunities.length };
+    if (direction === "Improving" && facets.some(facet => facet.direction === "Improving" && facet.metrics.some(name => ["clicks", "sessions"].includes(name)))) {
+      opportunities.push("Check customer fit and identify whether the successful approach transfers to a related page.");
+    }
+    const meaningful = facets.flatMap(facet => facet.metrics).length;
+    return { route, direction, facets, comparisons, opportunities, gaps,
+      weight: comparisons.reduce((sum, row) => sum + (isMaterialMetric(row, comparisons) ? Math.abs(row.difference) : 0), 0) + meaningful + opportunities.length };
   });
   pages.sort((a, b) => b.weight - a.weight || a.route.localeCompare(b.route));
   return { pages: pages.slice(0, 500), totalRoutes: pages.length, truncated: pages.length > 500 };
+}
+
+function reviewFacets(comparisons: PageReview["comparisons"]): PageReviewFacet[] {
+  const definitions: Array<{ key: PageReviewFacet["key"]; label: string; metrics: string[] }> = [
+    { key: "search", label: "Search visibility", metrics: ["clicks", "impressions", "ctr", "position"] },
+    { key: "visits", label: "Visits", metrics: ["sessions"] },
+    { key: "engagement", label: "Engagement", metrics: ["engagedSessions", "engagementRate"] },
+    { key: "enquiries", label: "Enquiries and outcomes", metrics: ["enquiries", "qualified", "quoted", "won"] }
+  ];
+  return definitions.map(definition => {
+    const available = comparisons.filter(row => definition.metrics.includes(row.metric));
+    const movements = available.filter(row => isMaterialMetric(row, comparisons));
+    const improving = movements.filter(row => metricDirection(row) > 0).map(row => row.metric);
+    const declining = movements.filter(row => metricDirection(row) < 0).map(row => row.metric);
+    const direction: ReviewDirection = improving.length && declining.length ? "Mixed" : declining.length ? "Declining" : improving.length ? "Improving" :
+      hasEnoughFacetEvidence(definition.key, available) ? "No clear change" : "Insufficient evidence";
+    return { key: definition.key, label: definition.label, direction, metrics: [...improving, ...declining] };
+  });
+}
+
+function isMaterialMetric(row: PageReview["comparisons"][number], comparisons: PageReview["comparisons"]) {
+  const absolute = Math.abs(row.difference), percent = Math.abs(row.percentChange ?? 0);
+  if (["clicks", "sessions"].includes(row.metric)) return row.before >= 20 && absolute >= 10 && percent >= 25;
+  if (row.metric === "impressions") return row.before >= 100 && absolute >= 50 && percent >= 25;
+  if (row.metric === "ctr") {
+    const impressions = comparisons.find(value => value.source === row.source && value.metric === "impressions");
+    return Boolean(impressions && Math.max(impressions.before, impressions.after) >= 100 && absolute >= 0.01);
+  }
+  if (row.metric === "position") {
+    const impressions = comparisons.find(value => value.source === row.source && value.metric === "impressions");
+    return Boolean(impressions && Math.max(impressions.before, impressions.after) >= 100 && absolute >= 3);
+  }
+  if (row.metric === "engagedSessions") return Math.max(row.before, row.after) >= 10 && absolute >= 5 && percent >= 25;
+  if (row.metric === "engagementRate") {
+    const engaged = comparisons.find(value => value.source === row.source && value.metric === "engagedSessions");
+    return Boolean(engaged && Math.max(engaged.before, engaged.after) >= 10 && absolute >= 0.05);
+  }
+  if (row.metric === "enquiries") return Math.max(row.before, row.after) >= 3 && absolute >= 2;
+  if (["qualified", "quoted", "won"].includes(row.metric)) return absolute >= 1;
+  return false;
+}
+
+function metricDirection(row: PageReview["comparisons"][number]) {
+  if (row.difference === 0) return 0;
+  return row.metric === "position" ? (row.difference < 0 ? 1 : -1) : row.difference > 0 ? 1 : -1;
+}
+
+function hasEnoughFacetEvidence(key: PageReviewFacet["key"], rows: PageReview["comparisons"]) {
+  if (key === "search") return rows.some(row => row.metric === "impressions" && Math.max(row.before, row.after) >= 100);
+  if (key === "visits") return rows.some(row => row.metric === "sessions" && Math.max(row.before, row.after) >= 20);
+  if (key === "engagement") return rows.some(row => row.metric === "engagedSessions" && Math.max(row.before, row.after) >= 10);
+  return rows.some(row => row.metric === "enquiries" && Math.max(row.before, row.after) >= 3);
 }
 
 export function effectivenessPacket(review: SiteReview | null, now = new Date()) {
