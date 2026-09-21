@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma, WebsiteInboundStatus } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import { createCreditCheckFromAccountSetup } from "@/modules/credit-checks/create";
@@ -7,6 +8,7 @@ import {
   stripWebsiteInboundSystemFields
 } from "@/modules/website-inbound/spam";
 import { normalizePhone, todayDate } from "@/modules/website-inbound/opportunities";
+import { normalizeWebsiteInboundAttribution } from "@/modules/website-inbound/attribution";
 import { summarizeWebsiteInboundFields } from "@/modules/website-inbound/summary";
 import type { WebsiteInboundSubmissionInput } from "@/modules/website-inbound/types";
 
@@ -44,7 +46,13 @@ function isValidPayload(payload: Partial<WebsiteInboundSubmissionInput>) {
       payload.formType.trim() &&
       payload.fields &&
       typeof payload.fields === "object" &&
-      !Array.isArray(payload.fields)
+      !Array.isArray(payload.fields) &&
+      Object.values(payload.fields).every(
+        (value) =>
+          typeof value === "string" ||
+          (Array.isArray(value) && value.every((item) => typeof item === "string"))
+      ) &&
+      JSON.stringify(payload).length <= 512_000
   );
 }
 
@@ -80,9 +88,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Inbound tenant is not configured." }, { status: 500 });
   }
 
+  const receivedAt = new Date();
   const sanitizedFields = sanitizeFields(payload.fields as Record<string, string | string[]>);
+  const source = typeof payload.source === "string" ? payload.source.trim().slice(0, 200) : undefined;
+  const pageUrl = typeof payload.pageUrl === "string" ? payload.pageUrl.trim().slice(0, 2000) : undefined;
+  const attribution = normalizeWebsiteInboundAttribution(
+    { ...payload, source, pageUrl },
+    sanitizedFields,
+    receivedAt
+  );
 
-  if (isLikelySpamWebsiteInboundSubmission(sanitizedFields)) {
+  if (!attribution.isTest && isLikelySpamWebsiteInboundSubmission(sanitizedFields)) {
     return NextResponse.json({ accepted: true, filtered: true }, { status: 201 });
   }
 
@@ -92,8 +108,8 @@ export async function POST(request: Request) {
     const result = await createCreditCheckFromAccountSetup({
       tenantId: tenant.id,
       formType: payload.formType,
-      source: payload.source ?? "website",
-      pageUrl: payload.pageUrl,
+      source: source ?? "website",
+      pageUrl,
       fields
     });
 
@@ -105,9 +121,12 @@ export async function POST(request: Request) {
     data: {
       tenantId: tenant.id,
       formType: payload.formType || "general",
-      source: payload.source ?? "website",
-      pageUrl: payload.pageUrl,
+      source: source ?? "website",
+      pageUrl,
       fields,
+      rawPayload: payload as Prisma.InputJsonValue,
+      ...attribution,
+      ...(attribution.isTest ? { status: WebsiteInboundStatus.TEST } : {}),
       ...summary,
       phoneNormalized: normalizePhone(summary.phone),
       receivedOn: new Date(`${todayDate()}T00:00:00Z`)

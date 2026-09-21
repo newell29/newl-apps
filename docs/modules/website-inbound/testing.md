@@ -8,6 +8,7 @@ Regression suites cover:
 - Original form preservation, editable contact/service details, before/after history, optimistic conflicts, notes independent of lifecycle updates.
 - Calendar-date and Toronto boundary handling, status overrides, combined filters, safe return URLs, queue/history pagination.
 - Existing form intake, Finance routing, server-owned intake metadata and manual-entry exclusion from Website Growth evidence.
+- Exact top-level and legacy-field attribution parsing, paid/organic/AI/direct/local classification, raw request preservation, server-derived Test status, and consistent exclusion from every marketing aggregate.
 - Rendered detail UI with missing evidence, original payload, note history and read-only controls.
 - Exact Inbox/Sent Items classification, internal-message exclusion, thread preservation and ambiguous-match refusal.
 - Conversation presentation groups exact mailbox/Graph conversation IDs chronologically without merging mailbox handoffs or messages that lack a conversation ID.

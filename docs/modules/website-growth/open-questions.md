@@ -1,5 +1,8 @@
 # Website growth and SEO: Open Questions
 
+- **Requires owner confirmation:** Is the cumulative paid-funnel interpretation correct—Quote sent and Won reached Qualified, and Won reached Quote sent—even though the current opportunity record stores only the latest status?
+- **Requires owner confirmation before cost alerts:** What daily/weekly budget and wasted-spend thresholds should replace the disabled/default-safe Phase 1 values after Google Ads synchronization exists?
+
 > Evidence status: Confirmed from code for file locations and schema references; business workflow details not explicitly encoded are marked Requires employee confirmation.
 
 ## Purpose and status

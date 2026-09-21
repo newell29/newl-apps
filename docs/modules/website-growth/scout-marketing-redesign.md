@@ -46,7 +46,7 @@ Scout must report evidence limitations, insufficient volume, seasonality, and co
 
 Existing Semrush scheduled-report ingestion and the independent analytics check-in remain in place. The supervisor now reads tenant-scoped cached reports/tracking directly. Each report keeps its own observation date and eight-day freshness flag; a recent position report does not refresh an old competitor report. Report-loading failures are explicit evidence gaps and do not stop other research. Public page/research turns can investigate current competitor pages and retain dated source URLs in the result. This is task-directed competitive research, not a configured continuous competitor watchlist or evidence of competitors' private conversion results.
 
-Measurement excludes URLs carrying the explicit `codex_weekly_diagnostic` query parameter and records the excluded enquiry count separately. Normal attribution parameters remain included. This proposed interpretation of the diagnostic marker requires owner review; it is not a general spam classifier. Untagged tests, spam and traffic without a preserved marker may remain. This change does not rewrite historical imports or the older research-signals dashboard.
+Measurement excludes records durably marked as tests or internal diagnostics and records the excluded enquiry count separately. The exact `codex_weekly_diagnostic` marker remains a supported server-owned exclusion. Normal attribution parameters remain included. This is not a general spam classifier; unmarked spam may remain. Paid landing-session attribution is reported separately in Paid campaigns and does not reinterpret this SEO submitted-page measurement.
 
 ## Research dedupe and recovery
 

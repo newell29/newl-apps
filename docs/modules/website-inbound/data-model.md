@@ -2,6 +2,8 @@
 
 `WebsiteInboundSubmission` remains the canonical opportunity. Existing contact and `primaryNeed` fields store the editable working details. The original form `fields` JSON and `pageUrl` remain evidence.
 
+Website-form records add `rawPayload` plus structured UTM, click ID, GA client ID, campaign/ad group/creative, match/network/device, landing/referrer, session/submission time, source guess/confidence, channel, derived location, test flag, and exclusion reason fields. `rawPayload` is immutable request evidence; attribution columns are normalized at ingestion. Historical rows receive a `_historicalPartial` compatibility envelope because the old route did not retain the complete top-level request.
+
 Added fields: `entryMethod` (WEBSITE_FORM/MANUAL), `contactChannel`, `ownerUserId`, date-only `receivedOn`/`followUpOn`, `nextAction`, `closedReason`, `phoneNormalized`, `revision`, `creationKey`, `createdByUserId`, and `lastActivityAt`.
 
 Opportunity fields also include `communicationMailbox`, `lastInboundEmailAt`, and `lastOutboundEmailAt`. The mailbox remains null until the first confirmed outbound send or an explicit owner handoff.
@@ -19,3 +21,5 @@ Updates use `(tenantId, id, revision)` optimistic concurrency. Creation uses a t
 Migration `20260916143000_inbound_opportunities` adds schema only plus a backfill of historical enquiry dates from creation time (Toronto date), last activity from update time, and digits-only phone matching. Existing status values and original payloads are unchanged; the existing rows default to WEBSITE_FORM. Database application needs explicit approval. No database migration is performed by local Prisma client generation or schema-diff generation.
 
 Migration `20260918143000_inbound_correspondence` adds the correspondence enums, opportunity timestamps/mailbox, email ledger, tenant-composite references, deduplication, and query indexes. It does not backfill, send mail, change lifecycle status, or alter existing opportunity values.
+
+Migration `20260921130000_paid_campaign_attribution` additively introduces attribution/test columns and indexes, the paid metric/signal ledgers, and the offline-conversion audit ledger. It backfills recoverable attribution from known historical field labels, timestamps historical rows from `createdAt`, and flags explicit test fields plus exact diagnostic, automated, synthetic, internal, and employee source/form markers. The separate `20260921131000_mark_inbound_tests` migration safely applies the newly committed Test enum value to every row flagged by that audit. Neither migration connects Google Ads, creates cost rows, uploads conversions, changes ads, or deletes submissions.

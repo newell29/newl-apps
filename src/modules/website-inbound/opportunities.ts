@@ -9,6 +9,7 @@ export const STATUS_LABELS: Record<WebsiteInboundStatus, string> = {
   NURTURE: "Nurture",
   LOST: "Lost",
   DISQUALIFIED: "Not a fit / Spam",
+  TEST: "Test",
   REVIEWED: "Reviewed",
   CONVERTED: "Converted (legacy)",
   CLOSED: "Closed (legacy)"
@@ -24,6 +25,7 @@ export const CLOSED_STATUSES: WebsiteInboundStatus[] = [
   "WON",
   "LOST",
   "DISQUALIFIED",
+  "TEST",
   "CONVERTED",
   "CLOSED"
 ];

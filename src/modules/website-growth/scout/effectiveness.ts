@@ -114,7 +114,8 @@ async function readPeriod(tenantId: string, name: SourceName, range: Period, fet
     for (const metrics of pages.values()) if (metrics.sessions > 0) metrics.engagementRate = metrics.engagedSessions / metrics.sessions;
   } else {
     const rows = await prisma.websiteInboundSubmission.groupBy({ by: ["pageUrl", "status"],
-      where: { tenantId, entryMethod: "WEBSITE_FORM", formType: { not: "account_setup" }, createdAt: {
+      where: { tenantId, entryMethod: "WEBSITE_FORM", formType: { not: "account_setup" }, status: { not: "TEST" }, isTest: false,
+        marketingExcludedReason: null, createdAt: {
         gte: new Date(range.startDate + "T00:00:00Z"), lt: new Date(Date.parse(range.endDate) + DAY_MS) } },
       _count: { _all: true }, orderBy: { pageUrl: "asc" }, take: 5001 });
     capped = rows.length >= 5001;

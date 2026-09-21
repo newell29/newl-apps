@@ -19,6 +19,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Legacy and current URLs connected by an approved website redirect are evaluated as one route family. Healthy migrations, improving routes, and ordinary volatility remain monitoring signals rather than content briefs.
 - Recovery work must prefer redirect, canonical, sitemap, internal-link, metadata, and useful content improvements on the surviving route. It must not recreate thin legacy pages or duplicate an active website build.
 - Recovery opportunities are reconciled on every evidence refresh: stale `NEW` or `REVIEWING` items move to `MONITORING`, and monitored items return to `NEW` only when current evidence again qualifies.
+- Paid Campaigns excludes every record marked Test or with an internal marketing-exclusion reason. It may report lead outcomes and recommend Increase, Maintain, Reduce, or Investigate, but Scout cannot change budgets, bids, campaigns, audiences, or keywords.
+- **Requires owner confirmation:** paid funnel reporting currently treats Quote sent and Won as having reached Qualified, and Won as having reached Quote sent. Legacy lifecycle values are not reinterpreted.
 
 ## Data model
 

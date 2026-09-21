@@ -411,7 +411,14 @@ export async function syncWebsiteInboundForTenant(
   try {
     const [submissions, companies, contacts, leads, creditChecks] = await Promise.all([
       prisma.websiteInboundSubmission.findMany({
-        where: { tenantId, formType: { not: "account_setup" }, entryMethod: "WEBSITE_FORM" },
+        where: {
+          tenantId,
+          formType: { not: "account_setup" },
+          entryMethod: "WEBSITE_FORM",
+          status: { not: "TEST" },
+          isTest: false,
+          marketingExcludedReason: null
+        },
         orderBy: { createdAt: "desc" },
         select: { pageUrl: true, primaryNeed: true },
         take: 1000

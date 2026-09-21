@@ -208,6 +208,9 @@ function BacklinkNavigation() {
       <Link href="/website-growth" className="rounded-md px-4 py-2 text-sm font-semibold text-mutedForeground transition-colors hover:bg-muted hover:text-foreground">
         Scout workspace
       </Link>
+      <Link href="/website-growth/paid-campaigns" className="rounded-md px-4 py-2 text-sm font-semibold text-mutedForeground transition-colors hover:bg-muted hover:text-foreground">
+        Paid campaigns
+      </Link>
       <Link href="/website-growth/backlinks" aria-current="page" className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primaryForeground">
         Backlink Scout
       </Link>

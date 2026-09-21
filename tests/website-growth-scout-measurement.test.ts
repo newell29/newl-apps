@@ -59,10 +59,12 @@ describe("Scout per-change measurement", () => {
     mocks.search.mockResolvedValue([]);
     mocks.ga4.mockResolvedValue([{ page: "/resources/contact?codex_weekly_diagnostic=synthetic", sessions: 20, engagedSessions: 10 },
       { page: "/resources/contact?utm_source=example", sessions: 8, engagedSessions: 4 }]);
-    mocks.inbound.mockResolvedValue([{ pageUrl: "https://example.com/resources/contact?codex_weekly_diagnostic=synthetic", _count: { _all: 9 } },
-      { pageUrl: "https://example.com/resources/contact?utm_source=example", _count: { _all: 2 } }, { pageUrl: null, _count: { _all: 5 } }]);
+    mocks.inbound.mockResolvedValue([{ pageUrl: "https://example.com/resources/contact?codex_weekly_diagnostic=synthetic", isTest: true, marketingExcludedReason: "CODEX_DIAGNOSTIC", _count: { _all: 9 } },
+      { pageUrl: "https://example.com/resources/contact?utm_source=example", isTest: false, marketingExcludedReason: null, _count: { _all: 2 } },
+      { pageUrl: "https://example.com/resources/contact", isTest: false, marketingExcludedReason: "INTERNAL_SUBMISSION", _count: { _all: 3 } },
+      { pageUrl: null, isTest: false, marketingExcludedReason: null, _count: { _all: 5 } }]);
     const result = await measureScoutPage("tenant-a", "/resources/contact", published, now);
-    expect(result.sources.find(row => row.source === "enquiries")?.metrics).toEqual({ enquiries: 2, excludedDiagnosticEnquiries: 9 });
+    expect(result.sources.find(row => row.source === "enquiries")?.metrics).toEqual({ enquiries: 2, excludedDiagnosticEnquiries: 12 });
     expect(result.sources.find(row => row.source === "ga4")?.metrics?.sessions).toBe(8);
   });
 });

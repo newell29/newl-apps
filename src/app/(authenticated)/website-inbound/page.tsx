@@ -538,6 +538,18 @@ export default async function WebsiteInboundPage({
                     <p className="mt-3 break-all text-xs text-mutedForeground">
                       {detail.pageUrl || "No page URL captured"}
                     </p>
+                    <div className="mt-4 rounded-md border border-border bg-muted/20 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-primary">Attribution</p>
+                      <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                        <div><dt className="text-xs text-mutedForeground">Channel</dt><dd>{(detail.attributionChannel ?? "UNKNOWN").replaceAll("_", " ")}</dd></div>
+                        <div><dt className="text-xs text-mutedForeground">Campaign</dt><dd>{detail.utmCampaign || detail.campaignId || "Unavailable"}</dd></div>
+                        <div><dt className="text-xs text-mutedForeground">Keyword</dt><dd>{detail.utmTerm || "Unavailable"}</dd></div>
+                        <div><dt className="text-xs text-mutedForeground">Landing page</dt><dd className="break-all">{detail.landingPath || detail.landingPage || "Unavailable"}</dd></div>
+                        <div><dt className="text-xs text-mutedForeground">Click ID</dt><dd className="break-all">{detail.gclid || detail.gbraid || detail.wbraid || "Unavailable"}</dd></div>
+                        <div><dt className="text-xs text-mutedForeground">Campaign details</dt><dd>{[detail.adGroupId && `Ad group ${detail.adGroupId}`, detail.creativeId && `Creative ${detail.creativeId}`, detail.device].filter(Boolean).join(" · ") || "Unavailable"}</dd></div>
+                      </dl>
+                      {detail.isTest || detail.status === "TEST" || detail.marketingExcludedReason ? <p className="mt-2 text-xs text-warning">Excluded from marketing reporting: {detail.marketingExcludedReason || "Test"}</p> : null}
+                    </div>
                     <dl className="mt-3 space-y-3">
                       {Object.entries(record(detail.fields)).map(([key, value]) => (
                         <div key={key}>
@@ -548,6 +560,12 @@ export default async function WebsiteInboundPage({
                         </div>
                       ))}
                     </dl>
+                    <details className="mt-4">
+                      <summary className="cursor-pointer text-xs font-semibold text-mutedForeground">Complete request evidence</summary>
+                      {record(detail.rawPayload)._historicalPartial === true ? <p className="mt-2 text-xs text-warning">Historical partial envelope: the pre-migration route did not save the full top-level request.</p> : null}
+                      <dl className="mt-3 space-y-3">{Object.entries(record(detail.rawPayload)).map(([key, value]) => <div key={key}><dt className="text-xs font-semibold text-mutedForeground">{key}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm">{renderValue(value)}</dd></div>)}</dl>
+                      {!detail.rawPayload ? <p className="mt-2 text-xs text-mutedForeground">No request envelope is available for this record.</p> : null}
+                    </details>
                   </details>
                 ) : null}
               </>

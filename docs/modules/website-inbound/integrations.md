@@ -2,6 +2,8 @@
 
 `POST /api/website-inbound` keeps its existing website contract, spam filtering, token authentication and server-side tenant resolution. Phone normalization and enquiry date are added server-side. The external payload cannot set ownership, lifecycle status, actor, or manual entry origin. Account setup continues routing to Finance.
 
+The route now accepts the optional top-level attribution contract in `attribution-contract.md`, preserves the request JSON, and derives Test status only from server-recognized diagnostic/test evidence. The Newl website still needs to add `campaignId`, `adGroupId`, `creativeId`, `matchType`, `network`, and `device`; no Newl Apps deployment can manufacture missing values.
+
 Website Growth's inbound count, landing-page grouping, and form evidence refresh explicitly restrict `entryMethod=WEBSITE_FORM`. Manual phone/email entries therefore do not inflate form-conversion reporting even if their lead source is Website. Website-sourced manual opportunities remain discoverable through the inbound source filter.
 
 Microsoft Graph application access can synchronize Inbox and Sent Items for the tenant's explicitly selected **inbound opportunity owner mailboxes**. This allowlist is separate from the Assistant's shared and team inbox list, so adding an Assistant knowledge source cannot silently make that person an inbound sender. Settings presents tenant members as checkboxes rather than accepting free-form addresses. At runtime, correspondence still intersects the saved allowlist with current tenant Membership emails.
