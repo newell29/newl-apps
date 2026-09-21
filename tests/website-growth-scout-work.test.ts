@@ -40,6 +40,22 @@ describe("Scout work model", () => {
     expect(() => parseMission({ ...DEFAULT_MISSION, maxActive: 11 })).toThrow();
     expect(stableId("tenant-a", "same")).not.toBe(stableId("tenant-b", "same"));
   });
+  it("upgrades the legacy undecided mission to the initial business profile without replacing custom decisions", () => {
+    const legacy = parseMission({ version: 1, objective: DEFAULT_MISSION.objective,
+      priorities: "Confirm priority services and markets before prioritizing campaigns.",
+      qualifiedLead: "Requires owner definition. Form submissions are enquiries, not qualified leads.",
+      enabled: true, dailySteps: 6, maxActive: 3 });
+    expect(legacy).toMatchObject({ version: 2, priorities: expect.stringContaining("60% to warehousing"),
+      qualifiedLead: expect.stringContaining("person confirms service fit"),
+      successCriteria: expect.stringContaining("28-day comparison windows"),
+      competitorWatchlist: expect.stringContaining("Bonded Logistics") });
+    const customized = parseMission({ ...legacy, priorities: "Focus only on a confirmed account list.",
+      qualifiedLead: "An owner-approved account with a scheduled call.", successCriteria: "Review every result manually.",
+      competitorWatchlist: "Example Logistics — example.com" });
+    expect(customized).toMatchObject({ priorities: "Focus only on a confirmed account list.",
+      qualifiedLead: "An owner-approved account with a scheduled call.", successCriteria: "Review every result manually.",
+      competitorWatchlist: "Example Logistics — example.com" });
+  });
   it("distinguishes deferred research, expired leases, and external waits", () => {
     expect(isDue({ ...work(), state: "WAITING", nextReviewAt: new Date(now.getTime() + DAY_MS).toISOString() }, now)).toBe(false);
     expect(isDue({ ...leased(), leaseUntil: new Date(now.getTime() - 1).toISOString() }, now)).toBe(true);
