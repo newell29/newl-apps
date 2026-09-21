@@ -170,18 +170,28 @@ describe("agent operations", () => {
         cadence: "Every 2 minutes"
       },
       {
+        assignment: "Check due marketing work",
+        cadence: "Hourly from 09:00–16:00 on weekdays"
+      },
+      {
         assignment: "Refresh website growth evidence",
-        cadence: "Mon/Wed deep research · Tue/Thu/Fri evidence check-in at 09:15"
+        cadence: "Tue/Thu/Fri at 09:15"
       },
       {
         assignment: "Process approved backlink outreach",
-        cadence: "Weekdays at 11:00"
-      },
-      {
-        assignment: "Discover and review backlink opportunities",
-        cadence: "Tuesdays at 10:15"
+        cadence: "Weekdays at 11:00 after supervised enablement"
       }
     ]);
+  });
+
+  it("shows hourly Scout wakes and research steps as real tenant-scoped activity", async () => {
+    prismaMock.automationJobRun.findMany.mockResolvedValue([
+      { id: "wake", jobType: "WEBSITE_GROWTH_SCOUT_WAKE", status: "SUCCESS", startedAt: new Date("2026-08-02T17:00:00Z"), finishedAt: new Date("2026-08-02T17:00:01Z"), input: { trigger: "SCHEDULED" }, output: { summary: "No research is due." }, errorMessage: null },
+      { id: "step", jobType: "WEBSITE_GROWTH_SCOUT_STEP", status: "SUCCESS", startedAt: new Date("2026-08-02T16:00:00Z"), finishedAt: new Date("2026-08-02T16:02:00Z"), input: { workKind: "PAGE" }, output: { summary: "Matched query evidence reviewed." }, errorMessage: null }
+    ]);
+    const history = await getAgentRunHistory(tenant, normalizeRunHistoryFilters({ agent: "website-scout" }), new Date("2026-08-02T18:30:00Z"));
+    expect(history.runs.map(run => run.assignment)).toEqual(["Check due marketing work", "Research one marketing work item"]);
+    expect(history.runs[0].summary).toContain("No research is due");
   });
 
   it("redacts common secret and identity patterns from operational text", () => {

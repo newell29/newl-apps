@@ -70,6 +70,12 @@ def object_schema(properties):
 
 def result_schema(kind):
     string = {"type": "string"}
+    wait_blocker = object_schema({
+        "type": {"type": "string", "enum": ["DATA_REFRESH", "PUBLIC_RESEARCH", "LOW_VOLUME", "OWNER_INPUT", "EXTERNAL_SYSTEM", "TECHNICAL"]},
+        "evidenceNeeded": string,
+        "resolutionAction": string,
+        "resolvableByScout": {"type": "boolean"},
+    })
     if kind == "PAGE":
         path = Path(__file__).resolve().parent.parent / "skills/website-growth-scout/scout-output.schema.json"
         page_schema = json.loads(path.read_text())
@@ -87,7 +93,8 @@ def result_schema(kind):
             artifact["required"] = list(artifact["properties"])
     schema = object_schema({"decision": {"type": "string", "enum": ["DELIVER", "WAIT", "DISMISS", "CONTINUE"]},
                           "summary": string, "nextAction": string, "reviewInDays": {"type": "integer", "minimum": 1, "maximum": 90},
-                          "artifact": {"anyOf": [artifact, {"type": "null"}]}})
+                          "artifact": {"anyOf": [artifact, {"type": "null"}]},
+                          "waitBlocker": {"anyOf": [wait_blocker, {"type": "null"}]}})
     if kind == "PAGE":
         schema["$defs"] = page_schema["$defs"]
     return schema
@@ -100,6 +107,8 @@ You have public web search and a bounded evidence packet. Never send, submit for
 or claim an external action succeeded. Do not put private correspondence, customer data, or identifiers in web searches.
 Use only verified public business claims. Distinguish missing evidence from zero and enquiries from qualified leads.
 Choose WAIT with a concrete next action when evidence is missing. DISMISS weak work with a reason.
+Every WAIT must include waitBlocker. Name the exact missing evidence, the action that can resolve it, and whether Scout can resolve it itself.
+Use OWNER_INPUT only for a business decision or private fact Scout cannot verify. Do not push ordinary public research or available saved data back to the owner.
 For PAGE deliver the complete page brief schema with exact copy, source context, and useful conversion improvements.
 For RELATIONSHIP draft a relevant response to the latest reply for human review; make no commitments.
 For MEASUREMENT use the authoritative supplied measurements, distinguish association from causation, and retain limitations.
@@ -127,7 +136,8 @@ Never recommend paid ranking links, irrelevant directories, or volume for its ow
 
 
 def run():
-    workspace = api({"action": "prepare"})
+    wake_id = str(uuid.uuid4())
+    workspace = api({"action": "prepare", "wakeId": wake_id})
     if not workspace["mission"]["enabled"] or not workspace["due"]:
         print(workspace.get("idleReason") or "Scout has no research due or is paused.")
         return
@@ -159,7 +169,9 @@ def run():
         except Exception:
             # Research has no external side effects, so its failure can be safely deferred in isolation.
             api({"action": "complete", **identity, "result": {"decision": "WAIT", "summary": "Research was interrupted; prior progress is preserved.",
-                 "nextAction": "Resume this item with the saved evidence on the next review.", "reviewInDays": 1, "artifact": None}})
+                 "nextAction": "Resume this item with the saved evidence on the next review.", "reviewInDays": 1, "artifact": None,
+                 "waitBlocker": {"type": "TECHNICAL", "evidenceNeeded": "A complete specialist research result.",
+                                 "resolutionAction": "Retry the saved research context on the next wake.", "resolvableByScout": True}}})
             raise RuntimeError("Scout research was deferred after an interrupted step") from None
         # A separate bounded review turn evaluates the artifact, not its own drafting conversation.
         # Failures preserve the complete research; they do not strand a lease or deliver unchecked work.
@@ -180,7 +192,10 @@ def run():
                 review = {"verdict": "WAIT", "reason": "Supervisor review was interrupted. Resume with the saved artifact and review it before delivery."}
             result["supervisor"] = review
             if review["verdict"] != "PASS":
-                result.update({"decision": "WAIT", "nextAction": review["reason"][:1500], "reviewInDays": 1})
+                result.update({"decision": "WAIT", "nextAction": review["reason"][:1500], "reviewInDays": 1,
+                               "waitBlocker": {"type": "PUBLIC_RESEARCH", "evidenceNeeded": review["reason"][:1500],
+                                               "resolutionAction": "Resolve the quality-review gap using the saved context and public evidence.",
+                                               "resolvableByScout": True}})
         # A lost completion acknowledgement must never overwrite the saved result with a failure.
         api({"action": "complete", **identity, "result": result})
         print("Scout saved one research step. Review the marketing workboard.")

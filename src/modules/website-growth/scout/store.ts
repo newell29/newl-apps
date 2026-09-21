@@ -7,9 +7,10 @@ import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website
 import { parseWebsiteGrowthScoutCompletion } from "@/modules/website-growth/scout-run";
 import { parseWebsiteGrowthBacklinkReview, persistWebsiteGrowthBacklinkReview } from "@/modules/website-growth/backlinks";
 import { hasPostChangeEvidence, measurementWindows, measureScoutPage } from "./measurement";
+import { loadScoutPageEvidence } from "./page-evidence";
 import { projectPageHandoffs } from "./lifecycle";
 import { scoutCompetitorEvidence, scoutOutcomes, supervisorReview } from "./learning";
-import { DEFAULT_MISSION, MISSION_JOB, WORK_JOB, STEP_JOB, LEASE_MS, DAY_MS, ScoutWorkError,
+import { DEFAULT_MISSION, MISSION_JOB, WORK_JOB, STEP_JOB, WAKE_JOB, LEASE_MS, DAY_MS, ScoutWorkError,
   isDue, newWork, nextWork, parseMission, parseResult, readWork, record, routePath, stableId, text,
   type Work } from "./model";
 
@@ -114,6 +115,10 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
           Date.parse(previousWork.leaseUntil ?? "") > now.getTime()) return { id, ...previousWork };
       throw new ScoutWorkError("This claim was already resolved or its lease expired. Prepare work again.", 409);
     }
+    await tx.automationJobRun.updateMany({
+      where: { tenantId, jobType: STEP_JOB, status: JobStatus.RUNNING, startedAt: { lte: new Date(now.getTime() - LEASE_MS) } },
+      data: { status: JobStatus.ERROR, finishedAt: now, errorMessage: "The Scout research lease expired before a result was saved." }
+    });
     const settings = await tx.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, "mission"), jobType: MISSION_JOB } });
     const mission = settings ? parseMission(settings.input) : DEFAULT_MISSION;
     if (!mission.enabled) throw new ScoutWorkError("Scout research is paused. Save and enable an owner-approved research plan first.", 409);
@@ -134,10 +139,30 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
     const updated = nextWork(work, { state: "WORKING", lease: randomUUID(), leaseUntil: new Date(now.getTime() + LEASE_MS).toISOString(),
       attempts: work.attempts + 1 }, "CLAIMED", reason, now);
     await replace(tx, tenantId, id, work, updated);
-    await tx.automationJobRun.create({ data: { id: stepId, tenantId, jobType: STEP_JOB, status: JobStatus.SUCCESS, startedAt: now,
-      finishedAt: now, input: { workId: id, claimId, lease: updated.lease } } });
+    await tx.automationJobRun.create({ data: { id: stepId, tenantId, jobType: STEP_JOB, status: JobStatus.RUNNING, startedAt: now,
+      input: { workId: id, workTitle: work.title, workKind: work.kind, claimId, lease: updated.lease, selectionReason: reason } } });
     return { id, ...updated };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function recordScoutWake(tenantId: string, wakeId: string, input: {
+  missionEnabled: boolean;
+  dueCount: number;
+  usedSteps: number;
+  dailySteps: number;
+  active: number;
+  maxActive: number;
+  idleReason: string | null;
+}, now = new Date()) {
+  text(wakeId, "Wake ID", 100);
+  const id = stableId(tenantId, `wake:${wakeId}`);
+  const summary = input.idleReason ?? `${input.dueCount} research item${input.dueCount === 1 ? " is" : "s are"} due for supervisor selection.`;
+  await prisma.automationJobRun.upsert({
+    where: { tenantId_id: { tenantId, id } },
+    create: { id, tenantId, jobType: WAKE_JOB, status: JobStatus.SUCCESS, startedAt: now, finishedAt: now,
+      input: { trigger: "SCHEDULED", wakeId }, output: json({ summary, ...input }) },
+    update: {}
+  });
 }
 
 export async function scoutWorkContext(tenantId: string, id: string, lease: string) {
@@ -146,10 +171,14 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
     outcomes: scoutOutcomes((await scoutWorkspace(tenantId)).items), competitors: await scoutCompetitorEvidence(tenantId),
     effectiveness: effectivenessPacket(await loadSiteReview(tenantId).catch(() => null)) };
   if (work.kind === "PAGE") {
-    const opportunity = await prisma.websiteGrowthOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "" },
-      select: { action: true, topic: true, primaryKeyword: true, targetPage: true, sourcePage: true, reason: true,
-        recommendation: true, supportingKeywords: true, evidence: true } });
-    return { opportunity, learning, website: await resolveNewlWebsiteContext() };
+    const [opportunity, website, pageEvidence] = await Promise.all([
+      prisma.websiteGrowthOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "" },
+        select: { action: true, topic: true, primaryKeyword: true, targetPage: true, sourcePage: true, reason: true,
+          recommendation: true, supportingKeywords: true, evidence: true } }),
+      resolveNewlWebsiteContext(),
+      work.route ? loadScoutPageEvidence(tenantId, work.route) : Promise.resolve(null)
+    ]);
+    return { opportunity, learning, website, pageEvidence };
   }
   if (work.kind === "RELATIONSHIP") {
     const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "", status: "REPLIED", unsubscribedAt: null },
@@ -167,7 +196,7 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
     const updated = nextWork(work, { evidence: { ...work.evidence, measurement,
       previousMeasurements: [...previousMeasurements, ...(work.evidence.measurement ? [work.evidence.measurement] : [])].slice(-5) } }, "MEASURED", "Collected independent source results.");
     await prisma.$transaction(tx => replace(tx, tenantId, id, work, updated));
-    return { draft, measurement, learning };
+    return { draft, measurement, learning, pageEvidence: await loadScoutPageEvidence(tenantId, work.route) };
   }
   if (work.evidence.source === "site-review") {
     const updated = nextWork(work, { evidence: { ...work.evidence, effectiveness: learning?.effectiveness ?? null } }, "SITE_EVIDENCE", "Saved dated site evidence for this investigation.");
@@ -271,8 +300,37 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       evidence = { ...evidence, externalWait: true, escalation: { at: now.toISOString(), reason: result.nextAction } };
       result.nextAction = `Scout needs help after repeated incomplete attempts: ${result.nextAction}`.slice(0, 1500);
     }
-    const updated = nextWork(work, { ...result, artifact: result.artifact ?? work.artifact, evidence, draftId, lease: null, leaseUntil: null }, `COMPLETED:${lease}`, result.summary, now);
+    if (result.state === "WAITING") {
+      let waitBlocker = result.waitBlocker ?? {
+        type: review?.verdict && review.verdict !== "PASS" ? "PUBLIC_RESEARCH" as const : "DATA_REFRESH" as const,
+        evidenceNeeded: result.nextAction,
+        resolutionAction: result.nextAction,
+        resolvableByScout: true
+      };
+      if (evidence.externalWait && waitBlocker.resolvableByScout) {
+        waitBlocker = {
+          type: "OWNER_INPUT",
+          evidenceNeeded: waitBlocker.evidenceNeeded,
+          resolutionAction: "Review the repeated incomplete attempts and provide a narrower direction or resolve the named source issue.",
+          resolvableByScout: false
+        };
+      }
+      evidence = { ...evidence, waitBlocker: { ...waitBlocker, recordedAt: now.toISOString(), nextReviewAt: result.nextReviewAt } };
+      if (waitBlocker.type === "OWNER_INPUT" && !waitBlocker.resolvableByScout) {
+        evidence = { ...evidence, externalWait: true, escalation: { at: now.toISOString(), reason: waitBlocker.evidenceNeeded } };
+        result.nextAction = `Owner input needed: ${waitBlocker.resolutionAction}`.slice(0, 1500);
+      }
+    } else if (evidence.waitBlocker) {
+      const resolvedWaits = Array.isArray(evidence.resolvedWaits) ? evidence.resolvedWaits : [];
+      evidence = { ...evidence, waitBlocker: null, resolvedWaits: [...resolvedWaits, evidence.waitBlocker].slice(-5) };
+    }
+    const resultState = { summary: result.summary, nextAction: result.nextAction,
+      state: result.state, nextReviewAt: result.nextReviewAt };
+    const updated = nextWork(work, { ...resultState, artifact: result.artifact ?? work.artifact, evidence, draftId, lease: null, leaseUntil: null }, `COMPLETED:${lease}`, result.summary, now);
     await replace(tx, tenantId, id, work, updated);
+    await tx.automationJobRun.updateMany({ where: { tenantId, jobType: STEP_JOB, status: JobStatus.RUNNING,
+      input: { path: ["lease"], equals: lease } }, data: { status: JobStatus.SUCCESS, finishedAt: now,
+      output: json({ summary: result.summary, workId: id, workKind: work.kind, state: updated.state }) } });
     await audit(tx, tenantId, null, "work-completed", id, { kind: work.kind, state: updated.state, draftId });
     return updated;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -292,8 +350,10 @@ export async function reviewScoutWork(tenantId: string, userId: string, id: stri
     }
     // Page approvals and publishing stay in the established claims/build review path.
     if (work.kind === "PAGE" && work.draftId && decision === "ACCEPT") throw new ScoutWorkError("Approve this page through its complete brief.");
+    const resolvedWaits = Array.isArray(work.evidence.resolvedWaits) ? work.evidence.resolvedWaits : [];
     const updated = nextWork(work, { state: decision === "REVISE" ? "READY" : decision === "DISMISS" ? "DISMISSED" : "DONE",
-      evidence: { ...work.evidence, externalWait: false, escalation: null },
+      evidence: { ...work.evidence, externalWait: false, escalation: null, waitBlocker: null,
+        resolvedWaits: work.evidence.waitBlocker ? [...resolvedWaits, work.evidence.waitBlocker].slice(-5) : resolvedWaits },
       nextAction: feedback, nextReviewAt: new Date().toISOString() }, "OWNER_REVIEW", feedback);
     await replace(tx, tenantId, id, work, updated);
     await audit(tx, tenantId, userId, "work-reviewed", id, { decision });

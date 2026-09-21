@@ -43,12 +43,12 @@ Scout uses its own OpenClaw agent and workspace. Deep website/backlink research 
 9. Re-run `ops/openclaw/install-website-growth-backlink-executor.sh` so the installed plugin and weekday job include `newl_backlink_fill_directory_credentials` and `newl_backlink_sync_directory_verifications`.
    The installer treats the returned command job as canonical and removes any retired agent-turn or duplicate job with the same declaration key before the schedule is enabled.
 10. Keep the owner-approved public business profile outside source control with file mode `600`.
-11. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then validate that Scout uses the `minimal` tool profile with only the browser and dedicated `newl_backlink_*` tools. Shell, exec, arbitrary reads, writes, and source-code inspection must remain denied.
+11. Restart or reload the OpenClaw gateway if required by the installed OpenClaw version, then run `ops/openclaw/preflight-website-growth-backlink-executor.sh`. The read-only preflight validates the subscription-backed OpenAI Codex route across supported OpenClaw status formats, loaded plugin and exact tools, eligible skill, minimal Scout policy, protected profile/settings, and the one installed command schedule. It does not claim an opportunity, invoke the executor, send mail, or send Teams. Shell, exec, arbitrary reads, writes, and source-code inspection must remain denied.
 
 ## Supervised launch test
 
 1. Approve one known, low-risk free-directory or outreach opportunity in Newl Apps.
-2. Run the disabled job manually while watching the dedicated mailbox and Newl Apps record.
+2. Confirm the read-only preflight passes and reports that the schedule is disabled, then run the disabled job manually while watching the dedicated mailbox and Newl Apps record.
 3. Confirm the exact recipient came from a public business contact page on the approved referring organization's domain, has its country and consent basis recorded, and includes no customer information. Newl Apps independently reads that public page before an initial send. A different corporate email domain is permitted only when the exact address is visibly published on the approved referring organization's page; consumer webmail remains blocked.
 4. Confirm the message is sent from the dedicated mailbox and includes the correct legal entity, public address, phone, website, and unsubscribe instruction.
 5. Reply from the test recipient. Confirm the reply appears as `REPLIED`; an unsubscribe reply must set `LOST`, add a suppression record, and cancel follow-ups.

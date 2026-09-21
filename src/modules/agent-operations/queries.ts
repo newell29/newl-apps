@@ -33,6 +33,8 @@ const AUTOMATION_JOB_ASSIGNMENTS: Record<string, { agentKey: AgentKey; assignmen
   WEBSITE_GROWTH_SCOUT_WEEKLY: { agentKey: "website-scout", assignment: "Refresh growth opportunities" },
   WEBSITE_GROWTH_BACKLINK_DISCOVERY: { agentKey: "website-scout", assignment: "Discover and review backlink opportunities" },
   WEBSITE_GROWTH_SCOUT_WEEKDAY_CHECKIN: { agentKey: "website-scout", assignment: "Refresh website growth evidence" },
+  WEBSITE_GROWTH_SCOUT_WAKE: { agentKey: "website-scout", assignment: "Check due marketing work" },
+  WEBSITE_GROWTH_SCOUT_STEP: { agentKey: "website-scout", assignment: "Research one marketing work item" },
   WEBSITE_GROWTH_BACKLINK_OUTREACH: { agentKey: "website-scout", assignment: "Process approved backlink outreach" },
   WEBSITE_GROWTH_BACKLINK_EXECUTOR_FAILURE: { agentKey: "website-scout", assignment: "Review backlink delivery failures" },
   WEBSITE_GROWTH_DEVELOPER_BUILD: { agentKey: "website-scout", assignment: "Prepare an approved website change" }
@@ -334,6 +336,8 @@ function buildMissedAssistantRuns(data: AgentOperationData, now: Date): AgentRun
 
 function buildAgentSchedules(data: AgentOperationData, runs: AgentRun[], now: Date): AgentScheduleEntry[] {
   const activeRunKeys = new Set(runs.filter((run) => run.status === "RUNNING").map((run) => run.agentKey));
+  const latestOutreach = runs.find(run => run.assignment === "Process approved backlink outreach") ?? null;
+  const outreachRecentlyHealthy = latestOutreach?.status === "SUCCESS" && latestOutreach.startedAt >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const schedules: AgentScheduleEntry[] = data.assistantAutomations.map((automation) => ({
     id: `nemo:${automation.id}`,
     agentKey: "nemo" as const,
@@ -376,37 +380,43 @@ function buildAgentSchedules(data: AgentOperationData, runs: AgentRun[], now: Da
       sourceNote: "Declared OpenClaw schedule"
     },
     declaredSchedule("rivet:quality", "rivet", "Audit Hunter research quality", "DAILY", "13:30", "Daily at 13:30", now, activeRunKeys),
-    declaredSchedule(
-      "website-scout:scan",
-      "website-scout",
-      "Refresh website growth evidence",
-      "WEEKDAYS",
-      "09:15",
-      "Mon/Wed deep research · Tue/Thu/Fri evidence check-in at 09:15",
-      now,
-      activeRunKeys
-    ),
     {
-      id: "website-scout:backlink-discovery",
+      id: "website-scout:marketing",
       agentKey: "website-scout",
       agentName: AGENT_CATALOG["website-scout"].name,
-      assignment: "Discover and review backlink opportunities",
-      cadence: "Tuesdays at 10:15",
+      assignment: "Check due marketing work",
+      cadence: "Hourly from 09:00–16:00 on weekdays",
       timezone: DEFAULT_TIMEZONE,
-      nextRunAt: null,
+      nextRunAt: nextWebsiteScoutHourlyRun(now),
       status: activeRunKeys.has("website-scout") ? "RUNNING" : "SCHEDULED",
-      sourceNote: "Expected local runtime schedule; Rivet monitors failures and disabled state"
+      sourceNote: "Declared Scout marketing runtime; each wake records whether work was due"
     },
-    declaredSchedule(
-      "website-scout:outreach",
-      "website-scout",
-      "Process approved backlink outreach",
-      "WEEKDAYS",
-      "11:00",
-      "Weekdays at 11:00",
-      now,
-      activeRunKeys
-    ),
+    {
+      id: "website-scout:evidence",
+      agentKey: "website-scout",
+      agentName: AGENT_CATALOG["website-scout"].name,
+      assignment: "Refresh website growth evidence",
+      cadence: "Tue/Thu/Fri at 09:15",
+      timezone: DEFAULT_TIMEZONE,
+      nextRunAt: nextAllowedWeekdayRunAt("09:15", [2, 4, 5], now),
+      status: activeRunKeys.has("website-scout") ? "RUNNING" : "SCHEDULED",
+      sourceNote: "Declared evidence check-in runtime"
+    },
+    {
+      id: "website-scout:outreach",
+      agentKey: "website-scout",
+      agentName: AGENT_CATALOG["website-scout"].name,
+      assignment: "Process approved backlink outreach",
+      cadence: "Weekdays at 11:00 after supervised enablement",
+      timezone: DEFAULT_TIMEZONE,
+      nextRunAt: outreachRecentlyHealthy ? computeNextAssistantAutomationRunAt("WEEKDAYS", "11:00", DEFAULT_TIMEZONE, now) : null,
+      status: activeRunKeys.has("website-scout") ? "RUNNING" : outreachRecentlyHealthy ? "SCHEDULED" : "NOT_CONFIGURED",
+      sourceNote: outreachRecentlyHealthy
+        ? "Recent successful execution observed"
+        : latestOutreach?.status === "FAILED"
+          ? "The last recorded executor run failed; repeated sends remain stopped pending supervised recovery"
+          : "No recent successful executor run; supervised enablement is still required"
+    },
     {
       id: "website-scout:build-notifications",
       agentKey: "website-scout",
@@ -597,6 +607,32 @@ function formatScheduleType(value: string) {
   if (value === "WEEKDAYS") return "Weekdays";
   if (value === "MONDAYS") return "Mondays";
   return "Daily";
+}
+
+function nextWebsiteScoutHourlyRun(now: Date) {
+  let candidate = new Date(Math.ceil(now.getTime() / (60 * 60 * 1000)) * 60 * 60 * 1000);
+  for (let index = 0; index < 24 * 10; index += 1) {
+    const parts = localScheduleParts(candidate);
+    if (parts.weekday >= 1 && parts.weekday <= 5 && parts.hour >= 9 && parts.hour <= 16) return candidate;
+    candidate = new Date(candidate.getTime() + 60 * 60 * 1000);
+  }
+  return null;
+}
+
+function nextAllowedWeekdayRunAt(time: string, allowedWeekdays: number[], now: Date) {
+  let cursor = now;
+  for (let index = 0; index < 10; index += 1) {
+    const candidate = computeNextAssistantAutomationRunAt("DAILY", time, DEFAULT_TIMEZONE, cursor);
+    if (allowedWeekdays.includes(localScheduleParts(candidate).weekday)) return candidate;
+    cursor = new Date(candidate.getTime() + 60_000);
+  }
+  return null;
+}
+
+function localScheduleParts(value: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: DEFAULT_TIMEZONE, weekday: "short", hour: "numeric", hourCycle: "h23" }).formatToParts(value);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.find(part => part.type === "weekday")?.value ?? "");
+  return { weekday, hour: Number(parts.find(part => part.type === "hour")?.value ?? -1) };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

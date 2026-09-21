@@ -34,6 +34,14 @@ const backlinkRunnerPath = path.join(
   repoRoot,
   "ops/openclaw/run-website-growth-backlink-executor.sh",
 );
+const backlinkPreflightPath = path.join(
+  repoRoot,
+  "ops/openclaw/preflight-website-growth-backlink-executor.sh",
+);
+const scoutOpenAiAuthValidatorPath = path.join(
+  repoRoot,
+  "ops/openclaw/validate-scout-openai-auth.py",
+);
 const backlinkSkillPath = path.join(
   repoRoot,
   "ops/openclaw/skills/website-growth-backlink-executor/SKILL.md",
@@ -791,16 +799,152 @@ print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
   });
 
   it("requires OAuth for outreach and preserves an already-enabled executor during reinstall", async () => {
-    const [runner, installer] = await Promise.all([
+    const [runner, installer, authValidator] = await Promise.all([
       readFile(backlinkRunnerPath, "utf8"),
       readFile(backlinkInstallerPath, "utf8"),
+      readFile(scoutOpenAiAuthValidatorPath, "utf8"),
     ]);
 
     expect(runner).toContain("models status --agent scout --json");
-    expect(runner).toContain("effectiveProfiles");
-    expect(runner).toContain("API-key fallback is disabled");
+    expect(runner).toContain("validate-scout-openai-auth.py");
+    expect(authValidator).toContain("API-key fallback is disabled");
+    expect(installer).toContain("validate-scout-openai-auth.py");
     expect(installer).toContain("preserve_executor_enabled");
     expect(installer).toContain('openclaw cron enable "${canonical_executor_job_id}"');
+  });
+
+  it("accepts modern Codex OAuth routing and rejects API-key-only Scout auth", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-scout-auth-"));
+    const modernStatusPath = path.join(directory, "modern.json");
+    const apiStatusPath = path.join(directory, "api.json");
+    await writeFile(modernStatusPath, JSON.stringify({
+      auth: {
+        providersWithOAuth: ["openai (1)"],
+        missingProvidersInUse: [],
+        runtimeAuthRoutes: [{ provider: "openai", runtime: "codex", status: "usable" }],
+      },
+    }));
+    await writeFile(apiStatusPath, JSON.stringify({
+      auth: {
+        providersWithOAuth: [],
+        missingProvidersInUse: [],
+        runtimeAuthRoutes: [{ provider: "openai", runtime: "codex", status: "usable" }],
+      },
+    }));
+
+    try {
+      await expect(execFileAsync("/usr/bin/python3", [
+        scoutOpenAiAuthValidatorPath,
+        modernStatusPath,
+      ])).resolves.toBeDefined();
+      await expect(execFileAsync("/usr/bin/python3", [
+        scoutOpenAiAuthValidatorPath,
+        apiStatusPath,
+      ])).rejects.toMatchObject({
+        stderr: expect.stringContaining("API-key fallback is disabled"),
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preflights the installed backlink runtime without claiming or sending work", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "newl-backlink-preflight-"));
+    const openclawPath = path.join(directory, "openclaw");
+    const scoutEnvPath = path.join(directory, "scout.env");
+    const gatewayEnvPath = path.join(directory, "gateway.env");
+    const profilePath = path.join(directory, "profile.json");
+    const commandLogPath = path.join(directory, "commands.log");
+    const fixtures: Record<string, unknown> = {
+      model: {
+        auth: {
+          providersWithOAuth: ["openai (1)"],
+          missingProvidersInUse: [],
+          runtimeAuthRoutes: [{ provider: "openai", runtime: "codex", status: "usable" }],
+        },
+      },
+      plugin: {
+        plugin: {
+          status: "loaded",
+          toolNames: [
+            "newl_backlink_business_profile", "newl_backlink_claim",
+            "newl_backlink_follow_ups", "newl_backlink_verification",
+            "newl_backlink_sync_replies", "newl_backlink_sync_directory_verifications",
+            "newl_backlink_summary", "newl_backlink_send_email",
+            "newl_backlink_send_follow_up", "newl_backlink_fill_directory_credentials",
+            "newl_backlink_report",
+          ],
+        },
+      },
+      skill: { eligible: true, modelVisible: true },
+      agents: [{
+        id: "scout",
+        tools: {
+          profile: "minimal",
+          alsoAllow: [
+            "browser", "newl_backlink_business_profile", "newl_backlink_sync_replies",
+            "newl_backlink_sync_directory_verifications", "newl_backlink_follow_ups",
+            "newl_backlink_verification", "newl_backlink_claim", "newl_backlink_send_email",
+            "newl_backlink_send_follow_up", "newl_backlink_fill_directory_credentials",
+            "newl_backlink_report",
+          ],
+          deny: ["exec", "bash", "read", "write", "edit", "apply_patch", "process"],
+        },
+      }],
+      cron: { jobs: [{
+        declarationKey: "newl.website-growth.backlink-outreach.weekday.v1",
+        enabled: false,
+        payload: { kind: "command", argv: ["/bin/zsh", "run-website-growth-backlink-executor.sh"] },
+      }] },
+    };
+    for (const [name, fixture] of Object.entries(fixtures)) {
+      await writeFile(path.join(directory, `${name}.json`), JSON.stringify(fixture));
+    }
+    await writeFile(scoutEnvPath, "NEWL_APPS_URL=https://newl-apps.example.com\n");
+    await writeFile(
+      gatewayEnvPath,
+      "OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN=synthetic-token\nNEWL_DIRECTORY_PASSWORD_MASTER_V1=synthetic-master\n",
+    );
+    await writeFile(profilePath, JSON.stringify({
+      status: "OWNER_APPROVED_2099-01-01",
+      outreachMailbox: "partnerships@newlgroup.com",
+      outreachPolicy: { manualOpportunityApproval: true },
+      submissionRules: { allowPayment: false },
+    }));
+    await writeFile(openclawPath, `#!/bin/zsh
+print -r -- "$*" >> "$COMMAND_LOG_PATH"
+case "$1 $2" in
+  "models status") cat "$FIXTURE_DIRECTORY/model.json" ;;
+  "plugins inspect") cat "$FIXTURE_DIRECTORY/plugin.json" ;;
+  "skills info") cat "$FIXTURE_DIRECTORY/skill.json" ;;
+  "config get") cat "$FIXTURE_DIRECTORY/agents.json" ;;
+  "cron list") cat "$FIXTURE_DIRECTORY/cron.json" ;;
+  *) exit 40 ;;
+esac
+`);
+    await chmod(openclawPath, 0o700);
+
+    try {
+      const { stdout } = await execFileAsync("/bin/zsh", [backlinkPreflightPath], {
+        env: {
+          ...process.env,
+          HOME: directory,
+          OPENCLAW_BIN: openclawPath,
+          WEBSITE_GROWTH_SCOUT_ENV_FILE: scoutEnvPath,
+          OPENCLAW_GATEWAY_ENV_FILE: gatewayEnvPath,
+          WEBSITE_GROWTH_BACKLINK_PROFILE_PATH: profilePath,
+          FIXTURE_DIRECTORY: directory,
+          COMMAND_LOG_PATH: commandLogPath,
+        },
+      });
+      const commands = await readFile(commandLogPath, "utf8");
+      expect(stdout).toContain("preflight passed (schedule disabled)");
+      expect(stdout).toContain("No opportunity was claimed and no message was sent");
+      expect(commands.trim().split("\n")).toHaveLength(5);
+      expect(commands).not.toMatch(/^agent\b|\bmessage\b|\bclaim\b/m);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("sends safe Teams outcomes for duplicate and failed runs", async () => {
@@ -819,6 +963,7 @@ print(json.dumps({"calls": calls, "triage": triage, "finalist": finalist}))
   it.each([
     "install-website-growth-scout.sh",
     "install-website-growth-backlink-executor.sh",
+    "preflight-website-growth-backlink-executor.sh",
     "enable-website-growth-backlink-executor.sh",
     "run-website-growth-backlink-executor.sh",
     "run-rivet-backlink-failure-monitor.sh",
