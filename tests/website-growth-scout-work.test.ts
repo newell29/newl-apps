@@ -49,6 +49,9 @@ describe("Scout work model", () => {
     expect(() => parseResult({ decision: "DELIVER", summary: "Ready", nextAction: "Review" }, now)).toThrow();
     expect(() => parseResult({ decision: "WAIT", summary: "Missing source", nextAction: "Retry", reviewInDays: 0 }, now)).toThrow();
     expect(parseResult({ decision: "WAIT", summary: "Missing source", nextAction: "Retry", reviewInDays: 2 }, now).nextReviewAt).toBe("2026-06-17T12:00:00.000Z");
+    expect(parseResult({ decision: "WAIT", summary: "Missing source", nextAction: "Retry", reviewInDays: 2,
+      waitBlocker: { type: "DATA_REFRESH", evidenceNeeded: "A fresh query comparison", resolutionAction: "Refresh saved Search Console evidence", resolvableByScout: true } }, now).waitBlocker)
+      .toMatchObject({ type: "DATA_REFRESH", resolvableByScout: true });
   });
   it("retries failed and legacy research, expires completed research, and preserves recent completed dedupe", () => {
     const base = { startedAt: now, output: { backlinkDiscovery: { seenUrlHashes: ["old"], reviewedUrlHashes: ["complete"] } } };
@@ -107,6 +110,15 @@ describe("Scout persisted work and budgets", () => {
     expect(saved?.state).toBe("WAITING");
     expect(isDue(saved!, now)).toBe(false);
     expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
+  });
+  it("records a structured wait action and surfaces only irreducible owner input", async () => {
+    db.automationJobRun.findFirst.mockResolvedValue({ output: leased() });
+    const saved = await completeScoutWork("tenant-a", "work-synthetic", "lease-synthetic", { decision: "WAIT", summary: "A private commercial fact is required", nextAction: "Confirm the service minimum", reviewInDays: 7,
+      waitBlocker: { type: "OWNER_INPUT", evidenceNeeded: "The approved minimum order quantity", resolutionAction: "Confirm the minimum or direct Scout to omit it", resolvableByScout: false } }, now);
+    expect(saved.evidence.waitBlocker).toMatchObject({ type: "OWNER_INPUT", resolvableByScout: false });
+    expect(saved.evidence.externalWait).toBe(true);
+    expect(saved.evidence.escalation).toBeTruthy();
+    expect(saved.nextAction).toContain("Owner input needed");
   });
   it("returns a saved completion after a lost acknowledgement without creating another artifact", async () => {
     const saved = { ...work(), state: "NEEDS_REVIEW", history: [{ at: now.toISOString(), action: "COMPLETED:lease-synthetic", summary: "Saved" }] };
@@ -248,10 +260,10 @@ it("can learn and propose from partial post-change evidence with explicit low co
 it("escalates repeated quality failures and resumes only when the owner supplies direction", async () => {
   db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH", attempts: 3 } });
   const saved = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "DELIVER", supervisor: { verdict: "REVISE", reason: "Need verified evidence" }, summary: "Prepared", nextAction: "Review", artifact: { recommendation: "Unverified" } }, now);
-  expect(saved.evidence.externalWait).toBe(true); expect(saved.evidence.escalation).toBeTruthy(); expect(isDue(saved, new Date("2027-01-01"))).toBe(false);
+  expect(saved.evidence.externalWait).toBe(true); expect(saved.evidence.escalation).toBeTruthy(); expect(saved.evidence.waitBlocker).toMatchObject({ type: "OWNER_INPUT", resolvableByScout: false }); expect(isDue(saved, new Date("2027-01-01"))).toBe(false);
   db.automationJobRun.findFirst.mockResolvedValue({ output: saved });
   await reviewScoutWork("tenant-a", "user-synthetic", "work", saved.revision, "REVISE", "Use the approved public service facts");
-  expect(db.automationJobRun.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ output: expect.objectContaining({ state: "READY", evidence: expect.objectContaining({ escalation: null, externalWait: false }) }) }) }));
+  expect(db.automationJobRun.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({ data: expect.objectContaining({ output: expect.objectContaining({ state: "READY", evidence: expect.objectContaining({ escalation: null, externalWait: false, waitBlocker: null }) }) }) }));
 });
 
 it("does not allow a stale workboard to revise an already-approved brief", async () => {

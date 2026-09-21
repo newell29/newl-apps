@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { authenticateWebsiteGrowthScoutRequest, WebsiteGrowthScoutAuthError } from "@/server/website-growth-scout-auth";
-import { claimScoutWork, completeScoutWork, reconcileScoutWork, scoutWorkContext, scoutWorkspace } from "@/modules/website-growth/scout/store";
+import { claimScoutWork, completeScoutWork, reconcileScoutWork, recordScoutWake, scoutWorkContext, scoutWorkspace } from "@/modules/website-growth/scout/store";
 import { record, ScoutWorkError, text } from "@/modules/website-growth/scout/model";
 import { scoutCandidates, scoutCompetitorEvidence, scoutOutcomes } from "@/modules/website-growth/scout/learning";
 
@@ -24,6 +24,7 @@ export async function POST(request: Request) {
     const input = record(JSON.parse(raw));
     action = typeof input.action === "string" ? input.action.slice(0, 40) : "unknown";
     if (input.action === "prepare") {
+      const wakeId = input.wakeId === undefined ? randomUUID() : text(input.wakeId, "Wake ID", 100);
       const saved = await scoutWorkspace(tenant.id);
       const review = saved.mission.enabled ? await refreshSiteReview(tenant.id).catch(() => loadSiteReview(tenant.id).catch(() => null)) : null;
       const workspace = saved.mission.enabled ? await reconcileScoutWork(tenant.id) : saved;
@@ -37,6 +38,9 @@ export async function POST(request: Request) {
         : workspace.capacity.usedSteps >= workspace.mission.dailySteps ? "The rolling daily research budget is used; Scout will resume as earlier steps leave the 24-hour window."
         : workspace.capacity.active >= workspace.mission.maxActive ? "The active-work limit is reached. Finish the current research or resolve the decisions shown on the workboard."
         : !due.length ? "No research is due. Scout is waiting for a scheduled review or an external system." : null;
+      await recordScoutWake(tenant.id, wakeId, { missionEnabled: workspace.mission.enabled, dueCount: due.length,
+        usedSteps: workspace.capacity.usedSteps, dailySteps: workspace.mission.dailySteps,
+        active: workspace.capacity.active, maxActive: workspace.mission.maxActive, idleReason });
       return NextResponse.json({ data: { mission: workspace.mission, configured: workspace.configured,
         capacity: workspace.capacity, truncated: workspace.truncated, idleReason, items, due: due.map(item => item.id),
         learning: due.length ? { outcomes: scoutOutcomes(workspace.items), competitors: await scoutCompetitorEvidence(tenant.id), effectiveness: effectivenessPacket(review) } : null } });

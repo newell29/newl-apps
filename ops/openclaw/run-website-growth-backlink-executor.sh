@@ -11,6 +11,7 @@ scout_env_file="${WEBSITE_GROWTH_SCOUT_ENV_FILE:-${HOME}/.openclaw/agents/scout/
 gateway_env_file="${OPENCLAW_GATEWAY_ENV_FILE:-${HOME}/.openclaw/.env}"
 prompt_path="${runner_directory}/prompts/website-growth-backlink-executor.md"
 validator_path="${runner_directory}/validate-website-growth-backlink-agent-run.py"
+model_auth_validator="${runner_directory}/validate-scout-openai-auth.py"
 openclaw_command="${OPENCLAW_BIN:-openclaw}"
 curl_command="${CURL_BIN:-curl}"
 scout_sessions_directory="${OPENCLAW_SCOUT_SESSIONS_DIR:-${HOME}/.openclaw/agents/scout/sessions}"
@@ -60,16 +61,7 @@ agent_status=0
 
 if ! "${openclaw_command}" models status --agent scout --json > "${model_status_path}" 2> "${agent_error_path}"; then
   agent_status=71
-elif ! /usr/bin/python3 - "${model_status_path}" >> "${agent_error_path}" 2>&1 <<'PY'
-import json, sys
-with open(sys.argv[1], encoding="utf-8") as handle:
-    status = json.load(handle)
-providers = ((status.get("auth") or {}).get("oauth") or {}).get("providers") or []
-openai = next((row for row in providers if row.get("provider") == "openai"), None)
-effective = (openai or {}).get("effectiveProfiles") or []
-if not any(row.get("type") == "oauth" and row.get("status") == "ok" for row in effective):
-    raise SystemExit("Scout does not have an effective OpenAI OAuth profile. API-key fallback is disabled for Website Growth.")
-PY
+elif ! /usr/bin/python3 "${model_auth_validator}" "${model_status_path}" >> "${agent_error_path}" 2>&1
 then
   agent_status=71
 fi

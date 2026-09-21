@@ -1,7 +1,17 @@
 import { SupplyChainDesignTableType } from "@prisma/client";
 
 import { parseCsvRows } from "@/modules/supply-chain-design/csv-intake";
+import {
+  normalizeSupplyChainDesignMoney,
+  supplyChainDesignFxSnapshot,
+  type SupplyChainDesignCurrencyContext,
+  type SupplyChainDesignFxSnapshot
+} from "@/modules/supply-chain-design/currency";
 import type { SupplyChainDesignFieldMapping } from "@/modules/supply-chain-design/types";
+import {
+  convertSupplyChainDesignWeightToPounds,
+  normalizeSupplyChainDesignWeightUnit
+} from "@/modules/supply-chain-design/weight-units";
 
 export type SupplyChainDesignModel01ProofInput = {
   currentNetworkActivity?: SupplyChainDesignMappedFile | null;
@@ -10,6 +20,7 @@ export type SupplyChainDesignModel01ProofInput = {
   inventory?: SupplyChainDesignMappedFile | null;
   facilityCosts?: SupplyChainDesignMappedFile | null;
   customers?: SupplyChainDesignMappedFile | null;
+  currencyContext?: SupplyChainDesignCurrencyContext | null;
 };
 
 export type SupplyChainDesignMappedFile = {
@@ -21,6 +32,7 @@ export type SupplyChainDesignMappedFile = {
 };
 
 export type SupplyChainDesignModel01ProofResult = {
+  normalizedWeightUnit?: "lb";
   facilityCount: number;
   shipmentCount: number;
   hasTransportationCost: boolean;
@@ -142,6 +154,7 @@ export type SupplyChainDesignModel01ProofResult = {
   transportationCostByCurrency?: Array<{ currency: string; transportationCost: number }>;
   facilityCostByCurrency?: Array<{ currency: string; facilityOperatingCost: number }>;
   observedNetworkCostByCurrency?: Array<{ currency: string; observedCost: number }>;
+  fxSnapshot?: SupplyChainDesignFxSnapshot;
   snapshotPalletUtilization?: Array<{
     facilityId: string;
     facilityName: string;
@@ -163,6 +176,7 @@ export function runSupplyChainDesignModel01Proof(
   input: SupplyChainDesignModel01ProofInput
 ): SupplyChainDesignModel01ProofResult {
   const normalizedInput = input.currentNetworkActivity ? normalizeCurrentNetworkActivityInput(input) : input;
+  const currencyContext = input.currencyContext ?? null;
   const facilities = readMappedRows(normalizedInput.facilities, ["facility_id", "facility_name"]);
   const shipments = readMappedRows(normalizedInput.shipments, ["origin_facility_id"]);
   const inventory = normalizedInput.inventory ? readMappedRows(normalizedInput.inventory, ["facility_id", "item_id", "quantity"]) : null;
@@ -175,11 +189,12 @@ export function runSupplyChainDesignModel01Proof(
   const shipmentCostColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "transportation_cost");
   const shipmentDestinationColumn = normalizedInput.customers ? getSourceColumn(normalizedInput.shipments.fieldMappings, "destination_id") : null;
   const serviceDaysColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "service_days");
-  const shipmentQuantityColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "shipment_quantity");
   const palletsColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "pallets");
   const unitsColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "units");
   const weightColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "weight");
-  const currencyColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "currency");
+  const weightUnitColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "weight_unit");
+  const currencyColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "transportation_cost_currency") ??
+    getSourceColumn(normalizedInput.shipments.fieldMappings, "currency");
   const modeColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "mode");
   const serviceLevelColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "service_level");
   const itemColumn = getSourceColumn(normalizedInput.shipments.fieldMappings, "item_id");
@@ -192,11 +207,9 @@ export function runSupplyChainDesignModel01Proof(
   const facilityAnnualCostColumn =
     getSourceColumn(normalizedInput.facilities.fieldMappings, "annual_facility_warehouse_cost") ??
     getSourceColumn(normalizedInput.facilities.fieldMappings, "annual_fixed_cost");
-  const facilityCurrencyColumn = getSourceColumn(normalizedInput.facilities.fieldMappings, "currency");
   const facilityInventoryPalletsColumn = getSourceColumn(normalizedInput.facilities.fieldMappings, "current_inventory_pallets");
   const facilityInventoryUnitsColumn = getSourceColumn(normalizedInput.facilities.fieldMappings, "current_inventory_units");
   const facilityInventoryValueColumn = getSourceColumn(normalizedInput.facilities.fieldMappings, "current_inventory_value");
-  const facilityCostCurrencyColumn = normalizedInput.facilityCosts ? getSourceColumn(normalizedInput.facilityCosts.fieldMappings, "currency") : null;
   const annualDemandColumn = normalizedInput.customers ? getSourceColumn(normalizedInput.customers.fieldMappings, "annual_demand") : null;
   const activityWarnings = input.currentNetworkActivity ? getActivityWarnings(normalizedInput) : [];
   const facilityIds = new Set<string>();
@@ -296,20 +309,17 @@ export function runSupplyChainDesignModel01Proof(
         valueAt(row, facilities.columnIndexes, "annual_fixed_cost").trim();
       if (rawAnnualCost) {
         const annualCost = parseNumber(rawAnnualCost, "FACILITIES annual_facility_warehouse_cost");
-        totalFacilityOperatingCost += annualCost;
-        facilityOperatingCostByFacility.set(facilityId, (facilityOperatingCostByFacility.get(facilityId) ?? 0) + annualCost);
+        const currency = valueAt(row, facilities.columnIndexes, "annual_facility_warehouse_cost_currency").trim() ||
+          valueAt(row, facilities.columnIndexes, "annual_fixed_cost_currency").trim() ||
+          valueAt(row, facilities.columnIndexes, "currency").trim();
+        const normalized = normalizeBaselineMoney(annualCost, currency, currencyContext, `FACILITIES ${facilityId} annual facility/warehouse cost`);
+        totalFacilityOperatingCost += normalized.normalizedAmount;
+        facilityOperatingCostByFacility.set(facilityId, (facilityOperatingCostByFacility.get(facilityId) ?? 0) + normalized.normalizedAmount);
         facilityOperatingCostByCategory.set(
           "Annual facility and warehouse cost",
-          (facilityOperatingCostByCategory.get("Annual facility and warehouse cost") ?? 0) + annualCost
+          (facilityOperatingCostByCategory.get("Annual facility and warehouse cost") ?? 0) + normalized.normalizedAmount
         );
-        if (facilityCurrencyColumn) {
-          const currency = valueAt(row, facilities.columnIndexes, "currency").trim();
-          if (currency) {
-            facilityCostByCurrency.set(currency, (facilityCostByCurrency.get(currency) ?? 0) + annualCost);
-          } else {
-            currencyWarnings.push(`${facilityId} has annual facility/warehouse cost but no currency.`);
-          }
-        }
+        facilityCostByCurrency.set(normalized.originalCurrency, (facilityCostByCurrency.get(normalized.originalCurrency) ?? 0) + annualCost);
       }
     }
     if (facilityInventoryUnitsColumn) {
@@ -322,8 +332,11 @@ export function runSupplyChainDesignModel01Proof(
     if (facilityInventoryValueColumn) {
       const value = parseOptionalNumber(valueAt(row, facilities.columnIndexes, "current_inventory_value"), "FACILITIES current_inventory_value");
       if (value !== null) {
-        totalInventoryValue += value;
-        inventoryValueByFacility.set(facilityId, (inventoryValueByFacility.get(facilityId) ?? 0) + value);
+        const currency = valueAt(row, facilities.columnIndexes, "current_inventory_value_currency").trim() ||
+          valueAt(row, facilities.columnIndexes, "currency").trim();
+        const normalized = normalizeBaselineMoney(value, currency, currencyContext, `FACILITIES ${facilityId} current inventory value`);
+        totalInventoryValue += normalized.normalizedAmount;
+        inventoryValueByFacility.set(facilityId, (inventoryValueByFacility.get(facilityId) ?? 0) + normalized.normalizedAmount);
       }
     }
     if (facilityInventoryPalletsColumn) {
@@ -365,9 +378,7 @@ export function runSupplyChainDesignModel01Proof(
       valueAt(row, shipments.columnIndexes, "shipment_reference").trim() ||
       `SHIPMENT-${String(totalShipmentQuantity + 1).padStart(5, "0")}`;
     const originFacilityId = requiredValue(row, shipments.columnIndexes, "origin_facility_id", "SHIPMENTS");
-    const shipmentQuantity = shipmentQuantityColumn
-      ? parseOptionalPositiveNumber(valueAt(row, shipments.columnIndexes, "shipment_quantity"), "SHIPMENTS shipment_quantity") ?? 1
-      : 1;
+    const shipmentQuantity = parseOptionalPositiveNumber(valueAt(row, shipments.columnIndexes, "shipment_quantity"), "SHIPMENTS shipment_quantity") ?? 1;
     totalShipmentQuantity += shipmentQuantity;
     const destinationId = customers
       ? requiredValue(row, shipments.columnIndexes, "destination_id", "SHIPMENTS")
@@ -388,36 +399,34 @@ export function runSupplyChainDesignModel01Proof(
       unmatchedShipmentOriginIds.add(originFacilityId);
     }
 
+    let normalizedShipmentTransportationCost: number | null = null;
     if (shipmentCostColumn) {
       const rawCost = valueAt(row, shipments.columnIndexes, "transportation_cost").trim();
       if (!rawCost) {
         throw new Error("SHIPMENTS transportation_cost is blank in a row used by the proof run.");
       }
       const cost = parseNumber(rawCost, "SHIPMENTS transportation_cost");
-      if (currencyColumn && !valueAt(row, shipments.columnIndexes, "currency").trim()) {
-        currencyWarnings.push(`Shipment ${shipmentId} has transportation cost but no currency.`);
-      }
-      if (currencyColumn) {
-        const currency = valueAt(row, shipments.columnIndexes, "currency").trim();
-        if (currency) {
-          transportationCostByCurrency.set(currency, (transportationCostByCurrency.get(currency) ?? 0) + cost);
-          shipmentQuantityByCurrency.set(currency, (shipmentQuantityByCurrency.get(currency) ?? 0) + shipmentQuantity);
-        }
-      }
-      totalTransportationCost += cost;
-      transportationCostByOrigin.set(originFacilityId, (transportationCostByOrigin.get(originFacilityId) ?? 0) + cost);
+      const currency = valueAt(row, shipments.columnIndexes, "transportation_cost_currency").trim() ||
+        valueAt(row, shipments.columnIndexes, "currency").trim();
+      const normalized = normalizeBaselineMoney(cost, currency, currencyContext, `Shipment ${shipmentId} transportation cost`);
+      normalizedShipmentTransportationCost = normalized.normalizedAmount;
+      transportationCostByCurrency.set(normalized.originalCurrency, (transportationCostByCurrency.get(normalized.originalCurrency) ?? 0) + cost);
+      shipmentQuantityByCurrency.set(normalized.originalCurrency, (shipmentQuantityByCurrency.get(normalized.originalCurrency) ?? 0) + shipmentQuantity);
+      totalTransportationCost += normalized.normalizedAmount;
+      transportationCostByOrigin.set(originFacilityId, (transportationCostByOrigin.get(originFacilityId) ?? 0) + normalized.normalizedAmount);
       if (destinationId) {
         transportationCostByDestination.set(
           destinationId,
-          (transportationCostByDestination.get(destinationId) ?? 0) + cost
+          (transportationCostByDestination.get(destinationId) ?? 0) + normalized.normalizedAmount
         );
-        transportationCostByLane.set(laneKey ?? "", (transportationCostByLane.get(laneKey ?? "") ?? 0) + cost);
+        transportationCostByLane.set(laneKey ?? "", (transportationCostByLane.get(laneKey ?? "") ?? 0) + normalized.normalizedAmount);
       }
     }
 
     const pallets = parseOptionalNumber(valueAt(row, shipments.columnIndexes, "pallets"), "SHIPMENTS pallets");
     const units = parseOptionalNumber(valueAt(row, shipments.columnIndexes, "units"), "SHIPMENTS units");
     const weight = parseOptionalNumber(valueAt(row, shipments.columnIndexes, "weight"), "SHIPMENTS weight");
+    let weightInPounds: number | null = null;
     if (pallets !== null) {
       totalPallets += pallets;
       palletsByFacility.set(originFacilityId, (palletsByFacility.get(originFacilityId) ?? 0) + pallets);
@@ -427,23 +436,34 @@ export function runSupplyChainDesignModel01Proof(
       unitsByFacility.set(originFacilityId, (unitsByFacility.get(originFacilityId) ?? 0) + units);
     }
     if (weight !== null) {
-      totalWeight += weight;
-      weightByFacility.set(originFacilityId, (weightByFacility.get(originFacilityId) ?? 0) + weight);
+
+      const unitResult = normalizeSupplyChainDesignWeightUnit(valueAt(row, shipments.columnIndexes, "weight_unit"));
+      if (!unitResult.ok && weightUnitColumn) {
+        throw new Error(
+          unitResult.reason === "MISSING"
+            ? "SHIPMENTS weight_unit is required when Weight is supplied."
+            : `SHIPMENTS weight_unit "${unitResult.sourceValue}" is not supported. Use lb or kg.`
+        );
+      }
+      weightInPounds = unitResult.ok ? convertSupplyChainDesignWeightToPounds(weight, unitResult.unit) : weight;
+      totalWeight += weightInPounds;
+      weightByFacility.set(originFacilityId, (weightByFacility.get(originFacilityId) ?? 0) + weightInPounds);
     }
     if (currencyColumn) {
-      const currency = valueAt(row, shipments.columnIndexes, "currency").trim();
+      const currency = valueAt(row, shipments.columnIndexes, "transportation_cost_currency").trim() ||
+        valueAt(row, shipments.columnIndexes, "currency").trim();
       if (currency) {
         if (pallets !== null) palletsByCurrency.set(currency, (palletsByCurrency.get(currency) ?? 0) + pallets);
         if (units !== null) unitsByCurrency.set(currency, (unitsByCurrency.get(currency) ?? 0) + units);
-        if (weight !== null) weightByCurrency.set(currency, (weightByCurrency.get(currency) ?? 0) + weight);
+        if (weightInPounds !== null) weightByCurrency.set(currency, (weightByCurrency.get(currency) ?? 0) + weightInPounds);
       }
     }
     if (modeColumn) {
       const mode = valueAt(row, shipments.columnIndexes, "mode").trim();
       if (mode) {
         modeShipments.set(mode, (modeShipments.get(mode) ?? 0) + shipmentQuantity);
-        if (shipmentCostColumn) {
-          modeCosts.set(mode, (modeCosts.get(mode) ?? 0) + parseNumber(valueAt(row, shipments.columnIndexes, "transportation_cost"), "SHIPMENTS transportation_cost"));
+        if (normalizedShipmentTransportationCost !== null) {
+          modeCosts.set(mode, (modeCosts.get(mode) ?? 0) + normalizedShipmentTransportationCost);
         }
       }
     }
@@ -498,8 +518,10 @@ export function runSupplyChainDesignModel01Proof(
           throw new Error("INVENTORY unit_cost is blank in a row used by the proof run.");
         }
         const rowValue = quantity * parseNumber(rawUnitCost, "INVENTORY unit_cost");
-        totalInventoryValue += rowValue;
-        inventoryValueByFacility.set(facilityId, (inventoryValueByFacility.get(facilityId) ?? 0) + rowValue);
+        const currency = valueAt(row, inventory.columnIndexes, "unit_cost_currency").trim() || valueAt(row, inventory.columnIndexes, "currency").trim();
+        const normalized = normalizeBaselineMoney(rowValue, currency, currencyContext, `INVENTORY ${facilityId} unit cost`);
+        totalInventoryValue += normalized.normalizedAmount;
+        inventoryValueByFacility.set(facilityId, (inventoryValueByFacility.get(facilityId) ?? 0) + normalized.normalizedAmount);
       }
       if (inventoryPalletsColumn && inventorySnapshotDateColumn) {
         const rawPallets = valueAt(row, inventory.columnIndexes, "inventory_pallets").trim();
@@ -549,22 +571,18 @@ export function runSupplyChainDesignModel01Proof(
         "FACILITY_COSTS annual_cost"
       );
 
-      totalFacilityOperatingCost += annualCost;
-      if (facilityCostCurrencyColumn) {
-        const currency = valueAt(row, facilityCosts.columnIndexes, "currency").trim();
-        if (currency) {
-          facilityCostByCurrency.set(currency, (facilityCostByCurrency.get(currency) ?? 0) + annualCost);
-        } else {
-          currencyWarnings.push(`${facilityId} ${costCategory} has facility cost but no currency.`);
-        }
-      }
+      const currency = valueAt(row, facilityCosts.columnIndexes, "annual_cost_currency").trim() ||
+        valueAt(row, facilityCosts.columnIndexes, "currency").trim();
+      const normalized = normalizeBaselineMoney(annualCost, currency, currencyContext, `FACILITY_COSTS ${facilityId} ${costCategory} annual cost`);
+      totalFacilityOperatingCost += normalized.normalizedAmount;
+      facilityCostByCurrency.set(normalized.originalCurrency, (facilityCostByCurrency.get(normalized.originalCurrency) ?? 0) + annualCost);
       facilityOperatingCostByFacility.set(
         facilityId,
-        (facilityOperatingCostByFacility.get(facilityId) ?? 0) + annualCost
+        (facilityOperatingCostByFacility.get(facilityId) ?? 0) + normalized.normalizedAmount
       );
       facilityOperatingCostByCategory.set(
         costCategory,
-        (facilityOperatingCostByCategory.get(costCategory) ?? 0) + annualCost
+        (facilityOperatingCostByCategory.get(costCategory) ?? 0) + normalized.normalizedAmount
       );
 
       if (!facilityIds.has(facilityId)) {
@@ -668,6 +686,8 @@ export function runSupplyChainDesignModel01Proof(
     transportationCostByCurrency: sortCurrencyCosts(transportationCostByCurrency, "transportationCost"),
     facilityCostByCurrency: sortCurrencyCosts(facilityCostByCurrency, "facilityOperatingCost"),
     observedNetworkCostByCurrency: sortObservedCostsByCurrency(transportationCostByCurrency, facilityCostByCurrency),
+    normalizedWeightUnit: weightUnitColumn && shipments.rows.every((row) => !valueAt(row, shipments.columnIndexes, "weight").trim() || normalizeSupplyChainDesignWeightUnit(valueAt(row, shipments.columnIndexes, "weight_unit")).ok) ? "lb" : undefined,
+    fxSnapshot: currencyContext ? supplyChainDesignFxSnapshot(currencyContext) : undefined,
     snapshotPalletUtilization,
     modeSummary: modeColumn ? sortModeSummary(modeShipments, modeCosts, Boolean(shipmentCostColumn)) : [],
     serviceLevelSummary: serviceLevelColumn ? sortServiceLevelSummary(serviceLevelShipments) : [],
@@ -680,10 +700,10 @@ export function runSupplyChainDesignModel01Proof(
         : null,
     deferredValidation: [
       "Full row-level validation framework",
-      "Date, location, unit, and currency normalization",
+      "Date, location, and unit normalization",
       "Duplicate business-key detection",
       "Full Model 01 cost categories",
-      "Currency conversion, inflation adjustments, and cost-period normalization",
+      "Inflation adjustments and cost-period normalization",
       "Cost allocation, inventory, service, capacity, and optimization rules",
       "Customer normalization, fuzzy matching, geocoding, duplicate handling, and advanced destination validation"
     ]
@@ -712,8 +732,7 @@ function normalizeCurrentNetworkActivityInput(
   for (const row of activityRows.rows) {
     const rawShipmentReference = activityValue(row, activityRows.columnIndexes, "shipment_reference");
     const shipmentQuantity = activityValue(row, activityRows.columnIndexes, "shipment_quantity");
-    const recordType = activityValue(row, activityRows.columnIndexes, "record_type");
-    validateActivityRecordType(recordType, rawShipmentReference, shipmentQuantity);
+    validateActivityRecordType(activityValue(row, activityRows.columnIndexes, "record_type"), activityValue(row, activityRows.columnIndexes, "shipment_reference"), shipmentQuantity);
     const shipmentReference = rawShipmentReference || `ACTIVITY-${String(shipmentRows.length + 1).padStart(5, "0")}`;
     const facilityId = requiredActivityValue(row, activityRows.columnIndexes, "origin_facility_id");
     const facilityName = requiredActivityValue(row, activityRows.columnIndexes, "facility_name");
@@ -723,7 +742,11 @@ function normalizeCurrentNetworkActivityInput(
       facility_type: activityValue(row, activityRows.columnIndexes, "facility_type"),
       postal_code: activityValue(row, activityRows.columnIndexes, "postal_code"),
       country: activityValue(row, activityRows.columnIndexes, "country"),
-      capacity: activityValue(row, activityRows.columnIndexes, "facility_capacity_pallet_positions")
+      capacity: activityValue(row, activityRows.columnIndexes, "facility_capacity_pallet_positions"),
+      annual_facility_warehouse_cost: activityValue(row, activityRows.columnIndexes, "annual_facility_warehouse_cost"),
+      annual_facility_warehouse_cost_currency:
+        activityValue(row, activityRows.columnIndexes, "annual_facility_warehouse_cost_currency") ||
+        activityValue(row, activityRows.columnIndexes, "currency")
     };
     upsertDedupeRecord(facilities, facilityId, facilityRecord, "facility", warnings);
 
@@ -736,7 +759,11 @@ function normalizeCurrentNetworkActivityInput(
       pallets: activityValue(row, activityRows.columnIndexes, "pallets"),
       units: activityValue(row, activityRows.columnIndexes, "units"),
       weight: activityValue(row, activityRows.columnIndexes, "weight"),
+      weight_unit: activityValue(row, activityRows.columnIndexes, "weight_unit"),
       transportation_cost: activityValue(row, activityRows.columnIndexes, "transportation_cost"),
+      transportation_cost_currency:
+        activityValue(row, activityRows.columnIndexes, "transportation_cost_currency") ||
+        activityValue(row, activityRows.columnIndexes, "currency"),
       service_days: activityValue(row, activityRows.columnIndexes, "service_days"),
       mode: activityValue(row, activityRows.columnIndexes, "mode"),
       service_level: activityValue(row, activityRows.columnIndexes, "service_level"),
@@ -777,6 +804,9 @@ function normalizeCurrentNetworkActivityInput(
           quantity,
           inventory_pallets: activityValue(row, activityRows.columnIndexes, "inventory_pallets"),
           unit_cost: unitCost,
+          unit_cost_currency:
+            activityValue(row, activityRows.columnIndexes, "inventory_value_total_currency") ||
+            activityValue(row, activityRows.columnIndexes, "currency"),
           snapshot_date: activityValue(row, activityRows.columnIndexes, "snapshot_date")
         });
       }
@@ -788,7 +818,23 @@ function normalizeCurrentNetworkActivityInput(
 
   return {
     ...input,
-    facilities: mappedFileFromRows(activity, "FACILITIES", ["facility_id", "facility_name", "facility_type", "postal_code", "country", "capacity"], facilityRows),
+    facilities: mappedFileFromRows(
+      activity,
+      "FACILITIES",
+      [
+        "facility_id",
+        "facility_name",
+        "facility_type",
+        "postal_code",
+        "country",
+        "capacity",
+        ...(hasActivityField(activityRows, "annual_facility_warehouse_cost") ? ["annual_facility_warehouse_cost"] : []),
+        ...(hasActivityField(activityRows, "annual_facility_warehouse_cost_currency") || hasActivityField(activityRows, "currency")
+          ? ["annual_facility_warehouse_cost_currency"]
+          : [])
+      ],
+      facilityRows
+    ),
     shipments: mappedFileFromRows(
       activity,
       "SHIPMENTS",
@@ -800,7 +846,11 @@ function normalizeCurrentNetworkActivityInput(
         ...(hasActivityField(activityRows, "pallets") ? ["pallets"] : []),
         ...(hasActivityField(activityRows, "units") ? ["units"] : []),
         ...(hasActivityField(activityRows, "weight") ? ["weight"] : []),
+        ...(hasActivityField(activityRows, "weight_unit") ? ["weight_unit"] : []),
         ...(hasActivityField(activityRows, "transportation_cost") ? ["transportation_cost"] : []),
+        ...(hasActivityField(activityRows, "transportation_cost_currency") || hasActivityField(activityRows, "currency")
+          ? ["transportation_cost_currency"]
+          : []),
         ...(hasActivityField(activityRows, "service_days") ? ["service_days"] : []),
         ...(hasActivityField(activityRows, "mode") ? ["mode"] : []),
         ...(hasActivityField(activityRows, "service_level") ? ["service_level"] : []),
@@ -823,6 +873,9 @@ function normalizeCurrentNetworkActivityInput(
               "quantity",
               ...(hasActivityField(activityRows, "inventory_pallets") ? ["inventory_pallets"] : []),
               ...(hasInventoryValue ? ["unit_cost"] : []),
+              ...(hasInventoryValue && (hasActivityField(activityRows, "inventory_value_total_currency") || hasActivityField(activityRows, "currency"))
+                ? ["unit_cost_currency"]
+                : []),
               "snapshot_date"
             ],
             inventoryRows
@@ -1115,34 +1168,9 @@ function parseOptionalNumber(rawValue: string, label: string) {
   return value ? parseNumber(value, label) : null;
 }
 
-function parseOptionalPositiveNumber(rawValue: string, label: string) {
-  const parsed = parseOptionalNumber(rawValue, label);
-  if (parsed === null) return null;
-  if (parsed <= 0) {
-    throw new Error(`${label} must be greater than zero.`);
-  }
-  return parsed;
-}
 
-function validateActivityRecordType(recordType: string, shipmentReference: string, shipmentQuantity: string) {
-  const normalized = recordType.trim().toLowerCase();
-  if (normalized && normalized !== "individual shipment" && normalized !== "aggregated activity") {
-    throw new Error(`CURRENT_NETWORK_ACTIVITY Record Type "${recordType}" must be Individual Shipment or Aggregated Activity.`);
-  }
-  const quantity = shipmentQuantity.trim() ? parseNumber(shipmentQuantity, "CURRENT_NETWORK_ACTIVITY Shipments") : null;
-  if (quantity !== null && quantity <= 0) {
-    throw new Error("CURRENT_NETWORK_ACTIVITY Shipments must be greater than zero.");
-  }
-  if (normalized === "individual shipment" && quantity !== null && quantity > 1) {
-    throw new Error("CURRENT_NETWORK_ACTIVITY Individual Shipment rows cannot have Shipments greater than 1.");
-  }
-  if (normalized === "aggregated activity" && quantity === null) {
-    throw new Error("CURRENT_NETWORK_ACTIVITY Aggregated Activity rows must include Shipments.");
-  }
-  if (!normalized && !shipmentReference.trim() && quantity === null) {
-    throw new Error("CURRENT_NETWORK_ACTIVITY rows without Shipment / Order Reference must include Shipments.");
-  }
-}
+
+
 
 function divideOrNull(numerator: number, denominator: number) {
   return denominator > 0 ? numerator / denominator : null;
@@ -1381,4 +1409,38 @@ function buildSnapshotUtilization(
         left.facilityId.localeCompare(right.facilityId) ||
         right.snapshotDate.localeCompare(left.snapshotDate)
     );
+}
+
+function parseOptionalPositiveNumber(rawValue: string, label: string) {
+  const parsed = parseOptionalNumber(rawValue, label);
+  if (parsed === null) return null;
+  if (parsed <= 0) {
+    throw new Error(`${label} must be greater than zero.`);
+  }
+  return parsed;
+}
+
+function validateActivityRecordType(recordType: string, shipmentReference: string, shipmentQuantity: string) {
+  const normalized = recordType.trim().toLowerCase();
+  if (normalized && normalized !== "individual shipment" && normalized !== "aggregated activity") {
+    throw new Error(`CURRENT_NETWORK_ACTIVITY Record Type "${recordType}" must be Individual Shipment or Aggregated Activity.`);
+  }
+  const quantity = shipmentQuantity.trim() ? parseNumber(shipmentQuantity, "CURRENT_NETWORK_ACTIVITY Shipments") : null;
+  if (quantity !== null && quantity <= 0) {
+    throw new Error("CURRENT_NETWORK_ACTIVITY Shipments must be greater than zero.");
+  }
+  if (normalized === "individual shipment" && quantity !== null && quantity > 1) {
+    throw new Error("CURRENT_NETWORK_ACTIVITY Individual Shipment rows cannot have Shipments greater than 1.");
+  }
+  if (normalized === "aggregated activity" && quantity === null) {
+    throw new Error("CURRENT_NETWORK_ACTIVITY Aggregated Activity rows must include Shipments.");
+  }
+  if (!normalized && !shipmentReference.trim() && quantity === null) {
+    throw new Error("CURRENT_NETWORK_ACTIVITY rows without Shipment / Order Reference must include Shipments.");
+  }
+}
+
+function normalizeBaselineMoney(amount: number, currency: string | null | undefined, context: SupplyChainDesignCurrencyContext | null, label: string) {
+  if (context) return normalizeSupplyChainDesignMoney(amount, currency, context, label);
+  return { normalizedAmount: amount, originalCurrency: currency?.trim() || "UNSPECIFIED" };
 }

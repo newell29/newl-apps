@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { newWork, DEFAULT_MISSION } from "@/modules/website-growth/scout/model";
 import { POST } from "@/app/api/website-growth/scout/work-items/route";
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), access: vi.fn(), workspace: vi.fn(), reconcile: vi.fn(), claim: vi.fn(), complete: vi.fn(), context: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), tenant: vi.fn(), access: vi.fn(), workspace: vi.fn(), reconcile: vi.fn(), wake: vi.fn(), claim: vi.fn(), complete: vi.fn(), context: vi.fn() }));
 vi.mock("@/server/website-growth-scout-auth", () => ({ authenticateWebsiteGrowthScoutRequest: mocks.auth,
   WebsiteGrowthScoutAuthError: class extends Error { status = 401; } }));
 vi.mock("@/server/db", () => ({ prisma: { tenant: { findUnique: mocks.tenant }, tenantModuleAccess: { findFirst: mocks.access } } }));
 vi.mock("@/modules/website-growth/scout/store", () => ({ scoutWorkspace: mocks.workspace, reconcileScoutWork: mocks.reconcile,
-  claimScoutWork: mocks.claim, completeScoutWork: mocks.complete, scoutWorkContext: mocks.context }));
+  recordScoutWake: mocks.wake, claimScoutWork: mocks.claim, completeScoutWork: mocks.complete, scoutWorkContext: mocks.context }));
 const effectiveness = vi.hoisted(() => ({ refresh: vi.fn(), load: vi.fn() }));
 vi.mock("@/modules/website-growth/scout/effectiveness", () => ({ refreshSiteReview: effectiveness.refresh, loadSiteReview: effectiveness.load }));
 const request = (body: object) => new Request("https://example.com/api/website-growth/scout/work-items", { method: "POST", body: JSON.stringify(body) });
-beforeEach(() => { vi.resetAllMocks(); effectiveness.refresh.mockResolvedValue(null); effectiveness.load.mockResolvedValue(null); mocks.auth.mockReturnValue({ tenantSlug: "synthetic" }); mocks.tenant.mockResolvedValue({ id: "tenant-authenticated" }); mocks.access.mockResolvedValue({ id: "access" }); });
+beforeEach(() => { vi.resetAllMocks(); effectiveness.refresh.mockResolvedValue(null); effectiveness.load.mockResolvedValue(null); mocks.wake.mockResolvedValue(undefined); mocks.auth.mockReturnValue({ tenantSlug: "synthetic" }); mocks.tenant.mockResolvedValue({ id: "tenant-authenticated" }); mocks.access.mockResolvedValue({ id: "access" }); });
 describe("Scout worker boundary", () => {
   it("resolves the tenant from authentication and ignores model-supplied tenant scope", async () => {
     mocks.claim.mockResolvedValue({ id: "work" });
@@ -63,6 +63,7 @@ it("bounds the selection packet independently of large saved artifacts", async (
   expect(body.data.due).toHaveLength(50);
   expect(body.data.items[0]).not.toHaveProperty("artifact");
   expect(JSON.stringify(body).length).toBeLessThan(100_000);
+  expect(mocks.wake).toHaveBeenCalledWith("tenant-authenticated", expect.any(String), expect.objectContaining({ dueCount: 50, idleReason: null }));
 });
 
 it("continues existing research when the optional site refresh and saved snapshot are unavailable", async () => {

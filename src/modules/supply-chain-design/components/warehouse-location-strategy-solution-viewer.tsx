@@ -76,7 +76,7 @@ export function WarehouseLocationStrategySolutionViewer({
             "Shipments represented",
             ...(result.weightingMethod !== "SHIPMENTS_REPRESENTED" ? [selectedMetricHeader(result)] : []),
             "Share of selected demand",
-            "Average distance to assigned region center"
+            "Weighted average distance to assigned region center"
           ]}
           rows={rows}
         />

@@ -5,10 +5,12 @@ import {
   buildSupplyChainDesignExactLaneRateFingerprint,
   findReusableSupplyChainDesignExactLaneRate
 } from "@/modules/supply-chain-design/ltl-rate-batches";
+import { normalizeSupplyChainDesignLtlPhysicalProfile } from "@/modules/supply-chain-design/ltl-physical-normalization";
 import type { SupplyChainDesignRatingOrigin } from "@/modules/supply-chain-design/rating-origins";
 
 export type SupplyChainDesignNetworkScenarioInput = {
   tenantId: string;
+  projectId: string;
   scenarioId: string;
   scenarioName: string;
   selectedOrigins: SupplyChainDesignNetworkScenarioOrigin[];
@@ -24,6 +26,8 @@ export type SupplyChainDesignNetworkScenarioInput = {
     accountName: string;
     carrierHashes: string[];
   };
+  bypassExactReuse?: boolean;
+  completedRateBatchIds?: string[];
 };
 
 export type SupplyChainDesignNetworkScenarioOrigin =
@@ -45,6 +49,7 @@ export type SupplyChainDesignNetworkScenarioOrigin =
 
 export type SupplyChainDesignScenarioAlternativeStatus =
   | "REUSED"
+  | "LIVE_RATE"
   | "MISSING_RATE"
   | "INVALID_ORIGIN"
   | "INELIGIBLE_PROFILE";
@@ -85,6 +90,7 @@ export type SupplyChainDesignNetworkScenarioProfileAlternatives = {
   profileKey: string;
   sourceReference: string;
   representedShipments: number;
+  representativeWeight: number | null;
   destination: string;
   historicalTransportationCost: number | null;
   alternatives: SupplyChainDesignNetworkScenarioAlternative[];
@@ -103,7 +109,7 @@ export type SupplyChainDesignNetworkScenarioAlternative = {
   request: LtlQuoteRequest | null;
   reusedSelectedRate: number | null;
   selectedQuote: LtlQuoteResult | null;
-  selectedRateSource: "EXACT_REUSE" | null;
+  selectedRateSource: "EXACT_REUSE" | "LIVE_RATE" | null;
   representedModeledTransportationCost: number | null;
   reuseLineage: {
     sourceLaneId: string;
@@ -216,13 +222,27 @@ export async function evaluateSupplyChainDesignNetworkScenario(
         carrierHashes: input.ratingConfig.carrierHashes,
         request: preflight.request
       });
-      const reusable = await findReusableSupplyChainDesignExactLaneRate({
-        tenantId: input.tenantId,
-        accountId: input.ratingConfig.accountId,
-        carrierHashes: input.ratingConfig.carrierHashes,
-        request: preflight.request
-      });
+      const completedLiveRate = input.completedRateBatchIds?.length
+        ? await findReusableSupplyChainDesignExactLaneRate({
+            tenantId: input.tenantId,
+            projectId: input.projectId,
+            allowedJobRunIds: input.completedRateBatchIds,
+            accountId: input.ratingConfig.accountId,
+            carrierHashes: input.ratingConfig.carrierHashes,
+            request: preflight.request
+          })
+        : null;
+      const reusable = completedLiveRate ?? (input.bypassExactReuse
+        ? null
+        : await findReusableSupplyChainDesignExactLaneRate({
+            tenantId: input.tenantId,
+            projectId: input.projectId,
+            accountId: input.ratingConfig.accountId,
+            carrierHashes: input.ratingConfig.carrierHashes,
+            request: preflight.request
+          }));
       if (reusable) {
+        const selectedRateSource = completedLiveRate ? "LIVE_RATE" : "EXACT_REUSE";
         alternatives.push({
           profileKey,
           sourceReference,
@@ -231,12 +251,12 @@ export async function evaluateSupplyChainDesignNetworkScenario(
           originFacilityId: origin.facilityId,
           originFacilityName: origin.facilityName,
           originSourceType: origin.sourceType,
-          status: "REUSED",
+          status: completedLiveRate ? "LIVE_RATE" : "REUSED",
           laneFingerprint,
           request: preflight.request,
           reusedSelectedRate: reusable.selectedQuote.total,
           selectedQuote: reusable.selectedQuote,
-          selectedRateSource: "EXACT_REUSE",
+          selectedRateSource,
           representedModeledTransportationCost: roundCurrency(reusable.selectedQuote.total * profile.representedShipments),
           reuseLineage: {
             sourceLaneId: reusable.sourceLaneId,
@@ -295,6 +315,7 @@ export async function evaluateSupplyChainDesignNetworkScenario(
       profileKey,
       sourceReference,
       representedShipments: profile.representedShipments,
+      representativeWeight: profile.representativeWeight,
       destination: profile.destinationPostalCode,
       historicalTransportationCost: profile.currentTransportationCost,
       alternatives: alternatives.filter((alternative) => alternative.profileKey === profileKey)
@@ -309,12 +330,12 @@ export async function evaluateSupplyChainDesignNetworkScenario(
       sourceType: origin.sourceType,
       facilityId: origin.facilityId,
       facilityName: origin.facilityName,
-      validProfileCombinations: originAlternatives.filter((alternative) => alternative.status === "REUSED" || alternative.status === "MISSING_RATE").length,
+      validProfileCombinations: originAlternatives.filter((alternative) => isRatedOrMissingStatus(alternative.status)).length,
       reusedLaneCount: originAlternatives.filter((alternative) => alternative.status === "REUSED").length,
       missingRateCount: originAlternatives.filter((alternative) => alternative.status === "MISSING_RATE").length,
       invalidCombinations: originAlternatives.filter((alternative) => alternative.status === "INVALID_ORIGIN" || alternative.status === "INELIGIBLE_PROFILE").length,
       representedShipmentsEvaluated: roundQuantity(originAlternatives
-        .filter((alternative) => alternative.status === "REUSED" || alternative.status === "MISSING_RATE")
+        .filter((alternative) => isRatedOrMissingStatus(alternative.status))
         .reduce((sum, alternative) => sum + alternative.representedShipments, 0))
     };
   });
@@ -335,12 +356,20 @@ export async function evaluateSupplyChainDesignNetworkScenario(
       facilityName: origin.facilityName
     })),
     representedShipmentVolumeCovered: roundQuantity(alternatives
-      .filter((alternative) => alternative.status === "REUSED")
+      .filter((alternative) => isCompletedRateStatus(alternative.status))
       .reduce((sum, alternative) => sum + alternative.representedShipments, 0)),
     originSummaries,
     profileAlternatives,
     missingRateManifest: [...missingByFingerprint.values()].sort((left, right) => left.laneFingerprint.localeCompare(right.laneFingerprint))
   };
+}
+
+function isRatedOrMissingStatus(status: SupplyChainDesignScenarioAlternativeStatus) {
+  return status === "REUSED" || status === "LIVE_RATE" || status === "MISSING_RATE";
+}
+
+function isCompletedRateStatus(status: SupplyChainDesignScenarioAlternativeStatus) {
+  return status === "REUSED" || status === "LIVE_RATE";
 }
 
 function isEligiblePreparedProfile(profile: SupplyChainDesignLtlPreparedRequest) {
@@ -355,13 +384,33 @@ function validateOrigin(origin: SupplyChainDesignNetworkScenarioOrigin) {
 
 function buildScenarioRequest(origin: SupplyChainDesignNetworkScenarioOrigin, profile: SupplyChainDesignLtlPreparedRequest): LtlQuoteRequest {
   const base = profile.normalizedRequest!;
+  const physicalProfile =
+    profile.representativePallets !== null &&
+    profile.representativeWeight !== null &&
+    profile.weightUnit &&
+    profile.length !== null &&
+    profile.width !== null &&
+    profile.height !== null &&
+    profile.dimensionUnit
+      ? normalizeSupplyChainDesignLtlPhysicalProfile({
+          pallets: profile.representativePallets,
+          weight: profile.representativeWeight,
+          weightUnit: profile.weightUnit,
+          length: profile.length,
+          width: profile.width,
+          height: profile.height,
+          dimensionUnit: profile.dimensionUnit
+        })
+      : null;
   return {
     ...base,
     customerReference: `${origin.sourceType}:${origin.facilityId}:${profile.rateRequestKey}`,
     originCity: "",
     originState: "",
     originZipcode: origin.postalCode!,
-    originCountry: origin.country!
+    originCountry: origin.country!,
+    uom: physicalProfile ? "US" : base.uom,
+    pieces: physicalProfile ? [physicalProfile.piece] : base.pieces
   };
 }
 

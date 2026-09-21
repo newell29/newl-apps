@@ -15,9 +15,15 @@ import {
   nearestCanadianDeliveryLocation,
   resolveCanadianDeliveryCity
 } from "@/modules/supply-chain-design/reference-data/canadian-delivery-locations";
+import {
+  buildSupplyChainDesignCurrencyContext,
+  normalizeSupplyChainDesignMoney,
+  type SupplyChainDesignCurrency
+} from "@/modules/supply-chain-design/currency";
 import type { SupplyChainDesignFieldMapping } from "@/modules/supply-chain-design/types";
+import { normalizeSupplyChainDesignWeightUnit } from "@/modules/supply-chain-design/weight-units";
 
-export const WAREHOUSE_LOCATION_STRATEGY_RESULT_VERSION = "WAREHOUSE_LOCATION_STRATEGY_V9";
+export const WAREHOUSE_LOCATION_STRATEGY_RESULT_VERSION = "WAREHOUSE_LOCATION_STRATEGY_V10";
 export const WAREHOUSE_LOCATION_STRATEGY_CALCULATION_VERSION = "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V9";
 export const WAREHOUSE_LOCATION_STRATEGY_INCREMENTAL_THRESHOLD = 0.15;
 export const WAREHOUSE_LOCATION_STRATEGY_MIN_REGION_DEMAND_SHARE = 0.1;
@@ -44,11 +50,12 @@ export type WarehouseLocationStrategyInput = {
   maxRegions: 1 | 2 | 3;
   weightingMethod: WarehouseLocationStrategyWeightingMethod;
   countryScope: WarehouseLocationStrategyCountryScope;
+  analysisCurrency?: SupplyChainDesignCurrency | null;
   cadToUsdRate?: number | null;
 };
 
 export type WarehouseLocationStrategyResultSummary = {
-  resultVersion: typeof WAREHOUSE_LOCATION_STRATEGY_RESULT_VERSION | "WAREHOUSE_LOCATION_STRATEGY_V2" | "WAREHOUSE_LOCATION_STRATEGY_V3" | "WAREHOUSE_LOCATION_STRATEGY_V4" | "WAREHOUSE_LOCATION_STRATEGY_V5" | "WAREHOUSE_LOCATION_STRATEGY_V6" | "WAREHOUSE_LOCATION_STRATEGY_V7" | "WAREHOUSE_LOCATION_STRATEGY_V8";
+  resultVersion: typeof WAREHOUSE_LOCATION_STRATEGY_RESULT_VERSION | "WAREHOUSE_LOCATION_STRATEGY_V9" | "WAREHOUSE_LOCATION_STRATEGY_V2" | "WAREHOUSE_LOCATION_STRATEGY_V3" | "WAREHOUSE_LOCATION_STRATEGY_V4" | "WAREHOUSE_LOCATION_STRATEGY_V5" | "WAREHOUSE_LOCATION_STRATEGY_V6" | "WAREHOUSE_LOCATION_STRATEGY_V7" | "WAREHOUSE_LOCATION_STRATEGY_V8";
   calculationVersion: typeof WAREHOUSE_LOCATION_STRATEGY_CALCULATION_VERSION | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V2" | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V3" | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V4" | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V5" | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V6" | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V7" | "WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V8";
   coordinateSources: string[];
   maxRegions: 1 | 2 | 3;
@@ -61,6 +68,7 @@ export type WarehouseLocationStrategyResultSummary = {
   spendCurrencyMode?: "SINGLE_CURRENCY" | "CONVERTED_MIXED_CURRENCY" | null;
   originalSpendCurrencies?: string[];
   cadToUsdRate?: number | null;
+  fxRateDirection?: "1 CAD = X USD" | null;
   recommendationThresholds: {
     minimumIncrementalImprovementPercent: 15;
     minimumSelectedDemandSharePercent: 10;
@@ -280,10 +288,15 @@ export function runSupplyChainDesignWarehouseLocationStrategy(input: WarehouseLo
     demandInclusion: "ALL_ELIGIBLE",
     networkStructure: input.countryScope === "SEPARATE_BY_COUNTRY" ? "SEPARATE" : "COMBINED",
     marketEligibility: marketEligibilityForCountryScope(input.countryScope, null),
-    selectedDemandCurrency: input.weightingMethod === "CURRENT_TRANSPORTATION_COST" ? parsed.currency ?? null : null,
+    selectedDemandCurrency: input.weightingMethod === "CURRENT_TRANSPORTATION_COST"
+      ? parsed.currencyMode === "CONVERTED_MIXED_CURRENCY"
+        ? input.analysisCurrency ?? "USD"
+        : parsed.currency ?? null
+      : null,
     spendCurrencyMode: input.weightingMethod === "CURRENT_TRANSPORTATION_COST" ? parsed.currencyMode : null,
     originalSpendCurrencies: input.weightingMethod === "CURRENT_TRANSPORTATION_COST" ? parsed.originalCurrencies : [],
     cadToUsdRate: parsed.currencyMode === "CONVERTED_MIXED_CURRENCY" ? input.cadToUsdRate ?? null : null,
+    fxRateDirection: parsed.currencyMode === "CONVERTED_MIXED_CURRENCY" ? "1 CAD = X USD" : null,
     recommendationThresholds: {
       minimumIncrementalImprovementPercent: 15,
       minimumSelectedDemandSharePercent: 10
@@ -404,7 +417,7 @@ function parseDemandProfiles(input: WarehouseLocationStrategyInput) {
     const weightUnit = normalizeWeightUnit(value(row, indexes, "weight_unit"), weight);
     const units = parsePositive(value(row, indexes, "units"));
     const currentTransportationCost = parsePositive(value(row, indexes, "transportation_cost"));
-    const currencyResult = normalizeCurrency(value(row, indexes, "currency"), currentTransportationCost);
+    const currencyResult = normalizeCurrency(value(row, indexes, "transportation_cost_currency") || value(row, indexes, "currency"), currentTransportationCost);
     const currency = currencyResult.currency;
 
     if (!rawDestination) {
@@ -461,33 +474,44 @@ function parseDemandProfiles(input: WarehouseLocationStrategyInput) {
     });
   }
 
+  const originalCurrencies = [...currencies].sort();
+  const analysisCurrency = input.analysisCurrency ?? (originalCurrencies.length === 1 && originalCurrencies[0] === "CAD" ? "CAD" : "USD");
+  const shouldNormalizeSpend =
+    input.weightingMethod === "CURRENT_TRANSPORTATION_COST" &&
+    originalCurrencies.some((currency) => currency !== analysisCurrency);
   let convertedProfiles = profiles;
-  if (input.weightingMethod === "CURRENT_TRANSPORTATION_COST" && currencies.size > 1) {
-    if (!currencies.has("USD") || !currencies.has("CAD") || currencies.size !== 2) {
+  if (shouldNormalizeSpend) {
+    if (!isValidCadToUsdRate(input.cadToUsdRate)) throw new Error("Enter a CAD to USD conversion rate greater than 0 and no more than 5.");
+    if (originalCurrencies.some((currency) => currency !== "USD" && currency !== "CAD")) {
       throw new Error("Historical transportation spend currency mix is not supported for conversion.");
     }
-    if (!isValidCadToUsdRate(input.cadToUsdRate)) {
-      throw new Error("Enter a CAD to USD conversion rate greater than 0 and no more than 5.");
-    }
+    const currencyContext = buildSupplyChainDesignCurrencyContext({
+      analysisCurrency,
+      cadToUsdRate: input.cadToUsdRate ?? null
+    });
     convertedProfiles = profiles.map((profile) => ({
       ...profile,
-      selectedWeight: convertSpendWeight(profile.selectedWeight, profile.currency, input.cadToUsdRate)
+      selectedWeight: normalizeSupplyChainDesignMoney(
+        profile.selectedWeight,
+        profile.currency,
+        currencyContext,
+        `${profile.sourceReference} historical transportation spend`
+      ).normalizedAmount
     }));
   }
   if (input.weightingMethod === "WEIGHT" && weightUnits.size > 1) {
     // Parsed rows are normalized to pounds, but this note catches impossible mixed unsupported states in tests.
     weightUnits.clear();
   }
-  const originalCurrencies = [...currencies].sort();
   return {
     profiles: convertedProfiles,
     issues,
     currency: input.weightingMethod === "CURRENT_TRANSPORTATION_COST"
-      ? originalCurrencies.length > 1 ? "USD" : originalCurrencies[0] ?? null
+      ? shouldNormalizeSpend ? analysisCurrency : originalCurrencies[0] ?? null
       : null,
     originalCurrencies,
     currencyMode: input.weightingMethod === "CURRENT_TRANSPORTATION_COST"
-      ? originalCurrencies.length > 1 ? "CONVERTED_MIXED_CURRENCY" as const : "SINGLE_CURRENCY" as const
+      ? shouldNormalizeSpend ? "CONVERTED_MIXED_CURRENCY" as const : "SINGLE_CURRENCY" as const
       : null
   };
 }
@@ -918,11 +942,7 @@ function selectWeight(method: WarehouseLocationStrategyWeightingMethod, values: 
   return values.currentTransportationCost;
 }
 
-function convertSpendWeight(value: number, currency: string | null, cadToUsdRate?: number | null) {
-  const rate = typeof cadToUsdRate === "number" && isValidCadToUsdRate(cadToUsdRate) ? cadToUsdRate : null;
-  if (currency === "CAD" && rate !== null) return round2(value * rate);
-  return value;
-}
+
 
 function isValidCadToUsdRate(value: number | null | undefined) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 5;
@@ -1089,10 +1109,8 @@ function normalizeStateProvince(stateProvince: string) {
 
 function normalizeWeightUnit(unit: string, weight: number | null) {
   if (!weight) return null;
-  const value = unit.trim().toLowerCase();
-  if (value === "lb" || value === "lbs" || value === "pound" || value === "pounds") return "lb";
-  if (value === "kg" || value === "kgs" || value === "kilogram" || value === "kilograms") return "kg";
-  return unit.trim() || null;
+  const normalized = normalizeSupplyChainDesignWeightUnit(unit);
+  return normalized.ok ? normalized.unit : unit.trim() || null;
 }
 
 function normalizeCurrency(currency: string, cost: number | null) {

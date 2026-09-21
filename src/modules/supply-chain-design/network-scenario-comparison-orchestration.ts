@@ -54,6 +54,8 @@ export type SupplyChainDesignNetworkScenarioComparisonOrchestrationInput = {
   submitMissingRates?: boolean;
   finalizeWithMissingRates?: boolean;
   forceNewRun?: boolean;
+  forceFreshRates?: boolean;
+  completedRateBatchIds?: string[];
   resultInputs?: Record<string, unknown>;
 };
 
@@ -133,7 +135,7 @@ export async function orchestrateSupplyChainDesignNetworkScenarioComparison(
     resultInputs: input.resultInputs ?? {}
   });
 
-  const completed = input.forceNewRun ? null : await findCompletedRun(input.context, input.projectId, comparisonFingerprint);
+  const completed = input.forceNewRun || input.forceFreshRates ? null : await findCompletedRun(input.context, input.projectId, comparisonFingerprint);
   if (completed) {
     return {
       phase: "COMPLETE",
@@ -150,7 +152,8 @@ export async function orchestrateSupplyChainDesignNetworkScenarioComparison(
     };
   }
 
-  const active = input.forceNewRun ? null : await findActiveRun(input.context, input.projectId, comparisonFingerprint);
+  const activeCandidate = input.forceNewRun ? null : await findActiveRun(input.context, input.projectId, comparisonFingerprint);
+  const active = input.forceFreshRates && activeCandidate?.ratingEvidence.reconciliation.forceFreshRates !== true ? null : activeCandidate;
   if (active && !input.comparisonRunId) {
     return {
       phase: active.status,
@@ -169,7 +172,7 @@ export async function orchestrateSupplyChainDesignNetworkScenarioComparison(
 
   let run: NetworkScenarioComparisonRunDetail | null = active && input.comparisonRunId ? active : null;
   try {
-    const initialRatingEvidence = buildRatingEvidence("EVALUATING", [], null, input.account.id, input.carrierHashes);
+    const initialRatingEvidence = buildRatingEvidence("EVALUATING", [], null, input.account.id, input.carrierHashes, undefined, input.forceFreshRates === true);
     if (!run) {
       run = await createRun(input.context, {
         projectId: input.projectId,
@@ -195,13 +198,13 @@ export async function orchestrateSupplyChainDesignNetworkScenarioComparison(
       });
     }
 
-    const scenarioA = await evaluateScenario("A", input.scenarioA, evaluateTransportation);
-    const scenarioB = await evaluateScenario("B", input.scenarioB, evaluateTransportation);
+    const scenarioA = await evaluateScenario("A", input.scenarioA, evaluateTransportation, input.forceFreshRates === true, input.completedRateBatchIds);
+    const scenarioB = await evaluateScenario("B", input.scenarioB, evaluateTransportation, input.forceFreshRates === true, input.completedRateBatchIds);
     const missingManifest = dedupeComparisonMissingRateManifest([scenarioA, scenarioB]);
-    const ratingEvidence = buildRatingEvidence("READY_FOR_COST_EVALUATION", [scenarioA, scenarioB], null, input.account.id, input.carrierHashes);
+    const ratingEvidence = buildRatingEvidence("READY_FOR_COST_EVALUATION", [scenarioA, scenarioB], null, input.account.id, input.carrierHashes, undefined, input.forceFreshRates === true, input.completedRateBatchIds);
 
     if (missingManifest.length > 0) {
-      const missingEvidence = buildRatingEvidence("RATES_REQUIRED", [scenarioA, scenarioB], null, input.account.id, input.carrierHashes, missingManifest);
+      const missingEvidence = buildRatingEvidence("RATES_REQUIRED", [scenarioA, scenarioB], null, input.account.id, input.carrierHashes, missingManifest, input.forceFreshRates === true, input.completedRateBatchIds);
       if (input.finalizeWithMissingRates) {
         const evaluated = evaluateBothCombinedCosts({ scenarioA, scenarioB, fxInput, evaluateCombinedCost });
         const resultSummary = buildResultSummary(evaluated, input.resultInputs ?? {});
@@ -232,9 +235,10 @@ export async function orchestrateSupplyChainDesignNetworkScenarioComparison(
         scenarioName: `${input.scenarioA.scenarioName} vs ${input.scenarioB.scenarioName}`,
         account: input.account,
         carrierHashes: input.carrierHashes,
+        forceFreshRates: input.forceFreshRates === true,
         missingRateManifest: missingManifest
       });
-      const batchEvidence = buildRatingEvidence("RATING", [scenarioA, scenarioB], batch.jobId, input.account.id, input.carrierHashes, missingManifest);
+      const batchEvidence = buildRatingEvidence("RATING", [scenarioA, scenarioB], batch.jobId, input.account.id, input.carrierHashes, missingManifest, input.forceFreshRates === true, input.completedRateBatchIds);
       run = await updateRun(input.context, input.projectId, run.id, {
         status: "RATING",
         ratingEvidence: batchEvidence,
@@ -360,9 +364,15 @@ function validateSharedDemand(input: SupplyChainDesignNetworkScenarioComparisonO
 async function evaluateScenario(
   scenarioKey: "A" | "B",
   scenario: SupplyChainDesignNetworkScenarioComparisonScenarioOrchestrationInput,
-  evaluateTransportation: typeof evaluateSupplyChainDesignNetworkScenario
+  evaluateTransportation: typeof evaluateSupplyChainDesignNetworkScenario,
+  forceFreshRates: boolean,
+  completedRateBatchIds: string[] | undefined
 ): Promise<ScenarioWork> {
-  const transportationEvaluation = await evaluateTransportation(scenario.transportationInput);
+  const transportationEvaluation = await evaluateTransportation({
+    ...scenario.transportationInput,
+    bypassExactReuse: forceFreshRates,
+    completedRateBatchIds
+  });
   return { ...scenario, scenarioKey, transportationEvaluation };
 }
 
@@ -389,6 +399,16 @@ function evaluateCombinedCostWithFx(
   evaluateCombinedCost: typeof evaluateSupplyChainDesignCombinedScenarioCost
 ): { combined: SupplyChainDesignCombinedScenarioCostResult; fx: ScenarioFxEvidence } {
   const sourceCurrencies = collectScenarioCurrencies(scenario.combinedCostInput);
+  const missingCurrency = missingScenarioMonetaryCurrency(scenario.combinedCostInput);
+  if (missingCurrency) return {
+    combined: evaluateCombinedCost({ ...scenario.combinedCostInput, transportationEvaluation: scenario.transportationEvaluation }),
+    fx: { sourceCurrencies, normalizedCurrency: null, cadToUsdRate: fxInput?.cadToUsdRate ?? null, fxApplied: false, incompleteReason: `${missingCurrency} currency is required before scenario comparison.` }
+  };
+  const unsupportedCurrency = sourceCurrencies.find((currency) => currency !== "USD" && currency !== "CAD");
+  if (unsupportedCurrency) return {
+    combined: evaluateCombinedCost({ ...scenario.combinedCostInput, transportationEvaluation: scenario.transportationEvaluation }),
+    fx: { sourceCurrencies, normalizedCurrency: null, cadToUsdRate: fxInput?.cadToUsdRate ?? null, fxApplied: false, incompleteReason: `Unsupported scenario currency: ${unsupportedCurrency}. Use USD or CAD.` }
+  };
   const needsFx = sourceCurrencies.includes("USD") && sourceCurrencies.includes("CAD");
   if (needsFx && !fxInput) {
     const combined = evaluateCombinedCost({
@@ -407,15 +427,18 @@ function evaluateCombinedCostWithFx(
     };
   }
 
-  if ((needsFx || sourceCurrencies.length === 1 && sourceCurrencies[0] === "CAD" && fxInput) && fxInput) {
-    const normalized = normalizeScenarioCostInputToUsd(scenario, fxInput.cadToUsdRate);
+  const targetCurrency = fxInput?.analysisCurrency ?? (sourceCurrencies[0] === "CAD" ? "CAD" : "USD");
+  const hasAmountSpecificCurrency = scenario.combinedCostInput.selectedFacilities.some((facility) => Object.entries(facility.warehouseCost).some(([key, value]) => key.endsWith("Currency") && typeof value === "string" && value.trim()));
+  const needsTargetNormalization = Boolean(fxInput) && sourceCurrencies.some((currency) => currency && currency !== targetCurrency);
+  if (needsFx || needsTargetNormalization || hasAmountSpecificCurrency) {
+    const normalized = normalizeScenarioCostInputToCurrency(scenario, fxInput?.cadToUsdRate ?? 1, targetCurrency);
     return {
       combined: evaluateCombinedCost(normalized),
       fx: {
         sourceCurrencies,
-        normalizedCurrency: "USD",
-        cadToUsdRate: fxInput.cadToUsdRate,
-        fxApplied: true,
+        normalizedCurrency: targetCurrency,
+        cadToUsdRate: fxInput?.cadToUsdRate ?? null,
+        fxApplied: needsFx || needsTargetNormalization,
         incompleteReason: null
       }
     };
@@ -437,11 +460,15 @@ function evaluateCombinedCostWithFx(
   };
 }
 
-function normalizeScenarioCostInputToUsd(scenario: ScenarioWork, cadToUsdRate: number): SupplyChainDesignCombinedScenarioCostInput {
-  const transportationRate = normalizeCurrency(scenario.combinedCostInput.transportationCurrency) === "CAD" ? cadToUsdRate : 1;
+function normalizeScenarioCostInputToCurrency(
+  scenario: ScenarioWork,
+  cadToUsdRate: number,
+  analysisCurrency: "USD" | "CAD"
+): SupplyChainDesignCombinedScenarioCostInput {
+  const transportationRate = conversionFactor(normalizeCurrency(scenario.combinedCostInput.transportationCurrency), analysisCurrency, cadToUsdRate);
   return {
     ...scenario.combinedCostInput,
-    transportationCurrency: "USD",
+    transportationCurrency: analysisCurrency,
     transportationEvaluation: {
       ...scenario.transportationEvaluation,
       profileAlternatives: scenario.transportationEvaluation.profileAlternatives.map((profile) => ({
@@ -453,35 +480,54 @@ function normalizeScenarioCostInputToUsd(scenario: ScenarioWork, cadToUsdRate: n
         }))
       }))
     },
-    selectedFacilities: scenario.combinedCostInput.selectedFacilities.map((facility) => normalizeFacilityCostToUsd(facility, cadToUsdRate))
+    selectedFacilities: scenario.combinedCostInput.selectedFacilities.map((facility) => normalizeFacilityCostToCurrency(facility, cadToUsdRate, analysisCurrency))
   };
 }
 
-function normalizeFacilityCostToUsd(
+function normalizeFacilityCostToCurrency(
   facility: SupplyChainDesignCombinedScenarioFacilityInput,
-  cadToUsdRate: number
+  cadToUsdRate: number,
+  analysisCurrency: "USD" | "CAD"
 ): SupplyChainDesignCombinedScenarioFacilityInput {
-  if (normalizeCurrency(facility.warehouseCost.currency) !== "CAD") return facility;
+  const aggregateCurrency = normalizeCurrency(facility.warehouseCost.currency);
   if (facility.sourceType === "CURRENT") {
+    const annualCurrency = normalizeCurrency(facility.warehouseCost.annualFacilityWarehouseCostCurrency) ?? aggregateCurrency;
+    const annualFactor = conversionFactor(annualCurrency, analysisCurrency, cadToUsdRate);
+    if (annualFactor === 1 && aggregateCurrency === analysisCurrency) return facility;
     return {
       ...facility,
       warehouseCost: {
         ...facility.warehouseCost,
-        currency: "USD",
-        annualFacilityWarehouseCost: multiplyNullable(facility.warehouseCost.annualFacilityWarehouseCost, cadToUsdRate)
+        currency: analysisCurrency,
+        annualFacilityWarehouseCost: multiplyNullable(facility.warehouseCost.annualFacilityWarehouseCost, annualFactor)
       }
     };
   }
+  const annualFacilityCurrency = normalizeCurrency(facility.warehouseCost.annualFacilityWarehouseCostCurrency) ?? aggregateCurrency;
+  const annualFixedCurrency = normalizeCurrency(facility.warehouseCost.annualFixedCostCurrency) ?? aggregateCurrency;
+  const inboundCurrency = normalizeCurrency(facility.warehouseCost.inboundFeePerPalletCurrency) ?? aggregateCurrency;
+  const outboundCurrency = normalizeCurrency(facility.warehouseCost.outboundFeePerPalletCurrency) ?? aggregateCurrency;
+  const storageCurrency = normalizeCurrency(facility.warehouseCost.storageFeePerPalletPerMonthCurrency) ?? aggregateCurrency;
+  const annualFacilityFactor = conversionFactor(annualFacilityCurrency, analysisCurrency, cadToUsdRate);
+  const annualFixedFactor = conversionFactor(annualFixedCurrency, analysisCurrency, cadToUsdRate);
+  const inboundFactor = conversionFactor(inboundCurrency, analysisCurrency, cadToUsdRate);
+  const outboundFactor = conversionFactor(outboundCurrency, analysisCurrency, cadToUsdRate);
+  const storageFactor = conversionFactor(storageCurrency, analysisCurrency, cadToUsdRate);
   return {
     ...facility,
     warehouseCost: {
       ...facility.warehouseCost,
-      currency: "USD",
-      annualFacilityWarehouseCost: multiplyNullable(facility.warehouseCost.annualFacilityWarehouseCost, cadToUsdRate),
-      annualFixedCost: multiplyNullable(facility.warehouseCost.annualFixedCost, cadToUsdRate),
-      inboundFeePerPallet: multiplyNullable(facility.warehouseCost.inboundFeePerPallet, cadToUsdRate),
-      outboundFeePerPallet: multiplyNullable(facility.warehouseCost.outboundFeePerPallet, cadToUsdRate),
-      storageFeePerPalletPerMonth: multiplyNullable(facility.warehouseCost.storageFeePerPalletPerMonth, cadToUsdRate)
+      currency: analysisCurrency,
+      annualFacilityWarehouseCostCurrency: analysisCurrency,
+      annualFixedCostCurrency: analysisCurrency,
+      inboundFeePerPalletCurrency: analysisCurrency,
+      outboundFeePerPalletCurrency: analysisCurrency,
+      storageFeePerPalletPerMonthCurrency: analysisCurrency,
+      annualFacilityWarehouseCost: multiplyNullable(facility.warehouseCost.annualFacilityWarehouseCost, annualFacilityFactor),
+      annualFixedCost: multiplyNullable(facility.warehouseCost.annualFixedCost, annualFixedFactor),
+      inboundFeePerPallet: multiplyNullable(facility.warehouseCost.inboundFeePerPallet, inboundFactor),
+      outboundFeePerPallet: multiplyNullable(facility.warehouseCost.outboundFeePerPallet, outboundFactor),
+      storageFeePerPalletPerMonth: multiplyNullable(facility.warehouseCost.storageFeePerPalletPerMonth, storageFactor)
     }
   };
 }
@@ -555,9 +601,14 @@ function buildRatingEvidence(
   batchId: string | null,
   ratingAccountId: string,
   carrierHashes: string[],
-  missingManifest = dedupeComparisonMissingRateManifest(scenarios)
+  missingManifest = dedupeComparisonMissingRateManifest(scenarios),
+  forceFreshRates = false,
+  retainedBatchIds: string[] = []
 ): NetworkScenarioComparisonRatingEvidence {
   const allAlternatives = scenarios.flatMap((scenario) => scenario.transportationEvaluation.profileAlternatives.flatMap((profile) => profile.alternatives));
+  const ratingBatchIds = unique([...(batchId ? [batchId] : []), ...retainedBatchIds]);
+  const exactReusedAlternatives = allAlternatives.filter((alternative) => alternative.status === "REUSED").length;
+  const newLiveAlternatives = allAlternatives.filter((alternative) => alternative.status === "LIVE_RATE").length;
   const laneReferences = allAlternatives
     .filter((alternative) => alternative.laneFingerprint)
     .map((alternative) => ({
@@ -568,21 +619,23 @@ function buildRatingEvidence(
     }));
   return {
     phase,
-    ratingBatchIds: batchId ? [batchId] : [],
+    ratingBatchIds,
     missingRateCount: missingManifest.length,
-    reusedLaneCount: allAlternatives.filter((alternative) => alternative.status === "REUSED").length,
+    reusedLaneCount: exactReusedAlternatives,
     exactLaneFingerprints: unique([...laneReferences.map((lane) => lane.exactLaneFingerprint), ...missingManifest.map((missing) => missing.laneFingerprint)]),
     laneReferences,
     reconciliation: {
       ratingAccountId,
       carrierHashes,
+      forceFreshRates,
       scenarioA: scenarios.find((scenario) => scenario.scenarioKey === "A") ? scenarioCounts(scenarios.find((scenario) => scenario.scenarioKey === "A")!) : null,
       scenarioB: scenarios.find((scenario) => scenario.scenarioKey === "B") ? scenarioCounts(scenarios.find((scenario) => scenario.scenarioKey === "B")!) : null,
       totalAlternatives: allAlternatives.length,
-      exactReusedAlternatives: allAlternatives.filter((alternative) => alternative.status === "REUSED").length,
+      exactReusedAlternatives,
+      newLiveAlternatives,
       rawMissingAlternatives: allAlternatives.filter((alternative) => alternative.status === "MISSING_RATE").length,
       uniqueMissingLiveRequests: missingManifest.length,
-      liveCompleted: allAlternatives.filter((alternative) => alternative.status === "REUSED").length,
+      liveCompleted: newLiveAlternatives,
       liveRemaining: missingManifest.length,
       failedOrNoRate: 0
     }
@@ -592,30 +645,54 @@ function buildRatingEvidence(
 function scenarioCounts(scenario: ScenarioWork) {
   const alternatives = scenario.transportationEvaluation.profileAlternatives.flatMap((profile) => profile.alternatives);
   const profilesWithComplete = scenario.transportationEvaluation.profileAlternatives.filter((profile) =>
-    profile.alternatives.some((alternative) => alternative.status === "REUSED")
+    profile.alternatives.some((alternative) => isCompletedRateStatus(alternative.status))
   ).length;
   return {
     totalAlternatives: alternatives.length,
     exactReusedAlternatives: alternatives.filter((alternative) => alternative.status === "REUSED").length,
+    newLiveAlternatives: alternatives.filter((alternative) => alternative.status === "LIVE_RATE").length,
     rawMissingAlternatives: alternatives.filter((alternative) => alternative.status === "MISSING_RATE").length,
     profilesWithCompleteAlternatives: profilesWithComplete,
     profilesWithoutCompleteAlternatives: scenario.transportationEvaluation.profileAlternatives.length - profilesWithComplete
   };
 }
 
+function isCompletedRateStatus(status: string) {
+  return status === "REUSED" || status === "LIVE_RATE";
+}
+
 function collectScenarioCurrencies(input: Omit<SupplyChainDesignCombinedScenarioCostInput, "transportationEvaluation">) {
   return unique([
     normalizeCurrency(input.transportationCurrency),
-    ...input.selectedFacilities.map((facility) => normalizeCurrency(facility.warehouseCost.currency))
+    ...input.selectedFacilities.flatMap((facility) => {
+      if (facility.sourceType === "CURRENT") {
+        return [currencyForAmount(facility.warehouseCost.annualFacilityWarehouseCost, facility.warehouseCost.annualFacilityWarehouseCostCurrency, normalizeCurrency(facility.warehouseCost.currency))];
+      }
+      const aggregateCurrency = normalizeCurrency(facility.warehouseCost.currency);
+      return [
+        currencyForAmount(facility.warehouseCost.annualFacilityWarehouseCost, facility.warehouseCost.annualFacilityWarehouseCostCurrency, aggregateCurrency),
+        currencyForAmount(facility.warehouseCost.annualFixedCost, facility.warehouseCost.annualFixedCostCurrency, aggregateCurrency),
+        currencyForAmount(facility.warehouseCost.inboundFeePerPallet, facility.warehouseCost.inboundFeePerPalletCurrency, aggregateCurrency),
+        currencyForAmount(facility.warehouseCost.outboundFeePerPallet, facility.warehouseCost.outboundFeePerPalletCurrency, aggregateCurrency),
+        currencyForAmount(facility.warehouseCost.storageFeePerPalletPerMonth, facility.warehouseCost.storageFeePerPalletPerMonthCurrency, aggregateCurrency)
+      ];
+    })
   ]);
 }
 
-function normalizeFxInput(input: NetworkScenarioComparisonFxInput | null) {
+function currencyForAmount(amount: number | null | undefined, currency: string | null | undefined, fallbackCurrency: string | null) {
+  return typeof amount === "number" && Number.isFinite(amount)
+    ? normalizeCurrency(currency) ?? fallbackCurrency
+    : null;
+}
+
+function normalizeFxInput(input: NetworkScenarioComparisonFxInput | null): NetworkScenarioComparisonFxInput | null {
   if (!input) return null;
   if (!Number.isFinite(input.cadToUsdRate) || input.cadToUsdRate <= 0) {
     throw new Error("Network Scenario Comparison CAD to USD rate must be a finite number greater than zero.");
   }
-  return { cadToUsdRate: input.cadToUsdRate };
+  const analysisCurrency: "USD" | "CAD" = input.analysisCurrency === "CAD" ? "CAD" : "USD";
+  return { cadToUsdRate: input.cadToUsdRate, analysisCurrency };
 }
 
 function normalizeCurrency(value: string | null | undefined) {
@@ -624,6 +701,13 @@ function normalizeCurrency(value: string | null | undefined) {
 
 function multiplyNullable(value: number | null | undefined, factor: number) {
   return typeof value === "number" && Number.isFinite(value) ? roundCurrency(value * factor) : value ?? null;
+}
+
+function conversionFactor(sourceCurrency: string | null, analysisCurrency: "USD" | "CAD", cadToUsdRate: number) {
+  if (!sourceCurrency || sourceCurrency === analysisCurrency) return 1;
+  if (sourceCurrency === "CAD" && analysisCurrency === "USD") return cadToUsdRate;
+  if (sourceCurrency === "USD" && analysisCurrency === "CAD") return 1 / cadToUsdRate;
+  throw new Error(`Unsupported scenario currency: ${sourceCurrency}. Use USD or CAD.`);
 }
 
 function buildReturn(
@@ -682,4 +766,21 @@ function roundCurrency(value: number) {
 
 function roundQuantity(value: number) {
   return Math.round(value * 1000000) / 1000000;
+}
+
+
+function missingScenarioMonetaryCurrency(input: Omit<SupplyChainDesignCombinedScenarioCostInput, "transportationEvaluation">) {
+  for (const facility of input.selectedFacilities) {
+    const cost = facility.warehouseCost;
+    const aggregate = normalizeCurrency(cost.currency);
+    const fields = cost.facilitySourceType === "CURRENT"
+      ? [[cost.annualFacilityWarehouseCost, cost.annualFacilityWarehouseCostCurrency ?? aggregate, "annual warehouse cost"]] as const
+      : typeof cost.annualFacilityWarehouseCost === "number" || typeof cost.annualFixedCost === "number"
+        ? [[cost.annualFacilityWarehouseCost ?? cost.annualFixedCost, cost.annualFacilityWarehouseCost != null ? cost.annualFacilityWarehouseCostCurrency ?? aggregate : cost.annualFixedCostCurrency ?? aggregate, "annual warehouse cost"]] as const
+        : [[cost.inboundFeePerPallet, cost.inboundFeePerPalletCurrency ?? aggregate, "inbound fee"], [cost.outboundFeePerPallet, cost.outboundFeePerPalletCurrency ?? aggregate, "outbound fee"], [cost.storageFeePerPalletPerMonth, cost.storageFeePerPalletPerMonthCurrency ?? aggregate, "storage fee"]] as const;
+    for (const [amount, currency, label] of fields) {
+      if (typeof amount === "number" && Number.isFinite(amount) && !normalizeCurrency(currency)) return `${facility.facilityId} ${label}`;
+    }
+  }
+  return null;
 }

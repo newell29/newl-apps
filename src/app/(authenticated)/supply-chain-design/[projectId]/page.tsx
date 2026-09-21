@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { SupplyChainDesignProjectCurrencySettingsForm } from "@/modules/supply-chain-design/components/project-currency-settings-form";
 import { PageHeader } from "@/components/page-header";
 import { SupplyChainDesignFileUploadForm } from "@/modules/supply-chain-design/components/file-upload-form";
 import { SupplyChainDesignModel01ProofRunForm } from "@/modules/supply-chain-design/components/model-01-proof-run-form";
@@ -139,6 +140,11 @@ function ProjectDataPanel({ project }: { project: SupplyChainDesignProjectDetail
       <p className="mt-1 text-sm text-mutedForeground">
         Upload and manage the shared datasets used across Supply Chain Design analyses.
       </p>
+      <SupplyChainDesignProjectCurrencySettingsForm
+        projectId={project.id}
+        analysisCurrency={project.analysisCurrency}
+        cadToUsdRate={project.cadToUsdRate}
+      />
 
       <div className="mt-5 rounded-md border border-border bg-background p-4">
         <h3 className="text-sm font-semibold text-foreground">Download templates</h3>
