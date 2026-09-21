@@ -88,6 +88,7 @@ export type SupplyChainDesignCombinedScenarioProfileResult = {
   profileKey: string;
   sourceReference: string;
   representedShipments: number;
+  representativeWeight: number | null;
   representedPallets: number | null;
   destination: string;
   historicalTransportationCost: number | null;
@@ -154,6 +155,7 @@ export function evaluateSupplyChainDesignCombinedScenarioCost(
       profileKey: profile.profileKey,
       sourceReference: profile.sourceReference,
       representedShipments: profile.representedShipments,
+      representativeWeight: profile.representativeWeight,
       representedPallets: profileCostEvidence?.representativePallets === null || profileCostEvidence === undefined
         ? null
         : profileCostEvidence.representativePallets * profileCostEvidence.representedShipments,
@@ -212,7 +214,7 @@ function evaluateAlternative(input: {
   transportationCurrency: string;
 }): SupplyChainDesignCombinedScenarioAlternative {
   const missingReasons: string[] = [];
-  if (input.alternative.status !== "REUSED" || input.alternative.representedModeledTransportationCost === null) {
+  if (!isCompletedTransportationRate(input.alternative) || input.alternative.representedModeledTransportationCost === null) {
     missingReasons.push(input.alternative.status === "MISSING_RATE" ? "modeled_transportation_rate" : input.alternative.status.toLowerCase());
   }
   if (!input.facility) {
@@ -419,6 +421,10 @@ function unique(values: string[]) {
 
 function sum(values: Array<number | null>) {
   return values.reduce<number>((total, value) => total + (typeof value === "number" && Number.isFinite(value) ? value : 0), 0);
+}
+
+function isCompletedTransportationRate(alternative: SupplyChainDesignNetworkScenarioAlternative) {
+  return alternative.status === "REUSED" || alternative.status === "LIVE_RATE";
 }
 
 function roundCurrency(value: number) {

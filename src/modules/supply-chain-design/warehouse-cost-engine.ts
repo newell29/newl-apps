@@ -11,6 +11,11 @@ export type SupplyChainDesignWarehouseCostCandidateInput = {
   facilityId: string;
   facilitySourceType: "CANDIDATE";
   currency: string | null;
+  annualFacilityWarehouseCostCurrency?: string | null;
+  annualFixedCostCurrency?: string | null;
+  inboundFeePerPalletCurrency?: string | null;
+  outboundFeePerPalletCurrency?: string | null;
+  storageFeePerPalletPerMonthCurrency?: string | null;
   annualFacilityWarehouseCost?: number | null;
   annualFixedCost?: number | null;
   inboundFeePerPallet?: number | null;
@@ -22,6 +27,7 @@ export type SupplyChainDesignWarehouseCostCurrentFacilityInput = {
   facilityId: string;
   facilitySourceType: "CURRENT";
   currency: string | null;
+  annualFacilityWarehouseCostCurrency?: string | null;
   annualFacilityWarehouseCost?: number | null;
 };
 

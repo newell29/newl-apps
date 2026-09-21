@@ -1,4 +1,5 @@
 import {
+  Prisma,
   JobStatus,
   IntegrationProvider,
   IntegrationStatus,
@@ -47,6 +48,7 @@ const prismaMock = vi.hoisted(() => {
   const tx = {
     supplyChainDesignProject: {
       create: vi.fn(),
+      updateMany: vi.fn(),
       delete: vi.fn()
     },
     supplyChainDesignProjectFile: {
@@ -86,6 +88,7 @@ const prismaMock = vi.hoisted(() => {
         delete: vi.fn()
       },
       supplyChainDesignFileMapping: {
+        findMany: vi.fn(),
         upsert: vi.fn(),
         findUnique: vi.fn(),
         delete: vi.fn()
@@ -118,6 +121,7 @@ const prismaMock = vi.hoisted(() => {
         deleteMany: vi.fn()
       },
       supplyChainDesignLtlRatePreparationRun: {
+        findFirst: vi.fn(),
         create: vi.fn(),
         findUnique: vi.fn(),
         findMany: vi.fn()
@@ -182,6 +186,7 @@ vi.mock("@/server/auth/actions", () => ({
 import { AuthorizationError } from "@/server/auth/authorization";
 import { filterVisibleNavEntries } from "@/components/app-shell";
 import {
+  updateSupplyChainDesignProjectCurrencySettingsAction,
   applySupplyChainDesignAutomaticMappingAction,
   createSupplyChainDesignProjectAction,
   deleteSupplyChainDesignProjectAction,
@@ -306,6 +311,7 @@ import {
 import { buildWarehouseLocationStrategyMapData } from "@/modules/supply-chain-design/components/warehouse-location-strategy-map";
 import { calculateLtlFreightClass } from "@/modules/ltl-rate-portal/freight-class";
 import {
+  findReusableSupplyChainDesignExactLaneRate,
   buildSupplyChainDesignExactLaneRateFingerprint,
   createSupplyChainDesignLtlRateBatch,
   createSupplyChainDesignScenarioMissingRateBatch,
@@ -486,6 +492,11 @@ describe("Supply Chain Design Studio persistence", () => {
     prismaMock.prisma.supplyChainDesignProjectFile.findFirst.mockResolvedValue(null);
     prismaMock.prisma.supplyChainDesignProjectFile.findMany.mockResolvedValue([]);
     prismaMock.prisma.supplyChainDesignModelRun.findMany.mockResolvedValue([]);
+    prismaMock.prisma.supplyChainDesignLtlRatePreparationRun.findMany.mockResolvedValue([]);
+    prismaMock.prisma.supplyChainDesignFileMapping.findMany.mockImplementation(async (args) => args?.include?.file?.select?.contentHash ? [
+      { id: "shipments-mapping", fileId: "shipments-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-shipments" } },
+      { id: "candidate-mapping", fileId: "candidate-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-candidates" } }
+    ] : []);
     prismaMock.prisma.supplyChainDesignScenario.findMany.mockResolvedValue([]);
     prismaMock.prisma.supplyChainDesignNetworkScenarioComparisonRun.findMany.mockResolvedValue([]);
     prismaMock.prisma.supplyChainDesignNetworkScenarioComparisonRun.findFirst.mockResolvedValue(null);
@@ -508,6 +519,86 @@ describe("Supply Chain Design Studio persistence", () => {
     prismaMock.prisma.supplyChainDesignScenario.create.mockResolvedValue({
       id: "scenario-1"
     });
+  });
+
+  it("saves project currency settings with tenant scope and a transactional audit", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.MANAGER));
+    prismaMock.tx.supplyChainDesignProject.updateMany.mockResolvedValue({ count: 1 });
+    const result = await updateSupplyChainDesignProjectCurrencySettingsAction(form({
+      projectId: "project-1", analysisCurrency: "CAD", cadToUsdRate: "0.75"
+    }));
+    expect(result.ok).toBe(true);
+    expect(prismaMock.prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prismaMock.tx.supplyChainDesignProject.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", id: "project-1" },
+      data: { analysisCurrency: "CAD", cadToUsdRate: 0.75 }
+    });
+    expect(prismaMock.tx.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      tenantId: "tenant-1", actorUserId: context(PlatformRole.MANAGER).userId,
+      action: "supply-chain-design.project.currency-settings.updated",
+      after: expect.objectContaining({ currencySettings: {
+        analysisCurrency: "CAD", cadToUsdRate: 0.75, rateDirection: "1 CAD = X USD"
+      } })
+    }) });
+    expect(revalidatePath).toHaveBeenCalledWith("/supply-chain-design/project-1");
+  });
+
+  it.each([
+    { analysisCurrency: "EUR", cadToUsdRate: "0.75" },
+    { analysisCurrency: "USD", cadToUsdRate: "0" },
+    { analysisCurrency: "USD", cadToUsdRate: "6" },
+    { analysisCurrency: "USD", cadToUsdRate: "invalid" }
+  ])("rejects invalid project currency settings %j before mutation", async (values) => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    expect((await updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "project-1", ...values }))).ok).toBe(false);
+    expect(prismaMock.prisma.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("allows project currency settings without FX and clears a previously entered rate", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    prismaMock.tx.supplyChainDesignProject.updateMany.mockResolvedValue({ count: 1 });
+    expect((await updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "project-1", analysisCurrency: "USD" }))).ok).toBe(true);
+    expect(prismaMock.tx.supplyChainDesignProject.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: { analysisCurrency: "USD", cadToUsdRate: null } }));
+  });
+
+  it("does not audit or revalidate project currency settings for another tenant or missing project", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    prismaMock.tx.supplyChainDesignProject.updateMany.mockResolvedValue({ count: 0 });
+    const result = await updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "foreign-project", analysisCurrency: "CAD" }));
+    expect(result).toEqual({ ok: false, message: "Supply Chain Design project was not found." });
+    expect(prismaMock.tx.supplyChainDesignProject.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { tenantId: "tenant-1", id: "foreign-project" } }));
+    expect(prismaMock.tx.auditLog.create).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("fails project currency settings atomically when audit fails", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    prismaMock.tx.supplyChainDesignProject.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.tx.auditLog.create.mockRejectedValueOnce(new Error("audit unavailable"));
+    await expect(updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "project-1", analysisCurrency: "CAD" }))).rejects.toThrow("audit unavailable");
+    expect(prismaMock.prisma.$transaction).toHaveBeenCalledOnce();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each([PlatformRole.OPERATIONS, PlatformRole.READ_ONLY])("rejects project currency settings for role %s", async (role) => {
+    getAuthenticatedContext.mockResolvedValue(context(role));
+    await expect(updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "project-1", analysisCurrency: "CAD" }))).rejects.toBeInstanceOf(AuthorizationError);
+    expect(prismaMock.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects project currency settings without module entitlement", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.MANAGER));
+    prismaMock.prisma.tenantModuleAccess.findFirst.mockResolvedValue(null);
+    await expect(updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "project-1", analysisCurrency: "CAD" }))).rejects.toBeInstanceOf(AuthorizationError);
+    expect(prismaMock.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects project currency settings when manager mutation access is disabled", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.MANAGER));
+    prismaMock.prisma.tenantRolePolicy.findUnique.mockResolvedValue({ canMutate: false });
+    await expect(updateSupplyChainDesignProjectCurrencySettingsAction(form({ projectId: "project-1", analysisCurrency: "CAD" }))).rejects.toBeInstanceOf(AuthorizationError);
+    expect(prismaMock.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("creates and reads a typed Network Scenario Comparison run with tenant and project scope", async () => {
@@ -965,6 +1056,37 @@ describe("Supply Chain Design Studio persistence", () => {
     );
   });
 
+  it("projects saved currency preferences from tenant-scoped project reads", async () => {
+    const adminContext = context(PlatformRole.ADMIN);
+    prismaMock.prisma.supplyChainDesignProject.findMany.mockResolvedValue([{
+      id: "project-1", name: "Synthetic project", description: null,
+      status: SupplyChainDesignProjectStatus.DRAFT,
+      analysisCurrency: "CAD", cadToUsdRate: { toString: () => "0.75" },
+      createdAt, updatedAt, createdBy: null
+    }]);
+    expect(await listSupplyChainDesignProjects(adminContext)).toEqual([expect.objectContaining({
+      analysisCurrency: "CAD", cadToUsdRate: 0.75
+    })]);
+    prismaMock.prisma.supplyChainDesignProject.findUnique.mockResolvedValue({
+      id: "project-1", name: "Synthetic project", description: null,
+      status: SupplyChainDesignProjectStatus.DRAFT, createdAt, updatedAt, createdBy: null,
+      files: [], mappings: [], modelRuns: [], scenarios: [], screeningRuns: [], ltlRatePreparationRuns: [],
+      analysisCurrency: "CAD", cadToUsdRate: { toString: () => "0.75" }
+    });
+    expect(await getSupplyChainDesignProject(adminContext, "project-1")).toMatchObject({
+      analysisCurrency: "CAD", cadToUsdRate: 0.75
+    });
+    expect(prismaMock.prisma.supplyChainDesignProject.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { tenantId_id: { tenantId: "tenant-1", id: "project-1" } }
+    }));
+  });
+
+  it("rejects project currency settings without a project ID", async () => {
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    expect(await updateSupplyChainDesignProjectCurrencySettingsAction(form({ analysisCurrency: "CAD" }))).toEqual({ ok: false, message: "Missing project ID." });
+    expect(prismaMock.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it("uses module entitlement and role checks for navigation visibility", () => {
     const entries = [
       {
@@ -1365,7 +1487,7 @@ describe("Supply Chain Design Studio persistence", () => {
     const recognized = recognizeSupplyChainDesignOfficialTemplate(headers);
     expect(recognized?.tableType).toBe("FACILITIES");
     const mappings = recognized?.fieldMappings ?? [];
-    expect(mappings).toHaveLength(11);
+    expect(mappings).toHaveLength(12);
     expect(new Set(mappings.map((mapping) => mapping.standardField)).size).toBe(mappings.length);
     expect(new Set(mappings.map((mapping) => mapping.sourceColumn)).size).toBe(mappings.length);
     expect(mappings).toEqual(
@@ -1404,7 +1526,7 @@ describe("Supply Chain Design Studio persistence", () => {
         model: "SupplyChainDesignFileMapping",
         method: "upsert",
         tableType: "FACILITIES",
-        fieldMappingCount: 11,
+        fieldMappingCount: 12,
         error: expect.any(Error)
       })
     );
@@ -2610,6 +2732,44 @@ describe("Supply Chain Design Studio persistence", () => {
           volumeSummary: expect.objectContaining({
             totalShipments: 3
           })
+        })
+      })
+    });
+  });
+
+  it("keeps selected legacy Model 01 mappings raw when an unselected project mapping is currency-aware", async () => {
+    const adminContext = context(PlatformRole.ADMIN);
+    getAuthenticatedContext.mockResolvedValue(adminContext);
+    const project = projectWithProofMappings();
+    project.mappings.push({
+      id: "unselected-currency-aware-shipments-mapping",
+      fileId: "unselected-currency-aware-shipments-file",
+      tableType: SupplyChainDesignTableType.SHIPMENTS,
+      updatedAt,
+      fieldMappings: [
+        { standardField: "shipment_id", sourceColumn: "Shipment ID", requirement: "REQUIRED" },
+        { standardField: "origin_facility_id", sourceColumn: "Origin", requirement: "REQUIRED" },
+        { standardField: "transportation_cost", sourceColumn: "Cost", requirement: "OPTIONAL" },
+        { standardField: "transportation_cost_currency", sourceColumn: "Currency", requirement: "OPTIONAL" }
+      ],
+      file: {
+        id: "unselected-currency-aware-shipments-file",
+        originalFileName: "unselected-currency-aware-shipments.csv",
+        fileBytes: Buffer.from("Shipment ID,Origin,Cost,Currency\nS9,F1,999,CAD\n")
+      }
+    });
+    prismaMock.prisma.supplyChainDesignProject.findUnique.mockResolvedValue(project);
+
+    await expect(
+      runSupplyChainDesignModel01ProofAction({ ok: false, message: "" }, proofRunForm())
+    ).resolves.toEqual({ ok: true, message: "Current Network Baseline completed." });
+
+    expect(prismaMock.prisma.supplyChainDesignModelRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        inputReferences: expect.objectContaining({ fxSnapshot: undefined }),
+        resultSummary: expect.objectContaining({
+          totalTransportationCost: 22.5,
+          fxSnapshot: undefined
         })
       })
     });
@@ -8105,6 +8265,7 @@ describe("3PL location screening proof", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -8535,7 +8696,7 @@ describe("3PL location screening proof", () => {
       expect(content).not.toMatch(/expected|benchmark|defect|logistics market/i);
     }
     expect(readFileSync("docs/modules/supply-chain-design/templates/current-facilities-and-costs-template.csv", "utf8").trim()).toBe(
-      "Facility ID,Facility Name,Facility Type,Facility ZIP / Postal Code,Annual Facility / Warehouse Cost,Pallet Capacity,Current Inventory Pallets,Current Inventory Units,Current Inventory Value,Currency,Notes"
+      "Facility ID,Facility Name,Facility Type,Facility ZIP / Postal Code,Annual Facility / Warehouse Cost,Annual Facility / Warehouse Cost Currency,Pallet Capacity,Current Inventory Pallets,Current Inventory Units,Current Inventory Value,Current Inventory Value Currency,Notes"
     );
     expect(readFileSync("docs/modules/supply-chain-design/templates/historical-shipments-template.csv", "utf8").trim()).toBe(
       "Record Type,Shipment / Order Reference,Shipment Date,Origin Facility ID,Destination Customer / Group,Destination ZIP / Postal Code,Destination City / Region,Destination Country,Shipments,Pallets,Inventory Dwell Time Days,Units,Weight,Weight Unit,Length,Width,Height,Dimension Unit,Hazardous Materials,Transportation Mode,Transportation Cost,Transit Days,Service Level,SKU / Item,Currency"
@@ -8547,7 +8708,7 @@ describe("3PL location screening proof", () => {
       /Storage Rate|Handling Rate|Accessorial/i
     );
     expect(readFileSync("docs/modules/supply-chain-design/templates/candidate-warehouses-and-costs-template.csv", "utf8").trim()).toBe(
-      "Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Inbound Fee Per Pallet,Outbound Fee Per Pallet,Storage Fee Per Pallet Per Month,Pallet Capacity,Currency,Notes"
+      "Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Annual Facility / Warehouse Cost Currency,Inbound Fee Per Pallet,Inbound Fee Per Pallet Currency,Outbound Fee Per Pallet,Outbound Fee Per Pallet Currency,Storage Fee Per Pallet Per Month,Storage Fee Per Pallet Per Month Currency,Pallet Capacity,Notes"
     );
   });
 
@@ -8640,9 +8801,9 @@ describe("3PL location screening proof", () => {
       facilityHeaders.map((header, index) => (index === 0 ? `\uFEFF ${header.toUpperCase()} ` : ` ${header} `))
     );
 
-    expect(facilityHeaders).toHaveLength(11);
+    expect(facilityHeaders).toHaveLength(12);
     expect(shipmentHeaders).toHaveLength(25);
-    expect(candidateHeaders).toHaveLength(12);
+    expect(candidateHeaders).toHaveLength(15);
     expect(facilitySampleHeaders).toEqual(facilityHeaders);
     expect(shipmentSampleHeaders).toEqual(shipmentHeaders);
     expect(candidateSampleHeaders).toEqual(candidateHeaders);
@@ -8661,7 +8822,8 @@ describe("3PL location screening proof", () => {
         "annual_facility_warehouse_cost",
         "current_inventory_pallets",
         "pallet_capacity",
-        "currency"
+        "annual_facility_warehouse_cost_currency",
+        "current_inventory_value_currency"
       ])
     );
     expect(
@@ -8940,6 +9102,7 @@ describe("3PL location screening proof", () => {
     expect(networkDesignFormSource).toContain('name="preparationRunId"');
     expect(networkDesignFormSource).toContain("Candidate warehouses to evaluate");
     expect(networkDesignFormSource).toContain('name="candidateFacilityIds"');
+    expect(networkDesignFormSource).toContain('name="forceFreshRates"');
     expect(networkDesignFormSource).toContain("defaultChecked");
     expect(networkDesignFormSource).toContain("initialSelectedCandidateFacilityIds");
     expect(networkDesignFormSource).toContain("initialSelectedCandidateFacilityIds.includes(candidate.facilityId)");
@@ -8991,7 +9154,7 @@ describe("3PL location screening proof", () => {
   it("runs calculation-only Warehouse Location Strategy for one two and three regions", () => {
     const result = runSupplyChainDesignWarehouseLocationStrategy(locationStrategyInputFixture({ maxRegions: 3 }));
 
-    expect(result.resultVersion).toBe("WAREHOUSE_LOCATION_STRATEGY_V9");
+    expect(result.resultVersion).toBe("WAREHOUSE_LOCATION_STRATEGY_V10");
     expect(result.calculationVersion).toBe("WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V9");
     expect(result.solutions.map((solution) => solution.regionCount)).toEqual([1, 2, 3]);
     expect(result.assumptions).toContain("An additional region is recommended when it reduces weighted average distance by at least 15% and every proposed region represents at least 10% of selected demand.");
@@ -9490,7 +9653,7 @@ describe("3PL location screening proof", () => {
       data: expect.objectContaining({
         status: SupplyChainDesignModelRunStatus.SUCCESS,
         inputReferences: expect.objectContaining({ maxRegions: 3, weightingMethod: "SHIPMENTS_REPRESENTED", countryScope: "US" }),
-      resultSummary: expect.objectContaining({ resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V9" })
+      resultSummary: expect.objectContaining({ resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V10" })
       })
     });
   });
@@ -9579,7 +9742,7 @@ describe("3PL location screening proof", () => {
       {
         id: "existing-location-run",
         inputReferences: { reportFingerprint },
-        resultSummary: { resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V9" }
+        resultSummary: { resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V10" }
       }
     ]);
 
@@ -9668,7 +9831,7 @@ describe("3PL location screening proof", () => {
     getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
     prismaMock.prisma.supplyChainDesignModelRun.findFirst.mockResolvedValueOnce({
       id: "current-run",
-      resultSummary: { resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V9" }
+      resultSummary: { resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V10" }
     });
     prismaMock.prisma.supplyChainDesignModelRun.delete.mockResolvedValueOnce({ id: "current-run" });
     prismaMock.prisma.supplyChainDesignModelRun.findMany.mockResolvedValueOnce([
@@ -9683,7 +9846,7 @@ describe("3PL location screening proof", () => {
 
     prismaMock.prisma.supplyChainDesignModelRun.findFirst.mockResolvedValueOnce({
       id: "last-run",
-      resultSummary: { resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V9" }
+      resultSummary: { resultVersion: "WAREHOUSE_LOCATION_STRATEGY_V10" }
     });
     prismaMock.prisma.supplyChainDesignModelRun.delete.mockResolvedValueOnce({ id: "last-run" });
     prismaMock.prisma.supplyChainDesignModelRun.findMany.mockResolvedValueOnce([
@@ -9799,7 +9962,7 @@ describe("3PL location screening proof", () => {
     expect(formSource).toContain("Maximum regions to evaluate");
     expect(formSource).toContain("Weight demand by");
     expect(formSource).toContain("Historical transportation spend");
-    expect(formSource).toContain("This does not estimate transportation costs from the recommended regions.");
+    expect(formSource).toContain("This does not estimate historical transportation cost totals from the recommended regions.");
     expect(formSource).toContain("Warehouse network country option");
     expect(formSource).toContain("Controls where warehouse markets may be recommended. Together uses one cross-border network. Separate creates independent U.S. and Canadian networks. U.S.-only and Canada-only still use all uploaded delivery demand but restrict warehouse recommendations to the selected country.");
     expect(formSource).toContain("Combined U.S. and Canada network");
@@ -10141,7 +10304,7 @@ describe("3PL location screening proof", () => {
 
     expect(torontoRows.reduce((total, row) => total + numberValue(row.Shipments), 0)).toBe(5031);
     expect(rows.reduce((total, row) => total + numberValue(row.Shipments), 0)).toBe(6054);
-    expect(result.resultVersion).toBe("WAREHOUSE_LOCATION_STRATEGY_V9");
+    expect(result.resultVersion).toBe("WAREHOUSE_LOCATION_STRATEGY_V10");
     expect(result.calculationVersion).toBe("WAREHOUSE_LOCATION_STRATEGY_CALCULATION_ONLY_V9");
     expect(result.shipmentsRepresented).toBe(6054);
     expect([usOnly, canadaOnly].map((candidate) => ({
@@ -10361,7 +10524,7 @@ describe("3PL location screening proof", () => {
     expect(batchSource).toContain("missingSelectedCandidateIds");
     expect(batchSource).toContain("Selected LTL preparation is incompatible with the current candidate selection.");
     expect(actionsSource).toContain("preparationResponse = await generateSupplyChainDesignCandidateLtlRatePreparationAction");
-    expect(actionsSource).toContain("batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup)");
+    expect(actionsSource).toContain("batch = await createSupplyChainDesignLtlRateBatch(context, projectId, preparationRunId, comparisonSetup, { forceFreshRates })");
   });
 
   it("uses the actual Prisma mappings relation for Network Design mapping lookup", () => {
@@ -10483,6 +10646,7 @@ describe("3PL location screening proof", () => {
     expect(formSource).toContain('name="facilitiesMappingId"');
     expect(formSource).toContain('name="candidateFacilitiesMappingId"');
     expect(formSource).toContain('name="forceNewRun"');
+    expect(formSource).toContain('name="forceFreshRates"');
     expect(formSource).toContain("Recalculate");
     expect(formSource).toContain('label="Scenario A"');
     expect(formSource).toContain('label="Scenario B"');
@@ -10965,6 +11129,20 @@ function screeningProjectQueryFixture(adminContext: AuthenticatedContext) {
 }
 
 describe("SCDS Candidate LTL Rate Preparation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prismaMock.prisma.ltlBatchQuoteLane.findMany.mockResolvedValue([]);
+    prismaMock.prisma.supplyChainDesignNetworkScenarioComparisonRun.findMany.mockResolvedValue([]);
+    prismaMock.prisma.supplyChainDesignNetworkScenarioComparisonRun.findFirst.mockResolvedValue(null);
+    prismaMock.prisma.tenantModuleAccess.findFirst.mockResolvedValue({ id: "access-1" });
+    prismaMock.prisma.tenantRolePolicy.findUnique.mockResolvedValue(null);
+    prismaMock.prisma.tenantRoleModuleAccess.findMany.mockResolvedValue([]);
+    prismaMock.prisma.supplyChainDesignLtlRatePreparationRun.findMany.mockResolvedValue([]);
+    prismaMock.prisma.supplyChainDesignFileMapping.findMany.mockImplementation(async (args) => args?.include?.file?.select?.contentHash ? [
+      { id: "shipments-mapping", fileId: "shipments-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-shipments" } },
+      { id: "candidate-mapping", fileId: "candidate-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-candidates" } }
+    ] : []);
+  });
   it("calculates approved full-month storage billing periods", () => {
     expect(calculateBillableStorageMonths(0)).toBe(1);
     expect(calculateBillableStorageMonths(1)).toBe(1);
@@ -11625,7 +11803,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
         scenarioInputs: data.scenarioInputs,
         ratingEvidence: data.ratingEvidence,
         fxInput: data.fxInput,
-        resultSummary: data.resultSummary,
+        resultSummary: (data.resultSummary as unknown) === Prisma.JsonNull ? null : data.resultSummary,
         comparisonFingerprint: data.comparisonFingerprint,
         transportationFingerprint: data.transportationFingerprint
       }))
@@ -11639,7 +11817,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
         status: data.status,
         ratingEvidence: data.ratingEvidence ?? networkScenarioComparisonCreateInput().ratingEvidence,
         fxInput: data.fxInput ?? null,
-        resultSummary: data.resultSummary ?? null,
+        resultSummary: (data.resultSummary as unknown) === Prisma.JsonNull ? null : data.resultSummary ?? null,
         errorMessage: data.errorMessage ?? null
       }))
     );
@@ -11652,22 +11830,24 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
         facilitiesMappingId: "facilities-mapping",
         candidateFacilitiesMappingId: "candidate-mapping",
         scenarioAName: "Keep Toronto",
-        scenarioBName: "Try Cincinnati",
+        scenarioBName: "Try Atlanta",
         cadToUsdRate: "0.75",
         scenarioAFacilityOptionIds: "CURRENT:TOR-01",
-        scenarioBFacilityOptionIds: "CANDIDATE:CVG-01"
+        scenarioBFacilityOptionIds: "CANDIDATE:ATL-01"
       })
     );
 
+    expect(result.ok, result.message).toBe(true);
+    expect(result.runStatus).toBe("RATING");
     expect(result.message).not.toContain("accounts.find is not a function");
     expect(result.submittedNetworkScenarioComparison).toMatchObject({
       shipmentsMappingId: "shipments-mapping",
       facilitiesMappingId: "facilities-mapping",
       candidateFacilitiesMappingId: "candidate-mapping",
       scenarioAName: "Keep Toronto",
-      scenarioBName: "Try Cincinnati",
+      scenarioBName: "Try Atlanta",
       scenarioAFacilityOptionIds: ["CURRENT:TOR-01"],
-      scenarioBFacilityOptionIds: ["CANDIDATE:CVG-01"],
+      scenarioBFacilityOptionIds: ["CANDIDATE:ATL-01"],
       cadToUsdRate: "0.75"
     });
     expect(prismaMock.prisma.automationJobRun.create).toHaveBeenCalled();
@@ -12292,7 +12472,10 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
         expect.objectContaining({ standardField: "inbound_fee_per_pallet", sourceColumn: "Inbound Fee Per Pallet" }),
         expect.objectContaining({ standardField: "outbound_fee_per_pallet", sourceColumn: "Outbound Fee Per Pallet" }),
         expect.objectContaining({ standardField: "storage_fee_per_pallet_per_month", sourceColumn: "Storage Fee Per Pallet Per Month" }),
-        expect.objectContaining({ standardField: "currency", sourceColumn: "Currency" })
+        expect.objectContaining({ standardField: "annual_facility_warehouse_cost_currency", sourceColumn: "Annual Facility / Warehouse Cost Currency" }),
+        expect.objectContaining({ standardField: "inbound_fee_per_pallet_currency", sourceColumn: "Inbound Fee Per Pallet Currency" }),
+        expect.objectContaining({ standardField: "outbound_fee_per_pallet_currency", sourceColumn: "Outbound Fee Per Pallet Currency" }),
+        expect.objectContaining({ standardField: "storage_fee_per_pallet_per_month_currency", sourceColumn: "Storage Fee Per Pallet Per Month Currency" })
       ])
     );
     expect(historicalRecognition?.fieldMappings).toEqual(
@@ -12399,9 +12582,9 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     expect(preparation.historicalRowsReviewed).toBe(12);
     expect(preparation.excludedNonLtlRowCount).toBe(1);
-    expect(preparation.readyRequestCount).toBe(44);
-    expect(profiles).toHaveLength(11);
-    expect(Object.values(warehouseProfiles).map((profile) => profile.inventoryDwellTimeDays ?? 0).sort((left, right) => left - right)).toEqual([15, 15, 30, 30, 30, 45, 45, 45, 61, 61, 90]);
+    expect(preparation.readyRequestCount).toBe(84);
+    expect(profiles).toHaveLength(21);
+    expect(Object.values(warehouseProfiles).map((profile) => profile.inventoryDwellTimeDays ?? 0).sort((left, right) => left - right)).toEqual([15, 15, 30, 30, 30, 30, 30, 30, 45, 45, 45, 45, 45, 45, 45, 61, 61, 61, 61, 90, 90]);
 
     const changedWarehouseFields = ltlPreparationInputFixture({
       shipmentsCsv: readFileSync(historicalPath, "utf8").replace(",24,15,", ",24,29,"),
@@ -12525,8 +12708,8 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
   it("rejects malformed or negative future warehouse-cost fields when supplied", () => {
     const candidateCsv = [
-      "Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Inbound Fee Per Pallet,Outbound Fee Per Pallet,Storage Fee Per Pallet Per Month,Pallet Capacity,Currency,Notes",
-      "BAD-01,Bad Candidate,Proposed 3PL,60601,US,100000,bad,7.25,18,9000,USD,Bad inbound fee."
+      "Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Annual Facility / Warehouse Cost Currency,Inbound Fee Per Pallet,Inbound Fee Per Pallet Currency,Outbound Fee Per Pallet,Outbound Fee Per Pallet Currency,Storage Fee Per Pallet Per Month,Storage Fee Per Pallet Per Month Currency,Pallet Capacity,Notes",
+      "BAD-01,Bad Candidate,Proposed 3PL,60601,US,100000,USD,bad,USD,7.25,USD,18,USD,9000,Bad inbound fee."
     ].join("\n");
     const candidateMapping = recognizeSupplyChainDesignOfficialTemplate(candidateCsv.split("\n")[0].split(","))?.fieldMappings ?? [];
 
@@ -12583,8 +12766,8 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
     expect(aggregated?.representedShipments).toBe(10);
     expect(aggregated?.representativeWeight).toBe(1000);
     expect(aggregated?.representativePallets).toBe(2);
-    expect(aggregated?.normalizedRequest?.pieces[0]?.weight).toBe(1000);
-    expect(aggregated?.normalizedRequest?.pieces[0]).toMatchObject({ qty: 2, weightType: "total" });
+    expect(aggregated?.normalizedRequest?.pieces[0]?.weight).toBe(500);
+    expect(aggregated?.normalizedRequest?.pieces[0]).toMatchObject({ qty: 2, weightType: "each" });
   });
 
   it("does not include future warehouse-cost contract fields in 7L request payloads or fingerprints", () => {
@@ -12602,7 +12785,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
     );
     const expandedInput = ltlPreparationInputFixture({
       candidateCsv: [
-        "Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Inbound Fee Per Pallet,Outbound Fee Per Pallet,Storage Fee Per Pallet Per Month,Pallet Capacity,Currency,Notes",
+        "Candidate Facility ID,Candidate Facility Name,Candidate Type,Candidate ZIP / Postal Code,Candidate Country,Annual Facility / Warehouse Cost,Annual Facility / Warehouse Cost Currency,Inbound Fee Per Pallet,Inbound Fee Per Pallet Currency,Outbound Fee Per Pallet,Outbound Fee Per Pallet Currency,Storage Fee Per Pallet Per Month,Storage Fee Per Pallet Per Month Currency,Pallet Capacity,Notes",
         "ATL-01,Atlanta Proposed Warehouse,Proposed Owned,30303,US,420000,8.25,7.00,17.50,14000,USD,Proposed US owned warehouse option."
       ].join("\n"),
       shipmentsCsv: [
@@ -12665,9 +12848,25 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const byReference = new Map(result.preparedRequests.map((request) => [request.shipmentOrderReferences[0] || "Aggregated Activity", request]));
     expect(byReference.get("ORD-1001")?.calculatedFreightClass).toBe("100");
-    expect(byReference.get("ORD-1001")?.normalizedRequest?.pieces[0]).toMatchObject({ qty: 2, weight: 1200, weightType: "total", freightClass: "100" });
+    expect(byReference.get("ORD-1001")?.normalizedRequest?.pieces[0]).toMatchObject({ qty: 2, weight: 600, weightType: "each", freightClass: "100" });
     expect(byReference.get("ORD-2001")?.calculatedFreightClass).toBe("150");
     expect(byReference.get("ORD-1001")?.sourceRowCount).toBe(2);
+  });
+
+  it.each([
+    { weight: "1000", weightUnit: "kg", length: "48", width: "40", height: "60", dimensionUnit: "in", expectedWeight: 1102.311311 },
+    { weight: "1200", weightUnit: "lbs", length: "121.92", width: "101.6", height: "152.4", dimensionUnit: "cm", expectedWeight: 600 }
+  ])("normalizes mixed physical units in the prepared provider request %j", (values) => {
+    const result = prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture({
+      candidateCsv: [ltlCandidateHeader(), "ATL-01,Synthetic Warehouse,Proposed Owned,30303,US,420000,14000,USD,Synthetic."].join("\n"),
+      shipmentsCsv: [ltlShipmentsHeader(), `Individual Shipment,ORD-UNIT,2026-01-15,TOR-01,Customer A,10001,Synthetic Destination,US,1,2,40,${values.weight},${values.weightUnit},${values.length},${values.width},${values.height},${values.dimensionUnit},No,LTL,525,2,Standard,SKU-UNIT,USD`].join("\n")
+    }));
+    const request = result.preparedRequests[0];
+    expect(request.preparationStatus).toBe("Ready for rating");
+    expect(request.representativeWeight).toBeCloseTo(values.expectedWeight * 2, 5);
+    expect(result.sourceRowOutcomes[0].weight).toBe(Number(values.weight));
+    expect(request.normalizedRequest).toMatchObject({ uom: "US", pieces: [{ qty: 2, weightType: "each", length: 48, width: 40, height: 60 }] });
+    expect(request.normalizedRequest?.pieces[0].weight).toBeCloseTo(values.expectedWeight, 6);
   });
 
   it("rejects missing pallet quantity instead of assuming one for calculated Network Design freight class", () => {
@@ -12683,7 +12882,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
     expect(result.readyRequestCount).toBe(0);
     expect(result.preparedRequests.every((request) => request.normalizedRequest === null)).toBe(true);
     expect(result.preparedRequests.map((request) => request.missingDataReason).join(" ")).toContain(
-      "Pallets must be greater than zero for freight class calculation"
+      "Pallets Total is missing"
     );
   });
 
@@ -12965,7 +13164,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
         reason: "Transportation Mode is not LTL."
       })
     ]));
-    expect(result.readyRequestCount).toBe(22);
+    expect(result.readyRequestCount).toBe(42);
     expect(result.excludedNonLtlRowCount).toBe(1);
   });
 
@@ -13190,6 +13389,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const result = await evaluateSupplyChainDesignNetworkScenario({
       tenantId: "tenant-1",
+      projectId: "project-1",
       scenarioId: "scenario-toronto",
       scenarioName: "Toronto only",
       selectedOrigins: [toronto],
@@ -13242,6 +13442,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const result = await evaluateSupplyChainDesignNetworkScenario({
       tenantId: "tenant-1",
+      projectId: "project-1",
       scenarioId: "scenario-current-reuse",
       scenarioName: "Current physical reuse",
       selectedOrigins: [currentOrigin],
@@ -13268,6 +13469,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const result = await evaluateSupplyChainDesignNetworkScenario({
       tenantId: "tenant-1",
+      projectId: "project-1",
       scenarioId: "scenario-a",
       scenarioName: "Toronto and Cincinnati",
       selectedOrigins: origins.slice(0, 2),
@@ -13312,6 +13514,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const result = await evaluateSupplyChainDesignNetworkScenario({
       tenantId: "tenant-1",
+      projectId: "project-1",
       scenarioId: "scenario-b",
       scenarioName: "Mixed reusable scenario",
       selectedOrigins: [toronto, cincinnati],
@@ -13355,6 +13558,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const result = await evaluateSupplyChainDesignNetworkScenario({
       tenantId: "tenant-1",
+      projectId: "project-1",
       scenarioId: "scenario-c",
       scenarioName: "Dedup missing rates",
       selectedOrigins: [scenarioOrigins()[1]],
@@ -13391,6 +13595,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const result = await evaluateSupplyChainDesignNetworkScenario({
       tenantId: "tenant-1",
+      projectId: "project-1",
       scenarioId: "scenario-d",
       scenarioName: "Invalid and ineligible",
       selectedOrigins: [
@@ -13848,6 +14053,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -13895,6 +14101,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -13904,7 +14111,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
     prismaMock.prisma.automationJobRun.findMany.mockResolvedValueOnce([
       {
         id: "batch-1",
-        input: ltlBatchInputFixture()
+        input: ltlCurrentBatchInputFixture()
       }
     ]);
     prismaMock.prisma.supplyChainDesignLtlRatePreparationRun.findMany.mockResolvedValueOnce([]);
@@ -13920,9 +14127,57 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
       message: "Network Design rate run resumed.",
       runId: "batch-1",
       runStatus: "QUEUED",
-      requestTotal: ltlBatchInputFixture().requests.length
+      requestTotal: ltlCurrentBatchInputFixture().requests.length
     });
     expect(prismaMock.prisma.automationJobRun.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects reuse of a batch with the old total-weight physical representation", async () => {
+    prismaMock.prisma.automationJobRun.create.mockClear();
+    getAuthenticatedContext.mockResolvedValue(context(PlatformRole.ADMIN));
+    const preparationResult = prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture());
+    prismaMock.prisma.supplyChainDesignProject.findUnique.mockResolvedValueOnce({
+      id: "project-1",
+      ltlRatePreparationRuns: [
+        {
+          id: "prep-run-1",
+          status: SupplyChainDesignModelRunStatus.SUCCESS,
+          createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
+          resultSummary: preparationResult
+        }
+      ]
+    });
+    prismaMock.prisma.tenantModuleAccess.findFirst.mockResolvedValueOnce({ id: "ltl-access" });
+    prismaMock.prisma.integrationCredential.findMany.mockResolvedValueOnce(sevenLAccountRecordsFixture());
+    prismaMock.prisma.automationJobRun.findMany.mockResolvedValueOnce([
+      {
+        id: "batch-1",
+        input: {
+          ...ltlBatchInputFixture(),
+          requests: ltlBatchInputFixture().requests.map((row) => ({
+            ...row, request: { ...row.request, pieces: row.request.pieces.map((piece) => ({
+              ...piece, weight: piece.weight * piece.qty, weightType: "total" as const
+            })) }
+          }))
+        }
+      }
+    ]);
+    prismaMock.prisma.automationJobRun.create.mockResolvedValueOnce({ id: "normalized-batch" });
+
+    const response = await runSupplyChainDesignNetworkDesignAction(
+      { ok: false, message: "" },
+      form({ projectId: "project-1", preparationRunId: "prep-run-1" })
+    );
+
+    expect(response).toEqual({
+      ok: true,
+      message: "Network Design rate run started.",
+      runId: "normalized-batch",
+      runStatus: "QUEUED",
+      requestTotal: ltlBatchInputFixture().requests.length
+    });
+    expect(prismaMock.prisma.automationJobRun.create).toHaveBeenCalledOnce();
   });
 
   it("does not reuse failed or legacy-incompatible Network Design rate batches", async () => {
@@ -13935,6 +14190,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -13993,6 +14249,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -14004,7 +14261,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
       .mockResolvedValueOnce([
         {
           id: "completed-batch",
-          input: ltlBatchInputFixture(),
+          input: ltlCurrentBatchInputFixture(),
           ltlBatchQuoteLanes: [ltlLaneFixture({ selectedQuoteJson: ltlQuoteFixture({ total: 100 }) })]
         }
       ]);
@@ -14020,7 +14277,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
       message: "Completed rates from the existing Network Design run were reused.",
       runId: "completed-batch",
       runStatus: "SUCCESS",
-      requestTotal: ltlBatchInputFixture().requests.length
+      requestTotal: ltlCurrentBatchInputFixture().requests.length
     });
     expect(prismaMock.prisma.automationJobRun.create).not.toHaveBeenCalled();
   });
@@ -14035,6 +14292,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -14078,6 +14336,7 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
           id: "prep-run-1",
           status: SupplyChainDesignModelRunStatus.SUCCESS,
           createdAt: new Date("2026-07-30T20:00:00.000Z"),
+          inputReferences: { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null, rateDirection: "1 CAD = X USD" }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } },
           resultSummary: preparationResult
         }
       ]
@@ -14223,6 +14482,9 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
     expect(batches[0].sourceRowCounts).toEqual({
       historicalRowsReviewed: 4,
       ltlRowsReviewed: 3,
+      totalHistoricalShipmentsRepresented: 27,
+      ltlShipmentsRepresented: 27,
+      parcelShipmentsRepresented: 0,
       shipmentsRepresented: 27,
       rateRequestsCompleted: 9,
       incompleteLtlRowsExcluded: 0,
@@ -14378,8 +14640,8 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
 
     const shipmentCsv = await exportSupplyChainDesignShipmentComparisonCsv(context(PlatformRole.ADMIN), "project-1", "batch-1");
 
-    expect(shipmentCsv).toContain("ORD-2001,Aggregated Activity,10,2,1000,lb,48 x 40 x 60,in,125,61,100,39,610,1000,390");
-    expect(shipmentCsv).toContain("ORD-2001,Aggregated Activity,10,2,1000,lb,48 x 40 x 60,in,125,61,90,29,610,900,290");
+    expect(shipmentCsv).toContain("ORD-2001,Aggregated Activity,10,2,20,1000,10000,lb,48 x 40 x 60,in,125,61,100,39,610,1000,390");
+    expect(shipmentCsv).toContain("ORD-2001,Aggregated Activity,10,2,20,1000,10000,lb,48 x 40 x 60,in,125,61,90,29,610,900,290");
   });
 
   it("exposes Network Design CSV downloads as attachment routes", () => {
@@ -14404,10 +14666,10 @@ describe("SCDS Candidate LTL Rate Preparation", () => {
       "utf8"
     );
 
-    expect(sample).toContain("CHI-3PL,Chicago Variable 3PL,Proposed 3PL,60601,US,,6.00,5.00,14.00,10000,USD");
-    expect(sample).toContain("ATL-3PL,Atlanta Variable 3PL,Proposed 3PL,30303,US,,5.50,4.75,13.00,12000,USD");
-    expect(sample).toContain("PHX-3PL,Phoenix Variable 3PL,Proposed 3PL,85004,US,,6.25,5.25,15.00,9000,USD");
-    expect(sample).toContain("DFW-ALLIN,Dallas Annual All-In Candidate,Proposed Leased,75201,US,195000,7.50,6.50,16.00,11000,USD");
+    expect(sample).toContain("CHI-3PL,Chicago Variable 3PL,Proposed 3PL,60601,US,,USD,6.00,USD,5.00,USD,14.00,USD,10000");
+    expect(sample).toContain("ATL-3PL,Atlanta Variable 3PL,Proposed 3PL,30303,US,,USD,5.50,USD,4.75,USD,13.00,USD,12000");
+    expect(sample).toContain("PHX-3PL,Phoenix Variable 3PL,Proposed 3PL,85004,US,,USD,6.25,USD,5.25,USD,15.00,USD,9000");
+    expect(sample).toContain("DFW-ALLIN,Dallas Annual All-In Candidate,Proposed Leased,75201,US,195000,USD,7.50,USD,6.50,USD,16.00,USD,11000");
   });
 });
 
@@ -14497,6 +14759,7 @@ function orchestrationInputFixture(
     context: context(PlatformRole.ADMIN),
     projectId: "project-1",
     transportationInput: {
+      projectId: "project-1",
       tenantId: "tenant-1",
       scenarioId: "scenario-1",
       scenarioName: "Scenario 1",
@@ -14609,6 +14872,7 @@ function comparisonOrchestrationDeps(
 function comparisonTransportationInput(scenarioId: string, scenarioName: string) {
   return {
     tenantId: "tenant-1",
+    projectId: "project-1",
     scenarioId,
     scenarioName,
     selectedOrigins: [],
@@ -15539,6 +15803,7 @@ function ltlBatchInputFixture(): ScdsLtlBatchInput {
     { id: "ATL-01", name: "Atlanta Proposed Warehouse", originZipcode: "30303", originalFacilityId: "TOR-01", representedShipments: 1, currentTransportationCost: 525 },
     { id: "CHI-3PL", name: "Chicago Proposed 3PL", originZipcode: "60601", originalFacilityId: "TOR-01", representedShipments: 1, currentTransportationCost: 525 }
   ];
+  const prepared = prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture()).preparedRequests;
   return {
     source: "SUPPLY_CHAIN_DESIGN",
     projectId: "project-1",
@@ -15562,6 +15827,8 @@ function ltlBatchInputFixture(): ScdsLtlBatchInput {
       representedShipments: candidate.representedShipments,
       currentTransportationCost: candidate.currentTransportationCost,
       currentTransportationCostPerShipment: candidate.currentTransportationCost / candidate.representedShipments,
+      currentTransportationCostCurrency: "USD",
+      warehouseCostSourceRows: prepared.find((row) => row.candidateFacilityId === candidate.id && row.originalFacilityId === candidate.originalFacilityId)!.warehouseCostSourceRows,
       representativePallets: 2,
       representativeWeight: candidate.representedShipments === 10 ? 1000 : 1200,
       weightUnit: "lb",
@@ -15575,8 +15842,8 @@ function ltlBatchInputFixture(): ScdsLtlBatchInput {
         pieces: [
           {
             qty: candidate.representedShipments === 10 ? 2 : 2,
-            weight: candidate.representedShipments === 10 ? 1000 : 1200,
-            weightType: "total" as const,
+            weight: candidate.representedShipments === 10 ? 500 : 600,
+            weightType: "each" as const,
             length: 48,
             width: 40,
             height: 60,
@@ -15836,6 +16103,7 @@ function actionMappingFixture(id: string, tableType: string, fileName: string, c
     file: {
       id: `${id}-file`,
       originalFileName: fileName,
+      contentHash: "synthetic-" + id,
       fileBytes: Buffer.from(csv)
     }
   };
@@ -16329,3 +16597,304 @@ function fileSummaryFixture(
     mappings
   };
 }
+
+
+describe("Phase 2 calculation reconciliation", () => {
+  function baseline(currency = "CAD") {
+    return {
+      facilities: { tableType: SupplyChainDesignTableType.FACILITIES, ...screeningMappedFile("facilities.csv", "ID,Name,Cost,Cost Currency\nF1,Synthetic Facility,100,USD", [["facility_id", "ID"], ["facility_name", "Name"], ["annual_fixed_cost", "Cost"], ["annual_fixed_cost_currency", "Cost Currency"]]) },
+      shipments: { tableType: SupplyChainDesignTableType.SHIPMENTS, ...screeningMappedFile("shipments.csv", `Origin,Cost,Currency,Weight,Unit,Shipments\nF1,100,${currency},10,kg,2`, [["origin_facility_id", "Origin"], ["transportation_cost", "Cost"], ["transportation_cost_currency", "Currency"], ["weight", "Weight"], ["weight_unit", "Unit"], ["shipment_quantity", "Shipments"]]) }
+    };
+  }
+
+  it.each([
+    { analysisCurrency: "USD" as const, transportation: 75, facility: 100 },
+    { analysisCurrency: "CAD" as const, transportation: 100, facility: 133.33 }
+  ])("normalizes amount-specific baseline currencies to $analysisCurrency with original evidence", ({ analysisCurrency, transportation, facility }) => {
+    const result = runSupplyChainDesignModel01Proof({ ...baseline(), currencyContext: { analysisCurrency, cadToUsdRate: 0.75 } });
+    expect(result.totalTransportationCost).toBe(transportation);
+    expect(result.totalFacilityOperatingCost).toBe(facility);
+    expect(result.transportationCostByCurrency).toEqual([{ currency: "CAD", transportationCost: 100 }]);
+    expect(result.shipmentCount).toBe(2);
+    expect(result.volumeSummary?.totalWeight).toBeCloseTo(22.046226218, 5);
+    expect(result.normalizedWeightUnit).toBe("lb");
+    expect(result.fxSnapshot).toEqual({ analysisCurrency, cadToUsdRate: 0.75, rateDirection: "1 CAD = X USD" });
+  });
+
+  it("retains legacy direct baseline amounts without claiming an FX snapshot", () => {
+    const result = runSupplyChainDesignModel01Proof(baseline());
+    expect(result.totalTransportationCost).toBe(100);
+    expect(result.fxSnapshot).toBeUndefined();
+  });
+
+  it.each(["", "EUR"])("fails explicit baseline normalization for missing or unsupported monetary currency %s", (currency) => {
+    expect(() => runSupplyChainDesignModel01Proof({ ...baseline(currency), currencyContext: { analysisCurrency: "USD", cadToUsdRate: 0.75 } })).toThrow(/currency/);
+  });
+
+  it("requires FX for a cross-currency baseline while allowing matching currency without FX", () => {
+    expect(() => runSupplyChainDesignModel01Proof({ ...baseline(), currencyContext: { analysisCurrency: "USD", cadToUsdRate: null } })).toThrow("requires FX");
+    expect(runSupplyChainDesignModel01Proof({ ...baseline("USD"), currencyContext: { analysisCurrency: "USD", cadToUsdRate: null } }).totalTransportationCost).toBe(100);
+  });
+
+  it("splits aggregate pallets into whole profiles while conserving represented volume and warehouse evidence", () => {
+    const csv = [ltlShipmentsHeader(), "Aggregated Activity,SYNTH-AGG,2026-01-01,F1,C1,10001,Synthetic,US,3,8,30,800,lb,48,40,60,in,No,LTL,300,2,Standard,SKU-SYNTH,USD"].join("\n");
+    const result = prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture({ shipmentsCsv: csv }));
+    const profiles = result.preparedRequests.filter((request) => request.candidateFacilityId === result.preparedRequests[0].candidateFacilityId);
+    expect(profiles.map((profile) => profile.representativePallets).sort()).toEqual([2, 3]);
+    expect(profiles.reduce((sum, profile) => sum + profile.representedShipments, 0)).toBe(3);
+    expect(profiles.reduce((sum, profile) => sum + profile.representativePallets! * profile.representedShipments, 0)).toBe(8);
+    expect(profiles.reduce((sum, profile) => sum + profile.representativeWeight! * profile.representedShipments, 0)).toBe(800);
+    expect(profiles.reduce((sum, profile) => sum + profile.currentTransportationCost!, 0)).toBe(300);
+    expect(profiles.flatMap((profile) => profile.warehouseCostSourceRows).reduce((sum, row) => sum + row.pallets!, 0)).toBe(8);
+    expect(result.totalHistoricalShipmentsRepresented).toBe(3);
+    expect(result.ltlShipmentsRepresented).toBe(3);
+  });
+
+  it("keeps shipment counts independent of candidate expansion and Parcel exclusion", () => {
+    const result = prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture());
+    expect(result.totalHistoricalShipmentsRepresented).toBe(37);
+    expect(result.ltlShipmentsRepresented).toBe(11);
+    expect(result.parcelShipmentsRepresented).toBe(26);
+  });
+
+  it("normalizes preparation historical costs once and retains the normalized currency metadata", () => {
+    const input = ltlPreparationInputFixture({ shipmentsCsv: ltlShipmentsCsv().replaceAll(",USD", ",CAD") });
+    const result = prepareSupplyChainDesignCandidateLtlRateRequests({ ...input, currencyContext: { analysisCurrency: "USD", cadToUsdRate: 0.75 } });
+    const request = result.preparedRequests.find((row) => row.shipmentOrderReferences.includes("ORD-1001"))!;
+    expect(request.currentTransportationCost).toBe(393.75);
+    expect(request.currentTransportationCostCurrency).toBe("USD");
+  });
+
+  it("normalizes a single USD warehouse comparison into CAD while retaining original rows", () => {
+    const facilities = warehouseCostOptionsFixture().map((row) => ({ ...row, currency: "USD" }));
+    const result = runWarehouseCostComparison({ facilities, selectedFacilityOptionIds: facilities.map((row) => row.optionId), analysisCurrency: "CAD", cadToUsdRate: 0.75 });
+    expect(result.reportingCurrency).toBe("CAD");
+    expect(result.facilities[0].originalComparableAnnualWarehouseCost).toBe(facilities[0].comparableAnnualWarehouseCost);
+    expect(result.facilities[0].comparableAnnualWarehouseCost).toBeCloseTo(facilities[0].comparableAnnualWarehouseCost! / 0.75, 2);
+  });
+
+  it("does not relabel unsupported warehouse currencies as the analysis currency", () => {
+    const facilities = warehouseCostOptionsFixture().map((row) => ({ ...row, currency: "EUR" }));
+    expect(() => runWarehouseCostComparison({ facilities, selectedFacilityOptionIds: facilities.map((row) => row.optionId), analysisCurrency: "USD", cadToUsdRate: 0.75 })).toThrow("Unsupported warehouse cost currency");
+  });
+});
+
+
+describe("Phase 2 orchestration evidence boundaries", () => {
+  it("normalizes scenario totals and amount-specific fees into CAD before selecting winners", async () => {
+    const input = comparisonOrchestrationFixture();
+    input.scenarioA.combinedCostInput.selectedFacilities = [candidateCombinedFacility("A-3PL", "Synthetic A", { currency: "USD", inboundFeePerPallet: 6, outboundFeePerPallet: 0, storageFeePerPalletPerMonth: 0 })];
+    const evaluationA = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "A-3PL", "Synthetic A", 100)])]);
+    const evaluationB = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "B-3PL", "Synthetic B", 200)])]);
+    const result = await orchestrateSupplyChainDesignNetworkScenarioComparison({ ...input, fxInput: { analysisCurrency: "CAD", cadToUsdRate: 0.5 } }, comparisonOrchestrationDeps(evaluationA, evaluationB));
+    expect(result.scenarioA.fx?.normalizedCurrency).toBe("CAD");
+    expect(result.scenarioA.combinedCostEvaluation?.totalNetworkCost).toBe(224);
+    expect(result.phase).toBe("COMPLETE");
+  });
+
+  it("prevents winner selection when FX input accompanies unsupported currency evidence", async () => {
+    const input = comparisonOrchestrationFixture({ scenarioACombined: { selectedFacilities: [candidateCombinedFacility("A-3PL", "Synthetic A", { currency: "EUR", inboundFeePerPallet: 6, outboundFeePerPallet: 0, storageFeePerPalletPerMonth: 0 })] } });
+    const evaluationA = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "A-3PL", "Synthetic A", 100)])]);
+    const evaluationB = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "B-3PL", "Synthetic B", 200)])]);
+    const result = await orchestrateSupplyChainDesignNetworkScenarioComparison({ ...input, fxInput: { analysisCurrency: "USD", cadToUsdRate: 0.75 } }, comparisonOrchestrationDeps(evaluationA, evaluationB));
+    expect(result.phase).toBe("INCOMPLETE");
+    expect(result.resultSummary?.comparison.lowerCostScenario).toBeNull();
+    expect(result.scenarioA.fx?.incompleteReason).toContain("Unsupported scenario currency");
+  });
+
+  it("rejects an exact physical lane rate from a different project in the same tenant", async () => {
+    const input = ltlBatchInputFixture();
+    const request = input.requests[0].request;
+    prismaMock.prisma.ltlBatchQuoteLane.findMany.mockResolvedValueOnce([ltlLaneFixture({ id: "synthetic-other-project-lane", jobRunId: "synthetic-other-project-batch", requestJson: request, selectedQuoteJson: ltlQuoteFixture({ total: 100, mode: "live" }), jobRun: { input: { ...input, projectId: "other-project" } } })]);
+    const result = await findReusableSupplyChainDesignExactLaneRate({ tenantId: "tenant-1", projectId: "project-1", accountId: input.accountId, carrierHashes: input.carrierHashes, request });
+    expect(result).toBeNull();
+    expect(prismaMock.prisma.ltlBatchQuoteLane.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant-1" }) }));
+  });
+});
+
+
+describe("Phase 2 warehouse source coverage", () => {
+  it.each(["complete", "partial", "missing"])("covers supplemental Parcel rows or fails closed for %s warehouse evidence", async (evidence) => {
+    const input = ltlCurrentBatchInputFixture();
+    input.requests = input.requests.filter((row) => row.candidateFacilityId === "ATL-01").map((row) => ({ ...row, inventoryDwellTimeDays: 30, warehouseCostSourceRows: row.warehouseCostSourceRows!.map((source) => ({ ...source, inventoryDwellTimeDays: 30 })) }));
+    input.comparisonSetup = {
+      scenarioSelections: [],
+      currentFacilities: [{ facilityId: "DFW-3PL", facilityName: "Synthetic Current", annualFacilityCost: 0, annualFacilityCostCurrency: "USD" }, { facilityId: "TOR-01", facilityName: "Synthetic Current Two", annualFacilityCost: 0, annualFacilityCostCurrency: "USD" }],
+      candidateFacilities: [{ facilityId: "ATL-01", facilityName: "Synthetic Candidate", annualFixedCost: null, inboundFeePerPallet: 2, inboundFeePerPalletCurrency: "USD", outboundFeePerPallet: 3, outboundFeePerPalletCurrency: "USD", storageFeePerPalletPerMonth: 5, storageFeePerPalletPerMonthCurrency: "USD" }]
+    };
+    input.preparationSummary = {
+      historicalRowsReviewed: 3, readyRequestCount: 2, missingDataRequestCount: 0, excludedNonLtlRowCount: 1,
+      totalHistoricalShipmentsRepresented: 12, ltlShipmentsRepresented: 11, parcelShipmentsRepresented: 1,
+      warehouseCostSourceRows: [{ sourceRowId: "synthetic-parcel-row", shipmentReference: "SYNTH-PARCEL", representedShipments: 1, pallets: evidence === "missing" ? null : 10, inventoryDwellTimeDays: evidence === "complete" ? 30 : null }]
+    };
+    prismaMock.prisma.automationJobRun.findFirst.mockResolvedValueOnce({ id: "synthetic-warehouse-batch", status: "SUCCESS", startedAt: new Date("2026-01-01T00:00:00Z"), finishedAt: new Date("2026-01-01T00:01:00Z"), errorMessage: null, input, ltlBatchQuoteLanes: input.requests.map((row) => ltlLaneFixture({ customerReference: row.rateRequestKey, selectedQuoteJson: ltlQuoteFixture({ total: 100, mode: "live" }) })) });
+    prismaMock.prisma.supplyChainDesignLtlRatePreparationRun.findFirst.mockResolvedValueOnce(null);
+    const result = await getSupplyChainDesignLtlRateBatchById(context(PlatformRole.ADMIN), "project-1", "synthetic-warehouse-batch");
+    if (evidence === "complete") {
+      expect(result?.candidateComparisons[0].candidateWarehouseCost).toBe(320);
+      expect(result?.status).toBe("SUCCESS");
+    } else {
+      expect(result?.status).toBe("ERROR");
+      expect(result?.errorMessage).toContain("Warehouse cost evidence is incomplete");
+      expect(result?.candidateComparisons).toEqual([]);
+    }
+  });
+});
+
+function ltlCurrentBatchInputFixture(): ScdsLtlBatchInput {
+  return { ...ltlBatchInputFixture(), currencyEvidence: { analysisCurrency: "USD", cadToUsdRate: null, sevenLRateCurrency: "USD", rateDirection: "1 CAD = X USD" } };
+}
+
+
+describe("Phase 2 preparation freshness", () => {
+  it.each(["missing hash", "changed hash", "changed mapping", "missing FX", "changed FX"])("rejects %s evidence before creating a reusable batch", async (change) => {
+    const references: { fxSnapshot?: { analysisCurrency: string; cadToUsdRate: number | null }; shipments: { fileId: string; mappingId: string; contentHash?: string; mappingUpdatedAt: string }; candidateFacilities: { fileId: string; mappingId: string; contentHash: string; mappingUpdatedAt: string } } = {
+      fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null },
+      shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", contentHash: "synthetic-shipments", mappingUpdatedAt: "2026-07-28T00:00:00.000Z" },
+      candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", contentHash: "synthetic-candidates", mappingUpdatedAt: "2026-07-28T00:00:00.000Z" }
+    };
+    if (change === "missing hash") delete references.shipments.contentHash;
+    if (change === "changed hash") references.shipments.contentHash = "synthetic-stale-hash";
+    if (change === "changed mapping") references.shipments.mappingUpdatedAt = "2026-01-01T00:00:00.000Z";
+    if (change === "missing FX") delete references.fxSnapshot;
+    if (change === "changed FX") references.fxSnapshot!.cadToUsdRate = 0.75;
+    prismaMock.prisma.automationJobRun.create.mockClear();
+    prismaMock.prisma.tenantModuleAccess.findFirst.mockResolvedValue({ id: "synthetic-access" });
+    prismaMock.prisma.tenantRolePolicy.findUnique.mockResolvedValue(null);
+    prismaMock.prisma.tenantRoleModuleAccess.findMany.mockResolvedValue([]);
+    prismaMock.prisma.integrationCredential.findMany.mockResolvedValue(sevenLAccountRecordsFixture());
+    prismaMock.prisma.supplyChainDesignProject.findUnique.mockResolvedValueOnce({ id: "project-1", analysisCurrency: "USD", cadToUsdRate: null, ltlRatePreparationRuns: [{ id: "prep-run-1", status: SupplyChainDesignModelRunStatus.SUCCESS, inputReferences: references, resultSummary: prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture()) }] });
+    prismaMock.prisma.supplyChainDesignFileMapping.findMany.mockResolvedValueOnce([
+      { id: "shipments-mapping", fileId: "shipments-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-shipments" } },
+      { id: "candidate-mapping", fileId: "candidate-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-candidates" } }
+    ]);
+    await expect(createSupplyChainDesignLtlRateBatch(context(PlatformRole.ADMIN), "project-1", "prep-run-1", { currentFacilities: [], candidateFacilities: [], scenarioSelections: [] })).rejects.toThrow("incompatible");
+    expect(prismaMock.prisma.automationJobRun.create).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("Phase 2 amount-specific scenario currencies", () => {
+  it.each(["complete", "partial", "missing"])("uses explicit fee currencies without FX and preserves %s evidence boundaries", async (evidence) => {
+    const input: SupplyChainDesignNetworkScenarioComparisonOrchestrationInput = comparisonOrchestrationFixture();
+    const facility = candidateCombinedFacility("A-3PL", "Synthetic A", { currency: "USD", inboundFeePerPallet: 6, outboundFeePerPallet: 0, storageFeePerPalletPerMonth: 0 });
+    input.scenarioA.combinedCostInput.selectedFacilities = [{ ...facility, warehouseCost: { ...facility.warehouseCost, currency: null, inboundFeePerPalletCurrency: evidence === "missing" ? null : "USD", outboundFeePerPalletCurrency: evidence === "complete" ? "USD" : null, storageFeePerPalletPerMonthCurrency: evidence === "complete" ? "USD" : null } }];
+    const evaluationA = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "A-3PL", "Synthetic A", 100)])]);
+    const evaluationB = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "B-3PL", "Synthetic B", 200)])]);
+    const result = await orchestrateSupplyChainDesignNetworkScenarioComparison(input, comparisonOrchestrationDeps(evaluationA, evaluationB));
+    if (evidence === "complete") {
+      expect(result.phase).toBe("COMPLETE");
+      expect(result.scenarioA.combinedCostEvaluation?.totalNetworkCost).toBe(112);
+      expect(result.scenarioA.fx?.fxApplied).toBe(false);
+    } else {
+      expect(result.phase).toBe("INCOMPLETE");
+      expect(result.resultSummary?.comparison.lowerCostScenario).toBeNull();
+      expect(result.scenarioA.fx?.incompleteReason).toContain("currency is required");
+    }
+  });
+});
+
+
+describe("Phase 2 represented baseline costs", () => {
+  it("uses shipment-weighted lane averages for aggregate Model 02 activity", () => {
+    const input = model02CapacityInput({ shipmentsCsv: "Shipment ID,Origin,Destination,Cost,Shipments\nSYNTH-1,F1,C1,100,10\nSYNTH-2,F1,C1,200,20" });
+    input.selectedExistingFacilityIds = ["F1"];
+    input.selectedCandidateFacilityIds = [];
+    input.shipments.fieldMappings.push({ standardField: "shipment_quantity", sourceColumn: "Shipments", requirement: "OPTIONAL" });
+    const result = runSupplyChainDesignModel02Proof(input);
+    expect(result.historicalShipmentCount).toBe(30);
+    expect(result.customerAssignments[0].historicalShipmentCount).toBe(30);
+    expect(result.customerAssignments[0].costPerShipment).toBe(10);
+  });
+
+  it("normalizes Inventory unit costs and Facility Costs from their own currencies", () => {
+    const result = runSupplyChainDesignModel01Proof({
+      facilities: { tableType: SupplyChainDesignTableType.FACILITIES, ...screeningMappedFile("facilities.csv", "ID,Name\nF1,Synthetic Facility", [["facility_id", "ID"], ["facility_name", "Name"]]) },
+      shipments: { tableType: SupplyChainDesignTableType.SHIPMENTS, ...screeningMappedFile("shipments.csv", "Origin\nF1", [["origin_facility_id", "Origin"]]) },
+      inventory: { tableType: SupplyChainDesignTableType.INVENTORY, ...screeningMappedFile("inventory.csv", "Facility,SKU,Quantity,Cost,Currency\nF1,SYNTH-SKU,2,10,CAD", [["facility_id", "Facility"], ["item_id", "SKU"], ["quantity", "Quantity"], ["unit_cost", "Cost"], ["unit_cost_currency", "Currency"]]) },
+      facilityCosts: { tableType: SupplyChainDesignTableType.FACILITY_COSTS, ...screeningMappedFile("costs.csv", "Facility,Category,Cost,Currency\nF1,Synthetic Rent,100,CAD", [["facility_id", "Facility"], ["cost_category", "Category"], ["annual_cost", "Cost"], ["annual_cost_currency", "Currency"]]) },
+      currencyContext: { analysisCurrency: "USD", cadToUsdRate: 0.75 }
+    });
+    expect(result.inventoryValue).toBe(15);
+    expect(result.totalFacilityOperatingCost).toBe(75);
+  });
+
+  it("normalizes single-currency USD location spend into the requested CAD analysis currency", () => {
+    const input = locationStrategyInputFixture({ weightingMethod: "CURRENT_TRANSPORTATION_COST", cadToUsdRate: 0.5 });
+    const usd = runSupplyChainDesignWarehouseLocationStrategy(input);
+    const cad = runSupplyChainDesignWarehouseLocationStrategy({ ...input, analysisCurrency: "CAD" });
+    expect(cad.selectedDemandCurrency).toBe("CAD");
+    expect(cad.recommendedSolution.selectedTotalDemandWeight).toBe(usd.recommendedSolution.selectedTotalDemandWeight * 2);
+  });
+});
+
+
+describe("Phase 2 fresh-rate batch compatibility", () => {
+  it("does not resume an ordinary reusable batch when fresh rates were requested", async () => {
+    prismaMock.prisma.automationJobRun.create.mockClear();
+    prismaMock.prisma.tenantModuleAccess.findFirst.mockResolvedValue({ id: "synthetic-access" });
+    prismaMock.prisma.tenantRolePolicy.findUnique.mockResolvedValue(null);
+    prismaMock.prisma.tenantRoleModuleAccess.findMany.mockResolvedValue([]);
+    prismaMock.prisma.integrationCredential.findMany.mockResolvedValue(sevenLAccountRecordsFixture());
+    const references = { fxSnapshot: { analysisCurrency: "USD", cadToUsdRate: null }, shipments: { fileId: "shipments-file", mappingId: "shipments-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-shipments" }, candidateFacilities: { fileId: "candidate-file", mappingId: "candidate-mapping", mappingUpdatedAt: "2026-07-28T00:00:00.000Z", contentHash: "synthetic-candidates" } };
+    prismaMock.prisma.supplyChainDesignProject.findUnique.mockResolvedValueOnce({ id: "project-1", analysisCurrency: "USD", cadToUsdRate: null, ltlRatePreparationRuns: [{ id: "prep-run-1", createdAt: new Date("2026-07-30T20:00:00Z"), status: SupplyChainDesignModelRunStatus.SUCCESS, inputReferences: references, resultSummary: prepareSupplyChainDesignCandidateLtlRateRequests(ltlPreparationInputFixture()) }] });
+    prismaMock.prisma.supplyChainDesignFileMapping.findMany.mockResolvedValueOnce([
+      { id: "shipments-mapping", fileId: "shipments-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-shipments" } },
+      { id: "candidate-mapping", fileId: "candidate-file", updatedAt: new Date("2026-07-28T00:00:00Z"), file: { contentHash: "synthetic-candidates" } }
+    ]);
+    prismaMock.prisma.automationJobRun.findMany.mockResolvedValueOnce([{ id: "ordinary-existing-batch", input: ltlCurrentBatchInputFixture() }]);
+    prismaMock.prisma.automationJobRun.create.mockResolvedValueOnce({ id: "synthetic-fresh-batch" });
+    const result = await createSupplyChainDesignLtlRateBatch(context(PlatformRole.ADMIN), "project-1", "prep-run-1", { scenarioSelections: [], currentFacilities: [], candidateFacilities: [] }, { forceFreshRates: true });
+    expect(result.jobId).toBe("synthetic-fresh-batch");
+    expect(result.reused).toBe(false);
+    expect(result.input.forceFreshRates).toBe(true);
+    expect(prismaMock.prisma.automationJobRun.create).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("Phase 2 fresh-rate comparison cache", () => {
+  it("bypasses completed comparisons and ordinary active comparisons when fresh rates were requested", async () => {
+    const evalA = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "A-3PL", "Synthetic A", 100)])]);
+    const evalB = combinedTransportationFixture([combinedProfileFixture("profile-1", [combinedAlternativeFixture("profile-1", "B-3PL", "Synthetic B", 200)])]);
+    const deps = comparisonOrchestrationDeps(evalA, evalB);
+    deps.findCompletedRun.mockResolvedValueOnce(networkScenarioComparisonRunRecord({ status: "COMPLETE" }));
+    deps.findActiveRun.mockResolvedValueOnce(networkScenarioComparisonRunRecord({ status: "RATING" }));
+    const result = await orchestrateSupplyChainDesignNetworkScenarioComparison({ ...comparisonOrchestrationFixture(), forceFreshRates: true }, deps);
+    expect(deps.findCompletedRun).not.toHaveBeenCalled();
+    expect(deps.createRun).toHaveBeenCalledOnce();
+    expect(deps.evaluateTransportation).toHaveBeenCalledWith(expect.objectContaining({ bypassExactReuse: true }));
+    expect(result.reusedCompletedRunId).toBeNull();
+    expect(result.resumedActiveRunId).toBeNull();
+  });
+});
+
+
+describe("Phase 2 currency-aware CSV reporting", () => {
+  it("exports both historical and provider comparison amounts in the analysis currency", async () => {
+    const input = ltlCurrentBatchInputFixture();
+    input.currencyEvidence = { analysisCurrency: "CAD", cadToUsdRate: 0.5, sevenLRateCurrency: "USD", rateDirection: "1 CAD = X USD" };
+    input.requests = input.requests.slice(0, 1);
+    prismaMock.prisma.automationJobRun.findMany.mockResolvedValueOnce([{ id: "synthetic-cad-export", status: "SUCCESS", startedAt: new Date("2026-01-01T00:00:00Z"), finishedAt: new Date("2026-01-01T00:01:00Z"), errorMessage: null, input, ltlBatchQuoteLanes: [ltlLaneFixture({ customerReference: input.requests[0].rateRequestKey, selectedQuoteJson: ltlQuoteFixture({ total: 100, mode: "live" }) })] }]);
+    prismaMock.prisma.supplyChainDesignLtlRatePreparationRun.findMany.mockResolvedValueOnce([]);
+    const csv = await exportSupplyChainDesignShipmentComparisonCsv(context(PlatformRole.ADMIN), "project-1", "synthetic-cad-export");
+    expect(csv).toContain("125,122,200,78,1220,2000,780");
+    expect(csv).toContain(",CAD,Rated,");
+  });
+});
+
+
+describe("Phase 2 active fresh comparison reuse", () => {
+  it("resumes an already fresh active comparison while avoiding duplicate rating work", async () => {
+    const evaluation = combinedTransportationFixture([]);
+    const deps = comparisonOrchestrationDeps(evaluation, evaluation);
+    const active = networkScenarioComparisonRunRecord({ id: "synthetic-active-fresh", status: "RATING" });
+    active.ratingEvidence.reconciliation.forceFreshRates = true;
+    deps.findActiveRun.mockResolvedValueOnce(active);
+    const result = await orchestrateSupplyChainDesignNetworkScenarioComparison({ ...comparisonOrchestrationFixture(), forceFreshRates: true }, deps);
+    expect(result.resumedActiveRunId).toBe("synthetic-active-fresh");
+    expect(deps.findCompletedRun).not.toHaveBeenCalled();
+    expect(deps.createRun).not.toHaveBeenCalled();
+    expect(deps.evaluateTransportation).not.toHaveBeenCalled();
+  });
+});

@@ -15,6 +15,11 @@ export type WarehouseCostComparisonFacilityOption = {
   stateProvince: string | null;
   country: string | null;
   currency: string | null;
+  annualFacilityWarehouseCostCurrency: string | null;
+  annualFixedCostCurrency: string | null;
+  inboundFeePerPalletCurrency: string | null;
+  outboundFeePerPalletCurrency: string | null;
+  storageFeePerPalletPerMonthCurrency: string | null;
   annualFacilityWarehouseCost: number | null;
   annualFixedCost: number | null;
   inboundFeePerPallet: number | null;
@@ -90,6 +95,7 @@ export function runWarehouseCostComparison(input: {
   comparisonName?: string;
   facilities: WarehouseCostComparisonFacilityOption[];
   selectedFacilityOptionIds: string[];
+  analysisCurrency?: "USD" | "CAD";
   cadToUsdRate?: number | null;
 }): WarehouseCostComparisonResultSummary {
   const selectedIds = new Set(input.selectedFacilityOptionIds);
@@ -103,22 +109,24 @@ export function runWarehouseCostComparison(input: {
   if (selected.some((facility) => facility.comparableAnnualWarehouseCost !== null && !facility.currency)) {
     throw new Error("Currency is required when a selected facility has Annual Facility / Warehouse Cost.");
   }
+  const analysisCurrency = input.analysisCurrency ?? (costCurrencies.length === 1 && costCurrencies[0] === "CAD" ? "CAD" : "USD");
   const mixedUsdCad = costCurrencies.length === 2 && costCurrencies.includes("USD") && costCurrencies.includes("CAD");
+  const needsConversion = costCurrencies.some((currency) => currency !== analysisCurrency);
   if (costCurrencies.length > 1 && !mixedUsdCad) {
     throw new Error(`Warehouse cost comparison cannot combine currencies without an approved conversion. Currencies found: ${costCurrencies.join(", ")}.`);
   }
-  if (mixedUsdCad && !isValidCadToUsdRate(input.cadToUsdRate)) {
+  if (needsConversion && !isValidCadToUsdRate(input.cadToUsdRate)) {
     throw new Error("Enter a CAD to USD conversion rate greater than 0 and no more than 5.");
   }
 
-  const reportingCurrency = mixedUsdCad ? "USD" : costCurrencies[0] ?? currencies[0] ?? "USD";
+  const reportingCurrency = costCurrencies.length > 0 ? analysisCurrency : costCurrencies[0] ?? currencies[0] ?? analysisCurrency;
   const normalized = selected.map((facility) => {
     const original = facility.comparableAnnualWarehouseCost;
     const comparable =
       original === null
         ? null
-        : mixedUsdCad && facility.currency === "CAD"
-          ? roundCurrency(original * (input.cadToUsdRate ?? 0))
+        : facility.currency && facility.currency !== analysisCurrency
+          ? convertCurrency(original, facility.currency, analysisCurrency, input.cadToUsdRate ?? null)
           : original;
     return { facility, comparable };
   });
@@ -147,10 +155,10 @@ export function runWarehouseCostComparison(input: {
     resultVersion: WAREHOUSE_COST_COMPARISON_RESULT_VERSION,
     comparisonName: input.comparisonName?.trim() || "Warehouse Cost Comparison",
     selectedFacilityCount: facilities.length,
-    currencyMode: mixedUsdCad ? "CONVERTED_MIXED_CURRENCY" : "SINGLE_CURRENCY",
+    currencyMode: needsConversion ? "CONVERTED_MIXED_CURRENCY" : "SINGLE_CURRENCY",
     reportingCurrency,
     originalCurrencies: costCurrencies,
-    cadToUsdRate: mixedUsdCad ? input.cadToUsdRate ?? null : null,
+    cadToUsdRate: needsConversion ? input.cadToUsdRate ?? null : null,
     lowestFacilityOptionId: lowestFacility?.optionId ?? null,
     facilities,
     categoryRows: [
@@ -193,6 +201,11 @@ function readFacilities(file: WarehouseCostMappedFile, facilityType: WarehouseCo
       const inboundFeePerPallet = optionalMoney(value(row, columns, "inbound_fee_per_pallet"));
       const outboundFeePerPallet = optionalMoney(value(row, columns, "outbound_fee_per_pallet"));
       const storageFeePerPalletPerMonth = optionalMoney(value(row, columns, "storage_fee_per_pallet_per_month"));
+      const annualFacilityWarehouseCostCurrency = normalizeCurrency(value(row, columns, "annual_facility_warehouse_cost_currency"));
+      const annualFixedCostCurrency = normalizeCurrency(value(row, columns, "annual_fixed_cost_currency"));
+      const inboundFeePerPalletCurrency = normalizeCurrency(value(row, columns, "inbound_fee_per_pallet_currency"));
+      const outboundFeePerPalletCurrency = normalizeCurrency(value(row, columns, "outbound_fee_per_pallet_currency"));
+      const storageFeePerPalletPerMonthCurrency = normalizeCurrency(value(row, columns, "storage_fee_per_pallet_per_month_currency"));
       const comparable = annualFacilityWarehouseCost ?? annualFixedCost;
       const city = value(row, columns, "city") || null;
       const stateProvince = value(row, columns, "state_province") || null;
@@ -207,7 +220,19 @@ function readFacilities(file: WarehouseCostMappedFile, facilityType: WarehouseCo
         city,
         stateProvince,
         country,
-        currency: normalizeCurrency(value(row, columns, "currency")),
+        currency: normalizeCurrency(
+          value(row, columns, "annual_facility_warehouse_cost_currency") ||
+          value(row, columns, "annual_fixed_cost_currency") ||
+          value(row, columns, "inbound_fee_per_pallet_currency") ||
+          value(row, columns, "outbound_fee_per_pallet_currency") ||
+          value(row, columns, "storage_fee_per_pallet_per_month_currency") ||
+          value(row, columns, "currency")
+        ),
+        annualFacilityWarehouseCostCurrency,
+        annualFixedCostCurrency,
+        inboundFeePerPalletCurrency,
+        outboundFeePerPalletCurrency,
+        storageFeePerPalletPerMonthCurrency,
         annualFacilityWarehouseCost,
         annualFixedCost,
         inboundFeePerPallet,
@@ -252,7 +277,17 @@ function normalizeCurrency(raw: string) {
   return value;
 }
 
-function isValidCadToUsdRate(value: number | null | undefined) {
+function convertCurrency(value: number, sourceCurrency: string, analysisCurrency: "USD" | "CAD", cadToUsdRate: number | null) {
+  if (!isValidCadToUsdRate(cadToUsdRate)) {
+    throw new Error("Enter a CAD to USD conversion rate greater than 0 and no more than 5.");
+  }
+  const rate = cadToUsdRate;
+  if (sourceCurrency === "CAD" && analysisCurrency === "USD") return roundCurrency(value * rate);
+  if (sourceCurrency === "USD" && analysisCurrency === "CAD") return roundCurrency(value / rate);
+  throw new Error(`Unsupported warehouse cost currency: ${sourceCurrency}. Use USD or CAD.`);
+}
+
+function isValidCadToUsdRate(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 5;
 }
 

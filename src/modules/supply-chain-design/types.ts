@@ -29,6 +29,8 @@ export type SupplyChainDesignProjectSummary = {
   name: string;
   description: string | null;
   status: string;
+  analysisCurrency: "USD" | "CAD";
+  cadToUsdRate: number | null;
   createdAt: Date;
   updatedAt: Date;
   createdByName: string | null;
@@ -364,6 +366,12 @@ export type SupplyChainDesignModel01ProofResultSummary = {
   transportationCostByCurrency?: Array<{ currency: string; transportationCost: number }>;
   facilityCostByCurrency?: Array<{ currency: string; facilityOperatingCost: number }>;
   observedNetworkCostByCurrency?: Array<{ currency: string; observedCost: number }>;
+  normalizedWeightUnit?: "lb";
+  fxSnapshot?: {
+    analysisCurrency: "USD" | "CAD";
+    cadToUsdRate: number | null;
+    rateDirection: "1 CAD = X USD";
+  };
   snapshotPalletUtilization?: Array<{
     facilityId: string;
     facilityName: string;

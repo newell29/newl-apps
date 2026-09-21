@@ -82,7 +82,7 @@ export function SupplyChainDesignWarehouseLocationStrategyForm({
           <option value="UNITS">Units</option>
           <option value="CURRENT_TRANSPORTATION_COST">Historical transportation spend</option>
         </select>
-        <span className="block text-xs text-mutedForeground">Historical transportation spend gives greater influence to destinations responsible for more historical transportation spending. This does not estimate transportation costs from the recommended regions.</span>
+        <span className="block text-xs text-mutedForeground">Historical transportation spend gives greater influence to destinations responsible for more historical transportation spending. This does not estimate historical transportation cost totals from the recommended regions.</span>
       </label>
       <label className="block space-y-1">
         <span className="text-sm font-semibold text-foreground">Warehouse network country option</span>

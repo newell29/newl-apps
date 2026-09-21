@@ -179,7 +179,11 @@ export function runSupplyChainDesignModel02Proof(
     requiredValue(row, shipments.columnIndexes, "shipment_id", "SHIPMENTS");
     const originFacilityId = requiredValue(row, shipments.columnIndexes, "origin_facility_id", "SHIPMENTS");
     const destinationId = requiredValue(row, shipments.columnIndexes, "destination_id", "SHIPMENTS");
-    historicalShipmentCountByCustomer.set(destinationId, (historicalShipmentCountByCustomer.get(destinationId) ?? 0) + 1);
+    const representedShipments = parsePositiveInteger(
+      valueAt(row, shipments.columnIndexes, "shipment_quantity") || "1",
+      "SHIPMENTS Shipments Represented"
+    );
+    historicalShipmentCountByCustomer.set(destinationId, (historicalShipmentCountByCustomer.get(destinationId) ?? 0) + representedShipments);
     if (!customersById.has(destinationId)) {
       unmatchedCustomerIds.add(destinationId);
     }
@@ -188,7 +192,7 @@ export function runSupplyChainDesignModel02Proof(
     }
     if (shipmentCostColumn) {
       const cost = parseNumber(requiredValue(row, shipments.columnIndexes, "transportation_cost", "SHIPMENTS"), "SHIPMENTS transportation_cost");
-      addAverage(historicalLaneCostTotals, laneKey(originFacilityId, destinationId), cost);
+      addAverage(historicalLaneCostTotals, laneKey(originFacilityId, destinationId), cost, representedShipments);
     }
   }
 
@@ -610,16 +614,24 @@ function parseNumber(rawValue: string, label: string) {
   return parsed;
 }
 
+function parsePositiveInteger(rawValue: string, label: string) {
+  const parsed = Number(rawValue.replace(/,/g, ""));
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive whole number.`);
+  }
+  return parsed;
+}
+
 function valueAt(row: string[], columnIndexes: Map<string, number>, standardField: string) {
   const index = columnIndexes.get(standardField);
   return typeof index === "number" ? row[index] ?? "" : "";
 }
 
-function addAverage(values: Map<string, { total: number; count: number }>, key: string, amount: number) {
+function addAverage(values: Map<string, { total: number; count: number }>, key: string, amount: number, count: number) {
   const current = values.get(key) ?? { total: 0, count: 0 };
   values.set(key, {
     total: current.total + amount,
-    count: current.count + 1
+    count: current.count + count
   });
 }
 

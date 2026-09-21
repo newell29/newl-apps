@@ -5,8 +5,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 
-export const NETWORK_SCENARIO_COMPARISON_CALCULATION_VERSION = "NETWORK_SCENARIO_COMPARISON_V1";
-export const NETWORK_SCENARIO_COMPARISON_TRANSPORTATION_VERSION = "NETWORK_SCENARIO_TRANSPORTATION_V1";
+export const NETWORK_SCENARIO_COMPARISON_CALCULATION_VERSION = "NETWORK_SCENARIO_COMPARISON_V2_CURRENCY";
+export const NETWORK_SCENARIO_COMPARISON_TRANSPORTATION_VERSION = "NETWORK_SCENARIO_TRANSPORTATION_V2_PHYSICAL";
 export const NETWORK_SCENARIO_COMPARISON_WAREHOUSE_COST_VERSION = "NETWORK_SCENARIO_WAREHOUSE_COST_V1";
 export const NETWORK_SCENARIO_COMPARISON_COMBINED_COST_VERSION = "NETWORK_SCENARIO_COMBINED_COST_V1";
 
@@ -77,6 +77,7 @@ export type NetworkScenarioComparisonRatingEvidence = {
 
 export type NetworkScenarioComparisonFxInput = {
   cadToUsdRate: number;
+  analysisCurrency?: "USD" | "CAD";
 };
 
 export type NetworkScenarioComparisonResultSummary = {
@@ -579,7 +580,8 @@ function validateFxInput(value: unknown): NetworkScenarioComparisonFxInput | nul
   const object = objectValue(value, "fxInput");
   const rate = numberValue(object.cadToUsdRate, "fxInput.cadToUsdRate");
   if (rate <= 0) throw new Error("Network Scenario Comparison CAD to USD rate must be greater than zero.");
-  return { cadToUsdRate: rate };
+  const analysisCurrency = object.analysisCurrency === "CAD" ? "CAD" : object.analysisCurrency === "USD" ? "USD" : undefined;
+  return analysisCurrency ? { cadToUsdRate: rate, analysisCurrency } : { cadToUsdRate: rate };
 }
 
 function validateResultSummary(value: unknown): NetworkScenarioComparisonResultSummary | null {
