@@ -163,6 +163,27 @@ empty lookup records a contact gap instead of triggering synonym retries. `statu
 completed buyer research, and the review explains preparation state. This does not change commercial
 fit, verify employment, reveal email, clear suppression, make outreach ready or authorize contact.
 
+### Source-led discovery catalog
+
+The worker supplies a versioned `researchSourceCatalog` to the decision model. It includes High Point
+Market exhibitors, Charlotte regional project announcements, Ontario Made manufacturers, CIFFA members,
+CBSA licensed customs brokers, official company/retailer pages, other named trade directories, trade and
+product-origin evidence, operational change signals, named-company follow-up and an open-web fallback.
+This is a menu of evidence sources, not a required sequence, score or service quota. `other_named_source`
+lets the model pursue a materially new source without changing code.
+
+Every search selects a `sourceKey`. The journal preserves it with the attempt and search evidence.
+`researchCoverage.sourceStrategies` then reports searches, empty results, candidate clues, unread clues,
+dismissals, recommendations and parked companies by strategy. The older domain-level `sourceFamilies`
+view remains available because the chosen strategy and the domains returned by a search answer different
+questions. Historical attempts are classified conservatively without rewriting the journal.
+
+A structured search can preserve up to ten results, and context exposes up to twelve materially different
+unread clues. The model is instructed to review that batch before starting another discovery search and to
+investigate only the strongest candidates. This reduces model calls spent inventing new generic queries;
+it does not force every candidate through a common research script. People lookup remains available only
+after commercial recommendation and official evidence, and is never a lead-discovery source.
+
 On first v2 wake, an inherited v1 `waiting`/`waiting_no_progress` timer longer than thirty minutes is
 shortened and audited as `schedule_recovered`. A gracefully stopped worker also requires a recorded
 model wait/yield cause; an unknown stopped schedule is preserved. Budget/error/review waits are preserved. STOP, expiry,

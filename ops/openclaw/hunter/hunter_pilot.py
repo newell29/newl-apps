@@ -35,10 +35,18 @@ UTC = dt.timezone.utc
 ZONE = ZoneInfo("America/Toronto")
 REPO = Path(__file__).resolve().parents[3]
 MISSION = Path(__file__).with_name("pilot-mission.md").read_text()
-VERSION = "hunter-autonomous-pilot-v3"
+SOURCE_CATALOG_DOCUMENT = json.loads(Path(__file__).with_name("pilot-source-catalog.json").read_text())
+SOURCE_CATALOG_VERSION = SOURCE_CATALOG_DOCUMENT["version"]
+SOURCE_CATALOG = SOURCE_CATALOG_DOCUMENT["sources"]
+SOURCE_KEYS = [row["key"] for row in SOURCE_CATALOG]
+SOURCE_BY_KEY = {row["key"]: row for row in SOURCE_CATALOG}
+SOURCE_DOMAIN_KEYS = {host: row["key"] for row in SOURCE_CATALOG for host in row["domains"]}
+VERSION = "hunter-autonomous-pilot-v4"
 COMPARISON_VERSION = "matched-decision-v1"
 DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
+DISCOVERY_RESULT_LIMIT = 10
+UNREAD_CLUE_LIMIT = 12
 ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "decide", "wait"]
 DIRECTIONS = ["charlotte", "gta", "ocean", "referral"]
 ENV_KEYS = {"INGESTION_API_TOKEN", "INGESTION_TENANT_SLUG", "HUNTER_BRAVE_SEARCH_API_KEY",
@@ -46,13 +54,14 @@ ENV_KEYS = {"INGESTION_API_TOKEN", "INGESTION_TENANT_SLUG", "HUNTER_BRAVE_SEARCH
 ARG_TYPES = {key: {"type": "string"} for key in ["query", "company", "url", "name", "domain", "hypothesis",
     "summary", "uncertainty", "nextAction", "quote", "quoteEvidenceId", "revisitWhen", "reason"]}
 ARG_TYPES.update(direction={"type": "string", "enum": DIRECTIONS},
+    sourceKey={"type": "string", "enum": SOURCE_KEYS},
     status={"type": "string", "enum": ["active", "parked", "rejected", "recommended"]},
     evidenceIds={"type": "array", "items": {"type": "string"}},
     titles={"type": "array", "items": {"type": "string"}},
     revisitDays={"type": "integer", "minimum": 1, "maximum": 180},
     minutes={"type": "integer", "minimum": 30, "maximum": 1440})
 CONTRACTS = {
-    "search": (["query", "direction"], ["company"]), "fetch": (["url"], ["company"]),
+    "search": (["query", "direction", "sourceKey"], ["company"]), "fetch": (["url"], ["company"]),
     "open_company": (["name", "domain", "direction", "hypothesis", "evidenceIds"], []),
     "dismiss_clue": (["evidenceIds", "reason"], ["name", "domain"]),
     "people": (["company", "titles"], []),
@@ -66,7 +75,8 @@ SCHEMA = {"oneOf": [{"type": "object", "additionalProperties": False,
 TOOLS = """
 Return exactly one JSON action {action, purpose, args}. purpose states what the action will resolve.
 direction must be exactly one of: charlotte, gta, ocean, referral.
-search: {query, direction, company?} -- company is an existing domain, or omit for discovery.
+search: {query, direction, sourceKey, company?} -- choose sourceKey from researchSourceCatalog.
+  company is an existing domain, or omit for discovery. Search returns a bounded candidate batch.
 fetch: {url, company?} -- read a public HTTPS page. Prefer official evidence and useful links.
 open_company: {name, domain, direction, hypothesis, evidenceIds:[id,...]} -- remember a company
   supported by retrieved evidence. Domain deduplicates identity; all companies receive a safety check.
@@ -95,6 +105,9 @@ search unless an active investigation has an immediately decisive source. This p
 it does not verify employment, reveal an email, approve outreach, or make contact mandatory for fit.
 Work continues across wakes; do not try to finish all research in one search or one wake. Use
 researchCoverage and unreadClues to consider alternatives after a dead end; neither is a quota.
+Prefer a relevant named researchSourceCatalog source. Review the returned unreadClues batch before
+another discovery search. open_web is a fallback, and other_named_source preserves autonomy to try a
+new source when its purpose explains the concrete hypothesis.
 """
 
 
@@ -416,7 +429,7 @@ class Pilot:
         self.stop_requested = False
         self.bridge = bridge or (PublicDiscoveryBridge() if self.config.get("publicDiscoveryOnly") else RemoteReadBridge())
         self.model = model or configured_model(self.config)
-        self.search = search or (lambda q: search_web(self.config["searchProvider"], q, 5))
+        self.search = search or (lambda q: search_web(self.config["searchProvider"], q, DISCOVERY_RESULT_LIMIT))
         self.fetch = fetch or fetch_public_page
         if self.state["tenantId"] != self.config["tenantId"]:
             raise RuntimeError("TENANT_MISMATCH")
@@ -464,12 +477,20 @@ class Pilot:
             budget["modelSeconds"] += 180  # reserve timeout; a crash cannot refund unobserved work
         self.save()  # reservation precedes the external call, including failed calls
 
-    def evidence(self, row, kind, company=None):
+    def evidence(self, row, kind, company=None, source_key=None, direction=None):
         url = text(row["url"], 2000)
         key = digest([url, row.get("snippet", ""), kind])
+        existing = self.state["evidence"].get(key, {})
+        source_keys = set(existing.get("sourceKeys", []))
+        if existing.get("sourceKey"):
+            source_keys.add(existing["sourceKey"])
+        if source_key:
+            source_keys.add(source_key)
         self.state["evidence"][key] = {"id": key, "url": url, "title": str(row.get("title", ""))[:200],
             "excerpt": str(row.get("snippet", ""))[:6000], "publishedAt": row.get("publishedAt"),
             "retrievedAt": iso(self.clock()), "kind": kind, "company": company,
+            "sourceKey": source_key or existing.get("sourceKey"), "sourceKeys": sorted(source_keys),
+            "direction": direction or existing.get("direction"),
             "extractorVersion": EXTRACTOR_VERSION if kind == "page" else None}
         return key
 
@@ -579,6 +600,9 @@ class Pilot:
         if key:
             self.state["attempts"][key] = {"at": iso(self.clock()), "action": name, "purpose": purpose,
                 "query": args.get("query"), "url": args.get("url"), "direction": args.get("direction"), "state": "started"}
+            if name == "search":
+                self.state["attempts"][key].update(sourceKey=args.get("sourceKey"),
+                                                   company=args.get("company"))
             self.save()
         try:
             result = self.perform(name, args)
@@ -599,6 +623,8 @@ class Pilot:
             query = text(args.get("query"), 350)
             if args.get("direction") not in DIRECTIONS:
                 raise ValueError("Choose a business direction")
+            if args.get("sourceKey") not in SOURCE_BY_KEY:
+                raise ValueError("Choose a source from researchSourceCatalog")
             cost = self.config["searchCostMicros"]
             if self.config["searchProvider"] == "BRAVE" and cost <= 0:
                 raise ValueError("Paid search requires a configured conservative per-call cost")
@@ -608,8 +634,10 @@ class Pilot:
             except (urllib.error.URLError, TimeoutError) as error:
                 return {"state": "unavailable", "provider": self.config["searchProvider"],
                         "httpStatus": getattr(error, "code", None)}
-            ids = [self.evidence(r, "search", args.get("company")) for r in rows[:5]]
-            return {"evidenceIds": ids, "direction": args["direction"], "empty": not ids}
+            ids = [self.evidence(r, "search", args.get("company"), args["sourceKey"],
+                                 args["direction"]) for r in rows[:DISCOVERY_RESULT_LIMIT]]
+            return {"evidenceIds": ids, "resultCount": len(ids), "direction": args["direction"],
+                    "sourceKey": args["sourceKey"], "empty": not ids}
         if name == "fetch":
             url = text(args.get("url"), 2000)
             self.reserve("pages")
@@ -637,6 +665,9 @@ class Pilot:
                 raise ValueError("Five active investigations; finish or park one first")
             company = {"name": text(args.get("name"), 200), "domain": key, "direction": args["direction"],
                 "hypothesis": text(args.get("hypothesis")), "evidenceIds": ids, "status": "active",
+                "discoverySourceKeys": sorted({source for eid in ids
+                                                for source in self.source_keys_for_evidence(
+                                                    self.state["evidence"][eid])}),
                 "openedAt": iso(self.clock()), "contacts": [], "buyingIntent": "UNCONFIRMED",
                 "nextAction": "Investigate the most important unresolved question", "uncertainty": "Initial hypothesis; verify fit"}
             self.safety(company)
@@ -645,6 +676,9 @@ class Pilot:
         if name == "dismiss_clue":
             ids = self.refs(args)
             item = {"at": iso(self.clock()), "evidenceIds": ids,
+                "sourceKeys": sorted({source for eid in ids
+                                      for source in self.source_keys_for_evidence(
+                                          self.state["evidence"][eid])}),
                 "reason": text(args.get("reason")), "name": None, "domain": None}
             if args.get("name") is not None:
                 item["name"] = text(args.get("name"), 200)
@@ -727,7 +761,91 @@ class Pilot:
             if attempt.get("query"):
                 row["recentQueries"] = (row["recentQueries"] + [attempt["query"]])[-3:]
         return {"directions": rows, "unknownDirectionAttempts": unknown,
-                "sourceFamilies": self.source_family_performance()}
+                "sourceFamilies": self.source_family_performance(),
+                "sourceStrategies": self.source_strategy_performance()}
+
+    @staticmethod
+    def source_key_for_query(query, company=None):
+        """Backfill a source key for old journals without rewriting their history."""
+        if company:
+            return "company_follow_up"
+        targets = [value.lower().removeprefix("www.") for value in
+                   re.findall(r"(?<![\w.-])site:([a-z0-9.-]+\.[a-z]{2,})", query or "", re.IGNORECASE)]
+        for target in targets:
+            for source_domain, key in SOURCE_DOMAIN_KEYS.items():
+                if target == source_domain or target.endswith("." + source_domain):
+                    return key
+        return "open_web"
+
+    @staticmethod
+    def source_keys_for_evidence(evidence):
+        from urllib.parse import urlparse
+        explicit = set(evidence.get("sourceKeys", []))
+        if evidence.get("sourceKey"):
+            explicit.add(evidence["sourceKey"])
+        explicit &= SOURCE_BY_KEY.keys()
+        if explicit:
+            return explicit
+        host = (urlparse(evidence.get("url", "")).hostname or "").removeprefix("www.")
+        for source_domain, key in SOURCE_DOMAIN_KEYS.items():
+            if host == source_domain or host.endswith("." + source_domain):
+                return {key}
+        return set()
+
+    def source_strategy_performance(self):
+        """Attribute outcomes to the model-selected source without imposing a score or quota."""
+        rows, evidence_sources = {}, {}
+
+        def row_for(key):
+            source = SOURCE_BY_KEY[key]
+            return rows.setdefault(key, {"sourceKey": key, "label": source["label"],
+                "searches": 0, "emptySearches": 0, "candidateClues": 0,
+                "unreadClues": 0, "recommendedCompanies": 0, "parkedCompanies": 0,
+                "dismissedClues": 0, "lastSearchAt": None})
+
+        for attempt in self.state["attempts"].values():
+            if attempt.get("action") != "search":
+                continue
+            key = attempt.get("sourceKey")
+            if key not in SOURCE_BY_KEY:
+                key = self.source_key_for_query(attempt.get("query"), attempt.get("company"))
+            row = row_for(key)
+            result = attempt.get("result") or {}
+            row["searches"] += 1
+            row["emptySearches"] += int(bool(result.get("empty")))
+            row["candidateClues"] += len(result.get("evidenceIds", []))
+            row["lastSearchAt"] = max(filter(None, [row["lastSearchAt"], attempt.get("at")]), default=None)
+            for eid in result.get("evidenceIds", []):
+                evidence_sources.setdefault(eid, set()).add(key)
+
+        def keys_for_evidence_ids(evidence_ids):
+            keys = set()
+            for eid in evidence_ids:
+                keys.update(evidence_sources.get(eid, set()))
+                if eid in self.state["evidence"]:
+                    keys.update(self.source_keys_for_evidence(self.state["evidence"][eid]))
+            return keys
+
+        for item in self.state.get("dismissedClues", []):
+            keys = set(item.get("sourceKeys", []))
+            keys.update(keys_for_evidence_ids(item.get("evidenceIds", [])))
+            for key in keys & SOURCE_BY_KEY.keys():
+                row_for(key)["dismissedClues"] += 1
+
+        for company in self.state["companies"].values():
+            field = {"recommended": "recommendedCompanies", "parked": "parkedCompanies"}.get(company["status"])
+            if not field:
+                continue
+            keys = set(company.get("discoverySourceKeys", []))
+            keys.update(keys_for_evidence_ids(company.get("evidenceIds", [])))
+            for key in keys & SOURCE_BY_KEY.keys():
+                row_for(key)[field] += 1
+
+        for clue in self.unread_clues():
+            for key in keys_for_evidence_ids([clue["id"]]):
+                row_for(key)["unreadClues"] += 1
+
+        return sorted(rows.values(), key=lambda row: (row["searches"], row["lastSearchAt"] or ""), reverse=True)
 
     def source_family_performance(self):
         """Summarize observed source yield without turning it into a rotation quota."""
@@ -862,9 +980,10 @@ class Pilot:
             if key in seen or attempt:
                 continue
             seen.add(key)
-            clues.append({k: evidence.get(k) for k in ("id", "url", "title", "publishedAt")})
+            clues.append({k: evidence.get(k) for k in
+                          ("id", "url", "title", "publishedAt", "sourceKey", "sourceKeys", "direction")})
             clues[-1]["excerpt"] = evidence.get("excerpt", "")[:500]
-            if len(clues) == 8:
+            if len(clues) == UNREAD_CLUE_LIMIT:
                 break
         return clues
 
@@ -925,9 +1044,10 @@ class Pilot:
             "dismissedClues": self.state.get("dismissedClues", [])[-20:],
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
+            "researchSourceCatalog": {"version": SOURCE_CATALOG_VERSION, "sources": SOURCE_CATALOG},
             "researchMomentum": self.research_momentum(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "A pending buyerResearchQueue item is high-value unfinished work: normally complete one tailored people lookup before broad discovery unless an active company has an immediately decisive source. Resolve a fetched named-company clue by opening it, dismissing it with evidence, or fetching one clearly necessary source before starting another broad search. Follow promising investigations across wakes. researchCoverage.sourceFamilies summarizes observed source outcomes, including explicit site: targets and empty searches, not quotas: reuse sources that yield promising companies, and leave a source family whose recent clues repeatedly park, dismiss or return empty unless an unread clue contains materially different operating evidence. researchMomentum reports both cumulative and current-local-day actions since the last company was opened, decided or buyer-researched. At the start of a fresh business day, use prior low yield to choose a materially different company, source or service hypothesis rather than waiting solely because yesterday stalled. Once current-day searches and dismissals also show falling marginal yield and no materially stronger unread clue remains, wait instead of consuming the allowance. unreadClues is a menu, not an inbox: do not dismiss every same-shaped weak clue merely to clear it when source history already demonstrates the problem. Coverage counts are not quotas or proof that a market is exhausted.",
+            "workSelection": "Choose one action that can materially change a decision. Continue an active investigation first when a decisive source exists. A pending buyerResearchQueue item is useful only after commercial recommendation; complete at most one tailored lookup rather than using people search for discovery. Otherwise select a relevant researchSourceCatalog source, harvest one bounded candidate batch, and review the returned unreadClues before another discovery search. researchCoverage.sourceStrategies records candidate, dismissal and company outcomes for the chosen source; researchCoverage.sourceFamilies separately records observed domains. These observed source outcomes are marginal-yield evidence, not quotas, scores or forced rotations. Reuse productive sources, but leave repeated empty or same-shaped dead ends. open_web is a fallback, and other_named_source permits a materially new source when the purpose names its hypothesis. At the start of a fresh business day, change company, source or service after prior low yield. Once current-day searches and dismissals show falling marginal yield and no stronger clue remains, wait. unreadClues is a menu, not an inbox; do not clear weak clues merely to create activity. Coverage counts do not prove that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -1490,6 +1610,7 @@ class Pilot:
                 pass
         heartbeat = self.state.get("heartbeatAt")
         stale = not heartbeat or self.clock() - parse_time(heartbeat) > dt.timedelta(minutes=15)
+        coverage = self.research_coverage()
         return {"version": VERSION, "health": self.state.get("health", "initialized"), "processAlive": alive,
             "heartbeatStale": stale,
             "heartbeatAt": self.state.get("heartbeatAt"), "lastCompletedWakeAt": self.state.get("lastCompletedWakeAt"),
@@ -1499,7 +1620,9 @@ class Pilot:
             "unproductiveWakes": self.state.get("unproductiveWakes", 0),
             "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
             "buyerResearch": buyer_research,
-            "searchesByDirection": {d: r["attempts"] for d, r in self.research_coverage()["directions"].items()},
+            "searchesByDirection": {d: r["attempts"] for d, r in coverage["directions"].items()},
+            "sourceCatalogVersion": SOURCE_CATALOG_VERSION,
+            "sourceStrategies": coverage["sourceStrategies"],
             "researchMomentum": self.research_momentum(),
             "model": self.config["model"], "searchProvider": self.config["searchProvider"],
             "modelProvider": self.config.get("modelProvider", "OLLAMA"),
@@ -1518,6 +1641,18 @@ class Pilot:
     def report(self):
         rows = ["# Hunter pilot research review", "", "Local research notes only. No outreach approval or confirmed buying intent.", "",
                 "```json", json.dumps(self.status(), indent=2), "```", ""]
+        source_rows = self.source_strategy_performance()
+        if source_rows:
+            rows += ["## Source strategy outcomes", "",
+                     "Observed research yield only; these counts are not lead scores or buying-intent evidence.", "",
+                     "| Source | Searches | Candidates | Unread | Dismissed | Recommended | Parked |",
+                     "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+            for source in source_rows:
+                rows.append("| " + " | ".join([source["label"], str(source["searches"]),
+                    str(source["candidateClues"]), str(source["unreadClues"]),
+                    str(source["dismissedClues"]), str(source["recommendedCompanies"]),
+                    str(source["parkedCompanies"])]) + " |")
+            rows.append("")
         for c in self.state["companies"].values():
             if c["status"] == "blocked":
                 continue
