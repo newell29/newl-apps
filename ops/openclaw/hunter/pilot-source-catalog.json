@@ -1,0 +1,113 @@
+{
+  "version": "2026-09-21",
+  "sources": [
+    {
+      "key": "high_point_market",
+      "label": "High Point Market exhibitors",
+      "kind": "buyer_directory",
+      "directions": ["charlotte", "ocean"],
+      "domains": ["highpointmarket.org"],
+      "objective": "Find furniture, decor and consumer-product brands with retailer distribution, imported inventory or a Southeast market-entry need.",
+      "caution": "Exhibiting at High Point establishes market participation, not warehousing demand or buying intent."
+    },
+    {
+      "key": "charlotte_growth_projects",
+      "label": "Charlotte regional projects and announcements",
+      "kind": "change_signal",
+      "directions": ["charlotte"],
+      "domains": ["charlotteregion.com"],
+      "objective": "Identify a named occupier or brand entering or expanding in the Carolinas, then investigate its actual distribution model.",
+      "caution": "A company-owned distribution center often indicates internal capacity; a facility announcement alone is not an outsourced-warehouse opportunity."
+    },
+    {
+      "key": "ontario_made",
+      "label": "Ontario Made manufacturers",
+      "kind": "buyer_directory",
+      "directions": ["gta", "ocean"],
+      "domains": ["supportontariomade.ca"],
+      "objective": "Find GTA manufacturers with supplier, plant, warehouse, airport or customer movements and investigate the company on first-party pages.",
+      "caution": "Directory membership establishes local manufacturing identity, not outsourced trucking, warehousing or freight demand."
+    },
+    {
+      "key": "ciffa_members",
+      "label": "CIFFA member directory",
+      "kind": "partner_directory",
+      "directions": ["gta", "referral", "ocean"],
+      "domains": ["ciffa.com"],
+      "objective": "Find Toronto-area forwarders and brokers whose stated capabilities support a specific local-cartage, airport-run or referral hypothesis.",
+      "caution": "Missing road or fleet language is uncertainty; it does not prove the company buys local trucking."
+    },
+    {
+      "key": "cbsa_customs_brokers",
+      "label": "CBSA licensed customs brokers",
+      "kind": "partner_directory",
+      "directions": ["gta", "referral"],
+      "domains": ["cbsa-asfc.gc.ca"],
+      "objective": "Seed licensed brokers for a later first-party check of GTA presence, airport work and local-cartage purchasing or referral fit.",
+      "caution": "A customs-broker licence does not establish location-specific trucking demand or a partnership need."
+    },
+    {
+      "key": "official_company_retailer",
+      "label": "Official company, retailer and stockist pages",
+      "kind": "first_party_discovery",
+      "directions": ["charlotte", "gta", "ocean", "referral"],
+      "domains": [],
+      "objective": "Discover and verify brands, importers, wholesalers and distributors through products, stockists, wholesale terms, shipping policies and market-entry evidence.",
+      "caution": "A retailer network or wholesale program establishes goods movement, not outsourcing or current buying intent."
+    },
+    {
+      "key": "trade_show_wholesale_directory",
+      "label": "Other trade-show and wholesale directories",
+      "kind": "buyer_directory",
+      "directions": ["charlotte", "gta", "ocean", "referral"],
+      "domains": [],
+      "objective": "Use a named, relevant directory to harvest a bounded batch of companies, then verify promising candidates on first-party pages.",
+      "caution": "Do not repeat a low-yield directory under paraphrased searches or treat directory text as confirmed operating evidence."
+    },
+    {
+      "key": "trade_origin_evidence",
+      "label": "Trade and product-origin evidence",
+      "kind": "flow_evidence",
+      "directions": ["ocean", "charlotte", "gta"],
+      "domains": [],
+      "objective": "Identify or validate China, UK, Netherlands or Latin America flows using trade evidence, product origins and supplier statements.",
+      "caution": "A shipment or imported product does not prove that the target controls freight, has recurring volume or is seeking a provider."
+    },
+    {
+      "key": "operational_change_signal",
+      "label": "Operational changes and hiring signals",
+      "kind": "change_signal",
+      "directions": ["charlotte", "gta", "ocean", "referral"],
+      "domains": [],
+      "objective": "Find a dated expansion, retail launch, distribution change, sourcing change or logistics hiring signal tied to a specific company.",
+      "caution": "Growth, hiring and new facilities are timing clues, not proof of outsourcing or buying intent."
+    },
+    {
+      "key": "company_follow_up",
+      "label": "Named-company follow-up",
+      "kind": "investigation",
+      "directions": ["charlotte", "gta", "ocean", "referral"],
+      "domains": [],
+      "objective": "Resolve the single uncertainty most likely to change an open or strongly identified company's disposition.",
+      "caution": "Do not repeat unchanged searches or gather facts that cannot change the decision."
+    },
+    {
+      "key": "open_web",
+      "label": "Open-web discovery fallback",
+      "kind": "fallback",
+      "directions": ["charlotte", "gta", "ocean", "referral"],
+      "domains": [],
+      "objective": "Test a specific, materially different business hypothesis when no structured source is suitable.",
+      "caution": "Use after considering the named sources; avoid generic logistics, warehouse-property and provider-heavy queries."
+    },
+    {
+      "key": "other_named_source",
+      "label": "Other explicitly named source",
+      "kind": "autonomous_extension",
+      "directions": ["charlotte", "gta", "ocean", "referral"],
+      "domains": [],
+      "objective": "Pursue a promising source not yet in the catalog and name it in the search purpose so its usefulness can be reviewed.",
+      "caution": "A new source should address a concrete hypothesis rather than relabeling another broad web search."
+    }
+  ]
+}

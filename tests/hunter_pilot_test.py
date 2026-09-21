@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops/openclaw/hunter"))
 from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, digest, UTC, ZONE
 from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
-    TOOLS, SCHEMA)
+    TOOLS, SCHEMA, SOURCE_CATALOG_VERSION)
 from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
     compact_packet, memory_sample, record_run_source, reserve_diagnostic, run_attempt,
     unload_test_model, validate_matched_models)
@@ -43,6 +43,8 @@ class PilotTests(unittest.TestCase):
         self.p = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
 
     def action(self, action_name, **args):
+        if action_name == "search":
+            args.setdefault("sourceKey", "open_web")
         return self.p.execute({"action": action_name, "purpose": "Resolve a specific uncertainty", "args": args})
 
     def open(self):
@@ -115,7 +117,8 @@ class PilotTests(unittest.TestCase):
     def test_reordered_case_variants_use_cache_after_restart(self):
         self.action("search", query="Canada wholesale BRAND", direction="gta")
         restarted = Pilot(self.path, self.bridge, self.model, self.search, self.fetch, lambda: self.time)
-        result = restarted.execute({"action": "search", "purpose": "Same question", "args": {"query": "brand wholesale canada", "direction": "gta"}})
+        result = restarted.execute({"action": "search", "purpose": "Same question", "args": {
+            "query": "brand wholesale canada", "direction": "gta", "sourceKey": "open_web"}})
         self.assertEqual(result["state"], "cached_or_already_attempted")
         self.assertEqual(self.search.call_count, 1)
         observation = restarted.context()["recentEvents"][-1]["result"]
@@ -238,7 +241,8 @@ class PilotTests(unittest.TestCase):
             nonlocal counter
             counter += 1
             return ({"action": "search", "purpose": "Investigate a new market clue", "args": {
-                "query": f"synthetic wholesale brand {counter}", "direction": "gta"}}, {})
+                "query": f"synthetic wholesale brand {counter}", "direction": "gta",
+                "sourceKey": "official_company_retailer"}}, {})
         self.p.model = model
         for _ in range(4):
             self.p.tick()
@@ -254,7 +258,8 @@ class PilotTests(unittest.TestCase):
                 "uncertainty": "No partnership basis found", "nextAction": "Move to another clue",
                 "evidenceIds": [], "revisitDays": 30, "revisitWhen": "A referral relationship emerges"}}, {}),
             ({"action": "search", "purpose": "Abandon that provider and investigate goods distributors", "args": {
-                "query": "synthetic Canadian housewares distributors", "direction": "gta"}}, {}),
+                "query": "synthetic Canadian housewares distributors", "direction": "gta",
+                "sourceKey": "official_company_retailer"}}, {}),
             ({"action": "wait", "purpose": "Continue next session", "args": {"minutes": 30, "reason": "Resume saved clues"}}, {})]
         self.p.tick()
         self.assertFalse(self.p.state["companies"])
@@ -284,6 +289,66 @@ class PilotTests(unittest.TestCase):
         self.assertIn("observed source outcomes", self.p.context()["workSelection"])
         self.assertIn("not quotas", self.p.context()["workSelection"])
         self.assertIn("evidence of marginal", MISSION)
+
+    def test_source_catalog_is_versioned_and_does_not_remove_open_discovery(self):
+        catalog = self.p.context()["researchSourceCatalog"]
+        self.assertEqual(catalog["version"], SOURCE_CATALOG_VERSION)
+        sources = {row["key"]: row for row in catalog["sources"]}
+        self.assertEqual(sources["high_point_market"]["domains"], ["highpointmarket.org"])
+        self.assertIn("gta", sources["ciffa_members"]["directions"])
+        self.assertIn("open_web", sources)
+        self.assertIn("other_named_source", sources)
+
+    def test_structured_search_preserves_bounded_candidate_batch_and_source_outcomes(self):
+        self.search.return_value = [{"url": f"https://candidate-{index}.example/", "title": f"Candidate {index}",
+                                     "snippet": "Synthetic GTA manufacturer."} for index in range(15)]
+        result = self.action("search", query="site:supportontariomade.ca Mississauga manufacturers",
+                             direction="gta", sourceKey="ontario_made")
+        self.assertEqual(result["resultCount"], 10)
+        self.assertEqual(len(self.p.context()["unreadClues"]), 10)
+        self.assertTrue(all(clue["sourceKey"] == "ontario_made"
+                            for clue in self.p.context()["unreadClues"]))
+        strategy = self.p.context()["researchCoverage"]["sourceStrategies"][0]
+        self.assertEqual(strategy["sourceKey"], "ontario_made")
+        self.assertEqual(strategy["candidateClues"], 10)
+        self.assertEqual(strategy["unreadClues"], 10)
+
+    def test_source_strategy_tracks_company_and_dismissal_outcomes(self):
+        evidence = self.action("search", query="site:ciffa.com synthetic Toronto forwarder",
+                               direction="gta", sourceKey="ciffa_members")["evidenceIds"]
+        self.action("open_company", name="Synthetic Supply", domain="supply.example", direction="gta",
+                    hypothesis="Local cartage fit", evidenceIds=evidence)
+        page = self.action("fetch", url="https://supply.example/", company="supply.example")["evidenceIds"][0]
+        self.decision(evidence=page)
+        row = next(row for row in self.p.source_strategy_performance()
+                   if row["sourceKey"] == "ciffa_members")
+        self.assertEqual(row["recommendedCompanies"], 1)
+        self.assertEqual(self.p.state["companies"]["supply.example"]["discoverySourceKeys"],
+                         ["ciffa_members"])
+
+    def test_source_strategy_backfills_historical_outcomes_without_rewriting_history(self):
+        evidence = self.action("search", query="synthetic historical distributor",
+                               direction="gta", sourceKey="open_web")["evidenceIds"]
+        self.action("open_company", name="Synthetic Supply", domain="supply.example", direction="gta",
+                    hypothesis="Local distribution fit", evidenceIds=evidence)
+        page = self.action("fetch", url="https://supply.example/", company="supply.example")["evidenceIds"][0]
+        self.decision(evidence=page)
+        search_attempt = next(row for row in self.p.state["attempts"].values()
+                              if row.get("action") == "search")
+        search_attempt.pop("sourceKey")
+        self.p.state["companies"]["supply.example"].pop("discoverySourceKeys")
+        for eid in evidence:
+            self.p.state["evidence"][eid].pop("sourceKey")
+            self.p.state["evidence"][eid].pop("sourceKeys")
+        row = next(row for row in self.p.source_strategy_performance()
+                   if row["sourceKey"] == "open_web")
+        self.assertEqual(row["recommendedCompanies"], 1)
+        self.assertNotIn("sourceKey", search_attempt)
+
+    def test_unknown_source_key_is_rejected_before_search(self):
+        with self.assertRaisesRegex(ValueError, "researchSourceCatalog"):
+            self.action("search", query="synthetic", direction="gta", sourceKey="invented_source")
+        self.search.assert_not_called()
 
     def test_source_family_performance_remembers_empty_site_target(self):
         self.search.return_value = []
@@ -878,7 +943,8 @@ class SubscriptionTests(unittest.TestCase):
 
     def test_subscription_returns_one_decision_and_plan_usage(self):
         action, usage = self.invoke([{"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 30}}],
-            {"decision": {"action": "search", "purpose": "Test", "args": {"query": "synthetic", "direction": "gta", "company": None}}})
+            {"decision": {"action": "search", "purpose": "Test", "args": {"query": "synthetic",
+                "direction": "gta", "sourceKey": "open_web", "company": None}}})
         self.assertNotIn("company", action["args"])
         self.assertEqual(usage["billing"], "plan_usage")
         self.assertFalse(usage["apiFallback"])
@@ -899,7 +965,8 @@ class SubscriptionTests(unittest.TestCase):
             {"type": "item.completed", "item": {"type": "error", "message": "Synthetic CLI diagnostic"}},
             {"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 30}},
         ], {"decision": {"action": "search", "purpose": "Test diagnostic handling",
-              "args": {"query": "synthetic", "direction": "gta", "company": None}}})
+              "args": {"query": "synthetic", "direction": "gta", "sourceKey": "open_web",
+                       "company": None}}})
         self.assertEqual(action["action"], "search")
         self.assertEqual(usage["diagnosticItems"], 1)
 

@@ -50,6 +50,25 @@ evidence. Vary sources. Example discovery surfaces: Atlanta Market, Inspired Hom
 Market; avoid assuming every exhibitor is suitable. TradeMining is optional supporting evidence.
 Do not force weak leads through every source or spend time collecting a long undifferentiated list.
 
+researchSourceCatalog is a versioned menu of source strategies, not a mandatory sequence. Choose the
+source most likely to answer the current business question and name its sourceKey on every search.
+Prefer a named buyer, partner, trade or change-signal source before open_web. other_named_source permits
+a promising new source when the purpose identifies it and explains the concrete hypothesis. A source
+harvest should return a bounded candidate batch. Review the materially different unreadClues from that
+batch before launching another broad discovery search; investigate only the strongest candidates.
+researchCoverage.sourceStrategies records searches, empty results, candidate clues, dismissals and
+company outcomes so later wakes can learn which sources are producing useful evidence. These are
+observations, not scores, quotas or proof that a source or market is exhausted.
+
+Useful starting sources include High Point Market exhibitors for Charlotte warehouse and ocean clues;
+Charlotte regional project announcements when they identify a suitable occupier; Ontario Made for GTA
+manufacturers; CIFFA members and CBSA licensed customs brokers for GTA cartage and referral hypotheses;
+official company, retailer and stockist pages; other named trade-show or wholesale directories; trade
+and product-origin evidence; and dated operating changes. Directory membership, exhibition, a licence,
+growth, hiring or a facility announcement is only a clue. Verify identity and material operating claims
+on first-party pages, and keep outsourcing, freight control, timing and buying intent unconfirmed unless
+the evidence actually establishes them.
+
 For Charlotte, favor company-first discovery of brands, importers, wholesalers and distributors whose
 goods flow resembles Newl's work: wholesale or retailer programs, marketplace/FBA replenishment,
 case/pallet ordering, multichannel sales, Southeast market entry or an observable outside-carrier/3PL
@@ -129,6 +148,8 @@ dismissal plus the source-family history can justify leaving similar rows unread
 changing service hypothesis, or waiting.
 
 Choose buyer roles for the actual opportunity. Identify the person before worrying about email.
+People search is preparation after commercial recommendation, never a discovery source or a substitute
+for resolving company fit. Do not look up people for active, parked or merely plausible companies.
 After opening a company, fetch its official page with the saved company domain before using people;
 a search-result snippet is not attached official-page evidence. If the people action is rejected for
 this prerequisite, fetch the cited official page next instead of retrying people with different titles.
