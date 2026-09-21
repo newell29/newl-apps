@@ -16,6 +16,14 @@
     {
       "path": "/api/website-inbound/correspondence/scheduled",
       "schedule": "7 * * * *"
+    },
+    {
+      "path": "/api/website-growth/paid-campaigns/health/scheduled",
+      "schedule": "17 * * * *"
+    },
+    {
+      "path": "/api/website-growth/paid-campaigns/weekly/scheduled",
+      "schedule": "30 13 * * 1"
     }
   ]
 }

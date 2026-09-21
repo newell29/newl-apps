@@ -28,7 +28,7 @@ export default async function ScoutEffectivenessPage() {
       confidence: record(item.artifact).confidence ?? null } : null }));
   return <div className="space-y-6">
     <PageHeader eyebrow="Website Growth" title="Scout effectiveness review" description="Review the whole site, find the next useful opportunity, and see what delivered work achieved." />
-    <nav className="flex flex-wrap gap-4 text-sm font-semibold"><Link href="/website-growth/marketing">Marketing workboard</Link><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/backlinks">Publisher opportunities</Link><Link href="/website-growth/signals">Research signals</Link></nav>
+    <nav className="flex flex-wrap gap-4 text-sm font-semibold"><Link href="/website-growth/marketing">Marketing workboard</Link><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/paid-campaigns">Paid campaigns</Link><Link href="/website-growth/backlinks">Publisher opportunities</Link><Link href="/website-growth/signals">Research signals</Link></nav>
     <EffectivenessReview review={review} items={items} canReview={canReview} workspaceAvailable={Boolean(workspace)} truncated={Boolean(workspace?.truncated || publicItems.length > selected.length)}
       mission={workspace?.mission ?? null} competitorSummary={competitors.status === "AVAILABLE" ? `${competitors.reports.filter(report => report.fresh).length} recent cached reports. Scout verifies dated public competitor sources during research.` : "No competitor reports available. Scout can research public competitors and must state the evidence gap."} />
   </div>;

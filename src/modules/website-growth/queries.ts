@@ -160,6 +160,9 @@ export async function getWebsiteGrowthShell(
           not: "account_setup"
         },
         entryMethod: "WEBSITE_FORM",
+        status: { not: "TEST" },
+        isTest: false,
+        marketingExcludedReason: null,
         createdAt: {
           gte: last30Days
         }
@@ -173,6 +176,9 @@ export async function getWebsiteGrowthShell(
           not: "account_setup"
         },
         entryMethod: "WEBSITE_FORM",
+        status: { not: "TEST" },
+        isTest: false,
+        marketingExcludedReason: null,
         pageUrl: {
           not: null
         }

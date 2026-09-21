@@ -54,6 +54,7 @@ The Website Growth UI intentionally separates two different kinds of records:
 - **Page briefs and previews** at `/website-growth/pages` contains the existing AI-curated Scout briefs and groups them into `Needs your review`, `Approved and building`, `Preview ready`, and `Completed and closed`.
 - **Research signals** contains the full GA4, Search Console, Semrush, and first-party evidence inventory. These records are inputs to Scout, not a human work queue.
 - **Backlink Scout** contains only Codex-reviewed, deduplicated prospects that pass deterministic relevance, quality, and spam-risk gates. Raw public-web results, model rejections, and raw Semrush rows are retained only in tenant-scoped automation history and are never presented as a work queue.
+- **Paid campaigns** contains first-party paid-search funnel reporting and deterministic paid-health/weekly Scout evidence. It stays separate from SEO, shows partial/unavailable attribution explicitly, and does not show cost metrics until a Google Ads synchronization has supplied verified cost rows.
 
 Every Scout card must state whether it proposes a **new page** or an **update to an existing page**, show the affected route, and summarize the primary proposed change. A draft created by the latest Scout run is labeled as new. The latest run summary remains visible even when no opportunities were selected.
 
@@ -83,6 +84,7 @@ Model changes must be evaluated against the same saved opportunities. Compare fa
 - Search Console: query/page clicks, impressions, CTR, and position, including deterministic classification of customer-question queries.
 - GA4 Data API: landing page sessions, engaged sessions, engagement rate, and event count for the last 28 days.
 - Newl inbound: form submissions and lead-producing pages. These remain the source of truth for lead counts.
+- Paid campaign attribution: normalized first-party website submissions and human-recorded inbound statuses. Test/internal submissions are retained but excluded. See [Paid campaigns Phase 1](paid-campaigns.md).
 - SEMrush: official read-only MCP through OAuth remains optional. Scheduled SEMrush PDF reports sent from `mail@semrush.com` to `partnerships@newlgroup.com` are also read from `Inbox/Semrush`, parsed deterministically, deduplicated by content hash, and cached as sanitized supporting evidence. Email bodies, Graph IDs, and PDF files are not retained.
 - Manual CSV/TSV: historical Search Console, GA4, Semrush, or one-off research.
 - Website repository context: routes, templates, components, navigation, sitemap, and current content.

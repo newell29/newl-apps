@@ -87,3 +87,5 @@ Relevant tests are under `tests/` and generally named after the module. Recommen
 ## Inbound opportunity attribution
 
 The Inbound Opportunities module now also stores manual phone/email/referral enquiries. Form count, landing-page aggregation and inbound evidence refresh restrict `entryMethod=WEBSITE_FORM`; source Website on a manual entry does not imply a form conversion. Original website payloads remain preserved when working contact/service details are edited.
+
+Paid reporting additionally requires `isTest=false` and no marketing exclusion reason. The Phase 1 scheduler performs deterministic local checks only. No Google Ads OAuth credential, API request, budget/bid/keyword mutation, or offline conversion upload exists. The future data ledgers and reserved sync job type are documented in `paid-campaigns.md`.

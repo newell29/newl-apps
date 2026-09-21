@@ -67,6 +67,34 @@ function existing(overrides: Partial<WebsiteInboundSubmission> = {}): WebsiteInb
     entryMethod: "WEBSITE_FORM",
     contactChannel: "WEBSITE_FORM",
     fields: { original: "Retain raw form" },
+    rawPayload: null,
+    utmSource: null,
+    utmMedium: null,
+    utmCampaign: null,
+    utmTerm: null,
+    utmContent: null,
+    gclid: null,
+    gbraid: null,
+    wbraid: null,
+    gaClientId: null,
+    campaignId: null,
+    adGroupId: null,
+    creativeId: null,
+    matchType: null,
+    network: null,
+    device: null,
+    landingPage: null,
+    landingPath: null,
+    firstReferrer: null,
+    firstReferrerDomain: null,
+    sessionStartedAt: null,
+    submittedAt: new Date("2026-09-16Z"),
+    trafficSourceGuess: null,
+    attributionConfidence: null,
+    attributionChannel: "UNKNOWN",
+    attributionLocation: null,
+    isTest: false,
+    marketingExcludedReason: null,
     formType: "assessment",
     pageUrl: "https://example.com/assessment",
     revision: 2,
@@ -243,6 +271,38 @@ describe("website form edits and notes", () => {
       })
     ).rejects.toThrow("Synthetic audit failure");
     expect(transaction).toHaveBeenCalled();
+  });
+  it("keeps a manually selected Test status synchronized with durable exclusion fields", async () => {
+    await updateOpportunity(ctx, "row-a", 2, {
+      ...input,
+      contactChannel: "WEBSITE_FORM",
+      status: "TEST"
+    });
+    expect(db.websiteInboundSubmission.updateMany).toHaveBeenCalledWith({
+      where: { id: "row-a", tenantId: "tenant-a", revision: 2 },
+      data: expect.objectContaining({
+        status: "TEST",
+        isTest: true,
+        marketingExcludedReason: "MANUAL_TEST_STATUS"
+      })
+    });
+
+    db.websiteInboundSubmission.findFirst.mockResolvedValue(
+      existing({ status: "TEST", isTest: true, marketingExcludedReason: "MANUAL_TEST_STATUS" })
+    );
+    await updateOpportunity(ctx, "row-a", 2, {
+      ...input,
+      contactChannel: "WEBSITE_FORM",
+      status: "NEW"
+    });
+    expect(db.websiteInboundSubmission.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "row-a", tenantId: "tenant-a", revision: 2 },
+      data: expect.objectContaining({
+        status: "NEW",
+        isTest: false,
+        marketingExcludedReason: null
+      })
+    });
   });
   it("appends notes without changing contact details, status or the edit revision", async () => {
     await addOpportunityNote(ctx, "row-a", "Called about storage");

@@ -46,6 +46,14 @@ describe("middleware machine route exemptions", () => {
     expect(config.matcher[0]).toContain("api/website-growth/weekly-plan");
   });
 
+  it("lets only the scheduled paid-campaign checks enforce cron authentication", () => {
+    expect(config.matcher[0]).toContain("api/website-growth/paid-campaigns/");
+    const matcher = new RegExp(`^${config.matcher[0]}$`);
+    expect(matcher.test("/api/website-growth/paid-campaigns/health/scheduled")).toBe(false);
+    expect(matcher.test("/api/website-growth/paid-campaigns/weekly/scheduled")).toBe(false);
+    expect(matcher.test("/website-growth/paid-campaigns")).toBe(true);
+  });
+
   it("lets the Hunter daily planner enforce Vercel cron authentication", () => {
     expect(config.matcher[0]).toContain("api/lead-gen/hunter/daily-plan");
     const matcher = new RegExp(`^${config.matcher[0]}$`);

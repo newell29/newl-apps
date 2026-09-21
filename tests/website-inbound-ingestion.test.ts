@@ -97,10 +97,75 @@ describe("existing form intake compatibility", () => {
         where: {
           tenantId: "tenant-a",
           formType: { not: "account_setup" },
-          entryMethod: "WEBSITE_FORM"
+          entryMethod: "WEBSITE_FORM",
+          status: { not: "TEST" },
+          isTest: false,
+          marketingExcludedReason: null
         },
         select: { pageUrl: true, primaryNeed: true }
       })
     );
+  });
+
+  it("preserves the raw request and stores normalized paid attribution", async () => {
+    const payload = {
+      formType: "assessment",
+      source: "website",
+      pageUrl: "https://www.newlgroup.com/contact",
+      fields: { Company: "Synthetic Company" },
+      utmSource: "google",
+      utmMedium: "cpc",
+      utmCampaign: "synthetic-search",
+      gclid: "synthetic-click-id",
+      landingPage: "https://www.newlgroup.com/services/warehousing?utm_source=google",
+      submittedAt: "2026-09-16T14:30:00.000Z",
+      campaignId: "123456",
+      adGroupId: "456789",
+      creativeId: "789012",
+      matchType: "exact",
+      network: "search",
+      device: "mobile"
+    };
+    await POST(request(payload));
+    expect(mocks.create.mock.calls[0][0].data).toMatchObject({
+      rawPayload: payload,
+      utmSource: "google",
+      utmMedium: "cpc",
+      campaignId: "123456",
+      adGroupId: "456789",
+      attributionChannel: "PAID_SEARCH",
+      isTest: false,
+      submittedAt: new Date("2026-09-16T14:30:00.000Z")
+    });
+  });
+
+  it("retains diagnostics as Test records instead of counting them as genuine leads", async () => {
+    await POST(request({
+      formType: "assessment",
+      pageUrl: "https://www.newlgroup.com/contact?codex_weekly_diagnostic=1",
+      fields: {},
+      isTest: true
+    }));
+    expect(mocks.create.mock.calls[0][0].data).toMatchObject({
+      status: "TEST",
+      isTest: true,
+      marketingExcludedReason: "CODEX_DIAGNOSTIC"
+    });
+  });
+
+  it("retains explicitly marked automated checks even when they exercise a honeypot", async () => {
+    const response = await POST(request({
+      formType: "assessment",
+      source: "form_health_check",
+      fields: { faxNumber: "synthetic-check" },
+      isTest: true
+    }));
+    expect(response.status).toBe(201);
+    expect(mocks.create).toHaveBeenCalledTimes(1);
+    expect(mocks.create.mock.calls[0][0].data).toMatchObject({
+      fields: {},
+      status: "TEST",
+      marketingExcludedReason: "AUTOMATED_FORM_CHECK"
+    });
   });
 });

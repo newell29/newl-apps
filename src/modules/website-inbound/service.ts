@@ -1,4 +1,4 @@
-import { Prisma, type WebsiteInboundSubmission } from "@prisma/client";
+import { Prisma, WebsiteInboundStatus, type WebsiteInboundSubmission } from "@prisma/client";
 
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
@@ -117,6 +117,9 @@ export async function createOpportunity(
       const row = await tx.websiteInboundSubmission.create({
         data: {
           ...input,
+          ...(input.status === WebsiteInboundStatus.TEST
+            ? { isTest: true, marketingExcludedReason: "MANUAL_TEST_STATUS" }
+            : {}),
           tenantId: ctx.tenantId,
           entryMethod: "MANUAL",
           formType: "manual_enquiry",
@@ -176,9 +179,22 @@ export async function updateOpportunity(
         .map((key) => [key, { before: oldValues[key], after: newValues[key] }])
     );
     if (!Object.keys(changes).length) return before.revision;
+    const manualTestExclusion = input.status === WebsiteInboundStatus.TEST
+      ? {
+          isTest: true,
+          marketingExcludedReason: before.marketingExcludedReason ?? "MANUAL_TEST_STATUS"
+        }
+      : before.marketingExcludedReason === "MANUAL_TEST_STATUS"
+        ? { isTest: false, marketingExcludedReason: null }
+        : {};
     const result = await tx.websiteInboundSubmission.updateMany({
       where: { id, tenantId: ctx.tenantId, revision },
-      data: { ...input, revision: { increment: 1 }, lastActivityAt: new Date() }
+      data: {
+        ...input,
+        ...manualTestExclusion,
+        revision: { increment: 1 },
+        lastActivityAt: new Date()
+      }
     });
     if (result.count !== 1)
       throw new InboundValidationError(

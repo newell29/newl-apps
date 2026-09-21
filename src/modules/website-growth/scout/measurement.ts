@@ -43,13 +43,13 @@ export async function measureScoutPage(tenantId: string, route: string, publishe
         return { sessions, engagedSessions, ...(sessions > 0 ? { engagementRate: engagedSessions / sessions } : {}) };
       }),
       source("enquiries", period, async () => {
-        const rows = await prisma.websiteInboundSubmission.groupBy({ by: ["pageUrl"],
+        const rows = await prisma.websiteInboundSubmission.groupBy({ by: ["pageUrl", "status", "isTest", "marketingExcludedReason"],
           where: { tenantId, entryMethod: "WEBSITE_FORM", formType: { not: "account_setup" }, createdAt: {
             gte: new Date(range.startDate + "T00:00:00Z"), lt: new Date(Date.parse(range.endDate + "T00:00:00Z") + DAY_MS) } },
           _count: { _all: true } });
         const matched = rows.filter(row => safePath(row.pageUrl) === route);
-        return { enquiries: matched.filter(row => !isDiagnosticPage(row.pageUrl)).reduce((sum, row) => sum + row._count._all, 0),
-          excludedDiagnosticEnquiries: matched.filter(row => isDiagnosticPage(row.pageUrl)).reduce((sum, row) => sum + row._count._all, 0) };
+        return { enquiries: matched.filter(row => row.status !== "TEST" && !row.isTest && !row.marketingExcludedReason && !isDiagnosticPage(row.pageUrl)).reduce((sum, row) => sum + row._count._all, 0),
+          excludedDiagnosticEnquiries: matched.filter(row => row.status === "TEST" || row.isTest || Boolean(row.marketingExcludedReason) || isDiagnosticPage(row.pageUrl)).reduce((sum, row) => sum + row._count._all, 0) };
       })
     ];
   }));
@@ -63,7 +63,7 @@ export async function measureScoutPage(tenantId: string, route: string, publishe
     });
   });
   return { windows, observedAt: now.toISOString(), followUp, status: sources.every(row => row.status === "AVAILABLE") ? "AVAILABLE" : "PARTIAL_OR_MISSING", sources, changes,
-    caveat: "Observed before/after association, not causal lift. Enquiries exclude explicitly tagged diagnostic URLs; untagged tests and spam may remain. Enquiries are not qualified leads or session-attributed conversions. Google reads use the configured site/property and capped page reports. Consider traffic volume, seasonality, and other site changes." };
+    caveat: "Observed before/after association, not causal lift. Enquiries exclude records marked as tests or internal diagnostics. Enquiries are not qualified leads or session-attributed conversions. Google reads use the configured site/property and capped page reports. Consider traffic volume, seasonality, and other site changes." };
 }
 async function source(name: string, period: string, read: () => Promise<Record<string, number> | null>) {
   try {

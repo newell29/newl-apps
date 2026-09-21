@@ -99,7 +99,7 @@ describe("opportunity queue filters", () => {
       AND: expect.arrayContaining([{ followUpOn: { lt: new Date("2026-09-16T00:00:00Z") } }])
     });
     expect(JSON.stringify(where)).toContain(
-      '"notIn":["WON","LOST","DISQUALIFIED","CONVERTED","CLOSED"]'
+      '"notIn":["WON","LOST","DISQUALIFIED","TEST","CONVERTED","CLOSED"]'
     );
     expect(dateValue("2026-09-16", "date")?.toISOString()).toBe("2026-09-16T00:00:00.000Z");
   });

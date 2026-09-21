@@ -20,6 +20,8 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 | Responsibility | Source |
 |---|---|
 | Search Console, GA4, and sanitized form refresh | `src/modules/website-growth/evidence-refresh.ts` |
+| Paid campaign reporting, funnel filters and grouping | `src/modules/website-growth/paid-campaigns.ts`, `src/app/(authenticated)/website-growth/paid-campaigns/page.tsx` |
+| Paid Scout health, weekly review, signals and thresholds | `src/modules/website-growth/paid-scout.ts`, `src/app/api/website-growth/paid-campaigns/*/scheduled/route.ts` |
 | Question-intent classification, answer strategy, scoring, and qualification | `src/modules/website-growth/opportunities.ts` |
 | Tenant-scoped candidate upsert | `src/modules/website-growth/opportunity-store.ts` |
 | Scout run locking, SEMrush cache, weekday check-in, packet, draft save, Teams message | `src/modules/website-growth/scout-run.ts` |
