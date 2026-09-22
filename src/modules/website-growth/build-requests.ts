@@ -324,12 +324,15 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
   const pullRequestUrl = normalizeOptionalUrl(update.pullRequestUrl);
   const pullRequestNumber = normalizePositiveInteger(update.pullRequestNumber);
   const commitSha = normalizeCommitSha(update.commitSha);
-  const recoveryEvidenceComplete = Boolean(
-    deploymentUrl &&
+  const hasMatchedPullRequestEvidence = Boolean(
     pullRequestUrl &&
     pullRequestNumber &&
-    commitSha &&
     pullRequestUrlMatchesNumber(pullRequestUrl, pullRequestNumber)
+  );
+  const recoveryEvidenceComplete = Boolean(
+    deploymentUrl &&
+    commitSha &&
+    (requestId === input.contentDraftId || hasMatchedPullRequestEvidence)
   );
   validateWorkerTransition(
     job.status,
@@ -378,7 +381,7 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
             : null
       }
     });
-    if ((update.status === "PR_OPEN" || update.status === "PREVIEW_READY") && pullRequestUrl) {
+    if (update.status === "PR_OPEN" && pullRequestUrl) {
       await tx.websiteGrowthContentDraft.updateMany({
         where: {
           id: input.contentDraftId,
@@ -389,18 +392,32 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
         },
         data: {
           status: WebsiteGrowthContentDraftStatus.BUILT,
-          pullRequestUrl,
-          ...(deploymentUrl ? { builtUrl: deploymentUrl } : {})
+          pullRequestUrl
         }
       });
       await tx.websiteGrowthOpportunity.updateMany({
         where: { id: input.opportunityId, tenantId: tenant.id },
         data: { status: WebsiteGrowthOpportunityStatus.IN_PROGRESS }
       });
-    } else if (update.status === "PREVIEW_READY" && deploymentUrl) {
+    }
+    if (update.status === "PREVIEW_READY" && deploymentUrl) {
       await tx.websiteGrowthContentDraft.updateMany({
-        where: { id: input.contentDraftId, tenantId: tenant.id },
-        data: { builtUrl: deploymentUrl }
+        where: {
+          id: input.contentDraftId,
+          tenantId: tenant.id,
+          status: {
+            in: [WebsiteGrowthContentDraftStatus.APPROVED, WebsiteGrowthContentDraftStatus.BUILT]
+          }
+        },
+        data: {
+          status: WebsiteGrowthContentDraftStatus.BUILT,
+          builtUrl: deploymentUrl,
+          ...(pullRequestUrl ? { pullRequestUrl } : {})
+        }
+      });
+      await tx.websiteGrowthOpportunity.updateMany({
+        where: { id: input.opportunityId, tenantId: tenant.id },
+        data: { status: WebsiteGrowthOpportunityStatus.IN_PROGRESS }
       });
     }
     if (update.status === "PUBLISHED") {

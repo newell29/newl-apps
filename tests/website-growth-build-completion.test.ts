@@ -159,14 +159,14 @@ describe("Website Growth production completion", () => {
     }));
   });
 
-  it("recovers a failed build at preview only with complete deployment and pull-request evidence", async () => {
+  it("recovers a failed build at preview with complete deployment and pull-request evidence", async () => {
     mocks.jobFindFirst.mockResolvedValue(buildJob({
       status: JobStatus.ERROR,
       phase: "FAILED"
     }));
 
     await expect(updateWebsiteGrowthBuildRequestFromWorker({
-      requestId: "draft-1",
+      requestId: "build-request-1",
       tenantSlug: "newl-group",
       update: {
         status: "PREVIEW_READY",
@@ -182,8 +182,8 @@ describe("Website Growth production completion", () => {
         tenantId: "tenant-1",
         jobType: "WEBSITE_GROWTH_DEVELOPER_BUILD",
         OR: [
-          { id: "draft-1" },
-          { input: { path: ["contentDraftId"], equals: "draft-1" } }
+          { id: "build-request-1" },
+          { input: { path: ["contentDraftId"], equals: "build-request-1" } }
         ]
       },
       orderBy: { createdAt: "desc" }
@@ -222,7 +222,7 @@ describe("Website Growth production completion", () => {
     });
   });
 
-  it("rejects failed-to-preview recovery when the callback evidence is incomplete", async () => {
+  it("recovers a failed manual preview by its approved draft ID when PR metadata is unavailable", async () => {
     mocks.jobFindFirst.mockResolvedValue(buildJob({
       status: JobStatus.ERROR,
       phase: "FAILED"
@@ -230,6 +230,41 @@ describe("Website Growth production completion", () => {
 
     await expect(updateWebsiteGrowthBuildRequestFromWorker({
       requestId: "draft-1",
+      tenantSlug: "newl-group",
+      update: {
+        status: "PREVIEW_READY",
+        previewUrl: "https://newl-website-preview.vercel.app/services/amazon-fba",
+        commitSha: "d".repeat(40)
+      }
+    })).resolves.toBe(true);
+
+    expect(mocks.draftUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "draft-1",
+        tenantId: "tenant-1",
+        status: {
+          in: [WebsiteGrowthContentDraftStatus.APPROVED, WebsiteGrowthContentDraftStatus.BUILT]
+        }
+      },
+      data: {
+        status: WebsiteGrowthContentDraftStatus.BUILT,
+        builtUrl: "https://newl-website-preview.vercel.app/services/amazon-fba"
+      }
+    });
+    expect(mocks.opportunityUpdateMany).toHaveBeenCalledWith({
+      where: { id: "opportunity-1", tenantId: "tenant-1" },
+      data: { status: WebsiteGrowthOpportunityStatus.IN_PROGRESS }
+    });
+  });
+
+  it("rejects failed-to-preview recovery when the callback evidence is incomplete", async () => {
+    mocks.jobFindFirst.mockResolvedValue(buildJob({
+      status: JobStatus.ERROR,
+      phase: "FAILED"
+    }));
+
+    await expect(updateWebsiteGrowthBuildRequestFromWorker({
+      requestId: "build-request-1",
       tenantSlug: "newl-group",
       update: {
         status: "PREVIEW_READY",
