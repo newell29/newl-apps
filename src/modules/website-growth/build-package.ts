@@ -157,16 +157,20 @@ function resolveBuildMode(
   pageMode?: WebsiteGrowthRenderedPagePreview["mode"] | null,
   contentType = ""
 ): WebsiteGrowthBuildPackage["mode"] {
-  if (pageMode === "new_page" || pageMode === "legacy_redirect_rebuild") {
+  if (pageMode === "legacy_redirect_rebuild") {
     return "CREATE_NEW_PAGE";
   }
 
-  if (pageMode === "existing_page_update") {
+  if (pageMode === "existing_page_update" || /existing.*(?:page|update)|page improvement/i.test(contentType)) {
     return "UPDATE_EXISTING_PAGE";
   }
 
   if (pageMode === "internal_link_update") {
     return "ADD_INTERNAL_LINKS";
+  }
+
+  if (pageMode === "new_page") {
+    return "CREATE_NEW_PAGE";
   }
 
   if (/legacy|dedicated page|new commercial page|resource article/i.test(contentType)) {

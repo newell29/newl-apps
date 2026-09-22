@@ -3,6 +3,7 @@ import { effectivenessPacket } from "./effectiveness-model";
 import { randomUUID } from "node:crypto";
 import { JobStatus, Prisma, WebsiteGrowthAction, WebsiteGrowthContentDraftSource } from "@prisma/client";
 import { prisma } from "@/server/db";
+import { isKnownNewlWebsiteRoute, type NewlWebsiteContext } from "@/modules/website-growth/newl-website-context";
 import { resolveNewlWebsiteContext } from "@/modules/website-growth/newl-website-context-scanner";
 import { parseWebsiteGrowthScoutCompletion } from "@/modules/website-growth/scout-run";
 import { parseWebsiteGrowthBacklinkReview, persistWebsiteGrowthBacklinkReview } from "@/modules/website-growth/backlinks";
@@ -208,6 +209,7 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
 export async function completeScoutWork(tenantId: string, id: string, lease: string, input: unknown, now = new Date()) {
   const result = parseResult(input, now);
   const review = supervisorReview(record(input).supervisor);
+  const websiteContext = await resolveNewlWebsiteContext();
   // Preserve legacy/interrupted output for the next supervised step instead of losing its artifact.
   if (result.state === "NEEDS_REVIEW" && review?.verdict !== "PASS") {
     result.state = "WAITING";
@@ -235,7 +237,8 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       const opportunity = await tx.websiteGrowthOpportunity.findFirst({ where: { id: work.referenceId ?? "", tenantId,
         status: { in: ["NEW", "REVIEWING"] }, ...(work.draftId ? {} : { contentDrafts: { none: {} } }) } });
       if (!opportunity) throw new ScoutWorkError("Page work changed or already has a draft. Reconcile before proceeding.", 409);
-      const draft = parsePageArtifact(result.artifact, now);
+      const effectiveAction = resolveProposedPageAction(opportunity.action, work.route, websiteContext);
+      const draft = normalizePageArtifact(parsePageArtifact(result.artifact, now), effectiveAction, work.route);
       const data = { tenantId, opportunityId: opportunity.id,
         source: WebsiteGrowthContentDraftSource.AI, title: draft.title, summary: draft.summary, contentType: draft.contentType,
         proposedPath: draft.proposedPath, targetPage: opportunity.targetPage, draftJson: json({ ...draft, scoutWorkId: id }) };
@@ -245,7 +248,8 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       } else {
         draftId = (await tx.websiteGrowthContentDraft.create({ data })).id;
       }
-      await tx.websiteGrowthOpportunity.updateMany({ where: { tenantId, id: opportunity.id, status: { in: ["NEW", "REVIEWING"] } }, data: { status: "REVIEWING" } });
+      await tx.websiteGrowthOpportunity.updateMany({ where: { tenantId, id: opportunity.id, status: { in: ["NEW", "REVIEWING"] } },
+        data: { status: "REVIEWING", action: effectiveAction } });
     }
     if (result.state === "NEEDS_REVIEW" && work.kind === "RELATIONSHIP") {
       text(result.artifact?.subject, "Reply subject", 180);
@@ -263,9 +267,18 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
         status: { in: ["NEW", "REVIEWING", "APPROVED", "IN_PROGRESS"] } }, select: { id: true } });
       // Reuse active work, but let a later outcome review improve a previously published page again.
       const opportunityId = existing?.id ?? stableId(tenantId, `proposal:${route}:${title.toLowerCase()}:from:${id}${work.evidence.source === "site-review" ? `:revision:${work.revision}` : ""}`);
+      const action = resolveProposedPageAction(
+        proposal.newPage === true ? WebsiteGrowthAction.CREATE_PAGE : WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+        route,
+        websiteContext
+      );
       await tx.websiteGrowthOpportunity.upsert({ where: { id: opportunityId, tenantId }, create: { id: opportunityId, tenantId,
         topic: title, reason: hypothesis, recommendation: hypothesis, targetPage: route,
-        action: proposal.newPage === true ? WebsiteGrowthAction.CREATE_PAGE : WebsiteGrowthAction.IMPROVE_EXISTING_PAGE, status: "REVIEWING" }, update: {} });
+        action, status: "REVIEWING", evidence: json({ routeClassification: {
+          requestedNewPage: proposal.newPage === true,
+          existingRouteFound: action !== WebsiteGrowthAction.CREATE_PAGE && proposal.newPage === true,
+          resolvedAction: action
+        } }) }, update: {} });
       const childId = stableId(tenantId, `page:${opportunityId}`);
       await tx.automationJobRun.upsert({ where: { tenantId_id: { tenantId, id: childId } }, create: { id: childId, tenantId,
         jobType: WORK_JOB, status: JobStatus.QUEUED, output: json(newWork("PAGE", opportunityId, title, hypothesis, route, { parentWorkId: id }, now)) }, update: {} });
@@ -364,12 +377,22 @@ export async function proposeScoutPage(tenantId: string, userId: string, input: 
   const proposal = record(input), title = text(proposal.title, "Title", 250), hypothesis = text(proposal.hypothesis, "Hypothesis", 4000);
   const route = routePath(proposal.route);
   if (!route) throw new ScoutWorkError("Provide the proposed or existing website route.");
+  const websiteContext = await resolveNewlWebsiteContext();
+  const action = resolveProposedPageAction(
+    proposal.newPage === true ? WebsiteGrowthAction.CREATE_PAGE : WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+    route,
+    websiteContext
+  );
   const opportunityId = stableId(tenantId, `proposal:${route}:${title.toLowerCase()}`);
   await prisma.$transaction(async tx => {
     await tx.websiteGrowthOpportunity.upsert({ where: { id: opportunityId, tenantId },
       create: { id: opportunityId, tenantId, topic: title, reason: hypothesis, recommendation: hypothesis, targetPage: route,
-        action: proposal.newPage === true ? WebsiteGrowthAction.CREATE_PAGE : WebsiteGrowthAction.IMPROVE_EXISTING_PAGE, status: "REVIEWING" }, update: {} });
-    await audit(tx, tenantId, userId, "page-proposed", opportunityId, { route });
+        action, status: "REVIEWING", evidence: json({ routeClassification: {
+          requestedNewPage: proposal.newPage === true,
+          existingRouteFound: action !== WebsiteGrowthAction.CREATE_PAGE && proposal.newPage === true,
+          resolvedAction: action
+        } }) }, update: {} });
+    await audit(tx, tenantId, userId, "page-proposed", opportunityId, { route, action });
   });
   await ensureWork(tenantId, `page:${opportunityId}`, newWork("PAGE", opportunityId, title, hypothesis, route));
 }
@@ -426,4 +449,53 @@ function parsePageArtifact(artifact: Record<string, unknown> | null, now: Date) 
   // Never persist model-supplied approval/build fields.
   const keys = ["title", "summary", "contentType", "proposedPath", "targetKeyword", "searchIntent", "sections", "metaTitle", "metaDescription", "faqs", "internalLinks", "implementationNotes", "reviewChecklist", "websitePageType", "websiteTemplate", "layoutComponents", "designSystemNotes", "pageChangePreview", "pagePreview"];
   return Object.fromEntries(keys.map(key => [key, record(draft)[key]])) as unknown as typeof draft;
+}
+
+function resolveProposedPageAction(action: WebsiteGrowthAction, route: string | null, context: NewlWebsiteContext) {
+  if (
+    (action === WebsiteGrowthAction.CREATE_PAGE || action === WebsiteGrowthAction.CREATE_RESOURCE_ARTICLE) &&
+    isKnownNewlWebsiteRoute(route, context)
+  ) {
+    return WebsiteGrowthAction.IMPROVE_EXISTING_PAGE;
+  }
+
+  return action;
+}
+
+function normalizePageArtifact<T extends ReturnType<typeof parsePageArtifact>>(
+  draft: T,
+  action: WebsiteGrowthAction,
+  route: string | null
+): T {
+  const existingPage = action === WebsiteGrowthAction.IMPROVE_EXISTING_PAGE ||
+    action === WebsiteGrowthAction.ADD_SECTION ||
+    action === WebsiteGrowthAction.ADD_INTERNAL_LINKS;
+
+  if (!existingPage) {
+    return draft;
+  }
+
+  const pagePreview = record(draft.pagePreview);
+  const pageChangePreview = record(draft.pageChangePreview);
+  const currentPage = record(pageChangePreview.currentPage);
+
+  return {
+    ...draft,
+    contentType: "Existing page improvement",
+    proposedPath: route ?? draft.proposedPath,
+    pagePreview: {
+      ...pagePreview,
+      mode: action === WebsiteGrowthAction.ADD_INTERNAL_LINKS ? "internal_link_update" : "existing_page_update"
+    },
+    pageChangePreview: {
+      ...pageChangePreview,
+      currentPage: {
+        ...currentPage,
+        path: route ?? currentPage.path
+      },
+      approvalSummary: route
+        ? `Update the existing page at ${route} using only the scoped changes in this brief. Do not create a new route.`
+        : pageChangePreview.approvalSummary
+    }
+  } as T;
 }

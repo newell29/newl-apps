@@ -15,6 +15,9 @@ Website growth and SEO is documented because code, routes, schema, or tests were
 - Approval, printing, posting, and live external writes require human approval unless a code path explicitly enforces a safe dry-run.
 - Customer-question candidates are classified deterministically and receive bounded weekly and Scout-packet capacity. Scout must prefer improving an existing authoritative page over creating a new question page.
 - Question-led work must remain commercially relevant, visible to visitors, supported by available evidence, and free of guarantees about AI citations or rankings.
+- Website route existence is deterministic. A route found in the scanned website inventory or approved core-link context cannot be stored as a new-page proposal merely because a model returned `newPage: true`.
+- Existing-page briefs keep the existing route, use an existing-page preview mode, and scope implementation through explicit section-level changes. The complete rendered page is review context and does not authorize an unnecessary rewrite.
+- When a legacy opportunity action conflicts with the final brief mode, the final brief mode controls the workspace label and build package. The UI discloses the reconciliation instead of showing contradictory instructions.
 - SEO recovery may reserve up to two deep-run packet positions. It compares complete, non-overlapping 28-day periods, excluding the newest two days while Search Console data may still be incomplete.
 - Legacy and current URLs connected by an approved website redirect are evaluated as one route family. Healthy migrations, improving routes, and ordinary volatility remain monitoring signals rather than content briefs.
 - Recovery work must prefer redirect, canonical, sitemap, internal-link, metadata, and useful content improvements on the surviving route. It must not recreate thin legacy pages or duplicate an active website build.

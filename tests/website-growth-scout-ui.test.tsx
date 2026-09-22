@@ -80,6 +80,14 @@ it("does not present due research as an owner decision", async () => {
   expect(html).not.toContain("Save decision");
 });
 
+it("labels page-card counts as the original signal instead of current metrics", async () => {
+  mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
+    items: [{ ...newWork("PAGE", "opportunity-synthetic", "Amazon FBA", "0 impressions, 0 clicks, 5 related leads", "/services/amazon-fba"), id: "work-synthetic" }] });
+  const html = renderToStaticMarkup(await ScoutWorkPage());
+  expect(html).toContain("Original research signal:");
+  expect(html).toContain("not a live metric snapshot");
+});
+
 it("shows approved builds as external work with no second brief decision or fictional research date", async () => {
   mocks.workspace.mockResolvedValue({ configured: true, mission: DEFAULT_MISSION, truncated: false,
     items: [{ ...newWork("PAGE", "opportunity", "Build page", "Improve clarity", "/resources/guide"), id: "work", draftId: "draft-synthetic", state: "WAITING",

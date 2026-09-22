@@ -65,6 +65,7 @@ import {
 import {
   deduplicateScoutDrafts,
   getWebsiteGrowthChangeType,
+  getWebsiteGrowthDraftChangeType,
   getWebsiteGrowthPrimaryChange,
   getWebsiteGrowthRoute,
   getWebsiteGrowthWorkflowStage,
@@ -267,6 +268,29 @@ describe("website growth Scout workspace", () => {
         }
       })
     ).toBe("/services/new-service");
+  });
+
+  it("uses the final brief mode when an older opportunity action says new page", () => {
+    const contradictoryDraft = {
+      ...existingPageDraft,
+      draftJson: {
+        pagePreview: { mode: "existing_page_update" },
+        pageChangePreview: {
+          approvalSummary: "Update the existing Amazon FBA page without creating another route."
+        }
+      },
+      opportunity: {
+        ...existingPageDraft.opportunity,
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        recommendation: "Create a dedicated Amazon marketplace-seller page."
+      }
+    };
+
+    expect(getWebsiteGrowthDraftChangeType(contradictoryDraft)).toMatchObject({
+      label: "Update existing page",
+      reconciled: true
+    });
+    expect(getWebsiteGrowthPrimaryChange(contradictoryDraft)).toContain("without creating another route");
   });
 
   it("moves approved work from building to preview ready", () => {
@@ -1088,6 +1112,40 @@ describe("website growth content draft packages", () => {
     expect(draft.contentType).toBe("Existing page improvement");
     expect(draft.proposedPath).toBe("/freight/gta-local-trucking");
     expect(draft.implementationNotes[0]).toContain("/freight/gta-local-trucking");
+  });
+
+  it("builds an existing-page package when the final brief corrects a stale create-page action", () => {
+    const draft = buildTemplateWebsiteGrowthContentDraft({
+      action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+      topic: "Amazon FBA / Marketplace Sellers",
+      primaryKeyword: "Amazon FBA prep services",
+      targetPage: "https://www.newlgroup.com/services/amazon-fba",
+      sourcePage: "https://www.newlgroup.com/services/amazon-fba",
+      score: 70,
+      confidence: "Medium",
+      reason: "Improve the national parent page.",
+      recommendation: "Update the existing page.",
+      supportingKeywords: [],
+      evidence: {}
+    });
+    const buildPackage = buildWebsiteGrowthBuildPackage({
+      id: "draft-amazon",
+      opportunityId: "opportunity-amazon",
+      title: draft.title,
+      contentType: "Existing service page update brief",
+      proposedPath: "/services/amazon-fba",
+      targetPage: "/services/amazon-fba",
+      draftJson: draft as unknown as Prisma.JsonValue,
+      opportunity: {
+        action: WebsiteGrowthAction.CREATE_PAGE,
+        topic: "Amazon FBA / Marketplace Sellers",
+        targetPage: "/services/amazon-fba",
+        sourcePage: "/services/amazon-fba"
+      }
+    });
+
+    expect(buildPackage.mode).toBe("UPDATE_EXISTING_PAGE");
+    expect(buildPackage.implementation.routeAction).toBe("Update the existing page at /services/amazon-fba.");
   });
 
   it("keeps legacy rebuild draft packages on the proposed legacy URL", () => {

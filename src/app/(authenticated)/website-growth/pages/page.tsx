@@ -9,7 +9,7 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { getWebsiteGrowthWorkspace } from "@/modules/website-growth/queries";
 import {
-  getWebsiteGrowthChangeType,
+  getWebsiteGrowthDraftChangeType,
   getWebsiteGrowthPrimaryChange,
   getWebsiteGrowthRoute,
   getWebsiteGrowthWorkflowStage,
@@ -465,7 +465,7 @@ function ScoutIdeaCard({
   isLatest: boolean;
   compact: boolean;
 }) {
-  const changeType = getWebsiteGrowthChangeType(draft.opportunity.action);
+  const changeType = getWebsiteGrowthDraftChangeType(draft);
   const route = getWebsiteGrowthRoute(draft);
   const primaryChange = getWebsiteGrowthPrimaryChange(draft);
   const scoutRunId = readScoutRunId(draft.draftJson);
@@ -485,6 +485,7 @@ function ScoutIdeaCard({
         <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{changeType.label}</p>
         <p className="mt-1 break-all font-mono text-sm font-semibold text-foreground">{route}</p>
         <p className="mt-1 text-xs leading-5 text-mutedForeground">{changeType.description}</p>
+        {changeType.reconciled ? <p className="mt-2 text-xs font-semibold text-warning">Final brief classification overrides an earlier conflicting research label.</p> : null}
       </div>
 
       <h3 className="mt-4 text-lg font-semibold text-foreground">{draft.title}</h3>

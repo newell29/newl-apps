@@ -110,6 +110,10 @@ Choose WAIT with a concrete next action when evidence is missing. DISMISS weak w
 Every WAIT must include waitBlocker. Name the exact missing evidence, the action that can resolve it, and whether Scout can resolve it itself.
 Use OWNER_INPUT only for a business decision or private fact Scout cannot verify. Do not push ordinary public research or available saved data back to the owner.
 For PAGE deliver the complete page brief schema with exact copy, source context, and useful conversion improvements.
+Treat the supplied website route inventory and current-page evidence as authoritative for route existence. If the route exists,
+classify the work as an existing-page update, keep proposedPath on that route, use pagePreview mode existing_page_update,
+and preserve the current page's useful structure. Show the complete page only as after-change context; make pageChangePreview
+a focused section-level patch. Do not disguise a rewrite or a duplicate route as an improvement.
 For RELATIONSHIP draft a relevant response to the latest reply for human review; make no commitments.
 For MEASUREMENT use the authoritative supplied measurements, distinguish association from causation, and retain limitations.
 Judge progress by qualified enquiries when actually linked, then enquiries, engaged visits, search clicks, impressions, CTR and position.
@@ -128,6 +132,7 @@ Choose reviewInDays based on the evidence (normally 7, longer for low-volume wai
 Human-recorded Qualified, Quote sent and Won counts are separate current statuses; never add them up as a proven historical funnel.
 For RESEARCH investigate the best new opportunity; provide a specific proposal, supporting public URLs, and a useful next action.
 Research and outcome artifacts may propose a page with proposedTitle, proposedRoute, hypothesis, and newPage.
+Set newPage false whenever proposedRoute already appears in the supplied website route inventory or current-page evidence.
 Use empty strings when no page is proposed and an empty prospects array when no publishers qualify.
 Proposed pages automatically become research tasks; deliver the complete brief before asking for publishing approval.
 Publisher prospects go to the existing human approval queue. Supply exact public sources, relevance, and a useful outreach angle.
@@ -182,6 +187,8 @@ def run():
                 review = model(RULES + "\nAct as the quality supervisor. Review the proposed result against the source context. "
                                "PASS only complete, useful, supported work. REVISE unsupported claims, missing exact copy, generic tasks, "
                                "or routine public research pushed back onto the owner. WAIT for missing evidence. "
+                               "REVISE any new-page classification for a route already present in the website inventory, any mismatch between "
+                               "the work route and proposedPath, or any existing-page brief that reads as an unnecessary wholesale rewrite. "
                                "Check dated competitor evidence and distinguish measured results from interpretation. "
                                "This quality review never approves sending, building or publishing.\n" +
                                json.dumps({"mission": workspace["mission"], "work": public_work, "context": context, "result": result}),

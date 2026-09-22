@@ -61,12 +61,16 @@ The Kimi comparison is optional and fails independently: a missing key, agent er
 ## Review workspace
 
 1. Open `/website-growth` to see Scout-curated briefs only.
-2. Start with `Needs your review`. Each card identifies `New page` or `Update existing page`, the affected route, and the primary proposed change.
-3. Open the brief for the complete current-page comparison, proposed copy, layout, claims review, and approval action.
+2. Start with `Needs your review`. Each card identifies `New page` or `Update existing page`, the affected route, and the primary proposed change. Newl Apps compares a requested new route with the scanned website inventory and converts it to an existing-page improvement when that route already exists.
+3. Open the brief for the complete current-page comparison, proposed copy, layout, claims review, and approval action. For an existing page, the rendered page is an after-change context view; the section-level change list defines the build scope.
 4. After approval, follow the same item through `Approved and building` and then `Preview ready`.
 5. Open the Vercel website preview for visual review. The owner makes the final GitHub merge decision.
 6. After the merged primary PR deploys successfully to Vercel production, the item moves automatically to `Completed and closed`.
 7. Use `/website-growth/signals` only when investigating the underlying analytics and imported evidence. Signal counts are not counts of approved or active ideas.
+
+Older stored briefs may contain a research-stage action that conflicts with their final page-preview mode. The workspace and approval package use the final brief mode, display the reconciliation, and ignore the stale label. The raw research hypothesis remains historical evidence and is not presented as the approval recommendation.
+
+Workboard page cards label their original research signal explicitly. Those counts are the evidence that created the work item, not a live metric snapshot. Dated progress entries and the complete brief carry the evidence used for the current recommendation, preventing an older zero/count from being presented beside a newer comparison window as if both described the same observation.
 
 ## Workflow / rules summary
 

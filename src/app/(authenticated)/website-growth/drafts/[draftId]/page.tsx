@@ -23,7 +23,7 @@ import type {
   WebsiteGrowthRenderedPagePreview
 } from "@/modules/website-growth/content-drafts";
 import {
-  getWebsiteGrowthChangeType,
+  getWebsiteGrowthDraftChangeType,
   getWebsiteGrowthPrimaryChange,
   getWebsiteGrowthRoute
 } from "@/modules/website-growth/workspace";
@@ -64,7 +64,7 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
   const claimReview = reviewWebsiteGrowthClaims(draft.draftJson);
   const developerBuildJob = await findWebsiteGrowthBuildRequestForDraft(context.tenantId, draft.id);
   const developerBuild = developerBuildJob ? summarizeWebsiteGrowthBuildRequest(developerBuildJob) : null;
-  const changeType = getWebsiteGrowthChangeType(draft.opportunity.action);
+  const changeType = getWebsiteGrowthDraftChangeType(draft);
   const route = getWebsiteGrowthRoute(draft);
   const primaryChange = getWebsiteGrowthPrimaryChange(draft);
   const canReviewDraft =
@@ -99,6 +99,11 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
           <p className="text-xs font-semibold uppercase tracking-wide text-mutedForeground">Primary proposed change</p>
           <p className="mt-2 text-sm leading-6 text-foreground">{primaryChange}</p>
         </div>
+        {changeType.reconciliationNote ? (
+          <p className="mt-4 rounded-md border border-warning/25 bg-background/80 p-3 text-sm leading-6 text-foreground">
+            <strong>Classification corrected:</strong> {changeType.reconciliationNote}
+          </p>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-border bg-card p-5">
@@ -110,20 +115,20 @@ export default async function WebsiteGrowthDraftPreviewPage({ params }: PageProp
           <Badge className="border-accentBorder bg-accentSoft text-primary">{draft.contentType}</Badge>
         </div>
         <dl className="mt-5 grid gap-4 md:grid-cols-2">
-          <SummaryRow label="Proposed path" value={draft.proposedPath} />
-          <SummaryRow label="Target page" value={draft.targetPage} />
+          <SummaryRow label={changeType.label === "New page" ? "Proposed route" : "Existing page"} value={route} />
           <SummaryRow label="Target keyword" value={payload.targetKeyword} />
           <SummaryRow label="Search intent" value={payload.searchIntent} />
           <SummaryRow label="Newl page pattern" value={payload.websitePageType} />
           <SummaryRow label="Website template" value={payload.websiteTemplate} />
           <SummaryRow label="Opportunity" value={draft.opportunity.topic} />
-          <SummaryRow label="Recommendation" value={draft.opportunity.recommendation} />
+          <SummaryRow label="Approval scope" value={primaryChange} />
         </dl>
       </section>
 
       <WebsiteStylePreview
         proposedPath={draft.proposedPath}
         payload={payload}
+        changeLabel={changeType.label}
       />
       <ExistingPageChangePreview preview={payload.pageChangePreview} />
 
@@ -432,10 +437,12 @@ function ChangeBox({ label, value, highlight = false }: { label: string; value: 
 
 function WebsiteStylePreview({
   proposedPath,
-  payload
+  payload,
+  changeLabel
 }: {
   proposedPath: string | null;
   payload: ReturnType<typeof readDraftPayload>;
+  changeLabel: string;
 }) {
   const preview = payload.pagePreview;
 
@@ -457,9 +464,13 @@ function WebsiteStylePreview({
     <section className="overflow-hidden rounded-lg border border-border bg-white shadow-sm">
       <div className="flex flex-col gap-2 border-b border-border bg-muted/40 px-5 py-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Generated Newl page preview</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+            {changeLabel === "New page" ? "Proposed new-page preview" : "Existing page after-change preview"}
+          </p>
           <p className="mt-1 text-sm text-mutedForeground">
-            This is the visitor-facing page experience generated for review before any Git or Vercel publishing work.
+            {changeLabel === "New page"
+              ? "This is the visitor-facing page experience generated for review before any Git or Vercel publishing work."
+              : "The complete page is shown for context. The build must change only the scoped items listed in Current page and proposed changes below."}
           </p>
         </div>
         <span className="rounded-full border border-border bg-white px-3 py-1 text-xs font-semibold text-mutedForeground">
