@@ -8,11 +8,13 @@ and lane preferences are in `ops/openclaw/hunter/pilot-mission.md`.
 
 ## Scope
 
-One Python loop chooses search, fetch, open-company, dismiss-clue, people-search, decide or wait actions. These are
+One Python loop chooses search, fetch, open-company, dismiss-clue, people-search, contact-verification, decide or wait actions. These are
 choices, not mandatory stages. It reuses Hunter's public retrieval helpers, local Ollama or the existing
 ChatGPT-authenticated Codex CLI, and Newl's
 tenant/identity conventions. No framework migration, extra agents, database migration, dashboard,
-outreach generation, approval or enrollment is included. Company research does not require TradeMining.
+message sending, approval or enrollment is included. A recommendation records an evidence-bounded
+outreach approach and discovery questions for owner review, but it cannot send or enroll anyone.
+Company research does not require TradeMining.
 
 Two explicit modes exist:
 
@@ -76,6 +78,19 @@ owner review. It requires a supported goods-movement use case, Newl service/geog
 contradiction; it does not require public proof that the company is shopping for a provider. Missing
 outsourcing evidence remains an uncertainty. Park a plausible fit for a known future trigger; dismiss
 when identity, service, geography or operating evidence actually weakens the hypothesis.
+
+The 2026-09-22 qualification correction makes that distinction explicit in the action contract.
+`dismiss_clue` requires a positive contradiction category; missing public evidence of outsourcing,
+provider shopping, carrier overflow or buying intent is not a category. Recommendations separately
+record target roles, an evidence-bounded outreach approach and the questions a conversation should
+answer. ICP fit, opportunity evidence and buying intent remain distinct without adding a lead score or
+mandatory research stage.
+
+Returned Apollo candidates enter `contactVerificationQueue`. One bounded public check can record
+`VERIFIED_CURRENT`, `LIKELY_CURRENT`, `UNVERIFIED`, `FORMER` or `IDENTITY_AMBIGUOUS`. Only a fetched
+official-company page naming the person can produce `VERIFIED_CURRENT`; search snippets and Apollo
+metadata cannot. Full names are accepted only when they match the saved first name and masked surname
+hint. No status reveals an email, clears outreach or writes a contact record.
 
 Data lives outside the checkout in a private directory. An atomic, fsynced journal persists evidence,
 companies, attempted searches, decisions, feedback and usage before external calls. One worker holds
@@ -162,6 +177,9 @@ highest-value unfinished task on a later wake. The result records searched title
 empty lookup records a contact gap instead of triggering synonym retries. `status` reports pending and
 completed buyer research, and the review explains preparation state. This does not change commercial
 fit, verify employment, reveal email, clear suppression, make outreach ready or authorize contact.
+Candidates returned by that lookup then appear in `contactVerificationQueue` until one bounded public
+employment check is recorded. The queue is preparation for owner review rather than a mandatory stage
+for every researched company.
 
 ### Source-led discovery catalog
 

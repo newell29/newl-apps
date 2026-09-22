@@ -88,11 +88,16 @@ describe("Hunter pilot read-only bridge", () => {
   });
   it("retains plausible buyers with masked names and unrevealed emails", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ people: [
-      { id: "person-a", first_name: "Synthetic", last_name_obfuscated: "T***", title: "Director of Operations", has_email: true, organization: { name: "Synthetic Supply" } }
+      { id: "person-a", first_name: "Synthetic", last_name_obfuscated: "T***", title: "Director of Operations",
+        has_email: true, last_refreshed_at: "2026-09-20T12:00:00Z",
+        linkedin_url: "https://www.linkedin.com/in/synthetic-person/", organization: { name: "Synthetic Supply" } }
     ] }) } as Response);
     const result = await readHunterPilot({ ...companyInput, action: "people", titles: ["operations"] });
     expect(result).toMatchObject({ result: "PEOPLE_FOUND_EMAIL_NOT_REVEALED", candidates: [
-      { id: "person-a", firstName: "Synthetic", lastNameHint: "T***", emailAvailable: true, emailState: "NOT_REVEALED", employmentVerified: false }
+      { id: "person-a", firstName: "Synthetic", lastNameHint: "T***", emailAvailable: true,
+        emailState: "NOT_REVEALED", employmentVerified: false,
+        employmentSource: "APOLLO_PEOPLE_SEARCH_UNVERIFIED", lastRefreshedAt: "2026-09-20T12:00:00Z",
+        linkedinUrl: "https://www.linkedin.com/in/synthetic-person/" }
     ] });
     const [url, request] = vi.mocked(fetch).mock.calls[0];
     expect(url).toBe("https://api.apollo.io/api/v1/mixed_people/api_search");
@@ -130,7 +135,20 @@ describe("Hunter pilot read-only bridge", () => {
   it("does not turn incomplete person records into usable contacts", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ people: [{ title: "Owner" }, { id: "p" }, { id: "q", title: "Operations" }] }) } as Response);
     expect(await searchPilotPeople("supply.example", ["operations"])).toEqual([
-      { id: "q", title: "Operations", firstName: null, lastNameHint: null, organization: null, emailAvailable: false, emailState: "NOT_REVEALED", employmentVerified: false, nameMasked: true }
+      { id: "q", title: "Operations", firstName: null, lastNameHint: null, organization: null,
+        lastRefreshedAt: null, linkedinUrl: null, emailAvailable: false, emailState: "NOT_REVEALED",
+        employmentVerified: false, employmentSource: "APOLLO_PEOPLE_SEARCH_UNVERIFIED", nameMasked: true }
+    ]);
+  });
+
+  it("rejects unsafe or malformed public-profile metadata", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ people: [
+      { id: "person-a", title: "Operations", linkedin_url: "https://example.com/not-linkedin",
+        last_refreshed_at: "not-a-date" }
+    ] }) } as Response);
+    expect(await searchPilotPeople("supply.example", ["operations"])).toEqual([
+      expect.objectContaining({ id: "person-a", linkedinUrl: null, lastRefreshedAt: null,
+        employmentVerified: false })
     ]);
   });
 });

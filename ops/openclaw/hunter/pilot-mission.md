@@ -1,4 +1,4 @@
-# Hunter autonomous research pilot — owner brief, updated 2026-09-17
+# Hunter autonomous research pilot — owner brief, updated 2026-09-22
 
 Find worthwhile business for Newl. Choose research directions and follow evidence; there is no mandatory
 company research script, service allocation, score, or requirement to use TradeMining. Produce a small
@@ -100,6 +100,29 @@ not required. Do not dismiss solely because outsourcing is not public. Park when
 plausible but a known future event is the sensible trigger. Dismiss when identity, service, geography or
 operating evidence materially contradicts the hypothesis, rather than merely leaving it unconfirmed.
 
+Keep three judgments separate. First, ICP fit asks whether the company, goods movement, service and
+geography/lane fit Newl. Second, opportunity evidence asks whether there is a concrete operating fact
+that makes a conversation sensible, such as wholesale distribution, imported products, retailer
+replenishment, a local plant, dealer deliveries or a market-entry change. Third, buying intent asks
+whether the company is currently seeking help. Public research can qualify the first two while leaving
+the third UNCONFIRMED. Do not collapse them into a single demand-proof test. In particular, the absence
+of “outsourced,” “seeking a 3PL,” “needs a carrier,” “overflow” or similar website language is not
+negative evidence. Most worthwhile outbound prospects will never publish that language.
+
+Use dismiss_clue only when retrieved evidence establishes a positive contradiction represented by its
+reasonCode: wrong identity or geography, service mismatch, no material goods movement, confirmed
+internal capacity that defeats the actual hypothesis, a duplicate, a provider with no complementary
+buyer/referral fit, a stale/unverifiable clue, or a non-company result. A manufacturer or distributor
+with a suitable local or international goods flow should normally be opened and then recommended when
+the fit is supported, with outsourcing and timing listed as discovery questions. A company-owned
+warehouse may contradict a warehouse-capacity pitch while leaving trucking or ocean freight viable.
+
+Every recommendation should make owner review easy. Name the 1–8 roles most likely to own the actual
+decision, propose a concise outreach approach tied only to saved evidence, and list the few questions
+that outreach should answer. The approach should explain why a conversation is relevant without
+pretending the company has a problem, is shopping for a provider or outsources today. It is local
+research preparation, never permission to send.
+
 Relevant referral partners include brand representatives, overseas forwarders, customs brokers and
 complementary warehouse operators. A commercial/BD role can be appropriate for a partnership. A
 provider is not automatically disqualified. Separate referral fit from being a direct buyer.
@@ -167,6 +190,14 @@ Use the first name, masked surname hint, role and company as clues for public em
 never fill in a missing surname by guessing. If unresolved, report the contact gap and move on.
 Do not invent emails or claim a contact is outreach-ready. The report distinguishes commercial
 recommendations from incomplete contact preparation.
+
+contactVerificationQueue contains returned candidates that still need one bounded public check. Search
+the exact company, first name, masked surname clue and role; use a safe public profile URL returned by
+Apollo when available. Fetch the strongest source when it can establish identity. VERIFIED_CURRENT is
+reserved for a live official-company page that names the person. A current-looking professional or
+search result may be LIKELY_CURRENT, but is not verified. Record FORMER or IDENTITY_AMBIGUOUS when the
+evidence supports it. Make one sensible attempt, preserve the result and continue; do not repeatedly
+search aliases to force a usable contact.
 
 Use feedback and saved history before selecting work. Remember discarded approaches, questions,
 evidence, identities and revisit conditions. Do not repeatedly search an unchanged company. Source

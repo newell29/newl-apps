@@ -7,6 +7,27 @@ import type { TenantContext } from "@/server/tenant-context";
 const MAX_IDENTITIES = 20_000;
 type Input = { action?: unknown; name?: unknown; domain?: unknown; titles?: unknown };
 
+function safeLinkedInUrl(value: unknown) {
+  if (typeof value !== "string" || value.length > 500) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port ||
+        !["linkedin.com", "www.linkedin.com"].includes(url.hostname.toLowerCase()) ||
+        !url.pathname.startsWith("/in/")) return null;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function safeApolloRefreshTime(value: unknown) {
+  if (typeof value !== "string" || value.length > 80 || !/^\d{4}-\d{2}-\d{2}T/.test(value) ||
+      Number.isNaN(Date.parse(value))) return null;
+  return value;
+}
+
 export function pilotDomain(value: unknown) {
   if (typeof value !== "string" || value.length > 253) throw new Error("INVALID_DOMAIN");
   const domain = normalizeHunterCompanyDomain(value);
@@ -110,7 +131,10 @@ export async function searchPilotPeople(domain: string, titles: string[]) {
       firstName: typeof p.first_name === "string" ? p.first_name.slice(0, 100) : null,
       lastNameHint: typeof p.last_name_obfuscated === "string" ? p.last_name_obfuscated.slice(0, 100) : null,
       organization: typeof org.name === "string" ? org.name.slice(0, 200) : null,
+      lastRefreshedAt: safeApolloRefreshTime(p.last_refreshed_at),
+      linkedinUrl: safeLinkedInUrl(p.linkedin_url),
       emailAvailable: p.has_email === true, emailState: "NOT_REVEALED" as const,
-      employmentVerified: false, nameMasked: true }];
+      employmentVerified: false, employmentSource: "APOLLO_PEOPLE_SEARCH_UNVERIFIED" as const,
+      nameMasked: true }];
   });
 }

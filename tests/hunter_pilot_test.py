@@ -57,7 +57,10 @@ class PilotTests(unittest.TestCase):
             evidence = self.action("fetch", url="https://supply.example/", company="supply.example")["evidenceIds"][0]
         return self.action("decide", company="supply.example", status=status, summary="Possible case picking fit",
             uncertainty="Outsourcing and buying intent unconfirmed", nextAction="Verify storage arrangements",
-            evidenceIds=[evidence], quote=quote, quoteEvidenceId=evidence, revisitDays=30, revisitWhen="New Canadian retailer announcement")
+            evidenceIds=[evidence], quote=quote, quoteEvidenceId=evidence, revisitDays=30,
+            revisitWhen="New Canadian retailer announcement", targetRoles=["Operations Manager"],
+            outreachApproach="Offer a short discovery conversation about Canadian retailer replenishment without assuming current outsourcing.",
+            outreachQuestions=["Who owns retailer replenishment?", "Are exception or overflow runs ever assigned externally?"])
 
     def test_cross_tenant_state_rejected(self):
         self.p.state["tenantId"] = "tenant-b"; self.p.save()
@@ -279,6 +282,7 @@ class PilotTests(unittest.TestCase):
     def test_source_family_performance_exposes_yield_without_forcing_rotation(self):
         evidence = self.action("search", query="synthetic distributor", direction="gta")["evidenceIds"]
         self.action("dismiss_clue", evidenceIds=evidence,
+            reasonCode="service_mismatch",
             reason="No supported local movement or external logistics fit",
             name="Synthetic Supply", domain="supply.example")
         row = self.p.context()["researchCoverage"]["sourceFamilies"][0]
@@ -404,6 +408,7 @@ class PilotTests(unittest.TestCase):
     def test_dismiss_clue_preserves_reason_and_removes_unsaved_domain(self):
         evidence = self.action("search", query="synthetic distributor", direction="gta")["evidenceIds"]
         result = self.action("dismiss_clue", evidenceIds=evidence,
+            reasonCode="competitor_without_complementary_fit",
             reason="Official evidence shows a provider operating the local service itself",
             name="Synthetic Supply", domain="supply.example")
         self.assertEqual(result["state"], "dismissed")
@@ -412,7 +417,7 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(dismissed["domain"], "supply.example")
         self.assertIn("operating the local service", dismissed["reason"])
         with self.assertRaisesRegex(ValueError, "Cite actual retrieved evidence IDs"):
-            self.action("dismiss_clue", evidenceIds=["invented"], reason="Unsupported")
+            self.action("dismiss_clue", evidenceIds=["invented"], reasonCode="service_mismatch", reason="Unsupported")
 
     def test_pending_clues_do_not_resurface_parked_or_blocked_company_domains(self):
         company = self.open()
@@ -445,14 +450,15 @@ class PilotTests(unittest.TestCase):
              "snippet": "Consumer goods wholesale."}]
         evidence = self.action("search", query="G.T. Wholesale location", direction="gta")["evidenceIds"]
         self.action("dismiss_clue", evidenceIds=[evidence[0]], name="G.T. Wholesale Limited",
-                    domain="gt-wholesale.com", reason="Outside the target geography")
+                    domain="gt-wholesale.com", reasonCode="wrong_geography", reason="Outside the target geography")
         self.assertEqual([clue["url"] for clue in self.p.context()["unreadClues"]],
                          ["https://three.example/brand"])
 
     def test_research_momentum_reports_work_since_last_company_progress(self):
         self.open(); self.decision()
         evidence = self.action("search", query="another synthetic distributor", direction="gta")["evidenceIds"]
-        self.action("dismiss_clue", evidenceIds=evidence, reason="No supported buyer-side need")
+        self.action("dismiss_clue", evidenceIds=evidence, reasonCode="service_mismatch",
+                    reason="No supported buyer-side need")
         momentum = self.p.context()["researchMomentum"]
         self.assertEqual(momentum["actionsSinceCompanyProgress"], 2)
         self.assertEqual(momentum["searchesSinceCompanyProgress"], 1)
@@ -514,6 +520,26 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.p.status()["buyerResearch"], {"pending": 1, "completed": 0})
         self.assertIn("research-qualified for owner review", MISSION)
         self.assertIn("Do not dismiss solely because outsourcing is not public", MISSION)
+        self.assertEqual(c["qualification"], "RESEARCH_QUALIFIED")
+        self.assertEqual(c["targetRoles"], ["Operations Manager"])
+        self.assertIn("without assuming current outsourcing", c["outreachApproach"])
+        self.assertEqual(len(c["outreachQuestions"]), 2)
+
+    def test_recommendation_requires_owner_review_outreach_preparation(self):
+        self.open()
+        evidence = self.action("fetch", url="https://supply.example/", company="supply.example")["evidenceIds"][0]
+        with self.assertRaisesRegex(ValueError, "target buyer roles"):
+            self.action("decide", company="supply.example", status="recommended", summary="Possible fit",
+                uncertainty="Buying intent unconfirmed", nextAction="Owner review", evidenceIds=[evidence],
+                quote="sells by the case", quoteEvidenceId=evidence, revisitDays=30,
+                revisitWhen="Material operating change")
+
+    def test_dismissal_requires_positive_contradiction_code(self):
+        evidence = self.action("search", query="synthetic distributor", direction="gta")["evidenceIds"]
+        with self.assertRaisesRegex(ValueError, "required"):
+            self.action("dismiss_clue", evidenceIds=evidence,
+                        reason="No public proof that the company outsources trucking")
+        self.assertIn("Missing public proof of outsourcing", TOOLS)
 
     def test_recommended_company_gets_one_buyer_research_continuation(self):
         self.open(); self.decision()
@@ -527,6 +553,46 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.p.context()["buyerResearchQueue"], [])
         self.assertEqual(self.p.status()["buyerResearch"], {"pending": 0, "completed": 1})
         self.assertFalse(company["outreachReady"])
+        self.assertEqual(company["contacts"][0]["employmentStatus"], "UNVERIFIED")
+        self.assertEqual(self.p.context()["contactVerificationQueue"][0]["domain"], "supply.example")
+
+    def test_contact_verification_requires_official_page_for_verified_current(self):
+        self.open(); self.decision()
+        self.bridge.side_effect = lambda action, **kw: {"tenantId": "tenant-a", "tenantSlug": "synthetic", "allowed": True,
+            "result": "PEOPLE_FOUND_EMAIL_NOT_REVEALED", "candidates": [{"id": "person-a", "firstName": "Synthetic",
+                "lastNameHint": "T***t", "title": "Operations Manager", "employmentVerified": False}]}
+        self.action("people", company="supply.example", titles=["Operations Manager"])
+        self.search.return_value = [{"url": "https://directory.example/synthetic-tarrant", "title": "Synthetic Tarrant",
+            "snippet": "Synthetic Tarrant is Operations Manager at Synthetic Supply."}]
+        evidence = self.action("search", query="Synthetic Tarrant Synthetic Supply Operations Manager",
+            direction="gta", sourceKey="company_follow_up", company="supply.example")["evidenceIds"]
+        with self.assertRaisesRegex(ValueError, "official-company page"):
+            self.action("verify_contact", company="supply.example", personId="person-a",
+                employmentStatus="VERIFIED_CURRENT", publicName="Synthetic Tarrant", evidenceIds=evidence,
+                rationale="A directory snippet names the person and role.")
+        result = self.action("verify_contact", company="supply.example", personId="person-a",
+            employmentStatus="LIKELY_CURRENT", publicName="Synthetic Tarrant", evidenceIds=evidence,
+            rationale="A public directory currently associates the person with the company, but it is not first-party.")
+        self.assertEqual(result["state"], "LIKELY_CURRENT")
+        self.assertFalse(result["employmentVerified"])
+        self.assertEqual(self.p.context()["contactVerificationQueue"], [])
+
+    def test_official_company_page_can_verify_current_employment(self):
+        self.open(); self.decision()
+        self.bridge.side_effect = lambda action, **kw: {"tenantId": "tenant-a", "tenantSlug": "synthetic", "allowed": True,
+            "result": "PEOPLE_FOUND_EMAIL_NOT_REVEALED", "candidates": [{"id": "person-a", "firstName": "Synthetic",
+                "lastNameHint": "T***t", "title": "Operations Manager", "employmentVerified": False}]}
+        self.action("people", company="supply.example", titles=["Operations Manager"])
+        self.fetch.return_value = ("Synthetic Tarrant is our Operations Manager for Canadian retailer distribution.", None)
+        evidence = self.action("fetch", url="https://supply.example/team", company="supply.example")["evidenceIds"]
+        result = self.action("verify_contact", company="supply.example", personId="person-a",
+            employmentStatus="VERIFIED_CURRENT", publicName="Synthetic Tarrant", evidenceIds=evidence,
+            rationale="The live official company team page names the person and current role.")
+        candidate = self.p.state["companies"]["supply.example"]["contacts"][0]
+        self.assertTrue(result["employmentVerified"])
+        self.assertTrue(candidate["employmentVerified"])
+        self.assertFalse(result["outreachReady"])
+        self.assertEqual(self.p.status()["contactVerification"]["verifiedCurrent"], 1)
 
     def test_empty_buyer_search_records_gap_without_retry_queue(self):
         self.open(); self.decision()
@@ -918,7 +984,7 @@ class SubscriptionTests(unittest.TestCase):
         schema = output_schema(SCHEMA)
         self.assertEqual(schema["type"], "object")
         variants = schema["properties"]["decision"]["anyOf"]
-        self.assertEqual(len(variants), 7)
+        self.assertEqual(len(variants), 8)
         for row in variants:
             args = row["properties"]["args"]
             self.assertEqual(set(args["required"]), set(args["properties"]))
