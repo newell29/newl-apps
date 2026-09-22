@@ -306,12 +306,40 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true } });
   if (!tenant) return false;
   const job = await prisma.automationJobRun.findFirst({
-    where: { id: requestId, tenantId: tenant.id, jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE }
+    where: {
+      tenantId: tenant.id,
+      jobType: WEBSITE_GROWTH_BUILD_JOB_TYPE,
+      OR: [
+        { id: requestId },
+        { input: { path: ["contentDraftId"], equals: requestId } }
+      ]
+    },
+    orderBy: { createdAt: "desc" }
   });
   if (!job) return false;
   const input = parseBuildRequestInput(job.input);
   if (!input) return false;
-  validateWorkerTransition(job.status, readPhase(job.output), update.status);
+
+  const deploymentUrl = normalizeOptionalUrl(update.previewUrl);
+  const pullRequestUrl = normalizeOptionalUrl(update.pullRequestUrl);
+  const pullRequestNumber = normalizePositiveInteger(update.pullRequestNumber);
+  const commitSha = normalizeCommitSha(update.commitSha);
+  const hasMatchedPullRequestEvidence = Boolean(
+    pullRequestUrl &&
+    pullRequestNumber &&
+    pullRequestUrlMatchesNumber(pullRequestUrl, pullRequestNumber)
+  );
+  const recoveryEvidenceComplete = Boolean(
+    deploymentUrl &&
+    commitSha &&
+    (requestId === input.contentDraftId || hasMatchedPullRequestEvidence)
+  );
+  validateWorkerTransition(
+    job.status,
+    readPhase(job.output),
+    update.status,
+    recoveryEvidenceComplete
+  );
 
   const nextStatus =
     update.status === "FAILED"
@@ -319,22 +347,25 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
       : update.status === "PREVIEW_READY" || update.status === "PUBLISHED"
         ? JobStatus.SUCCESS
         : JobStatus.RUNNING;
-  const deploymentUrl = normalizeOptionalUrl(update.previewUrl);
   if (update.status === "PUBLISHED" && !deploymentUrl) {
     throw new Error("Website Growth published status requires a valid HTTPS production URL.");
   }
+  const previousOutput = { ...readRecord(job.output) };
+  if (update.status !== "FAILED") {
+    delete previousOutput.errorCode;
+  }
+  const githubRunUrl = normalizeOptionalUrl(update.githubRunUrl);
   const output = {
-    ...readRecord(job.output),
+    ...previousOutput,
     phase: update.status,
-    githubRunUrl: normalizeOptionalUrl(update.githubRunUrl),
-    pullRequestUrl: normalizeOptionalUrl(update.pullRequestUrl),
-    pullRequestNumber: update.pullRequestNumber,
-    previewUrl: deploymentUrl,
-    commitSha: update.commitSha?.slice(0, 64),
-    errorCode: update.errorCode?.slice(0, 80),
+    ...(githubRunUrl ? { githubRunUrl } : {}),
+    ...(pullRequestUrl ? { pullRequestUrl } : {}),
+    ...(pullRequestNumber ? { pullRequestNumber } : {}),
+    ...(deploymentUrl ? { previewUrl: deploymentUrl } : {}),
+    ...(commitSha ? { commitSha } : {}),
+    ...(update.status === "FAILED" ? { errorCode: update.errorCode?.slice(0, 80) } : {}),
     updatedAt: new Date().toISOString()
   } as Prisma.InputJsonObject;
-
   await prisma.$transaction(async (tx) => {
     await tx.automationJobRun.update({
       where: { id: job.id },
@@ -350,10 +381,19 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
             : null
       }
     });
-    if (update.status === "PR_OPEN" && update.pullRequestUrl) {
+    if (update.status === "PR_OPEN" && pullRequestUrl) {
       await tx.websiteGrowthContentDraft.updateMany({
-        where: { id: input.contentDraftId, tenantId: tenant.id, status: WebsiteGrowthContentDraftStatus.APPROVED },
-        data: { status: WebsiteGrowthContentDraftStatus.BUILT, pullRequestUrl: update.pullRequestUrl }
+        where: {
+          id: input.contentDraftId,
+          tenantId: tenant.id,
+          status: {
+            in: [WebsiteGrowthContentDraftStatus.APPROVED, WebsiteGrowthContentDraftStatus.BUILT]
+          }
+        },
+        data: {
+          status: WebsiteGrowthContentDraftStatus.BUILT,
+          pullRequestUrl
+        }
       });
       await tx.websiteGrowthOpportunity.updateMany({
         where: { id: input.opportunityId, tenantId: tenant.id },
@@ -362,8 +402,22 @@ export async function updateWebsiteGrowthBuildRequestFromWorker({
     }
     if (update.status === "PREVIEW_READY" && deploymentUrl) {
       await tx.websiteGrowthContentDraft.updateMany({
-        where: { id: input.contentDraftId, tenantId: tenant.id },
-        data: { builtUrl: deploymentUrl }
+        where: {
+          id: input.contentDraftId,
+          tenantId: tenant.id,
+          status: {
+            in: [WebsiteGrowthContentDraftStatus.APPROVED, WebsiteGrowthContentDraftStatus.BUILT]
+          }
+        },
+        data: {
+          status: WebsiteGrowthContentDraftStatus.BUILT,
+          builtUrl: deploymentUrl,
+          ...(pullRequestUrl ? { pullRequestUrl } : {})
+        }
+      });
+      await tx.websiteGrowthOpportunity.updateMany({
+        where: { id: input.opportunityId, tenantId: tenant.id },
+        data: { status: WebsiteGrowthOpportunityStatus.IN_PROGRESS }
       });
     }
     if (update.status === "PUBLISHED") {
@@ -427,7 +481,12 @@ function parseBuildRequestInput(value: unknown): BuildRequestInput | null {
   return input as BuildRequestInput;
 }
 
-function validateWorkerTransition(currentStatus: JobStatus, currentPhase: WebsiteGrowthBuildPhase, next: WebsiteGrowthBuildPhase) {
+function validateWorkerTransition(
+  currentStatus: JobStatus,
+  currentPhase: WebsiteGrowthBuildPhase,
+  next: WebsiteGrowthBuildPhase,
+  recoveryEvidenceComplete: boolean
+) {
   const allowed: Record<WebsiteGrowthBuildPhase, WebsiteGrowthBuildPhase[]> = {
     QUEUED: ["RUNNING", "FAILED"],
     DISPATCHED: ["RUNNING", "FAILED"],
@@ -438,11 +497,16 @@ function validateWorkerTransition(currentStatus: JobStatus, currentPhase: Websit
     FAILED: ["PUBLISHED"],
     CANCELLED: []
   };
-  if (
+  const isVerifiedPreviewRecovery =
+    currentStatus === JobStatus.ERROR &&
+    currentPhase === "FAILED" &&
+    next === "PREVIEW_READY" &&
+    recoveryEvidenceComplete;
+  if (!isVerifiedPreviewRecovery && (
     currentStatus === JobStatus.CANCELLED ||
     (currentStatus === JobStatus.SUCCESS && next !== "PUBLISHED") ||
     !allowed[currentPhase].includes(next)
-  ) {
+  )) {
     throw new Error(`Website Growth build cannot move from ${currentPhase} to ${next}.`);
   }
 }
@@ -461,6 +525,25 @@ function normalizeOptionalUrl(value?: string) {
     return url.protocol === "https:" ? url.toString() : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function normalizePositiveInteger(value?: number) {
+  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+}
+
+function normalizeCommitSha(value?: string) {
+  const commitSha = value?.trim();
+  return commitSha && /^[0-9a-f]{40}$/i.test(commitSha) ? commitSha : undefined;
+}
+
+function pullRequestUrlMatchesNumber(urlValue: string, pullRequestNumber: number) {
+  try {
+    const url = new URL(urlValue);
+    const match = url.pathname.match(/\/pull\/(\d+)\/?$/);
+    return Boolean(match && Number(match[1]) === pullRequestNumber);
+  } catch {
+    return false;
   }
 }
 
