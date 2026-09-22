@@ -108,6 +108,11 @@ class WorkerTests(unittest.TestCase):
             self.assertIn("Test the conversion hypothesis", model.call_args_list[1].args[0])
             self.assertEqual(model.call_args_list[0].kwargs["timeout"], 180)
 
+    def test_page_policy_prefers_focused_updates_for_known_routes(self):
+        self.assertIn("website route inventory and current-page evidence as authoritative", worker.RULES)
+        self.assertIn("pageChangePreview", worker.RULES)
+        self.assertIn("Set newPage false", worker.RULES)
+
     @unittest.skipUnless(shutil.which("zsh"), "Installer requires zsh")
     def test_installer_does_not_attempt_an_unconfigured_message_delivery(self):
         installer = Path(__file__).resolve().parent.parent / "install-scout-marketing.sh"

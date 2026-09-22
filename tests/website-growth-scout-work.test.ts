@@ -7,6 +7,8 @@ import { WebsiteGrowthAction } from "@prisma/client";
 import { reusableWebsiteGrowthResearchHashes } from "@/modules/website-growth/backlink-discovery";
 import { WEBSITE_GROWTH_BUILD_JOB_TYPE } from "@/modules/website-growth/build-requests";
 
+const resolveWebsiteContextMock = vi.hoisted(() => vi.fn());
+
 const db = vi.hoisted(() => ({
   automationJobRun: { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(), updateMany: vi.fn(), create: vi.fn(), upsert: vi.fn() },
   websiteGrowthOpportunity: { findMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(), upsert: vi.fn() },
@@ -14,7 +16,7 @@ const db = vi.hoisted(() => ({
   websiteGrowthBacklinkOpportunity: { findMany: vi.fn(), findFirst: vi.fn() }, auditLog: { create: vi.fn() }, $transaction: vi.fn()
 }));
 vi.mock("@/server/db", () => ({ prisma: db }));
-vi.mock("@/modules/website-growth/newl-website-context-scanner", () => ({ resolveNewlWebsiteContext: vi.fn().mockResolvedValue({}) }));
+vi.mock("@/modules/website-growth/newl-website-context-scanner", () => ({ resolveNewlWebsiteContext: resolveWebsiteContextMock }));
 const now = new Date("2026-06-15T12:00:00Z");
 const supervisor = { verdict: "PASS", reason: "Sources and complete deliverable reviewed." };
 const measurement = { status: "AVAILABLE", sources: [{ source: "search_console", period: "after", status: "AVAILABLE", metrics: { clicks: 20 } }] };
@@ -31,6 +33,7 @@ beforeEach(() => {
   db.websiteGrowthContentDraft.findFirst.mockResolvedValue({ status: "DRAFT", approvedAt: null });
   db.websiteGrowthOpportunity.updateMany.mockResolvedValue({ count: 1 });
   db.websiteGrowthContentDraft.create.mockResolvedValue({ id: "draft-synthetic" });
+  resolveWebsiteContextMock.mockResolvedValue({ internalLinkRules: [], siteInventory: { routes: [], internalLinks: [] } });
 });
 
 describe("Scout work model", () => {
@@ -150,7 +153,7 @@ describe("Scout persisted work and budgets", () => {
   });
   it("saves an unapproved page draft while discarding model-supplied approval and build fields", async () => {
     db.automationJobRun.findFirst.mockResolvedValue({ output: leased() });
-    db.websiteGrowthOpportunity.findFirst.mockResolvedValue({ id: "opportunity-synthetic", targetPage: "/services/warehouse" });
+    db.websiteGrowthOpportunity.findFirst.mockResolvedValue({ id: "opportunity-synthetic", targetPage: "/services/warehouse", action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE });
     const draft = buildTemplateWebsiteGrowthContentDraft({ action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE, topic: "Warehouse information", primaryKeyword: "warehouse", targetPage: "/services/warehouse", sourcePage: null, score: 70, confidence: "medium", reason: "Improve clarity", recommendation: "Add helpful details", supportingKeywords: [], evidence: {} });
     await completeScoutWork("tenant-a", "work-synthetic", "lease-synthetic", { decision: "DELIVER", supervisor, summary: "Specific copy prepared", nextAction: "Review brief", artifact: { ...draft, approvedByUserId: "forged", buildPackage: { status: "READY_FOR_PR" } } }, now);
     const created = db.websiteGrowthContentDraft.create.mock.calls[0][0].data;
@@ -207,6 +210,35 @@ it("promotes an evidence-backed idea to a page task without approving or buildin
   expect(db.websiteGrowthOpportunity.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ tenantId: "tenant-a", status: "REVIEWING", action: "CREATE_PAGE" }) }));
   expect(db.automationJobRun.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ tenantId: "tenant-a", jobType: WORK_JOB, output: expect.objectContaining({ kind: "PAGE", state: "READY" }) }) }));
   expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
+});
+
+it("changes a new-page request into an existing-page improvement when the website inventory already has the route", async () => {
+  resolveWebsiteContextMock.mockResolvedValue({
+    internalLinkRules: ["Core Amazon FBA links point to /services/amazon-fba."],
+    siteInventory: { routes: [{ path: "/services/amazon-fba", type: "Service page" }], internalLinks: [] }
+  });
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH" } });
+
+  await completeScoutWork("tenant-a", "work", "lease-synthetic", {
+    decision: "DELIVER",
+    supervisor,
+    summary: "Improve the existing national FBA page",
+    nextAction: "Prepare a focused brief",
+    artifact: {
+      proposedTitle: "Amazon FBA / Marketplace Sellers",
+      proposedRoute: "/services/amazon-fba",
+      hypothesis: "Add the Canada policy update and improve regional links.",
+      newPage: true
+    }
+  }, now);
+
+  expect(db.websiteGrowthOpportunity.upsert).toHaveBeenCalledWith(expect.objectContaining({
+    create: expect.objectContaining({
+      targetPage: "/services/amazon-fba",
+      action: WebsiteGrowthAction.IMPROVE_EXISTING_PAGE,
+      evidence: expect.objectContaining({ routeClassification: expect.objectContaining({ existingRouteFound: true }) })
+    })
+  }));
 });
 
 it("replenishes completed research immediately and respects an existing dated research wait", async () => {

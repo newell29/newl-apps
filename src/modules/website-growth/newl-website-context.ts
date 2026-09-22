@@ -31,6 +31,26 @@ export type NewlWebsiteContext = {
   };
 };
 
+export function isKnownNewlWebsiteRoute(value: string | null | undefined, context: NewlWebsiteContext) {
+  const route = normalizePath(value ?? null);
+
+  if (!route) {
+    return false;
+  }
+
+  const inventoryRoutes = context.siteInventory?.routes.map((entry) => normalizePath(entry.path)) ?? [];
+  const linkedRoutes = [
+    ...(context.siteInventory?.internalLinks ?? []),
+    ...(context.internalLinkRules ?? []).flatMap(extractRouteReferences)
+  ].map(normalizePath);
+
+  return [...inventoryRoutes, ...linkedRoutes].some((candidate) => candidate === route);
+}
+
+function extractRouteReferences(value: string) {
+  return value.match(/\/(?:services|freight|industries|locations|resources)\/[a-z0-9][a-z0-9/-]*/gi) ?? [];
+}
+
 export const newlWebsiteContext: NewlWebsiteContext = {
   brandPositioning: [
     "Newl is a warehousing-led supply chain partner, not a generic freight broker.",

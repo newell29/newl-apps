@@ -118,7 +118,9 @@ function WorkCard({ item, canReview }: { item: Work & { id: string; recipientEma
   const handoff = record(item.evidence.handoff), supervisor = record(item.evidence.supervisor), waitBlocker = record(item.evidence.waitBlocker);
   return <article className="rounded-lg border border-border bg-card p-4 shadow-sm">
     <p className="text-xs font-semibold uppercase tracking-wide text-primary">{kindLabels[item.kind]}</p><h3 className="mt-2 font-semibold">{item.title}</h3>
-    {item.route && <p className="mt-1 break-all text-xs text-mutedForeground">{item.route}</p>}<p className="mt-3 text-sm">{item.hypothesis}</p>
+    {item.route && <p className="mt-1 break-all text-xs text-mutedForeground">{item.route}</p>}
+    <p className="mt-3 text-sm"><strong>{item.kind === "PAGE" ? "Original research signal:" : "Working hypothesis:"}</strong> {item.hypothesis}</p>
+    {item.kind === "PAGE" && <p className="mt-1 text-xs text-mutedForeground">This is the signal saved when the work was created, not a live metric snapshot. The complete brief and dated progress entries contain the evidence used for the current recommendation.</p>}
     <p className="mt-3 text-sm"><strong>Next:</strong> {item.nextAction}</p>
     {item.state === "WAITING" && typeof waitBlocker.type === "string" && <div className="mt-3 rounded-md border border-border bg-muted/30 p-3 text-xs"><p className="font-semibold">Waiting for {String(waitBlocker.type).toLowerCase().replaceAll("_", " ")}</p><p className="mt-1">Evidence needed: {String(waitBlocker.evidenceNeeded ?? item.nextAction)}</p><p className="mt-1 text-mutedForeground">Resolution: {String(waitBlocker.resolutionAction ?? item.nextAction)} · {waitBlocker.resolvableByScout === true ? "Scout owns this follow-up." : "Human input is required."}</p></div>}
     {item.state === "WAITING" && !item.evidence.externalWait && <p className="mt-2 text-xs text-mutedForeground">{needsOwner(item) ? "Waiting for your decision." : isDue(item) ? "Due now for the next scheduled wake." : `Scout checks again ${new Date(item.nextReviewAt).toLocaleDateString("en-CA", { timeZone: "UTC" })}`}</p>}

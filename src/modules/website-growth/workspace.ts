@@ -24,6 +24,7 @@ export function deduplicateScoutDrafts<T extends { opportunityId: string }>(draf
 }
 
 type DraftLike = {
+  contentType?: string | null;
   status: WebsiteGrowthContentDraftStatus;
   builtUrl?: string | null;
   pullRequestUrl?: string | null;
@@ -93,6 +94,32 @@ export function getWebsiteGrowthChangeType(action: WebsiteGrowthAction) {
   return {
     label: "Update existing page",
     description: "Scout is proposing changes to a page that already exists."
+  };
+}
+
+export function getWebsiteGrowthDraftChangeType(draft: DraftLike) {
+  const payload = readRecord(draft.draftJson);
+  const previewMode = readString(readRecord(payload.pagePreview).mode);
+  const contentType = readString(payload.contentType) ?? readString(draft.contentType);
+  const declared = getWebsiteGrowthChangeType(draft.opportunity.action);
+  let resolved = declared;
+
+  if (previewMode === "legacy_redirect_rebuild") {
+    resolved = getWebsiteGrowthChangeType(WebsiteGrowthAction.CREATE_PAGE);
+  } else if (previewMode === "existing_page_update" || (contentType && /existing.*(?:page|update)|page improvement/i.test(contentType))) {
+    resolved = getWebsiteGrowthChangeType(WebsiteGrowthAction.IMPROVE_EXISTING_PAGE);
+  } else if (previewMode === "internal_link_update") {
+    resolved = getWebsiteGrowthChangeType(WebsiteGrowthAction.ADD_INTERNAL_LINKS);
+  } else if (previewMode === "new_page") {
+    resolved = getWebsiteGrowthChangeType(WebsiteGrowthAction.CREATE_PAGE);
+  }
+
+  return {
+    ...resolved,
+    reconciled: resolved.label !== declared.label,
+    reconciliationNote: resolved.label !== declared.label
+      ? `The final brief identifies this as “${resolved.label}”. Scout's earlier “${declared.label}” classification is not used for the build.`
+      : null
   };
 }
 

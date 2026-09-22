@@ -28,4 +28,13 @@ describe("website growth brief approval UI", () => {
     expect(source).toContain("It will not merge the PR or publish the page.");
     expect(source).toContain("An Admin or Manager with write access must approve or reject this brief.");
   });
+
+  it("explains reconciled existing-page briefs without presenting them as new routes", async () => {
+    const source = await readFile(detailPagePath, "utf8");
+
+    expect(source).toContain("Classification corrected:");
+    expect(source).toContain("Existing page after-change preview");
+    expect(source).toContain("The build must change only the scoped items");
+    expect(source).toContain('label="Approval scope"');
+  });
 });
