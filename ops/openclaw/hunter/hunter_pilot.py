@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Isolated, read-only Hunter research pilot. Standard library; private durable journal.
 
-The model selects one of six bounded actions. It cannot execute code, change its
+The model selects one bounded action at a time. It cannot execute code, change its
 configuration, mutate Newl Apps/Apollo, reveal emails, or communicate externally.
 """
 from __future__ import annotations
@@ -41,31 +41,43 @@ SOURCE_CATALOG = SOURCE_CATALOG_DOCUMENT["sources"]
 SOURCE_KEYS = [row["key"] for row in SOURCE_CATALOG]
 SOURCE_BY_KEY = {row["key"]: row for row in SOURCE_CATALOG}
 SOURCE_DOMAIN_KEYS = {host: row["key"] for row in SOURCE_CATALOG for host in row["domains"]}
-VERSION = "hunter-autonomous-pilot-v4"
+VERSION = "hunter-autonomous-pilot-v5"
 COMPARISON_VERSION = "matched-decision-v1"
 DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
 DISCOVERY_RESULT_LIMIT = 10
 UNREAD_CLUE_LIMIT = 12
-ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "decide", "wait"]
+ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "verify_contact", "decide", "wait"]
 DIRECTIONS = ["charlotte", "gta", "ocean", "referral"]
+DISMISS_REASON_CODES = ["wrong_identity", "wrong_geography", "service_mismatch",
+    "no_material_goods_movement", "internal_capacity_contradiction",
+    "duplicate_or_already_known", "competitor_without_complementary_fit",
+    "stale_or_unverifiable_clue", "non_company_result"]
+EMPLOYMENT_STATUSES = ["VERIFIED_CURRENT", "LIKELY_CURRENT", "UNVERIFIED", "FORMER", "IDENTITY_AMBIGUOUS"]
 ENV_KEYS = {"INGESTION_API_TOKEN", "INGESTION_TENANT_SLUG", "HUNTER_BRAVE_SEARCH_API_KEY",
             "NEWL_APPS_BASE_URL", "VERCEL_AUTOMATION_BYPASS_SECRET"}
 ARG_TYPES = {key: {"type": "string"} for key in ["query", "company", "url", "name", "domain", "hypothesis",
-    "summary", "uncertainty", "nextAction", "quote", "quoteEvidenceId", "revisitWhen", "reason"]}
+    "summary", "uncertainty", "nextAction", "quote", "quoteEvidenceId", "revisitWhen", "reason",
+    "personId", "publicName", "rationale", "outreachApproach"]}
 ARG_TYPES.update(direction={"type": "string", "enum": DIRECTIONS},
     sourceKey={"type": "string", "enum": SOURCE_KEYS},
+    reasonCode={"type": "string", "enum": DISMISS_REASON_CODES},
+    employmentStatus={"type": "string", "enum": EMPLOYMENT_STATUSES},
     status={"type": "string", "enum": ["active", "parked", "rejected", "recommended"]},
     evidenceIds={"type": "array", "items": {"type": "string"}},
     titles={"type": "array", "items": {"type": "string"}},
+    targetRoles={"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8},
+    outreachQuestions={"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 6},
     revisitDays={"type": "integer", "minimum": 1, "maximum": 180},
     minutes={"type": "integer", "minimum": 30, "maximum": 1440})
 CONTRACTS = {
     "search": (["query", "direction", "sourceKey"], ["company"]), "fetch": (["url"], ["company"]),
     "open_company": (["name", "domain", "direction", "hypothesis", "evidenceIds"], []),
-    "dismiss_clue": (["evidenceIds", "reason"], ["name", "domain"]),
+    "dismiss_clue": (["evidenceIds", "reasonCode", "reason"], ["name", "domain"]),
     "people": (["company", "titles"], []),
-    "decide": (["company", "status", "summary", "uncertainty", "nextAction", "evidenceIds", "revisitDays", "revisitWhen"], ["quote", "quoteEvidenceId"]),
+    "verify_contact": (["company", "personId", "employmentStatus", "evidenceIds", "rationale"], ["publicName"]),
+    "decide": (["company", "status", "summary", "uncertainty", "nextAction", "evidenceIds", "revisitDays", "revisitWhen"],
+               ["quote", "quoteEvidenceId", "targetRoles", "outreachApproach", "outreachQuestions"]),
     "wait": (["reason", "minutes"], [])}
 SCHEMA = {"oneOf": [{"type": "object", "additionalProperties": False,
     "properties": {"action": {"const": action}, "purpose": {"type": "string"},
@@ -80,18 +92,26 @@ search: {query, direction, sourceKey, company?} -- choose sourceKey from researc
 fetch: {url, company?} -- read a public HTTPS page. Prefer official evidence and useful links.
 open_company: {name, domain, direction, hypothesis, evidenceIds:[id,...]} -- remember a company
   supported by retrieved evidence. Domain deduplicates identity; all companies receive a safety check.
-dismiss_clue: {evidenceIds:[id,...], reason, name?, domain?} -- remember why an unsaved clue is not worth
-  more work. Use this for a named company that is clearly irrelevant or buyer-inappropriate; it is not
-  a company rejection, suppression decision, or permanent statement about future fit.
+dismiss_clue: {evidenceIds:[id,...], reasonCode, reason, name?, domain?} -- remember a positive,
+  evidence-backed contradiction using one allowed reasonCode. Missing public proof of outsourcing,
+  provider shopping, buying intent, carrier overflow or a current trigger is uncertainty, not a valid
+  dismissal reason. Open a company when its goods movement, service and geography create a plausible fit.
 people: {company, titles:[up to 8 roles]} -- zero-credit Apollo search, no email reveal. Use only
   after an official company page was fetched with company set to the saved domain, so that page evidence
   is attached to the company. Results never count as verified employment.
+verify_contact: {company, personId, employmentStatus, evidenceIds:[id,...], rationale, publicName?} --
+  assess one Apollo candidate after public research. VERIFIED_CURRENT requires a fetched official-company
+  page that names the person; a search snippet or Apollo record can support only LIKELY_CURRENT or lower.
+  This saves research evidence and never reveals an email or authorizes outreach.
 decide: {company, status:'active'|'parked'|'rejected'|'recommended', summary, uncertainty,
-  nextAction, evidenceIds:[id,...], quote, quoteEvidenceId, revisitDays, revisitWhen}.
+  nextAction, evidenceIds:[id,...], quote, quoteEvidenceId, revisitDays, revisitWhen,
+  targetRoles?, outreachApproach?, outreachQuestions?}.
   company must be an already-saved domain from activeCompanies, dueForRevisit or otherCompanies.
   Do not create a company merely to reject it or call decide for an unknown company.
   A recommendation needs an exact supporting quote from a fetched official page. Missing evidence
-  must remain explicit. Use active to pivot a hypothesis. Park/reject instead of filling a quota.
+  must remain explicit. It also needs 1-8 targetRoles, a specific outreachApproach and 1-6 honest
+  discovery questions. These are owner-review preparation, not outreach approval. Use active to pivot
+  a hypothesis. Park/reject instead of filling a quota.
 wait: {reason, minutes:30..1440} -- global pause, capped to 30 minutes. For a known company,
   use decide/parked with a revisit condition instead. One blocked clue is not global exhaustion.
 No mandatory order or research passes. Do not loop over the same failed action. At most five active
@@ -103,6 +123,10 @@ buyerResearchQueue contains commercially recommended companies that have not yet
 zero-credit people lookup. Normally finish one pending buyer-role check before another broad discovery
 search unless an active investigation has an immediately decisive source. This prepares owner review;
 it does not verify employment, reveal an email, approve outreach, or make contact mandatory for fit.
+contactVerificationQueue contains returned people candidates that still need one bounded public check.
+Use the candidate's first name, masked surname hint, role, company and safe public profile URL when
+available. Do not guess a full name. If public evidence cannot resolve identity and current employment,
+record UNVERIFIED or IDENTITY_AMBIGUOUS and move on rather than repeating synonyms.
 Work continues across wakes; do not try to finish all research in one search or one wake. Use
 researchCoverage and unreadClues to consider alternatives after a dead end; neither is a quota.
 Prefer a relevant named researchSourceCatalog source. Review the returned unreadClues batch before
@@ -157,6 +181,24 @@ def text(value, maximum=1200):
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
         raise ValueError("Missing or oversized text")
     return value.strip().replace("\x00", "")
+
+
+def normalized_words(value):
+    return re.findall(r"[a-z0-9]+", str(value).casefold())
+
+
+def candidate_matches_public_name(candidate, public_name):
+    words = normalized_words(public_name)
+    first = normalized_words(candidate.get("firstName"))
+    if len(words) < 2 or len(first) != 1 or words[0] != first[0]:
+        return False
+    hint = str(candidate.get("lastNameHint") or "").casefold()
+    if not hint:
+        return False
+    last = words[-1]
+    prefix = hint.split("*", 1)[0]
+    suffix = hint.rsplit("*", 1)[-1] if "*" in hint else ""
+    return bool(prefix) and last.startswith(prefix) and (not suffix or last.endswith(suffix))
 
 
 def atomic_write(path, data):
@@ -534,12 +576,19 @@ class Pilot:
     def buyer_research(self, company):
         attempted = "contactState" in company or bool(company.get("contactResearchAt"))
         candidates = company.get("contacts", [])
+        statuses = [candidate.get("employmentStatus", "UNVERIFIED")
+                    for candidate in candidates if isinstance(candidate, dict)]
         return {"state": "COMPLETED" if attempted else "PENDING",
                 "contactState": company.get("contactState", "NOT_RESEARCHED"),
                 "candidateCount": len(candidates) if isinstance(candidates, list) else 0,
                 "titles": company.get("contactTitles", []),
                 "researchedAt": company.get("contactResearchAt"),
-                "employmentVerified": False,
+                "verificationPending": sum(not candidate.get("employmentVerificationAt")
+                                           for candidate in candidates if isinstance(candidate, dict)),
+                "employmentStatusCounts": {status: statuses.count(status) for status in EMPLOYMENT_STATUSES
+                                             if status in statuses},
+                "employmentVerified": any(candidate.get("employmentVerified") is True
+                                          for candidate in candidates if isinstance(candidate, dict)),
                 "outreachReady": False}
 
     def safety(self, company):
@@ -669,17 +718,21 @@ class Pilot:
                                                 for source in self.source_keys_for_evidence(
                                                     self.state["evidence"][eid])}),
                 "openedAt": iso(self.clock()), "contacts": [], "buyingIntent": "UNCONFIRMED",
+                "qualification": "ICP_FIT_UNDER_REVIEW",
                 "nextAction": "Investigate the most important unresolved question", "uncertainty": "Initial hypothesis; verify fit"}
             self.safety(company)
             self.state["companies"][key] = company
             return {"state": "opened", "company": key}
         if name == "dismiss_clue":
             ids = self.refs(args)
+            reason_code = args.get("reasonCode")
+            if reason_code not in DISMISS_REASON_CODES:
+                raise ValueError("Choose a supported evidence-backed dismissal reason; missing public outsourcing or buying intent is uncertainty")
             item = {"at": iso(self.clock()), "evidenceIds": ids,
                 "sourceKeys": sorted({source for eid in ids
                                       for source in self.source_keys_for_evidence(
                                           self.state["evidence"][eid])}),
-                "reason": text(args.get("reason")), "name": None, "domain": None}
+                "reasonCode": reason_code, "reason": text(args.get("reason")), "name": None, "domain": None}
             if args.get("name") is not None:
                 item["name"] = text(args.get("name"), 200)
             if args.get("domain") is not None:
@@ -702,11 +755,47 @@ class Pilot:
             result = self.bridge("people", name=company["name"], domain=company["domain"], titles=titles)
             if result.get("tenantId") != self.config["tenantId"] or not result.get("allowed"):
                 raise RuntimeError("CONTACT_LOOKUP_NOT_ALLOWED")
-            company["contacts"] = result.get("candidates", [])
+            company["contacts"] = [{**candidate, "employmentStatus": "UNVERIFIED",
+                "employmentVerified": False, "employmentEvidenceIds": [],
+                "employmentVerificationAt": None, "verificationRationale": None,
+                "publicName": None}
+                for candidate in result.get("candidates", []) if isinstance(candidate, dict)]
             company["contactState"] = result["result"]
             company["contactTitles"] = titles
             company["contactResearchAt"] = iso(self.clock())
             return {"state": result["result"], "candidates": company["contacts"]}
+        if name == "verify_contact":
+            company = self.company(args)
+            self.safety(company)
+            candidate = next((candidate for candidate in company.get("contacts", [])
+                              if candidate.get("id") == args.get("personId")), None)
+            if not candidate:
+                raise ValueError("Choose an Apollo candidate already attached to this company")
+            status = args.get("employmentStatus")
+            if status not in EMPLOYMENT_STATUSES:
+                raise ValueError("Choose a supported employment status")
+            ids = self.refs(args)
+            evidence = [self.state["evidence"][eid] for eid in ids]
+            if not any(row.get("company") == company["domain"] for row in evidence):
+                raise ValueError("Contact evidence must come from a bounded search or fetch attached to the saved company")
+            public_name = args.get("publicName")
+            if status in {"VERIFIED_CURRENT", "LIKELY_CURRENT", "FORMER"}:
+                public_name = text(public_name, 200)
+                if not candidate_matches_public_name(candidate, public_name):
+                    raise ValueError("Public name must match the candidate first name and masked surname hint; never guess")
+                name_words = normalized_words(public_name)
+                if not any(all(word in normalized_words(row.get("title", "") + " " + row.get("excerpt", ""))
+                                   for word in name_words) for row in evidence):
+                    raise ValueError("Cited evidence must name the public identity")
+            if status == "VERIFIED_CURRENT":
+                official_ids = {row["id"] for row in self.official_evidence(company)}
+                if not any(row["id"] in official_ids and row.get("kind") == "page" for row in evidence):
+                    raise ValueError("VERIFIED_CURRENT requires a fetched official-company page that names the person")
+            candidate.update(employmentStatus=status, employmentVerified=status == "VERIFIED_CURRENT",
+                employmentEvidenceIds=ids, employmentVerificationAt=iso(self.clock()),
+                verificationRationale=text(args.get("rationale")), publicName=public_name)
+            return {"state": status, "company": company["domain"], "personId": candidate["id"],
+                    "employmentVerified": candidate["employmentVerified"], "outreachReady": False}
         if name == "decide":
             company = self.company(args)
             self.safety(company)
@@ -722,6 +811,15 @@ class Pilot:
                 evidence = self.state["evidence"].get(args.get("quoteEvidenceId"))
                 if not evidence or evidence["id"] not in ids or evidence not in self.official_evidence(company) or quote not in evidence["excerpt"]:
                     raise ValueError("Recommendation requires an exact quote from fetched official evidence")
+                target_roles = args.get("targetRoles")
+                questions = args.get("outreachQuestions")
+                if not isinstance(target_roles, list) or not 1 <= len(target_roles) <= 8:
+                    raise ValueError("Recommendation requires 1–8 target buyer roles")
+                if not isinstance(questions, list) or not 1 <= len(questions) <= 6:
+                    raise ValueError("Recommendation requires 1–6 honest discovery questions")
+                company["targetRoles"] = [text(role, 80) for role in target_roles]
+                company["outreachApproach"] = text(args.get("outreachApproach"), 1200)
+                company["outreachQuestions"] = [text(question, 300) for question in questions]
                 if self.config.get("publicDiscoveryOnly"):
                     status = "needs_clearance"
             revisit_days = args.get("revisitDays", 30)
@@ -731,6 +829,8 @@ class Pilot:
             company.update(status=status, summary=summary, uncertainty=uncertainty, nextAction=next_action,
                 evidenceIds=list(dict.fromkeys(company["evidenceIds"] + ids)), decidedAt=iso(self.clock()),
                 revisitAt=iso(self.clock() + dt.timedelta(days=revisit_days)), revisitWhen=revisit_when,
+                qualification="RESEARCH_QUALIFIED" if status in {"recommended", "needs_clearance"} else
+                              "ICP_FIT_UNDER_REVIEW" if status == "active" else status.upper(),
                 buyingIntent="UNCONFIRMED", outreachReady=False)
             return {"state": status, "company": company["domain"], "outreachReady": False}
         if name == "wait":
@@ -1021,7 +1121,11 @@ class Pilot:
         due = [c for c in companies if c.get("revisitAt") and parse_time(c["revisitAt"]) <= self.clock() and c["status"] in {"parked", "rejected"}]
         buyer_pending = [c for c in companies if c["status"] == "recommended" and
                          self.buyer_research(c)["state"] == "PENDING"]
-        wanted = set(i for c in active + due + buyer_pending for i in c.get("evidenceIds", []))
+        verification_pending = [c for c in companies if c["status"] == "recommended" and
+                                any(isinstance(candidate, dict) and not candidate.get("employmentVerificationAt")
+                                    for candidate in c.get("contacts", []))]
+        wanted = set(i for c in active + due + buyer_pending + verification_pending
+                     for i in c.get("evidenceIds", []))
         evidence = list(self.state["evidence"].values())
         chosen = [e for e in evidence if e["id"] in wanted][-8:]
         chosen += [e for e in evidence[-4:] if e not in chosen]
@@ -1029,8 +1133,18 @@ class Pilot:
             "activeCompanies": active, "dueForRevisit": due[:5],
             "buyerResearchQueue": [{**{k: c.get(k) for k in ("name", "domain", "direction", "summary", "uncertainty", "nextAction")},
                                      "buyerResearch": self.buyer_research(c),
+                                     "targetRoles": c.get("targetRoles", []),
                                      "officialEvidenceAttached": bool(self.official_evidence(c))}
                                     for c in buyer_pending[:5]] if not self.config.get("publicDiscoveryOnly") else [],
+            "contactVerificationQueue": [{"name": c["name"], "domain": c["domain"],
+                "direction": c["direction"], "outreachApproach": c.get("outreachApproach"),
+                "candidates": [{k: candidate.get(k) for k in ("id", "firstName", "lastNameHint", "title",
+                    "organization", "lastRefreshedAt", "linkedinUrl", "employmentStatus")}
+                    for candidate in c.get("contacts", []) if isinstance(candidate, dict) and
+                    not candidate.get("employmentVerificationAt")][:5],
+                "recentCompanyEvidence": [{**row, "excerpt": row["excerpt"][:1800]}
+                    for row in evidence if row.get("company") == c["domain"]][-5:]}
+                for c in verification_pending[:3]] if not self.config.get("publicDiscoveryOnly") else [],
             "otherCompanies": [{**{k: c.get(k) for k in ("domain", "status", "summary", "revisitAt", "revisitWhen", "contactState")},
                                 "buyerResearch": self.buyer_research(c) if c["status"] == "recommended" else None}
                                for c in companies if c not in active][-40:],
@@ -1047,7 +1161,7 @@ class Pilot:
             "researchSourceCatalog": {"version": SOURCE_CATALOG_VERSION, "sources": SOURCE_CATALOG},
             "researchMomentum": self.research_momentum(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "Choose one action that can materially change a decision. Continue an active investigation first when a decisive source exists. A pending buyerResearchQueue item is useful only after commercial recommendation; complete at most one tailored lookup rather than using people search for discovery. Otherwise select a relevant researchSourceCatalog source, harvest one bounded candidate batch, and review the returned unreadClues before another discovery search. researchCoverage.sourceStrategies records candidate, dismissal and company outcomes for the chosen source; researchCoverage.sourceFamilies separately records observed domains. These observed source outcomes are marginal-yield evidence, not quotas, scores or forced rotations. Reuse productive sources, but leave repeated empty or same-shaped dead ends. open_web is a fallback, and other_named_source permits a materially new source when the purpose names its hypothesis. At the start of a fresh business day, change company, source or service after prior low yield. Once current-day searches and dismissals show falling marginal yield and no stronger clue remains, wait. unreadClues is a menu, not an inbox; do not clear weak clues merely to create activity. Coverage counts do not prove that a market is exhausted.",
+            "workSelection": "Choose one action that can materially change a decision. A company is research-qualified when first-party evidence supports the right goods movement, a specific Newl service and the relevant geography or lane with no material contradiction. Public proof of outsourcing, provider shopping or current buying intent is not required and its absence is never a dismiss_clue reason. Open and investigate plausible ICP companies rather than demanding evidence that is rarely public. Continue an active investigation first when a decisive source exists. A pending buyerResearchQueue item is useful only after commercial recommendation; complete at most one tailored lookup rather than using people search for discovery. If contactVerificationQueue has candidates, make one bounded public employment check using company_follow_up, fetch the strongest public source when useful, and record verify_contact without guessing identity. Otherwise select a relevant researchSourceCatalog source, harvest one bounded candidate batch, and review the returned unreadClues before another discovery search. researchCoverage.sourceStrategies records candidate, dismissal and company outcomes for the chosen source; researchCoverage.sourceFamilies separately records observed domains. These observed source outcomes are marginal-yield evidence, not quotas, scores or forced rotations. Reuse productive sources, but leave repeated empty or same-shaped dead ends. open_web is a fallback, and other_named_source permits a materially new source when its purpose names its hypothesis. At the start of a fresh business day, change company, source or service after prior low yield. Once current-day searches and dismissals show falling marginal yield and no stronger clue remains, wait. unreadClues is a menu, not an inbox; do not clear weak clues merely to create activity. Coverage counts do not prove that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -1601,6 +1715,15 @@ class Pilot:
         recommended = [c for c in self.state["companies"].values() if c["status"] == "recommended"]
         buyer_research = {"pending": sum(self.buyer_research(c)["state"] == "PENDING" for c in recommended),
                           "completed": sum(self.buyer_research(c)["state"] == "COMPLETED" for c in recommended)}
+        contacts = [candidate for company in recommended for candidate in company.get("contacts", [])
+                    if isinstance(candidate, dict)]
+        contact_verification = {"candidates": len(contacts),
+            "pending": sum(not candidate.get("employmentVerificationAt") for candidate in contacts),
+            "verifiedCurrent": sum(candidate.get("employmentStatus") == "VERIFIED_CURRENT" for candidate in contacts),
+            "likelyCurrent": sum(candidate.get("employmentStatus") == "LIKELY_CURRENT" for candidate in contacts),
+            "unverifiedOrAmbiguous": sum(candidate.get("employmentStatus", "UNVERIFIED") in
+                                         {"UNVERIFIED", "IDENTITY_AMBIGUOUS"} for candidate in contacts),
+            "former": sum(candidate.get("employmentStatus") == "FORMER" for candidate in contacts)}
         alive = False
         if self.state.get("pid"):
             try:
@@ -1620,6 +1743,7 @@ class Pilot:
             "unproductiveWakes": self.state.get("unproductiveWakes", 0),
             "researchNeedsReview": self.state.get("unproductiveWakes", 0) >= 3,
             "buyerResearch": buyer_research,
+            "contactVerification": contact_verification,
             "searchesByDirection": {d: r["attempts"] for d, r in coverage["directions"].items()},
             "sourceCatalogVersion": SOURCE_CATALOG_VERSION,
             "sourceStrategies": coverage["sourceStrategies"],
@@ -1664,7 +1788,24 @@ class Pilot:
                 buyer = self.buyer_research(c)
                 rows += ["Owner review preparation: " + ("buyer-role research pending."
                          if buyer["state"] == "PENDING" else
-                         "buyer-role search completed; any returned candidates remain employment-unverified."), ""]
+                         "buyer-role search completed; each returned candidate keeps a separate employment status."), "",
+                         "Target roles: " + (", ".join(c.get("targetRoles", [])) or "Legacy recommendation; not recorded."), "",
+                         "Proposed outreach approach: " + c.get("outreachApproach", "Legacy recommendation; not recorded."), ""]
+                if c.get("outreachQuestions"):
+                    rows += ["Discovery questions:", ""] + ["- " + question for question in c["outreachQuestions"]] + [""]
+                if c.get("contacts"):
+                    rows += ["Contact candidates (research only):", ""]
+                    for candidate in c["contacts"]:
+                        identity = candidate.get("publicName") or " ".join(filter(None,
+                            [candidate.get("firstName"), candidate.get("lastNameHint")])) or "Masked candidate"
+                        profile = ("; public profile: " + candidate["linkedinUrl"]
+                                   if candidate.get("linkedinUrl") else "; public profile: not returned")
+                        refreshed = ("; Apollo refreshed: " + candidate["lastRefreshedAt"]
+                                     if candidate.get("lastRefreshedAt") else "")
+                        rows.append("- " + identity + " — " + candidate.get("title", "Unknown role") +
+                                    "; employment: " + candidate.get("employmentStatus", "UNVERIFIED") +
+                                    profile + refreshed + "; outreach ready: no")
+                    rows.append("")
             for eid in c["evidenceIds"]:
                 e = self.state["evidence"][eid]
                 rows.append(f"- [{e['title'] or e['url']}]({e['url']}) — retrieved {e['retrievedAt']}")
