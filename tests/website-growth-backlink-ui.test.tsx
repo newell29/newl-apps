@@ -5,7 +5,7 @@ import type { authorityWorkspace } from "@/modules/website-growth/authority/stor
 import type { Action } from "@/modules/website-growth/authority/model";
 vi.mock("@/modules/website-growth/authority/actions", () => ({ saveAuthorityCampaignAction: vi.fn(), reviewAuthorityPlanAction: vi.fn() }));
 type Workspace = Awaited<ReturnType<typeof authorityWorkspace>>;
-function workspace(): Workspace { return { campaign: null, actions: [], opportunities: [], wake: null, truncated: false }; }
+function workspace(): Workspace { return { campaign: null, researchEnabled: false, actions: [], opportunities: [], wake: null, truncated: false }; }
 describe("Authority control centre walkthrough", () => {
   it("distinguishes research, approval, execution and measured outcomes in the empty pilot", () => {
     const html = renderToStaticMarkup(<AuthorityBoard workspace={workspace()} canReview />);

@@ -30,7 +30,8 @@ export function projectScoutWorkboard(items: WorkboardItem[], mission: Mission, 
     pages: open.filter(item => item.kind === "PAGE").length,
     replies: open.filter(item => item.kind === "RELATIONSHIP").length,
     measurements: open.filter(item => item.kind === "MEASUREMENT").length,
-    exploration: open.filter(item => item.kind === "RESEARCH" && record(item.evidence).source !== "site-review").length,
+    exploration: open.filter(item => item.kind === "RESEARCH" && !["site-review", "authority-campaign"].includes(String(record(item.evidence).source))).length,
+    authority: open.filter(item => record(item.evidence).source === "authority-campaign").length,
     siteReview: open.filter(item => item.kind === "RESEARCH" && record(item.evidence).source === "site-review").length
   };
 

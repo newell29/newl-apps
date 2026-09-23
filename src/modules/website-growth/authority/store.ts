@@ -3,7 +3,7 @@ import { Prisma, WebsiteGrowthOutreachConsentBasis } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { assertSafeWebsiteGrowthOutreachCopy, buildCompliantWebsiteGrowthOutreachBody, readWebsiteGrowthOutreachIdentity, validateWebsiteGrowthOutreachConsent, fetchWebsiteGrowthPublicContactEvidence, sendWebsiteGrowthOutreachEmail,
   syncWebsiteGrowthOutreachReplies } from "../backlink-outreach";
-import { record, ScoutWorkError, text } from "../scout/model";
+import { MISSION_JOB, record, ScoutWorkError, stableId, text } from "../scout/model";
 import { ACTIVE, ACTION_JOB, assertSafeAuthorityEvidence, authorityId, CAMPAIGN_JOB, parsePlan, placementEvidence, priority, publicUrl, readAction,
   samePublisher, transition, WAKE_JOB, type Action, type Campaign, type Plan } from "./model";
 
@@ -39,16 +39,17 @@ export async function saveAuthorityCampaign(tenantId: string, userId: string, va
   }, { isolationLevel: "Serializable" });
 }
 export async function authorityWorkspace(tenantId: string, db: DB = prisma) {
-  const [campaign, jobs, wake, opportunities] = await Promise.all([
+  const [campaign, jobs, wake, opportunities, missionJob] = await Promise.all([
     authorityCampaign(tenantId, db),
     db.automationJobRun.findMany({ where: { tenantId, jobType: ACTION_JOB }, orderBy: { createdAt: "desc" }, take: 500 }),
     db.automationJobRun.findFirst({ where: { tenantId, jobType: WAKE_JOB }, orderBy: { startedAt: "desc" } }),
     db.websiteGrowthBacklinkOpportunity.findMany({ where: { tenantId, status: { notIn: ["ARCHIVED", "REJECTED", "LOST"] } },
       orderBy: [{ lastReplyAt: "desc" }, { qualityScore: "desc" }], take: 80,
-      include: { messages: { where: { tenantId }, orderBy: { sentAt: "desc" }, take: 3 } } })
+      include: { messages: { where: { tenantId }, orderBy: { sentAt: "desc" }, take: 3 } } }),
+    db.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, "mission"), jobType: MISSION_JOB } })
   ]);
   const actions = jobs.flatMap(j => { const a = readAction(j.output); return a ? [{ id: j.id, ...a }] : []; });
-  return { campaign, actions, wake: wake ? { at: wake.startedAt, status: wake.status, output: wake.output } : null,
+  return { campaign, researchEnabled: record(missionJob?.input).enabled === true, actions, wake: wake ? { at: wake.startedAt, status: wake.status, output: wake.output } : null,
     opportunities, truncated: jobs.length === 500 || opportunities.length === 80 };
 }
 export async function authorityResearchContext(tenantId: string) {

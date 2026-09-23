@@ -28,8 +28,7 @@ export async function scoutWorkspace(tenantId: string) {
   const mission = missionJob ? parseMission(missionJob.input) : DEFAULT_MISSION;
   const projected = await projectPageHandoffs(prisma, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
   const campaign = await authorityCampaign(tenantId);
-  const items = projected.map(item => campaign && item.kind === "RELATIONSHIP" && !["DONE", "DISMISSED"].includes(item.state)
-    ? { ...item, state: "WAITING" as const, evidence: { ...item.evidence, externalWait: true }, nextAction: "This conversation is now managed in Authority campaigns. Review its exact next action there." } : item);
+  const items = projectAuthorityHandoffs(projected, campaign);
   const usedSteps = await prisma.automationJobRun.count({ where: { tenantId, jobType: STEP_JOB,
     startedAt: { gte: new Date(Date.now() - DAY_MS) } } });
   const active = items.filter(item => item.state === "NEEDS_REVIEW" || (item.state === "WORKING" && Date.parse(item.leaseUntil ?? "") > Date.now())).length;
@@ -132,7 +131,8 @@ export async function claimScoutWork(tenantId: string, id: string, reason: strin
     if (!mission.enabled) throw new ScoutWorkError("Scout research is paused. Save and enable an owner-approved research plan first.", 409);
     const jobs = await tx.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB }, take: 1001 });
     if (jobs.length > 1000) throw new ScoutWorkError("Scout work history needs archiving before further work.", 409);
-    const works = await projectPageHandoffs(tx, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
+    const campaign = await authorityCampaign(tenantId, tx);
+    const works = projectAuthorityHandoffs(await projectPageHandoffs(tx, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; })), campaign);
     const work = works.find(item => item.id === id);
     if (!work || !isDue(work, now)) throw new ScoutWorkError("This item is unavailable, already claimed, or not due.", 409);
     if (work.kind === "PAGE" && work.route && works.some(other => other.id !== id && other.kind === "PAGE" && other.route === work.route &&
@@ -522,4 +522,14 @@ function normalizePageArtifact<T extends ReturnType<typeof parsePageArtifact>>(
         : pageChangePreview.approvalSummary
     }
   } as T;
+}
+
+function projectAuthorityHandoffs<T extends Work>(items: T[], campaign: { enabled: boolean } | null): T[] {
+  return items.map(item => {
+    if (["DONE", "DISMISSED"].includes(item.state)) return item;
+    const retiredReply = campaign && item.kind === "RELATIONSHIP";
+    const pausedCampaign = item.evidence.source === "authority-campaign" && !campaign?.enabled;
+    return retiredReply || pausedCampaign ? { ...item, state: "WAITING" as const, evidence: { ...item.evidence, externalWait: true },
+      nextAction: retiredReply ? "This conversation is now managed in Authority campaigns. Review its exact next action there." : "Authority campaign is paused. Enable it in the campaign control centre before research resumes." } : item;
+  });
 }
