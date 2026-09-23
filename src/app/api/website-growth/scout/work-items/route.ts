@@ -32,6 +32,7 @@ export async function POST(request: Request) {
       const due = workspace.capacity.available ? scoutCandidates(workspace.items) : [];
       const decisions = workspace.items.filter(item => ["DONE", "DISMISSED"].includes(item.state) && item.kind !== "RELATIONSHIP").slice(0, 20);
       const items = [...due, ...decisions].map(item => ({ id: item.id, kind: item.kind, state: item.state,
+        priorityReason: item.evidence.source === "authority-campaign" && item.evidence.replyKey ? "Publisher reply: finish the concrete next action before new discovery." : null,
         title: item.title.slice(0, 250), hypothesis: item.hypothesis.slice(0, 800), nextAction: item.nextAction.slice(0, 500), lease: null,
         history: item.history.slice(-3).map(event => ({ ...event, summary: event.summary.slice(0, 300) })) }));
       const idleReason = !workspace.mission.enabled ? "Research is paused by the owner."

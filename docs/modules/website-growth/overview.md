@@ -1,5 +1,9 @@
 # Website Growth and SEO
 
+## Authority campaign pilot
+
+The backlink workspace now follows [authority campaigns](authority-campaigns.md): feasibility, exact approvals, one-action execution, receipts and placement reviews. The old executor is retired per tenant when its campaign is saved.
+
 ## Scout marketing redesign
 
 The default workspace now follows persistent marketing work through research, owner decisions, and outcome reviews. See [Scout marketing specialist](scout-marketing-redesign.md) for the implemented worker contract, data model, approval boundaries, regression coverage, and staged cutover. Existing scheduled discovery remains available while the marketing mission is paused.

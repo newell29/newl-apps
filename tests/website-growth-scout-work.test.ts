@@ -382,3 +382,11 @@ it("allows a later cycle of the reusable site review to revisit a previously pub
   }
   expect(db.websiteGrowthOpportunity.upsert.mock.calls[0][0].create.id).not.toEqual(db.websiteGrowthOpportunity.upsert.mock.calls[1][0].create.id);
 });
+
+it("refuses paused authority research before spending a step even when the marketing mission is enabled", async () => {
+  const item = newWork("RESEARCH", "campaign", "Authority", "Earn useful placements", null, { source: "authority-campaign" }, now);
+  db.automationJobRun.findFirst.mockImplementation(async ({ where }) => where.jobType === MISSION_JOB ? { input: { ...DEFAULT_MISSION, enabled: true } } : { input: { version: 1, enabled: false, title: "Synthetic campaign", targetPage: "https://brand.example.com/guide" } });
+  db.automationJobRun.findMany.mockResolvedValue([{ id: "authority-work", output: item }]);
+  await expect(claimScoutWork("tenant-a", "authority-work", "Investigate campaign", "paused-claim", now)).rejects.toThrow("not due");
+  expect(db.automationJobRun.create).not.toHaveBeenCalled();
+});

@@ -1,5 +1,7 @@
 # Website Growth backlink outreach rollout
 
+> Historical rollout. For tenants using the new campaign workspace, use [Authority campaigns](authority-campaigns.md). Do not reinstall or re-enable this legacy executor after campaign cutover.
+
 > Evidence status: Confirmed from code unless marked otherwise. Owner-approved operating profile received 2026-07-24.
 
 ## Safe launch state

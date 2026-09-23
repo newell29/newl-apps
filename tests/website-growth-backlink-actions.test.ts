@@ -16,6 +16,7 @@ const requireRole = vi.fn();
 
 vi.mock("@/server/db", () => ({
   prisma: {
+    automationJobRun: { findFirst: vi.fn().mockResolvedValue(null) },
     websiteGrowthBacklinkOpportunity: {
       findFirst: (...args: unknown[]) => backlinkFindFirst(...args),
       updateMany: (...args: unknown[]) => backlinkUpdateMany(...args)

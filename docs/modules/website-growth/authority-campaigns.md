@@ -1,0 +1,54 @@
+# Scout authority campaigns
+
+Status: implemented for reviewed branch/Preview validation. Production activation requires the owner merge and the documented runtime cutover. No database migration is required. This replaces the previous backlink opportunity approval/executor path for a tenant once its first campaign is saved, including when the campaign is paused.
+
+## Operating model
+
+Newl Apps remains the control centre. It owns the editable campaign, target page and asset, audience, hypothesis, exact action packets, human approval, execution leases, receipts, exceptions and measured results. Scout's existing marketing supervisor researches and revises; a separate, narrowly scoped `scout-authority` browser agent executes approved guest forms. Email and public-link checks use deterministic server services.
+
+The pilot defaults are the approved direction, editable in Newl Apps: improve the existing distribution playbook, finish positive conversations before discovery, investigate 12–20 feasible prospects, aim for fewer than 20% of approved actions blocked, at least two positive replies and one relevant verified placement in 30 days. These are decision guides, not guaranteed outcomes or automatic pass/fail gates. A REPLIED status is not a positive-reply classification.
+
+The existing marketing schedule and budget are retained. A reusable campaign investigation receives publisher conversations, existing action history, previous research, website inventory and measured outcomes. Fresh replies bring the campaign forward; otherwise it is revisited daily after completion. The quality supervisor reviews concrete actions before saving them. Research can propose an improvement to an existing asset through the normal page-brief/PR process. It cannot approve, send or publish.
+
+Feasibility precedes approval. A packet contains the exact publisher route, observed evidence checked within seven days, recipient/country/consent for email, exact copy or form fields, reviewed terms for forms, and observable completion criteria. Unsupported routes, paid work, account creation, CAPTCHA/MFA/phone steps and unknown business facts become a specific human task. The pilot automatically handles free guest forms; it does not inherit broad legacy account-creation authority.
+
+## State and execution
+
+`AutomationJobRun` stores versioned campaign (`website-growth.authority.campaign.v1`), action (`website-growth.authority.action.v1`) and wake records. All reads/writes use authenticated `tenantId`. Existing backlink/message tables retain the publisher and correspondence history. No schema change or transfer of history is needed.
+
+An action moves through REVIEW → APPROVED → RUNNING → SUBMITTED, BLOCKED or UNCERTAIN. VERIFY actions are read-only and need no communication approval. Only a server fetch containing an actual anchor to the exact target page records LIVE. Plain URL mentions, scripts, comments and another destination page do not count. Fetch failures are unavailable evidence, never proof of link removal. `rel` and anchor text remain in the verification receipt; nofollow links are still observed placements, not promised ranking credit.
+
+Admin/Manager mutation access is required for campaign settings and exact action approval. The server rejects stale revisions and changed publisher/conversation evidence. It records the approving user and timestamp. Before a communication starts, it refreshes mailbox replies, checks the current campaign, approval, evidence age, source revision, recipient suppression and lease. Existing email consent, identity/footer and rolling volume limits remain enforced.
+
+Each executor wake refreshes replies and expires abandoned leases, then claims at most one approved action with an idempotent claim ID. No work means no model or browser. Only one action per tenant can run at a time. A failed or uncertain action holds that item; unrelated eligible work continues. A scoped browser packet contains no app bearer token or directory master. The browser agent has only browser and `newl_authority_action`; it must reserve the exact action immediately before one submit, then save the visible receipt. Four-minute runtime bounds and a 25-call instruction limit contain browser work; the tool-call count is an instruction, not a platform-enforced counter.
+
+A missing receipt after reservation becomes UNCERTAIN and is never automatically retried. The next wake reconciles abandoned leases. A recovered tool error does not invalidate a durable successful receipt. Closing an uncertain action requires an explicit reconciliation note; it does not authorize repeating a previous email or form. Ambiguous historical message reservations still require mailbox/service-level reconciliation before a new send. This conservative recovery boundary prevents duplicate contact.
+
+The default new executor schedule is weekdays at :15 and :45 from 09:00–16:00 America/Toronto. It is installed disabled. Email limits remain five new contacts per rolling day, twenty per rolling week and ten follow-ups/responses per day. The schedule is not a send quota. Settings do not grant bulk approval. Existing positive replies may produce a REPLY, FORM, VERIFY or human task as appropriate.
+
+## Results and learning
+
+The control centre separates prepared actions, individually approved actions, accepted messages/submitted forms, held approvals and unique verified placements. A new publisher reply is revisited before more discovery. Every verified placement creates independent 28/56/90-day target-page reviews using the existing Search Console, GA4 and first-party form measurement service, preserving source gaps and confidence limits. Later reviews use a rolling 28-day comparison with the original pre-placement baseline. Verification time is the first observed placement date, not a known publisher publication timestamp.
+
+There is no publisher-level GA4 referral or qualified-enquiry attribution in this release. Positive-reply interpretation is still qualitative. Target-page movement is association, not causal lift from one link. These limits are visible in the UI and supplied to Scout. Do not scale spend or outbound volume based on sent-count or aggregate page movement alone.
+
+## Cutover and rollback
+
+1. Review/merge the application and public-asset PRs through the owner-controlled process. Wait for their normal successful deployments; never directly deploy a feature branch to production.
+2. Update the dedicated runtime checkout to the merged application commit. Preserve the marketing job ID/budget. Build/validate the plugin, then run `ops/openclaw/install-scout-authority.sh`. It creates a separate restricted browser agent and one disabled executor schedule; repeat installs preserve the existing schedule state.
+3. Confirm `openclaw models status --agent scout-authority --json`, the plugin's `newl_authority_action` registration and the minimal tool policy. Resolve model authentication through existing OpenClaw setup without putting credentials in prompts. Run an empty executor wake while the campaign is paused; no browser should start.
+4. Reconcile any legacy IN_PROGRESS record before saving the campaign. Save its direction/enabled state in Newl Apps. Saving permanently closes legacy claim/report/send/account and review entry points for that tenant. Existing messages, suppression and publisher history remain intact.
+5. Run `ops/openclaw/cutover-scout-authority.sh` for its dry-run schedule plan, then `--apply`. Apply requires a merged runtime commit, exactly one replacement job, no running relevant jobs, an enabled campaign and fresh mailbox sync. It disables only the declared legacy backlink discovery, outreach and old global-failure monitor, then enables the replacement. Marketing, analytics and build schedules are untouched.
+6. Review one concrete proposal and individually approve it. Confirm the exact action, mailbox or form receipt, reply sync and independent verification before widening the pilot. No real publisher communication is sent by automated tests. Vercel Preview is explicitly prohibited from reserving external emails or forms, because preview deployments may share production mailbox credentials; approvals and public-link reads can still be validated.
+
+Rollback: pause the campaign and disable the authority schedule. Preserve action receipts and unresolved holds. Do not re-enable the old executor against a configured campaign or delete the campaign to bypass approval; repair through a reviewed PR. Saved data remains available.
+
+## Validation and compatibility
+
+Regression tests include completely missing/partial feasibility, private/credentialed URLs, wrong tenants/leases/revisions, changed replies, lost claim acknowledgement, duplicate form/reply attempts, interrupted sends, isolated blockers, empty wakes, unavailable verification and actual-anchor verification. Rendered UI tests cover exact copy, separate states, read-only users and escaped untrusted text. Python walkthroughs cover the executor and retired-schedule selection. The opt-in `authority_model_walkthrough.py` evaluates the live supervisor on three synthetic cases with all action tools disabled.
+
+Commands: `npm run lint`; `npm run typecheck`; `npm run build`; Website Growth Vitest suites; `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ops/openclaw/scout -p 'test_*.py'`; plugin `npm run build`, `npm test -- --no-cache`, `npm run plugin:validate`; shell syntax checks. Preview/UI evidence and exact final counts belong in the PR validation report.
+
+Open PR #550 was checked for compatibility: its Teams wording changes target legacy runners/reporting. This implementation uses separate campaign execution and retains the existing mail service; it does not depend on or silently merge #550. On configured tenants its legacy executor is intentionally retired. Any later merge of #550 should preserve that retirement and avoid reinstalling the old schedule.
+
+Pilot limits: one editable campaign per tenant; bounded history (500 actions/80 publishers per read); CA/US mail only under existing consent policy; guest forms only; no automatic expansion, paid placement, customer case-study permission or new service claims. Multi-campaign UI, historical archival and publisher-level referral/qualification attribution are follow-on work, not claimed delivered features.

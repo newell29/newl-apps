@@ -1,3 +1,4 @@
+import { rejectLegacyAuthority } from "@/modules/website-growth/authority/store";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getMicrosoftGraphApplicationAccessToken } from "@/server/integrations/microsoft-graph-application";
@@ -8,6 +9,7 @@ import { DAY_MS, WORK_JOB, ScoutWorkError, nextWork, readWork, stableId, text } 
 
 /** Called only by the authenticated Admin/Manager approval action; never exposed to the worker. */
 export async function approveAndSendScoutReply(tenantId: string, userId: string, id: string, revision: number) {
+  await rejectLegacyAuthority(tenantId);
   await syncWebsiteGrowthOutreachReplies({ tenantId });
   const identity = readWebsiteGrowthOutreachIdentity();
   const token = await getMicrosoftGraphApplicationAccessToken();

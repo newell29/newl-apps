@@ -37,7 +37,7 @@ export default async function ScoutWorkPage() {
   return <div className="space-y-6">
     <WorkboardRefresh />
     <PageHeader eyebrow="Website Growth" title="Scout marketing workboard" description="Set the direction, review finished work, and follow what Scout learns from the results." />
-    <nav className="flex flex-wrap gap-3 text-sm font-semibold"><Link href="/website-growth">Effectiveness review</Link><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/paid-campaigns">Paid campaigns</Link><Link href="/website-growth/backlinks">Publisher opportunities</Link><Link href="/website-growth/signals">Research signals</Link></nav>
+    <nav className="flex flex-wrap gap-3 text-sm font-semibold"><Link href="/website-growth">Effectiveness review</Link><Link href="/website-growth/pages">Page briefs and previews</Link><Link href="/website-growth/paid-campaigns">Paid campaigns</Link><Link href="/website-growth/backlinks">Authority campaigns</Link><Link href="/website-growth/signals">Research signals</Link></nav>
     <section className="rounded-lg border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Marketing direction</h2><span className="rounded-full bg-muted px-3 py-1 text-sm">{workspace.mission.enabled ? "Research enabled" : "Research paused"}</span></div>
       <p className="mt-2 text-mutedForeground">{workspace.mission.objective}</p>
@@ -73,6 +73,7 @@ export default async function ScoutWorkPage() {
         <WorkSource label="Publisher replies" count={board.sourceCounts.replies}>Replies that need a useful, reviewed next response.</WorkSource>
         <WorkSource label="Outcome reviews" count={board.sourceCounts.measurements}>Published pages returning after their evidence window.</WorkSource>
         <WorkSource label="Open exploration" count={board.sourceCounts.exploration}>One broad brief replenished after the last one closes.</WorkSource>
+        <WorkSource label="Authority campaign" count={board.sourceCounts.authority}>Publisher conversations, feasible actions and placement results.</WorkSource>
         <WorkSource label="Whole-site review" count={board.sourceCounts.siteReview}>One reusable review of performance, impact, and gaps.</WorkSource>
       </dl></div>
       {canReview && <p className="text-xs text-mutedForeground">“Check for due work” only reconciles saved records. It does not run the AI worker or consume a research step.</p>}

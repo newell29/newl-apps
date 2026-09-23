@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createApiTool,
+  createAuthorityActionTool,
   createBusinessProfileTool,
   createDirectoryCredentialFillTool,
   createParameterizedApiTool,
@@ -260,4 +261,13 @@ describe("Newl Website Growth OpenClaw plugin", () => {
     );
     expect(result.content[0].text).not.toContain("model-controlled-value");
   });
+});
+
+it("prevents the browser tool from claiming or sending work outside its packet", async () => {
+  const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+  const tool = createAuthorityActionTool()({ config: { baseUrl: "https://app.example.com" } });
+  for (const action of ["claim", "prepare", "execute"]) {
+    expect((await tool.execute("synthetic", { action })).details.status).toBe("denied");
+  }
+  expect(fetchMock).not.toHaveBeenCalled(); vi.unstubAllGlobals();
 });

@@ -47,7 +47,7 @@ describe("Scout workboard projection", () => {
       item("site", "RESEARCH", "WAITING", "2026-10-17T16:00:00.000Z", { source: "site-review" })
     ], { ...DEFAULT_MISSION, enabled: true }, { usedSteps: 0, active: 0, available: true }, NOW);
 
-    expect(result.sourceCounts).toEqual({ pages: 1, replies: 1, measurements: 1, exploration: 1, siteReview: 1 });
+    expect(result.sourceCounts).toEqual({ pages: 1, replies: 1, measurements: 1, exploration: 1, authority: 0, siteReview: 1 });
     expect(result.wakeStatus).toContain("find nothing due");
     expect(result.wakeStatus).toContain("without using an AI research step");
   });
