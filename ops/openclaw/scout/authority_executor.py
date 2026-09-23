@@ -53,8 +53,9 @@ def browser(action):
         prompt.write_text(RULES + "\n" + json.dumps(packet), encoding="utf-8")
         # The app bearer token and directory master never enter the browser agent process.
         env = {k: v for k, v in os.environ.items() if k in {"PATH", "HOME", "TMPDIR", "LANG"}}
+        # Respect the operator-validated agent model; do not override account compatibility.
         subprocess.run([os.environ.get("OPENCLAW_BIN", "openclaw"), "agent", "--agent", "scout-authority",
-                        "--model", "openai/gpt-5.4-mini", "--thinking", "high", "--timeout", "240",
+                        "--thinking", "high", "--timeout", "240",
                         "--session-key", "agent:scout-authority:action-" + str(uuid.uuid4()),
                         "--message-file", str(prompt), "--json"], env=env, timeout=270, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
