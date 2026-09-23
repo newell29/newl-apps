@@ -29,6 +29,12 @@ export type WebsiteGrowthPluginConfig = {
   businessProfilePath?: string;
 };
 
+const authorityActionParameters = Type.Object({
+  action: Type.Union([Type.Literal("begin"), Type.Literal("finish"), Type.Literal("status")]),
+  id: Type.String({ minLength: 1, maxLength: 100 }), lease: Type.String({ minLength: 1, maxLength: 100 }),
+  result: Type.Optional(Type.Object({ state: Type.Union([Type.Literal("SUBMITTED"), Type.Literal("BLOCKED"), Type.Literal("UNCERTAIN")]), detail: Type.String({ minLength: 1, maxLength: 2000 }) }))
+});
+
 const emptyParameters = Type.Object({});
 const summaryParameters = Type.Object({
   runStartedAt: Type.String({
@@ -132,10 +138,8 @@ const plugin = defineToolPlugin({
       name: "newl_authority_action",
       label: "Reserve or report approved authority action",
       description: "Use only the action ID and lease in the provided packet. Call begin immediately before the one approved guest form submission. A refusal means do not submit. Finish with observed evidence; never report LIVE.",
-      parameters: Type.Object({ action: Type.Union([Type.Literal("begin"), Type.Literal("finish"), Type.Literal("status")]),
-        id: Type.String({ minLength: 1, maxLength: 100 }), lease: Type.String({ minLength: 1, maxLength: 100 }),
-        result: Type.Optional(Type.Object({ state: Type.Union([Type.Literal("SUBMITTED"), Type.Literal("BLOCKED"), Type.Literal("UNCERTAIN")]), detail: Type.String({ minLength: 1, maxLength: 2000 }) })) }),
-      factory: createParameterizedApiTool("newl_authority_action", "/api/website-growth/backlinks/authority")
+      parameters: authorityActionParameters,
+      factory: createAuthorityActionTool()
     }),
     tool({
       name: "newl_backlink_business_profile",
@@ -570,4 +574,18 @@ function textResult(text: string, status: string) {
     content: [{ type: "text" as const, text }],
     details: { status }
   };
+}
+
+/** Browser tool cannot claim, prepare, execute email, or expand its own work packet. */
+export function createAuthorityActionTool() {
+  return ({ config }: { config: WebsiteGrowthPluginConfig }) => ({
+    name: "newl_authority_action", label: "Approved authority action", description: "Reserve or report only the scoped browser packet.", parameters: authorityActionParameters,
+    async execute(_toolCallId: string, params: unknown) {
+      const payload = params && typeof params === "object" && !Array.isArray(params) ? params as Record<string, unknown> : {};
+      if (!["begin", "finish", "status"].includes(String(payload.action))) {
+        return { content: [{ type: "text" as const, text: "This browser tool cannot expand its assigned action." }], details: { status: "denied" } };
+      }
+      return callNewlApps(config, "/api/website-growth/backlinks/authority", payload);
+    }
+  });
 }

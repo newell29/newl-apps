@@ -5,6 +5,7 @@ runner_directory="${0:A:h}"
 runtime_repo_path="${NEWL_APPS_SCOUT_RUNTIME_REPO_PATH:-${HOME}/Developer/newl-apps-scout-runtime}"
 runner_path="${runtime_repo_path}/ops/openclaw/run-scout-authority.sh"
 [[ -r "${runner_path}" ]] || { echo "Update the reviewed runtime checkout first."; exit 1; }
+npm --prefix "${runtime_repo_path}/ops/openclaw/plugins/newl-website-growth" run plugin:validate
 openclaw plugins install --force "${runtime_repo_path}/ops/openclaw/plugins/newl-website-growth"
 agent_index="$(openclaw config get agents.list --json | /usr/bin/python3 -c 'import json,sys; print(next((str(i) for i,a in enumerate(json.load(sys.stdin)) if a.get("id")=="scout-authority"),""))')"
 if [[ -z "${agent_index}" ]]; then
