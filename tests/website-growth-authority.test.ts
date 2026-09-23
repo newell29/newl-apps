@@ -182,6 +182,11 @@ describe("supervisor to executor walkthroughs", () => {
     await expect(rejectLegacyAuthority(tenant)).rejects.toThrow("retired");
     await expect(rejectLegacyAuthority("other-tenant")).resolves.toBeUndefined();
   });
+  it("blocks all preview communications before mailbox or publisher access", async () => {
+    const { id, lease } = await approveClaim(); vi.stubEnv("VERCEL_ENV", "preview");
+    await expect(beginAuthorityAction(tenant, id, lease)).rejects.toThrow("Preview validates plans");
+    expect(mocks.sync).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled(); expect(action(id).startedAt).toBeNull();
+  });
   it("checks new replies and opt-outs again immediately before the external action", async () => {
     const { id, lease } = await approveClaim(); publisher.updatedAt = new Date(now.getTime() + 10_000); publisher.lastReplyAt = publisher.updatedAt;
     await executeAuthorityAction(tenant, id, lease); expect(action(id).state).toBe("BLOCKED"); expect(mocks.send).not.toHaveBeenCalled();
