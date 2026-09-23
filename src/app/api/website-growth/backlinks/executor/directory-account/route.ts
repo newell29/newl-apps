@@ -1,3 +1,4 @@
+import { rejectLegacyAuthority } from "@/modules/website-growth/authority/store";
 import { NextResponse } from "next/server";
 
 import {
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+    await rejectLegacyAuthority(tenant.id);
     const body = await request.json() as Record<string, unknown>;
     if (
       typeof body.opportunityId !== "string" ||

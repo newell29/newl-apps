@@ -86,3 +86,7 @@ Codex runtime reference: [official non-interactive documentation](https://learn.
 ## Whole-site effectiveness review
 
 The default `/website-growth` now opens the effectiveness review; `/website-growth/effectiveness` is a direct link and `/website-growth/marketing` retains the workboard. See [effectiveness review](scout-effectiveness-review.md) for coverage, recovery, and interpretation limits.
+
+## Authority campaign integration
+
+Configured authority campaigns replace the legacy relationship handoff and prospect-level approval queue. A reusable campaign research item prepares exact actions; the dedicated executor handles one individually approved action per wake, with independent placement checks and 28/56/90-day target-page reviews. See [authority campaigns](authority-campaigns.md) for state, limits, measured evidence and staged retirement. Existing SEO page work, budgets and build handoffs remain in the same marketing supervisor.

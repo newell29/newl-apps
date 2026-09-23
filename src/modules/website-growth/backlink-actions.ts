@@ -1,5 +1,8 @@
 "use server";
 
+import { rejectLegacyAuthority } from "@/modules/website-growth/authority/store";
+
+
 import {
   ModuleKey,
   PlatformRole,
@@ -16,6 +19,7 @@ import { getAuthenticatedContext } from "@/server/tenant-context";
 
 export async function reviewWebsiteGrowthBacklinkAction(formData: FormData) {
   const context = await getBacklinkReviewContext();
+  await rejectLegacyAuthority(context.tenantId);
   const backlinkId = readBacklinkId(formData);
   const decision = parseBacklinkReviewDecision(formData.get("decision"));
   const notes = String(formData.get("notes") ?? "").trim().slice(0, 2000);
@@ -72,6 +76,7 @@ export async function reviewWebsiteGrowthBacklinkAction(formData: FormData) {
 
 export async function returnWebsiteGrowthBacklinkToReviewAction(formData: FormData) {
   const context = await getBacklinkReviewContext();
+  await rejectLegacyAuthority(context.tenantId);
   const backlinkId = readBacklinkId(formData);
   const opportunity = await prisma.websiteGrowthBacklinkOpportunity.findFirst({
     where: {
@@ -122,6 +127,7 @@ export async function returnWebsiteGrowthBacklinkToReviewAction(formData: FormDa
 
 export async function retryBlockedWebsiteGrowthBacklinkAction(formData: FormData) {
   const context = await getBacklinkReviewContext();
+  await rejectLegacyAuthority(context.tenantId);
   const backlinkId = readBacklinkId(formData);
   if (formData.get("confirmNoExternalAction") !== "yes") {
     throw new Error("Confirm that no email or directory submission occurred before retrying.");
@@ -206,6 +212,7 @@ export async function retryBlockedWebsiteGrowthBacklinkAction(formData: FormData
 
 export async function approveAllWebsiteGrowthBacklinksAction() {
   const context = await getBacklinkReviewContext();
+  await rejectLegacyAuthority(context.tenantId);
   const pending = await prisma.websiteGrowthBacklinkOpportunity.findMany({
     where: {
       tenantId: context.tenantId,

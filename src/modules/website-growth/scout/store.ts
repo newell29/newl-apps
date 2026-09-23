@@ -1,3 +1,5 @@
+import { authorityCampaign, authorityResearchContext, proposeAuthorityActions } from "../authority/store";
+import { reconcileAuthorityResearch, authorityResultArtifact } from "../authority/scout";
 import { loadSiteReview } from "./effectiveness";
 import { effectivenessPacket } from "./effectiveness-model";
 import { randomUUID } from "node:crypto";
@@ -24,7 +26,10 @@ export async function scoutWorkspace(tenantId: string) {
     prisma.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB }, orderBy: { createdAt: "desc" }, take: 1000 })
   ]);
   const mission = missionJob ? parseMission(missionJob.input) : DEFAULT_MISSION;
-  const items = await projectPageHandoffs(prisma, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
+  const projected = await projectPageHandoffs(prisma, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
+  const campaign = await authorityCampaign(tenantId);
+  const items = projected.map(item => campaign && item.kind === "RELATIONSHIP" && !["DONE", "DISMISSED"].includes(item.state)
+    ? { ...item, state: "WAITING" as const, evidence: { ...item.evidence, externalWait: true }, nextAction: "This conversation is now managed in Authority campaigns. Review its exact next action there." } : item);
   const usedSteps = await prisma.automationJobRun.count({ where: { tenantId, jobType: STEP_JOB,
     startedAt: { gte: new Date(Date.now() - DAY_MS) } } });
   const active = items.filter(item => item.state === "NEEDS_REVIEW" || (item.state === "WORKING" && Date.parse(item.leaseUntil ?? "") > Date.now())).length;
@@ -43,6 +48,8 @@ export async function saveScoutMission(tenantId: string, userId: string, input: 
 
 /** Idempotent reconciliation creates work; it never sends, approves, or changes source decisions. */
 export async function reconcileScoutWork(tenantId: string, now = new Date()) {
+  await reconcileAuthorityResearch(tenantId, now);
+  const authority = await authorityCampaign(tenantId);
   await reconcilePageHandoffs(tenantId);
   await reconcileRelationshipHandoffs(tenantId);
   const [pages, replies, published] = await Promise.all([
@@ -56,7 +63,7 @@ export async function reconcileScoutWork(tenantId: string, now = new Date()) {
   ]);
   for (const page of pages) await ensureWork(tenantId, `page:${page.id}`, newWork("PAGE", page.id, page.topic,
     page.reason, safePath(page.targetPage ?? page.sourcePage), { source: "existing-opportunity", score: page.score }, now));
-  for (const reply of replies) await ensureWork(tenantId, `reply:${reply.id}:${reply.lastReplyAt?.toISOString()}`, newWork("RELATIONSHIP", reply.id,
+  for (const reply of authority ? [] : replies) await ensureWork(tenantId, `reply:${reply.id}:${reply.lastReplyAt?.toISOString()}`, newWork("RELATIONSHIP", reply.id,
     `Continue: ${reply.title}`, "A publisher replied. Review the conversation and prepare a useful next response.", safePath(reply.targetPage),
     { sourceDomain: reply.sourceDomain, sourceUrl: reply.sourceUrl, replyAt: reply.lastReplyAt?.toISOString() ?? null }, now));
   for (const draft of published) {
@@ -70,7 +77,7 @@ export async function reconcileScoutWork(tenantId: string, now = new Date()) {
   }
   // Keep one open research brief, replenished by completed work rather than a calendar quota.
   const latestResearch = await prisma.automationJobRun.findFirst({ where: { tenantId, jobType: WORK_JOB,
-    output: { path: ["kind"], equals: "RESEARCH" }, id: { not: stableId(tenantId, "research:site-effectiveness") } }, orderBy: { createdAt: "desc" } });
+    output: { path: ["kind"], equals: "RESEARCH" }, id: { notIn: [stableId(tenantId, "research:site-effectiveness"), stableId(tenantId, "research:authority-campaign")] } }, orderBy: { createdAt: "desc" } });
   const previousResearch = readWork(latestResearch?.output);
   if (!previousResearch || ["DONE", "DISMISSED"].includes(previousResearch.state)) {
     await ensureWork(tenantId, `research:after:${latestResearch?.id ?? "initial"}`, newWork("RESEARCH", null, "Find the next valuable inbound opportunity",
@@ -171,6 +178,7 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
   const learning = work.kind === "RELATIONSHIP" ? null : {
     outcomes: scoutOutcomes((await scoutWorkspace(tenantId)).items), competitors: await scoutCompetitorEvidence(tenantId),
     effectiveness: effectivenessPacket(await loadSiteReview(tenantId).catch(() => null)) };
+  if (work.evidence.source === "authority-campaign") return { authority: await authorityResearchContext(tenantId), website: await resolveNewlWebsiteContext(), learning };
   if (work.kind === "PAGE") {
     const [opportunity, website, pageEvidence] = await Promise.all([
       prisma.websiteGrowthOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "" },
@@ -188,6 +196,14 @@ export async function scoutWorkContext(tenantId: string, id: string, lease: stri
     return { opportunity, rule: "Prepare a response for human review. This worker cannot send messages or make commitments." };
   }
   if (work.kind === "MEASUREMENT") {
+    if (work.evidence.source === "authority-placement" && work.route) {
+      const placement = await prisma.websiteGrowthBacklinkOpportunity.findFirst({ where: { tenantId, id: work.referenceId ?? "", status: "LIVE" }, select: { verifiedAt: true, liveUrl: true } });
+      if (!placement?.verifiedAt) throw new ScoutWorkError("The placement is no longer verified. Recheck the publisher before measuring.", 409);
+      const measurement = await measureScoutPage(tenantId, work.route, placement.verifiedAt, new Date(), Number(work.evidence.window) > 28);
+      const updated = nextWork(work, { evidence: { ...work.evidence, measurement } }, "MEASURED", "Collected target-page trends following a placement; association only.");
+      await prisma.$transaction(tx => replace(tx, tenantId, id, work, updated));
+      return { placement, measurement, learning, limitation: "No publisher-level referral or qualified-enquiry attribution. Before/after movement is not causal lift." };
+    }
     const draft = await prisma.websiteGrowthContentDraft.findFirst({ where: { tenantId, id: work.referenceId ?? "", status: "PUBLISHED" },
       select: { title: true, summary: true, publishedAt: true } });
     if (!draft?.publishedAt || !work.route) throw new ScoutWorkError("Published page evidence is unavailable.", 409);
@@ -289,8 +305,16 @@ export async function completeScoutWork(tenantId: string, id: string, lease: str
       const review = parseWebsiteGrowthBacklinkReview({ source: "WEB_DISCOVERY", queried: true, observedAt: now.toISOString(),
         summary: result.summary, rawProspectsReviewed: result.artifact.prospects.length, duplicatesRejected: 0, qualityRejected: 0, prospects: result.artifact.prospects });
       await persistWebsiteGrowthBacklinkReview({ tenantId, runId: id, review, database: tx });
-      result.state = "NEEDS_REVIEW";
-      result.nextAction = "Review the researched publisher opportunities in Backlink Scout. No outreach has been approved or sent.";
+      const authority = await authorityCampaign(tenantId, tx);
+      result.state = authority ? "DONE" : "NEEDS_REVIEW";
+      result.nextAction = authority ? "Publisher inventory updated. The authority campaign will prepare feasible exact actions before approval." : "Review the researched publisher opportunities in Backlink Scout. No outreach has been approved or sent.";
+    }
+    if (delivering && work.evidence.source === "authority-campaign") {
+      const actions = await proposeAuthorityActions(tx, tenantId, authorityResultArtifact(result.artifact), now);
+      result.state = "DONE";
+      result.nextReviewAt = new Date(now.getTime() + DAY_MS).toISOString();
+      result.nextAction = `Campaign investigation saved. ${actions.length} concrete action(s) prepared in Authority campaigns. External actions still require individual approval.`;
+      evidence = { ...evidence, authorityActionIds: actions };
     }
     if (delivering && work.kind === "RESEARCH" && work.evidence.source === "site-review") {
       const previousReviews = Array.isArray(evidence.previousReviews) ? evidence.previousReviews : [];

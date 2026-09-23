@@ -80,6 +80,16 @@ def result_schema(kind):
         path = Path(__file__).resolve().parent.parent / "skills/website-growth-scout/scout-output.schema.json"
         page_schema = json.loads(path.read_text())
         artifact = page_schema["properties"]["drafts"]["items"]["properties"]["draft"]
+    elif kind == "AUTHORITY":
+        plan = object_schema({key: string for key in ["opportunityId", "route", "recipientEmail", "recipientCountry", "consentBasis", "subject", "body", "evidence", "checkedAt", "completion", "reason", "termsUrl"]})
+        plan["properties"].update({"method": {"type": "string", "enum": ["EMAIL", "FOLLOW_UP", "REPLY", "FORM", "VERIFY", "MANUAL"]},
+                                   "free": {"type": "boolean"}, "accountRequired": {"type": "boolean"},
+                                   "fields": {"type": "array", "maxItems": 25, "items": object_schema({"label": string, "value": string})}})
+        plan["required"] = list(plan["properties"])
+        artifact = object_schema({"recommendation": string, "evidence": {"type": "array", "items": string}, "limitations": string,
+                                  "proposedTitle": string, "proposedRoute": string, "hypothesis": string, "newPage": {"type": "boolean"},
+                                  "authorityActions": {"type": "array", "maxItems": 3, "items": plan},
+                                  "prospects": {"type": "array", "maxItems": 5, "items": json.loads((Path(__file__).resolve().parent.parent / "skills/website-growth-scout/scout-output.schema.json").read_text())["properties"]["backlinks"]["properties"]["prospects"]["items"]}})
     elif kind == "RELATIONSHIP":
         artifact = object_schema({"subject": string, "body": string, "rationale": string})
     else:
@@ -135,6 +145,14 @@ Research and outcome artifacts may propose a page with proposedTitle, proposedRo
 Set newPage false whenever proposedRoute already appears in the supplied website route inventory or current-page evidence.
 Use empty strings when no page is proposed and an empty prospects array when no publishers qualify.
 Proposed pages automatically become research tasks; deliver the complete brief before asking for publishing approval.
+For authority-campaign work use the authority context: finish positive replies and due verification/follow-up before discovery.
+Prepare at most three feasible exact actions using existing opportunity IDs. Never propose an active/uncertain action again.
+Do not request another generic reply when the publisher already supplied a submission route. Inspect the actual form and terms.
+FORM means free guest submission with all exact field values. Account, phone, CAPTCHA, unusual terms or unavailable facts mean MANUAL with the smallest specific owner action.
+EMAIL/FOLLOW_UP/REPLY require exact copy, published recipient, CA/US country and consent. REPLY must use the latest existing conversation and recipient. MANUAL is a human task, not executor-ready.
+VERIFY uses the publisher URL where a link should exist. Do not claim LIVE yourself.
+If an asset is weak, propose improvement to its existing route with a concrete hypothesis. Use history/results to adapt, not a rigid prospect quota.
+Every action needs an ISO checkedAt from current dated research, public evidence and observable completion criteria.
 Publisher prospects go to the existing human approval queue. Supply exact public sources, relevance, and a useful outreach angle.
 Never recommend paid ranking links, irrelevant directories, or volume for its own sake.
 """
@@ -170,7 +188,7 @@ def run():
             # Lease is kept by this deterministic wrapper, never passed to the model.
             public_work = {key: value for key, value in claimed.items() if key not in {"lease", "leaseUntil"}}
             result = model(RULES + "\n" + json.dumps({"mission": workspace["mission"], "direction": selected["reason"], "work": public_work, "context": context, "previousDecisions": learning}),
-                           result_schema(claimed["kind"]), directory, "result", search=claimed["kind"] in {"PAGE", "RESEARCH"})
+                           result_schema("AUTHORITY" if claimed.get("evidence", {}).get("source") == "authority-campaign" else claimed["kind"]), directory, "result", search=claimed["kind"] in {"PAGE", "RESEARCH"})
         except Exception:
             # Research has no external side effects, so its failure can be safely deferred in isolation.
             api({"action": "complete", **identity, "result": {"decision": "WAIT", "summary": "Research was interrupted; prior progress is preserved.",

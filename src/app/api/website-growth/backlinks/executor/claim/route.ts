@@ -1,3 +1,4 @@
+import { rejectLegacyAuthority } from "@/modules/website-growth/authority/store";
 import { NextResponse } from "next/server";
 
 import { claimApprovedWebsiteGrowthBacklinks } from "@/modules/website-growth/backlink-executor";
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
     const { tenantSlug } = authenticateWebsiteGrowthBacklinkExecutorRequest(request);
     const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug }, select: { id: true } });
     if (!tenant) return NextResponse.json({ error: "Backlink executor tenant was not found." }, { status: 404 });
+    await rejectLegacyAuthority(tenant.id);
     const body = await readOptionalJson(request);
     const limit = typeof body.limit === "number" ? body.limit : 5;
     const opportunities = await claimApprovedWebsiteGrowthBacklinks({ tenantId: tenant.id, limit });

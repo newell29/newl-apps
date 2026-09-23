@@ -129,6 +129,15 @@ const plugin = defineToolPlugin({
   configSchema,
   tools: (tool) => [
     tool({
+      name: "newl_authority_action",
+      label: "Reserve or report approved authority action",
+      description: "Use only the action ID and lease in the provided packet. Call begin immediately before the one approved guest form submission. A refusal means do not submit. Finish with observed evidence; never report LIVE.",
+      parameters: Type.Object({ action: Type.Union([Type.Literal("begin"), Type.Literal("finish"), Type.Literal("status")]),
+        id: Type.String({ minLength: 1, maxLength: 100 }), lease: Type.String({ minLength: 1, maxLength: 100 }),
+        result: Type.Optional(Type.Object({ state: Type.Union([Type.Literal("SUBMITTED"), Type.Literal("BLOCKED"), Type.Literal("UNCERTAIN")]), detail: Type.String({ minLength: 1, maxLength: 2000 }) })) }),
+      factory: createParameterizedApiTool("newl_authority_action", "/api/website-growth/backlinks/authority")
+    }),
+    tool({
       name: "newl_backlink_business_profile",
       label: "Read Approved Backlink Business Profile",
       description:

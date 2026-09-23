@@ -1,3 +1,4 @@
+import { rejectLegacyAuthority } from "@/modules/website-growth/authority/store";
 import {
   WebsiteGrowthOutreachConsentBasis,
   WebsiteGrowthOutreachMessageKind
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+    await rejectLegacyAuthority(tenant.id);
     const body = (await request.json()) as Record<string, unknown>;
     const kind = readEnum(body.kind, WebsiteGrowthOutreachMessageKind, "message kind");
     const consentBasis = readEnum(
