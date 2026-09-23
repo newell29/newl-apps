@@ -1,3 +1,4 @@
+import { lookup } from "node:dns/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTION_JOB, authorityId, CAMPAIGN_JOB, parsePlan, placementEvidence, readAction, type Plan } from "@/modules/website-growth/authority/model";
 import { authorityOutcomes, beginAuthorityAction, claimAuthorityAction, executeAuthorityAction, finishAuthorityAction,
@@ -7,9 +8,10 @@ import type { Prisma } from "@prisma/client";
 
 const mocks = vi.hoisted(() => ({ send: vi.fn(), sync: vi.fn(), fetch: vi.fn(), graph: vi.fn(), token: vi.fn(),
   db: { automationJobRun: { findFirst: vi.fn(), findMany: vi.fn(), upsert: vi.fn(), updateMany: vi.fn(), create: vi.fn() },
-    websiteGrowthBacklinkOpportunity: { findFirst: vi.fn(), findFirstOrThrow: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
-    websiteGrowthOutreachSuppression: { findUnique: vi.fn() }, websiteGrowthOutreachMessage: { count: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    websiteGrowthBacklinkOpportunity: { findFirst: vi.fn(), findFirstOrThrow: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
+    websiteGrowthOutreachSuppression: { findUnique: vi.fn() }, websiteGrowthOutreachMessage: { count: vi.fn(), create: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
     auditLog: { create: vi.fn() }, $transaction: vi.fn() } }));
+vi.mock("node:dns/promises", () => ({ lookup: vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]) }));
 vi.mock("@/server/db", () => ({ prisma: mocks.db }));
 vi.mock("@/modules/website-growth/backlink-outreach", async original => ({ ...await original<object>(), sendWebsiteGrowthOutreachEmail: mocks.send,
   syncWebsiteGrowthOutreachReplies: mocks.sync, fetchWebsiteGrowthPublicContactEvidence: mocks.fetch,
@@ -23,6 +25,7 @@ const tenant = "tenant-synthetic";
 const now = new Date("2026-09-23T14:00:00Z");
 const opportunity = () => ({ id: "publisher-synthetic", tenantId: tenant, title: "Operations resource", sourceDomain: "publisher.example.com",
   category: "RESOURCE_PAGE", status: "NEEDS_REVIEW", updatedAt: now, lastReplyAt: null as Date | null, unsubscribedAt: null,
+  messages: [] as Array<{ kind: string; externalMessageId: string | null; conversationId: string | null }>, followUpCount: 0,
   targetPage: "https://brand.example.com/resources/guide", contactedAt: null as Date | null, submittedAt: null as Date | null,
   nextFollowUpAt: null as Date | null, recipientEmail: "editor@publisher.example.com", recipientCountry: "US", consentBasis: "US_BUSINESS_OUTREACH" });
 let publisher = opportunity();
@@ -53,10 +56,10 @@ async function approveClaim(value = plan()) {
   return { id, lease: claimed!.lease! };
 }
 beforeEach(() => {
-  vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(now); rows.clear(); publisher = opportunity();
+  vi.resetAllMocks(); vi.mocked(lookup).mockResolvedValue([{ address: "93.184.216.34", family: 4 }] as never); vi.useFakeTimers(); vi.setSystemTime(now); rows.clear(); publisher = opportunity();
   rows.set("campaign", { id: authorityId(tenant, "pilot"), tenantId: tenant, jobType: CAMPAIGN_JOB,
     input: { version: 1, title: "Synthetic pilot", targetPage: publisher.targetPage, enabled: true } });
-  mocks.db.$transaction.mockImplementation(async fn => fn(mocks.db));
+  mocks.db.$transaction.mockImplementation(async fn => Array.isArray(fn) ? Promise.all(fn) : fn(mocks.db));
   mocks.db.automationJobRun.findFirst.mockImplementation(async ({ where }) => [...rows.values()].find(row => matches(row, where)) ?? null);
   mocks.db.automationJobRun.findMany.mockImplementation(async ({ where }) => [...rows.values()].filter(row => matches(row, where)));
   mocks.db.automationJobRun.upsert.mockImplementation(async ({ create }) => { if (!rows.has(create.id)) rows.set(create.id, create); return rows.get(create.id); });
@@ -74,11 +77,14 @@ beforeEach(() => {
   });
   mocks.db.websiteGrowthOutreachSuppression.findUnique.mockResolvedValue(null);
   mocks.db.websiteGrowthOutreachMessage.count.mockResolvedValue(0);
+  mocks.db.websiteGrowthOutreachMessage.create.mockImplementation(async ({ data }) => data);
+  mocks.db.websiteGrowthOutreachMessage.update.mockResolvedValue({});
+  mocks.db.websiteGrowthBacklinkOpportunity.update.mockImplementation(async ({ data }) => Object.assign(publisher, data));
   mocks.sync.mockResolvedValue({ replies: 0 }); mocks.send.mockResolvedValue({ status: "CONTACTED" });
   mocks.graph.mockResolvedValue({ id: "message-synthetic", conversationId: "conversation-synthetic" });
 });
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("authority feasibility and placement evidence", () => {
   it("rejects completely missing and partially populated email evidence", () => {
@@ -101,6 +107,21 @@ describe("authority feasibility and placement evidence", () => {
   });
 });
 describe("supervisor to executor walkthroughs", () => {
+  it("walks through the real mail service state/consent/reservation/footer contract with only network transports mocked", async () => {
+    const actual = await vi.importActual<typeof import("@/modules/website-growth/backlink-outreach")>("@/modules/website-growth/backlink-outreach");
+    for (const [key, value] of Object.entries({ MAILBOX: "partnerships@example.com", SENDER_NAME: "Editor", PUBLIC_BRAND: "Example Logistics", PUBLIC_PHONE: "+1 555 0100", WEBSITE: "https://brand.example.com", CANADA_LEGAL_NAME: "Example Canada", CANADA_ADDRESS: "Synthetic Canadian business address", US_LEGAL_NAME: "Example US", US_ADDRESS: "Synthetic US business address" })) vi.stubEnv(`WEBSITE_GROWTH_OUTREACH_${key}`, value);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('<a href="mailto:editor@publisher.example.com">Editorial submissions</a>', { headers: { "content-type": "text/html" } })));
+    let mailFailure: unknown = null;
+    mocks.send.mockImplementation(async input => { try { return await actual.sendWebsiteGrowthOutreachEmail(input); } catch (error) { mailFailure = error; throw error; } });
+    const { id, lease } = await approveClaim();
+    const result = await executeAuthorityAction(tenant, id, lease);
+    expect(mailFailure).toBeNull();
+    expect(result).toMatchObject({ state: "SUBMITTED" });
+    expect(mocks.graph).toHaveBeenCalledOnce();
+    expect(mocks.graph.mock.calls[0][2]).toMatchObject({ recipientEmail: plan().recipientEmail, subject: plan().subject, body: expect.stringContaining("unsubscribe") });
+    expect(publisher.status).toBe("CONTACTED");
+    expect(mocks.db.websiteGrowthOutreachMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ tenantId: tenant, kind: "INITIAL" }) }));
+  });
   it("keeps new proposals unexecuted until exact approval, then sends once", async () => {
     const id = await proposal();
     expect(action(id).state).toBe("REVIEW"); expect(await claimAuthorityAction(tenant, "not-approved", now)).toBeNull();

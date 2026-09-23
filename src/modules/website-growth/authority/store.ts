@@ -67,7 +67,8 @@ export async function proposeAuthorityActions(db: DB, tenantId: string, proposal
   for (const value of proposals) {
     const plan = parsePlan(value, now);
     const opportunity = await db.websiteGrowthBacklinkOpportunity.findFirst({ where: { tenantId, id: plan.opportunityId,
-      unsubscribedAt: null, status: { notIn: ["REJECTED", "ARCHIVED", "LOST"] }, category: { not: "PAID_PLACEMENT" } } });
+      unsubscribedAt: null, status: { notIn: ["REJECTED", "ARCHIVED", "LOST"] }, category: { not: "PAID_PLACEMENT" } },
+      include: { messages: { where: { tenantId }, select: { kind: true, externalMessageId: true } } } });
     if (!opportunity) throw new ScoutWorkError("The publisher is no longer eligible.", 409);
     if (!samePublisher(plan.route, opportunity.sourceDomain) || (plan.termsUrl && !samePublisher(plan.termsUrl, opportunity.sourceDomain))) {
       throw new ScoutWorkError("Use a verified route and terms on the publisher's domain. Third-party forms need human review.");
@@ -82,7 +83,7 @@ export async function proposeAuthorityActions(db: DB, tenantId: string, proposal
     if (plan.method === "FORM" && (opportunity.submittedAt || history.some(a => a.plan.method === "FORM" && a.startedAt))) {
       throw new ScoutWorkError("A submission was already attempted. Verify or reconcile it instead of submitting again.", 409);
     }
-    if (plan.method === "EMAIL" && opportunity.contactedAt) throw new ScoutWorkError("This publisher has already been contacted. Prepare a follow-up or submission instead.");
+    if (plan.method === "EMAIL" && (opportunity.contactedAt || opportunity.messages?.some(m => m.kind === "INITIAL"))) throw new ScoutWorkError("This publisher already has a contact attempt. Reconcile it or prepare a follow-up or submission instead.");
     if (plan.method === "FOLLOW_UP" && (opportunity.status !== "CONTACTED" || !opportunity.nextFollowUpAt || opportunity.nextFollowUpAt > now || opportunity.lastReplyAt)) {
       throw new ScoutWorkError("Follow-up is not due or the publisher has replied. Review the latest conversation.");
     }
@@ -207,6 +208,11 @@ export async function beginAuthorityAction(tenantId: string, id: string, lease: 
     const source = await tx.websiteGrowthBacklinkOpportunity.findFirst({ where: { tenantId, id: a.plan.opportunityId, unsubscribedAt: null } });
     if (!source || source.updatedAt.toISOString() !== a.sourceUpdatedAt) throw new ScoutWorkError("Conversation or publisher evidence changed. Prepare the next action again.", 409);
     if (a.plan.recipientEmail && await tx.websiteGrowthOutreachSuppression.findUnique({ where: { tenantId_normalizedEmail: { tenantId, normalizedEmail: a.plan.recipientEmail } } })) throw new ScoutWorkError("This contact opted out.", 409);
+    if (a.plan.method === "EMAIL") {
+      const claimed = await tx.websiteGrowthBacklinkOpportunity.updateMany({ where: { tenantId, id: source.id, status: "APPROVED", updatedAt: source.updatedAt },
+        data: { status: "IN_PROGRESS", claimedAt: new Date() } });
+      if (claimed.count !== 1) throw new ScoutWorkError("The initial outreach is no longer approved for execution.", 409);
+    }
     const next = transition(a, { startedAt: new Date().toISOString() }, "EXTERNAL_RESERVED", "Exact approved action reserved. Do not repeat it.");
     await replace(tx, tenantId, id, a, next);
     await audit(tx, tenantId, null, "external-reserved", id, { approvedBy: a.approvedBy, approvedAt: a.approvedAt });
