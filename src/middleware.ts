@@ -70,6 +70,8 @@ export const config = {
    *  - /api/website-growth/scout/*       (dedicated tenant-scoped Scout token auth)
    *  - /api/website-growth/backlinks/executor/*
    *                                      (approved-work backlink executor token auth)
+   *  - /api/website-growth/backlinks/authority
+   *                                      (exact authority endpoint; tenant-scoped executor token auth)
    *  - /api/website-growth/weekly-plan   (Vercel cron secret auth)
    *  - /api/website-growth/paid-campaigns/{health,weekly}/scheduled
    *                                      (Vercel cron secret auth)
@@ -78,6 +80,6 @@ export const config = {
    *  - Next.js internals and static files
    */
   matcher: [
-    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/openclaw/development-jobs|api/assistant/openclaw/hunter-quality|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/operations/tmg-order-intake/(?:scheduled(?:/|$)|worker(?:/|$))|api/lead-gen/apollo/status-sync|api/lead-gen/hunter/daily-plan|api/lead-gen/hunter/pilot/read$|api/lead-gen/hunter/signal-scout|api/lead-gen/hunter/company-research|api/lead-gen/hunter/outreach-handoff|api/lead-gen/hunter/apollo-exceptions|api/website-growth/scout|api/website-growth/backlinks/executor|api/website-growth/weekly-plan|api/website-growth/paid-campaigns/(?:health|weekly)/scheduled|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
+    "/((?!api/auth|api/integrations/trademining|api/assistant/teamship/read|api/assistant/openclaw/unresolved-turns|api/assistant/openclaw/development-jobs|api/assistant/openclaw/hunter-quality|api/assistant/teamship/browser-jobs|api/assistant/printing|api/assistant/garland|api/shipment-documents/teamship-review/update-jobs/agent|api/shipment-documents/teamship-review/email-intake/scheduled|api/operations/tmg-order-intake/(?:scheduled(?:/|$)|worker(?:/|$))|api/lead-gen/apollo/status-sync|api/lead-gen/hunter/daily-plan|api/lead-gen/hunter/pilot/read$|api/lead-gen/hunter/signal-scout|api/lead-gen/hunter/company-research|api/lead-gen/hunter/outreach-handoff|api/lead-gen/hunter/apollo-exceptions|api/website-growth/scout|api/website-growth/backlinks/executor|api/website-growth/backlinks/authority$|api/website-growth/weekly-plan|api/website-growth/paid-campaigns/(?:health|weekly)/scheduled|api/website-growth/build-requests|api/website-inbound|_next/static|_next/image|favicon.ico|.*\\..*).*)"
   ]
 };
