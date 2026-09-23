@@ -1,6 +1,6 @@
 import subprocess
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import authority_executor as worker
 
 
@@ -52,6 +52,15 @@ class AuthorityExecutorWalkthroughs(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             worker.run(call, Mock())
         self.assertEqual(call.call_count, 3)
+
+    def test_browser_respects_configured_agent_model_and_excludes_credentials(self):
+        with patch.dict(worker.os.environ, {"OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN": "synthetic-secret"}), \
+                patch.object(worker.subprocess, "run") as run:
+            worker.browser(self.packet())
+        args = run.call_args.args[0]
+        self.assertEqual(args[args.index("--agent") + 1], "scout-authority")
+        self.assertNotIn("--model", args)
+        self.assertNotIn("OPENCLAW_WEBSITE_GROWTH_BACKLINK_TOKEN", run.call_args.kwargs["env"])
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ npm --prefix "${runtime_repo_path}/ops/openclaw/plugins/newl-website-growth" run
 openclaw plugins install --force "${runtime_repo_path}/ops/openclaw/plugins/newl-website-growth"
 agent_index="$(openclaw config get agents.list --json | /usr/bin/python3 -c 'import json,sys; print(next((str(i) for i,a in enumerate(json.load(sys.stdin)) if a.get("id")=="scout-authority"),""))')"
 if [[ -z "${agent_index}" ]]; then
-  openclaw agents add scout-authority --non-interactive --workspace "${HOME}/.openclaw/workspace-scout-authority" --model openai/gpt-5.4-mini
+  openclaw agents add scout-authority --non-interactive --workspace "${HOME}/.openclaw/workspace-scout-authority" --model openai/gpt-5.6-sol
   agent_index="$(openclaw config get agents.list --json | /usr/bin/python3 -c 'import json,sys; print(next(str(i) for i,a in enumerate(json.load(sys.stdin)) if a.get("id")=="scout-authority"))')"
 fi
 openclaw config set "agents.list[${agent_index}].tools" '{"profile":"minimal","alsoAllow":["browser","newl_authority_action"],"deny":["exec","bash","read","write","edit","apply_patch","process","message","sessions_spawn","newl_backlink_claim","newl_backlink_send_email","newl_backlink_send_follow_up","newl_backlink_report","newl_backlink_fill_directory_credentials"]}' --strict-json
