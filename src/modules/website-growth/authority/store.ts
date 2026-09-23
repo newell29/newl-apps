@@ -199,6 +199,7 @@ async function leased(db: DB, tenantId: string, id: string, lease: string) {
 }
 /** Reservation occurs once, immediately before the external action; a second begin never grants authority. */
 export async function beginAuthorityAction(tenantId: string, id: string, lease: string) {
+  if (process.env.VERCEL_ENV === "preview") throw new ScoutWorkError("Preview validates plans and approvals but cannot send publisher email or submit live forms.", 409);
   await syncWebsiteGrowthOutreachReplies({ tenantId }); // fail closed before communication if mailbox sync is unavailable
   return prisma.$transaction(async tx => {
     if (!(await authorityCampaign(tenantId, tx))?.enabled) throw new ScoutWorkError("Campaign was paused.", 409);
