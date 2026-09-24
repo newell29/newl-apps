@@ -1,7 +1,7 @@
 import { reviewWindows } from "@/modules/website-growth/scout/effectiveness-model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MISSION, DAY_MS, WORK_JOB, MISSION_JOB, STEP_JOB, isDue, newWork, parseMission, parseResult, stableId } from "@/modules/website-growth/scout/model";
-import { claimScoutWork, completeScoutWork, reviewScoutWork, scoutWorkContext, reconcileScoutWork } from "@/modules/website-growth/scout/store";
+import { claimScoutWork, completeScoutWork, reviewScoutWork, scoutWorkContext, reconcileScoutWork, scoutWorkspace } from "@/modules/website-growth/scout/store";
 import { buildTemplateWebsiteGrowthContentDraft } from "@/modules/website-growth/content-drafts";
 import { WebsiteGrowthAction } from "@prisma/client";
 import { reusableWebsiteGrowthResearchHashes } from "@/modules/website-growth/backlink-discovery";
@@ -281,8 +281,50 @@ it.each([undefined, { verdict: "REVISE", reason: "Unsupported assertion" }, { ve
   db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH" } });
   const artifact = { proposedRoute: "/resources/guide", proposedTitle: "Guide", hypothesis: "Test", newPage: true };
   const saved = await completeScoutWork("tenant-a", "work", "lease-synthetic", { decision: "DELIVER", supervisor: review, summary: "Prepared", nextAction: "Review", artifact }, now);
-  expect(saved.state).toBe("WAITING"); expect(saved.artifact).toEqual(artifact);
+  expect(saved.state).toBe(review?.verdict === "REVISE" ? "READY" : "WAITING"); expect(saved.artifact).toEqual(artifact);
+  expect(isDue(saved, now)).toBe(review?.verdict === "REVISE");
   expect(db.websiteGrowthOpportunity.upsert).not.toHaveBeenCalled(); expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
+});
+
+it("recovers a saved correction on workspace reads and claims, charging one step with the original revision guard", async () => {
+  const saved = { ...work(), kind: "RESEARCH" as const, state: "WAITING" as const, attempts: 1,
+    artifact: { recommendation: "Saved draft" }, nextReviewAt: new Date(now.getTime() + DAY_MS).toISOString(),
+    evidence: { supervisor: { verdict: "REVISE", reason: "Verify the claim", reviewedAt: now.toISOString() },
+      waitBlocker: { type: "PUBLIC_RESEARCH", evidenceNeeded: "Public source", resolutionAction: "Check public source", resolvableByScout: true } } };
+  db.automationJobRun.findFirst.mockResolvedValue({ input: { ...DEFAULT_MISSION, enabled: true } });
+  db.automationJobRun.findMany.mockResolvedValue([{ id: "work-synthetic", output: saved }]);
+  const workspace = await scoutWorkspace("tenant-a");
+  expect(workspace.items[0]).toMatchObject({ state: "READY", artifact: saved.artifact, attempts: 1, revision: 0 });
+  expect(db.automationJobRun.updateMany).not.toHaveBeenCalled();
+  db.automationJobRun.count.mockResolvedValue(6);
+  await expect(claimScoutWork("tenant-a", "work-synthetic", "Correct saved work", "claim-blocked", now)).rejects.toThrow("budget");
+  expect(db.automationJobRun.create).not.toHaveBeenCalled();
+  db.automationJobRun.count.mockResolvedValue(0);
+  const claimed = await claimScoutWork("tenant-a", "work-synthetic", "Correct saved work", "claim-correction", now);
+  expect(claimed).toMatchObject({ state: "WORKING", attempts: 2, artifact: saved.artifact });
+  expect(db.automationJobRun.create).toHaveBeenCalledTimes(1);
+  expect(db.automationJobRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: {
+    tenantId: "tenant-a", id: "work-synthetic", jobType: WORK_JOB, output: { path: ["revision"], equals: 0 }
+  } }));
+  const heldCampaign = { ...saved, evidence: { ...saved.evidence, source: "authority-campaign" } };
+  db.automationJobRun.findMany.mockResolvedValue([{ id: "work-synthetic", output: heldCampaign }]);
+  const paused = await scoutWorkspace("tenant-a");
+  expect(paused.items[0]).toMatchObject({ state: "WAITING", evidence: { externalWait: true } });
+  await expect(claimScoutWork("tenant-a", "work-synthetic", "Do not resume a paused campaign", "claim-paused", now)).rejects.toThrow("unavailable");
+});
+
+it.each(["REVISE", "WAIT"])("supports the existing worker's %s payload without promoting its artifact", async verdict => {
+  db.automationJobRun.findFirst.mockResolvedValue({ output: { ...leased(), kind: "RESEARCH", attempts: 1 } });
+  const saved = await completeScoutWork("tenant-a", "work", "lease-synthetic", {
+    decision: "WAIT", supervisor: { verdict, reason: "Check the cited source" }, summary: "Draft retained", nextAction: "Check source",
+    reviewInDays: 1, artifact: { recommendation: "Saved draft" },
+    waitBlocker: { type: "PUBLIC_RESEARCH", evidenceNeeded: "Cited source", resolutionAction: "Check source", resolvableByScout: true }
+  }, now);
+  expect(saved.state).toBe(verdict === "REVISE" ? "READY" : "WAITING");
+  expect(saved.nextReviewAt).toBe(new Date(now.getTime() + (verdict === "REVISE" ? 0 : DAY_MS)).toISOString());
+  expect(saved.evidence.supervisor).toMatchObject({ verdict });
+  expect(db.websiteGrowthContentDraft.create).not.toHaveBeenCalled();
+  expect(db.websiteGrowthOpportunity.upsert).not.toHaveBeenCalled();
 });
 
 it.each(["PARTIAL_OR_MISSING", "WAITING_FOR_DATA", undefined])("does not promote a measurement proposal with %s and no usable evidence even if the model passes it", async status => {

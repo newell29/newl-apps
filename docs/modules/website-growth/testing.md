@@ -28,6 +28,8 @@ The OpenClaw Website Growth plugin has its own build and tests under `ops/opencl
 
 The website repository validates the optional Kimi workflow with GitHub Actions syntax checks plus the same changed-file lint and production build used for Codex. The controlled model evaluation must start both agents from the same approved brief and website commit, then compare claim compliance, route correctness, design fit, build success, reviewer edits, latency, and cost across their separate Vercel Previews. A missing or failed Kimi run must leave the Codex callback and primary build state unchanged.
 
+Supervisor-correction regressions cover after-hours completion becoming eligible at the next morning wake, recovery of existing waits on read and claim, tenant/revision guards, preserved drafts and feedback, unchanged rolling-budget and active-capacity gates, one-step worker completion, the three-attempt escalation, incomplete review/blocker metadata, missing/partial measurement evidence, and unchanged external/owner/measurement waits. Rendered workboard coverage distinguishes a ready correction from a scheduled review while still explaining a full budget. These checks use synthetic fixtures and do not run research models or contact publishers.
+
 ## Workflow / rules summary
 
 - Entry points are protected authenticated pages and/or API routes for this module.

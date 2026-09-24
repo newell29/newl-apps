@@ -87,7 +87,8 @@ class WorkerTests(unittest.TestCase):
             self.assertNotIn("Private publisher correspondence", prompt)
 
     def test_quality_failure_or_interruption_preserves_artifact_without_delivery(self):
-        for review in [{"verdict": "REVISE", "reason": "Verify the public source"}, TimeoutError(), {}]:
+        for review in [{"verdict": "REVISE", "reason": "Verify the public source"},
+                       {"verdict": "WAIT", "reason": "The measurement window is not complete"}, TimeoutError(), {}]:
             claimed = {"id": "work", "lease": "private-lease", "kind": "RESEARCH"}
             artifact = {"recommendation": "Saved investigation"}
             with patch.object(worker, "api", side_effect=[self.workspace(), claimed, {}, {}]) as api, patch.object(worker, "model", side_effect=[{"id": "work", "reason": "Useful"}, {"decision": "DELIVER", "artifact": artifact}, review]):
@@ -96,6 +97,11 @@ class WorkerTests(unittest.TestCase):
                 self.assertEqual(result["decision"], "WAIT")
                 self.assertEqual(result["artifact"], artifact)
                 self.assertEqual(result["reviewInDays"], 1)
+                # The server chooses eligibility; the worker must finish this wake without a retry loop.
+                self.assertEqual(len(api.call_args_list), 4)
+                if isinstance(review, dict) and review.get("verdict"):
+                    self.assertEqual(result["supervisor"], review)
+                    self.assertEqual(result["nextAction"], review["reason"])
 
     def test_supervisor_receives_measured_outcomes_and_dated_competitor_evidence(self):
         workspace = self.workspace()
