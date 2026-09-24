@@ -204,7 +204,9 @@ def run():
             try:
                 review = model(RULES + "\nAct as the quality supervisor. Review the proposed result against the source context. "
                                "PASS only complete, useful, supported work. REVISE unsupported claims, missing exact copy, generic tasks, "
-                               "or routine public research pushed back onto the owner. WAIT for missing evidence. "
+                               "or routine public research pushed back onto the owner. REVISE means Scout can correct the saved draft "
+                               "using available evidence or public research at its next available wake. WAIT means a real dependency, "
+                               "such as a future measurement window, unavailable external source, or private owner fact. "
                                "REVISE any new-page classification for a route already present in the website inventory, any mismatch between "
                                "the work route and proposedPath, or any existing-page brief that reads as an unnecessary wholesale rewrite. "
                                "Check dated competitor evidence and distinguish measured results from interpretation. "
@@ -217,6 +219,8 @@ def run():
                 review = {"verdict": "WAIT", "reason": "Supervisor review was interrupted. Resume with the saved artifact and review it before delivery."}
             result["supervisor"] = review
             if review["verdict"] != "PASS":
+                # Newl Apps makes eligible REVISE results ready and enforces the attempt cap.
+                # Retain the dated WAIT fallback for older servers during a staggered rollout.
                 result.update({"decision": "WAIT", "nextAction": review["reason"][:1500], "reviewInDays": 1,
                                "waitBlocker": {"type": "PUBLIC_RESEARCH", "evidenceNeeded": review["reason"][:1500],
                                                "resolutionAction": "Resolve the quality-review gap using the saved context and public evidence.",

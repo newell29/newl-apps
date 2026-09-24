@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import ScoutWorkPage from "@/app/(authenticated)/website-growth/marketing/page";
 import { DEFAULT_MISSION, newWork } from "@/modules/website-growth/scout/model";
+import { projectSupervisorCorrections } from "@/modules/website-growth/scout/learning";
 const mocks = vi.hoisted(() => ({ context: vi.fn(), workspace: vi.fn(), recipients: vi.fn(), canMutate: vi.fn() }));
 vi.mock("@/server/tenant-context", () => ({ getAuthenticatedContext: mocks.context }));
 vi.mock("@/server/auth/authorization", () => ({ requireModule: vi.fn(), resolveRoleCanMutate: mocks.canMutate }));
@@ -15,6 +16,22 @@ beforeEach(() => {
   mocks.workspace.mockResolvedValue({ configured: false, mission: DEFAULT_MISSION, items: [], truncated: false });
 });
 describe("Scout marketing workboard", () => {
+  it("shows a recovered correction as due while explaining an exhausted budget", async () => {
+    const [item] = projectSupervisorCorrections([{ ...newWork("RESEARCH", null, "Synthetic revision", "Fix the saved draft", null),
+      id: "work-correction", state: "WAITING" as const, attempts: 1, nextReviewAt: "2099-01-01T00:00:00.000Z",
+      artifact: { recommendation: "Saved draft" }, evidence: {
+        supervisor: { verdict: "REVISE", reason: "Remove unsupported claims", reviewedAt: "2026-01-01T00:00:00.000Z" },
+        waitBlocker: { type: "PUBLIC_RESEARCH", evidenceNeeded: "Public source", resolutionAction: "Check source", resolvableByScout: true }
+      } }]);
+    mocks.workspace.mockResolvedValue({ configured: true, mission: { ...DEFAULT_MISSION, enabled: true, dailySteps: 7 },
+      items: [item], truncated: false, capacity: { usedSteps: 7, active: 0, available: false } });
+    const html = renderToStaticMarkup(await ScoutWorkPage());
+    expect(html).toContain("Correction ready for the next available research wake");
+    expect(html).toContain("research budget is used");
+    expect(html).toContain("Due for Scout");
+    expect(html).not.toContain("Scout checks again");
+    expect(html).not.toContain("Save decision");
+  });
   it("shows a useful paused setup and empty states", async () => {
     const html = renderToStaticMarkup(await ScoutWorkPage());
     expect(html).toContain("Scout marketing workboard"); expect(html).toContain("Research paused");

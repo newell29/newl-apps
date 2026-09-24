@@ -10,6 +10,8 @@ The pilot defaults are the approved direction, editable in Newl Apps: improve th
 
 The existing marketing schedule and budget are retained. A reusable campaign investigation receives publisher conversations, existing action history, previous research, website inventory and measured outcomes. Fresh replies bring the campaign forward; otherwise it is revisited daily after completion. The quality supervisor reviews concrete actions before saving them. Research can propose an improvement to an existing asset through the normal page-brief/PR process. It cannot approve, send or publish.
 
+Scout-owned draft corrections returned as REVISE can resume at the next research wake with available budget, including qualifying revisions saved before this change. They do not wait an additional day merely because the previous run finished after working hours. Real dependency waits and the existing three-attempt support escalation remain in place; a paused campaign or held external action cannot be reopened by correction recovery.
+
 Feasibility precedes approval. A packet contains the exact publisher route, observed evidence checked within seven days, recipient/country/consent for email, exact copy or form fields, reviewed terms for forms, and observable completion criteria. Unsupported routes, paid work, account creation, CAPTCHA/MFA/phone steps and unknown business facts become a specific human task. The pilot automatically handles free guest forms; it does not inherit broad legacy account-creation authority.
 
 ## State and execution

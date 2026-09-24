@@ -1,8 +1,28 @@
 import { loadWebsiteGrowthSemrushCache } from "@/modules/website-growth/scout-run";
 import { DAY_MS, isDue, record, type Work } from "./model";
+import { hasPostChangeEvidence } from "./measurement";
 
 type Item = Work & { id: string };
 const recent = (work: Work) => Date.parse(work.history.at(-1)?.at ?? "") || 0;
+
+/** Recover saved correction waits on reads and claims, without approving or resetting attempts. */
+export function projectSupervisorCorrections<T extends Work>(items: T[]): T[] {
+  return items.map(work => {
+    const review = supervisorReview(work.evidence.supervisor);
+    const reviewedAt = record(work.evidence.supervisor).reviewedAt;
+    const blocker = record(work.evidence.waitBlocker);
+    if (work.state !== "WAITING" || work.evidence.externalWait || work.evidence.escalation ||
+        review?.verdict !== "REVISE" || typeof reviewedAt !== "string" || !Number.isFinite(Date.parse(reviewedAt)) ||
+        !Number.isInteger(work.attempts) || work.attempts < 0 || work.attempts >= 3 ||
+        !Object.keys(record(work.artifact)).length || blocker.type !== "PUBLIC_RESEARCH" || blocker.resolvableByScout !== true ||
+        typeof blocker.evidenceNeeded !== "string" || !blocker.evidenceNeeded.trim() ||
+        typeof blocker.resolutionAction !== "string" || !blocker.resolutionAction.trim()) return work;
+    // Missing results or an unfinished measurement window are still genuine dated waits.
+    if (work.kind === "MEASUREMENT" && (!hasPostChangeEvidence(work.evidence.measurement) ||
+        record(record(work.evidence.measurement).windows).ready !== true)) return work;
+    return { ...work, state: "READY", nextReviewAt: reviewedAt };
+  });
+}
 
 /** Due measurements/revisions must not disappear behind hundreds of imported keyword candidates. */
 export function scoutCandidates(items: Item[], now = new Date()) {
