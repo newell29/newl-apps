@@ -47,6 +47,8 @@ DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
 DISCOVERY_RESULT_LIMIT = 10
 UNREAD_CLUE_LIMIT = 12
+TRANSIENT_CHATGPT_ERRORS = {"CHATGPT_MODEL_UNAVAILABLE"}
+TRANSIENT_CHATGPT_RETRY_MINUTES = (15, 30, 60)
 ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "verify_contact", "decide", "wait"]
 DIRECTIONS = ["charlotte", "gta", "ocean", "referral"]
 DISMISS_REASON_CODES = ["wrong_identity", "wrong_geography", "service_mismatch",
@@ -155,6 +157,38 @@ def next_business_start(value):
     while day.weekday() >= 5:
         day += dt.timedelta(days=1)
     return dt.datetime.combine(day, dt.time(9), ZONE)
+
+
+def schedule_error_retry(state, code, value):
+    """Return a bounded retry time without hiding the provider failure.
+
+    Authentication and contract failures keep the conservative next-business-day
+    behavior. A transient unavailable model gets three same-day retries before
+    backing off until the next business morning.
+    """
+    if code not in TRANSIENT_CHATGPT_ERRORS:
+        state.pop("transientModelRetry", None)
+        return next_business_start(value) if code.startswith("CHATGPT_") else value + dt.timedelta(minutes=30)
+
+    previous = state.get("transientModelRetry", {})
+    same_day = False
+    try:
+        same_day = (previous.get("code") == code and
+                    parse_time(previous["lastFailureAt"]).astimezone(ZONE).date() ==
+                    value.astimezone(ZONE).date())
+    except (KeyError, TypeError, ValueError):
+        pass
+    count = previous.get("consecutiveFailures", 0) + 1 if same_day else 1
+    if count <= len(TRANSIENT_CHATGPT_RETRY_MINUTES):
+        retry_at = value + dt.timedelta(minutes=TRANSIENT_CHATGPT_RETRY_MINUTES[count - 1])
+        retry_local = retry_at.astimezone(ZONE)
+        if retry_local.date() != value.astimezone(ZONE).date() or not 9 <= retry_local.hour < 17:
+            retry_at = next_business_start(value)
+    else:
+        retry_at = next_business_start(value)
+    state["transientModelRetry"] = {"code": code, "consecutiveFailures": count,
+        "lastFailureAt": iso(value), "nextRetryAt": iso(retry_at)}
+    return retry_at
 
 
 def digest(value):
@@ -1256,6 +1290,7 @@ class Pilot:
             self.state["nextWakeAt"] = iso(next_business_start(self.clock()))
             self.event("yield", reason="Three consecutive wakes made no useful progress despite alternatives in context. Research quality needs review; pause until next business day rather than spend the budget looping.")
         self.state["lastError"] = None
+        self.state.pop("transientModelRetry", None)
         self.state["lastCompletedWakeAt"] = iso(self.clock())
         self.event("wake_completed")
 
@@ -1760,7 +1795,9 @@ class Pilot:
             "dismissedClues": len(self.state.get("dismissedClues", [])),
             "searchComparisonCases": len(self.state.get("searchComparisons", {})),
             "publicDiscoveryOnly": self.config.get("publicDiscoveryOnly", False),
-            "externalWrites": 0, "paidEmailEnrichments": 0, "lastError": self.state.get("lastError")}
+            "externalWrites": 0, "paidEmailEnrichments": 0,
+            "transientModelRetry": self.state.get("transientModelRetry"),
+            "lastError": self.state.get("lastError")}
 
     def report(self):
         rows = ["# Hunter pilot research review", "", "Local research notes only. No outreach approval or confirmed buying intent.", "",
@@ -1958,8 +1995,11 @@ def main():
                 code = str(error) if re.fullmatch(r"[A-Z_0-9]+", str(error)) else type(error).__name__
                 pilot.state["health"] = "error"
                 pilot.state["lastError"] = code
-                pilot.state["nextWakeAt"] = iso(next_business_start(now()) if code.startswith("CHATGPT_") else now() + dt.timedelta(minutes=30))
-                pilot.event("error", code=code)
+                failed_at = now()
+                pilot.state["nextWakeAt"] = iso(schedule_error_retry(pilot.state, code, failed_at))
+                retry = pilot.state.get("transientModelRetry")
+                pilot.event("error", code=code, retryCount=retry.get("consecutiveFailures") if retry else None,
+                            nextWakeAt=pilot.state["nextWakeAt"])
                 if code in {"STOP_REQUESTED", "PILOT_EXPIRED", "TENANT_MISMATCH", "CONFIG_CHANGED_RESTART_REQUIRED", "HUNTER_DISABLED", "PILOT_DISABLED"}:
                     stopping = True
             pilot.save()
