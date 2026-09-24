@@ -374,8 +374,12 @@ non-tool `error` item emitted by the CLI is counted as a passive diagnostic when
 one valid structured result and `turn.completed`; actual command/tool items and unknown item types remain
 rejected. Top-level errors and failed turns still fail closed. The process
 group is killed on timeout. No alternate model, API key, hidden web search or paid fallback is attempted.
-Subscription failure pauses until the next business morning, with a visible error. Plan usage remains
-shared with other ChatGPT/Codex work; zero API fees do not mean unlimited subscription capacity.
+Authentication, subscription and response-contract failures pause until the next business morning with
+a visible error. `CHATGPT_MODEL_UNAVAILABLE` is treated as a transient availability failure: the worker
+keeps the error visible and retries after 15, 30 and 60 minutes during the same business day. A fourth
+consecutive same-day failure, or a retry that would fall outside 09:00–17:00 Toronto time, pauses until
+the next business morning. A completed wake clears the transient retry counter. Plan usage remains shared
+with other ChatGPT/Codex work; zero API fees do not mean unlimited subscription capacity.
 
 Approved runtime configuration (private file; preserve tenant, expiry, evidence and all counters):
 

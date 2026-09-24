@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops/openclaw/hunter"))
 from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, digest, UTC, ZONE
 from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
-    TOOLS, SCHEMA, SOURCE_CATALOG_VERSION)
+    TOOLS, SCHEMA, SOURCE_CATALOG_VERSION, schedule_error_retry)
 from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
     compact_packet, memory_sample, record_run_source, reserve_diagnostic, run_attempt,
     unload_test_model, validate_matched_models)
@@ -164,6 +164,44 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.p.state["health"], "error")
         self.p.tick(force=True)
         self.assertIsNone(self.p.state["lastError"])
+
+    def test_transient_model_unavailable_retries_three_times_same_business_day(self):
+        state = {}
+        failure = dt.datetime(2026, 9, 24, 13, tzinfo=UTC)  # Thursday 09:00 Toronto
+        expected = [
+            dt.datetime(2026, 9, 24, 13, 15, tzinfo=UTC),
+            dt.datetime(2026, 9, 24, 13, 45, tzinfo=UTC),
+            dt.datetime(2026, 9, 24, 14, 45, tzinfo=UTC),
+            dt.datetime(2026, 9, 25, 13, 0, tzinfo=UTC),
+        ]
+        for retry_at in expected:
+            actual = schedule_error_retry(state, "CHATGPT_MODEL_UNAVAILABLE", failure)
+            self.assertEqual(actual, retry_at)
+            failure = actual
+        self.assertEqual(state["transientModelRetry"]["consecutiveFailures"], 4)
+        self.p.state["transientModelRetry"] = state["transientModelRetry"]
+        self.assertEqual(self.p.status()["transientModelRetry"]["consecutiveFailures"], 4)
+
+    def test_transient_model_retry_does_not_cross_business_close(self):
+        state = {}
+        failure = dt.datetime(2026, 9, 25, 20, 50, tzinfo=UTC)  # Friday 16:50 Toronto
+        retry_at = schedule_error_retry(state, "CHATGPT_MODEL_UNAVAILABLE", failure)
+        self.assertEqual(retry_at, dt.datetime(2026, 9, 28, 13, 0, tzinfo=UTC))
+
+    def test_auth_failure_keeps_next_business_day_pause(self):
+        state = {"transientModelRetry": {"code": "CHATGPT_MODEL_UNAVAILABLE",
+            "consecutiveFailures": 1, "lastFailureAt": self.time.isoformat()}}
+        retry_at = schedule_error_retry(state, "CHATGPT_AUTH_UNAVAILABLE", self.time)
+        self.assertEqual(retry_at, dt.datetime(2026, 9, 17, 13, 0, tzinfo=UTC))
+        self.assertNotIn("transientModelRetry", state)
+
+    def test_successful_wake_clears_transient_model_retry(self):
+        self.p.state.update(lastError="CHATGPT_MODEL_UNAVAILABLE", transientModelRetry={
+            "code": "CHATGPT_MODEL_UNAVAILABLE", "consecutiveFailures": 2,
+            "lastFailureAt": self.time.isoformat(), "nextRetryAt": self.time.isoformat()})
+        self.p.tick(force=True)
+        self.assertIsNone(self.p.state["lastError"])
+        self.assertNotIn("transientModelRetry", self.p.state)
 
     def test_two_stalled_wakes_leave_room_to_change_direction(self):
         self.p.tick(force=True)
