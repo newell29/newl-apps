@@ -108,6 +108,13 @@ market scan. Three actions per half hour spread the existing 40-call daily allow
 fourteen wakes when productive, rather than consuming it in seven large batches. These are ceilings,
 not a required activity or lead quota; waits, model time and other budgets can reduce actual work.
 
+Known public-page failures are recorded as unavailable observations so one oversized, unresolvable or
+unsafe URL does not abort the wake. After two recent failures on a domain, the context exposes a 24-hour
+domain backoff and the executor refuses another URL on that site while Hunter changes company, source or
+service. Unknown runtime failures still fail closed and remain visible for diagnosis. The CBSA broker
+source reads the bounded first-party licence table directly and returns broker names plus their listed
+company sites; the licence remains only a discovery clue.
+
 Two unproductive actions yield to the next half-hour wake. A model-requested global wait is capped at
 thirty minutes, even when an older proposal requests a day. Known companies use `decide/parked` with
 their own revisit condition; one unavailable property page must not pause other research. Three
@@ -174,7 +181,8 @@ reason to complete the zero-credit buyer-role lookup. Connected-mode context now
 companies without a completed people search in `buyerResearchQueue`, including their actual service
 hypothesis and whether official evidence is attached. One tailored people lookup normally becomes the
 highest-value unfinished task on a later wake. The result records searched titles and time; a completed
-empty lookup records a contact gap instead of triggering synonym retries. `status` reports pending and
+empty lookup permits one materially different, narrower zero-credit role lookup. After two empty
+lookups, Hunter records the contact gap without further synonym retries. `status` reports pending and
 completed buyer research, and the review explains preparation state. This does not change commercial
 fit, verify employment, reveal email, clear suppression, make outreach ready or authorize contact.
 Candidates returned by that lookup then appear in `contactVerificationQueue` until one bounded public

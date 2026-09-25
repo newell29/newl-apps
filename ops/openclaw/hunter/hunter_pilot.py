@@ -24,6 +24,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -41,12 +42,16 @@ SOURCE_CATALOG = SOURCE_CATALOG_DOCUMENT["sources"]
 SOURCE_KEYS = [row["key"] for row in SOURCE_CATALOG]
 SOURCE_BY_KEY = {row["key"]: row for row in SOURCE_CATALOG}
 SOURCE_DOMAIN_KEYS = {host: row["key"] for row in SOURCE_CATALOG for host in row["domains"]}
-VERSION = "hunter-autonomous-pilot-v5"
+VERSION = "hunter-autonomous-pilot-v6"
 COMPARISON_VERSION = "matched-decision-v1"
 DEFAULT_WAKE_STEPS = 3
 EXTRACTOR_VERSION = "main-content-v2"
 DISCOVERY_RESULT_LIMIT = 10
 UNREAD_CLUE_LIMIT = 12
+MAX_FETCH_FAILURES_PER_DOMAIN = 2
+FETCH_DOMAIN_BACKOFF = dt.timedelta(days=1)
+MAX_BUYER_LOOKUPS = 2
+CBSA_BROKER_LIST_URL = "https://www.cbsa-asfc.gc.ca/services/cb-cd/cb-cd-eng.html"
 TRANSIENT_CHATGPT_ERRORS = {"CHATGPT_MODEL_UNAVAILABLE"}
 TRANSIENT_CHATGPT_RETRY_MINUTES = (15, 30, 60)
 ACTIONS = ["search", "fetch", "open_company", "dismiss_clue", "people", "verify_contact", "decide", "wait"]
@@ -79,7 +84,8 @@ CONTRACTS = {
     "people": (["company", "titles"], []),
     "verify_contact": (["company", "personId", "employmentStatus", "evidenceIds", "rationale"], ["publicName"]),
     "decide": (["company", "status", "summary", "uncertainty", "nextAction", "evidenceIds", "revisitDays", "revisitWhen"],
-               ["quote", "quoteEvidenceId", "targetRoles", "outreachApproach", "outreachQuestions"]),
+               ["quote", "quoteEvidenceId", "targetRoles", "outreachApproach", "outreachQuestions",
+                "direction", "hypothesis"]),
     "wait": (["reason", "minutes"], [])}
 SCHEMA = {"oneOf": [{"type": "object", "additionalProperties": False,
     "properties": {"action": {"const": action}, "purpose": {"type": "string"},
@@ -107,13 +113,16 @@ verify_contact: {company, personId, employmentStatus, evidenceIds:[id,...], rati
   This saves research evidence and never reveals an email or authorizes outreach.
 decide: {company, status:'active'|'parked'|'rejected'|'recommended', summary, uncertainty,
   nextAction, evidenceIds:[id,...], quote, quoteEvidenceId, revisitDays, revisitWhen,
-  targetRoles?, outreachApproach?, outreachQuestions?}.
+  targetRoles?, outreachApproach?, outreachQuestions?, direction?, hypothesis?}.
   company must be an already-saved domain from activeCompanies, dueForRevisit or otherCompanies.
   Do not create a company merely to reject it or call decide for an unknown company.
   A recommendation needs an exact supporting quote from a fetched official page. Missing evidence
   must remain explicit. It also needs 1-8 targetRoles, a specific outreachApproach and 1-6 honest
   discovery questions. These are owner-review preparation, not outreach approval. Use active to pivot
-  a hypothesis. Park/reject instead of filling a quota.
+  a hypothesis. When active changes service, include direction and hypothesis; the executor preserves
+  the closed service direction. Before parking or rejecting, consider whether saved evidence supports
+  another Newl service. A failed warehouse hypothesis does not close ocean, trucking or referral fit.
+  Park/reject instead of filling a quota.
 wait: {reason, minutes:30..1440} -- global pause, capped to 30 minutes. For a known company,
   use decide/parked with a revisit condition instead. One blocked clue is not global exhaustion.
 No mandatory order or research passes. Do not loop over the same failed action. At most five active
@@ -121,10 +130,12 @@ companies; choose whether to finish/park one or explore a better direction. Comp
 instead of only collecting sources. After fetching a named company's official page for a stated
 uncertainty, normally open it, dismiss the clue, or fetch one clearly necessary source before starting
 another broad search. References must be actual evidence IDs in the journal.
-buyerResearchQueue contains commercially recommended companies that have not yet received one tailored,
-zero-credit people lookup. Normally finish one pending buyer-role check before another broad discovery
-search unless an active investigation has an immediately decisive source. This prepares owner review;
-it does not verify employment, reveal an email, approve outreach, or make contact mandatory for fit.
+buyerResearchQueue contains commercially recommended companies that still have bounded contact work.
+Normally finish one pending buyer-role check before another broad discovery search unless an active
+investigation has an immediately decisive source. If the first zero-credit lookup returns no person,
+one materially different lookup may use a narrower alternate owner or operating-role set; never exceed
+two total lookups or repeat title synonyms. This prepares owner review; it does not verify employment,
+reveal an email, approve outreach, or make contact mandatory for fit.
 contactVerificationQueue contains returned people candidates that still need one bounded public check.
 Use the candidate's first name, masked surname hint, role, company and safe public profile URL when
 available. Do not guess a full name. If public evidence cannot resolve identity and current employment,
@@ -341,6 +352,95 @@ class PilotTextParser(HTMLParser):
     def content(self):
         preferred = " ".join(self.main_parts)
         return preferred if len(preferred) > 100 else " ".join(self.parts)
+
+
+class CbsaBrokerTableParser(HTMLParser):
+    """Extract broker names and websites from CBSA's first-party table without emails."""
+    def __init__(self):
+        super().__init__()
+        self.table_depth = 0
+        self.row = None
+        self.cell = None
+        self.rows = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "table":
+            self.table_depth += 1
+        elif tag == "tr" and self.table_depth:
+            self.row = []
+        elif tag in {"td", "th"} and self.row is not None:
+            self.cell = {"parts": [], "href": None}
+        elif tag == "a" and self.cell is not None and not self.cell["href"]:
+            self.cell["href"] = attributes.get("href")
+
+    def handle_data(self, data):
+        if self.cell is not None:
+            value = " ".join(data.split())
+            if value:
+                self.cell["parts"].append(value)
+
+    def handle_endtag(self, tag):
+        if tag in {"td", "th"} and self.cell is not None and self.row is not None:
+            self.row.append({"text": " ".join(self.cell["parts"]), "href": self.cell["href"]})
+            self.cell = None
+        elif tag == "tr" and self.row is not None:
+            if self.row:
+                self.rows.append(self.row)
+            self.row = None
+            self.cell = None
+        elif tag == "table" and self.table_depth:
+            self.table_depth -= 1
+
+
+def parse_cbsa_brokers(document):
+    parser = CbsaBrokerTableParser()
+    parser.feed(document)
+    rows = []
+    for cells in parser.rows:
+        if len(cells) < 2:
+            continue
+        name = " ".join(cells[0]["text"].split())
+        links = [cell.get("href") for cell in cells if cell.get("href")]
+        if not name or name.casefold() == "name":
+            continue
+        website = None
+        for link in links:
+            candidate = urllib.parse.urljoin(CBSA_BROKER_LIST_URL, link)
+            parsed = urllib.parse.urlsplit(candidate)
+            if (parsed.scheme in {"http", "https"} and parsed.hostname and
+                    not parsed.hostname.endswith("cbsa-asfc.gc.ca")):
+                website = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.query, ""))
+                break
+        if not website:
+            continue
+        marker = digest([name, website])
+        rows.append({"url": CBSA_BROKER_LIST_URL + "#broker-" + marker, "title": name,
+            "snippet": "CBSA lists this company as a licensed Canadian customs broker. "
+                       "Listed company website: " + website, "publishedAt": None})
+    return rows
+
+
+def fetch_cbsa_brokers():
+    request = urllib.request.Request(CBSA_BROKER_LIST_URL, headers={
+        "Accept": "text/html,application/xhtml+xml", "User-Agent": "Newl-Hunter-Pilot/1.0"})
+    body, _final_url, content_type = fetch_bytes(request, timeout=30, maximum=2_000_000)
+    if "html" not in content_type.lower():
+        return []
+    return parse_cbsa_brokers(body.decode("utf-8", "replace"))
+
+
+def public_fetch_failure_code(error):
+    message = str(error)
+    if message == "Hunter research response exceeded its size limit.":
+        return "RESPONSE_TOO_LARGE"
+    if message.startswith("Hunter research could not resolve "):
+        return "DNS_UNAVAILABLE"
+    if message in {"Hunter research accepts public HTTPS URLs only.",
+                   "Hunter research cannot retrieve local hosts.",
+                   "Hunter research cannot retrieve private or non-global addresses."}:
+        return "PUBLIC_URL_REJECTED"
+    return None
 
 
 def fetch_public_page(url):
@@ -608,13 +708,17 @@ class Pilot:
                 urlparse(e["url"]).hostname in {company["domain"], "www." + company["domain"]}]
 
     def buyer_research(self, company):
-        attempted = "contactState" in company or bool(company.get("contactResearchAt"))
+        attempts = company.get("contactResearchAttempts")
+        if type(attempts) is not int or attempts < 0:
+            attempts = 1 if "contactState" in company or company.get("contactResearchAt") else 0
         candidates = company.get("contacts", [])
         statuses = [candidate.get("employmentStatus", "UNVERIFIED")
                     for candidate in candidates if isinstance(candidate, dict)]
-        return {"state": "COMPLETED" if attempted else "PENDING",
+        completed = bool(candidates) or attempts >= MAX_BUYER_LOOKUPS
+        return {"state": "COMPLETED" if completed else "PENDING",
                 "contactState": company.get("contactState", "NOT_RESEARCHED"),
                 "candidateCount": len(candidates) if isinstance(candidates, list) else 0,
+                "lookupAttempts": attempts, "maxLookupAttempts": MAX_BUYER_LOOKUPS,
                 "titles": company.get("contactTitles", []),
                 "researchedAt": company.get("contactResearchAt"),
                 "verificationPending": sum(not candidate.get("employmentVerificationAt")
@@ -624,6 +728,50 @@ class Pilot:
                 "employmentVerified": any(candidate.get("employmentVerified") is True
                                           for candidate in candidates if isinstance(candidate, dict)),
                 "outreachReady": False}
+
+    def recent_fetch_failures(self, url):
+        host = (urllib.parse.urlsplit(url).hostname or "").casefold().removeprefix("www.")
+        if not host:
+            return []
+        cutoff = self.clock() - FETCH_DOMAIN_BACKOFF
+        rows = []
+        for attempt in self.state["attempts"].values():
+            if attempt.get("action") != "fetch" or not attempt.get("url"):
+                continue
+            attempt_host = (urllib.parse.urlsplit(attempt["url"]).hostname or "").casefold().removeprefix("www.")
+            if attempt_host != host:
+                continue
+            try:
+                recent = parse_time(attempt["at"]) >= cutoff
+            except (KeyError, TypeError, ValueError):
+                recent = False
+            result = attempt.get("result") or {}
+            if recent and (attempt.get("state") == "started" or result.get("state") == "unavailable"):
+                rows.append(attempt)
+        return rows
+
+    def fetch_domain_backoffs(self):
+        hosts = {}
+        for attempt in self.state["attempts"].values():
+            if attempt.get("action") != "fetch" or not attempt.get("url"):
+                continue
+            host = (urllib.parse.urlsplit(attempt["url"]).hostname or "").casefold().removeprefix("www.")
+            if host and len(self.recent_fetch_failures(attempt["url"])) >= MAX_FETCH_FAILURES_PER_DOMAIN:
+                hosts[host] = {"domain": host, "failureCount": len(self.recent_fetch_failures(attempt["url"])),
+                    "retryAfter": iso(max(parse_time(row["at"]) for row in self.recent_fetch_failures(attempt["url"])) +
+                                      FETCH_DOMAIN_BACKOFF)}
+        return sorted(hosts.values(), key=lambda row: row["domain"])
+
+    def structured_source_rows(self, source_key):
+        if source_key != "cbsa_customs_brokers":
+            return None
+        rows = fetch_cbsa_brokers()
+        seen = {e.get("title", "").casefold() for e in self.state["evidence"].values()
+                if source_key in self.source_keys_for_evidence(e)}
+        seen.update(c.get("name", "").casefold() for c in self.state["companies"].values())
+        seen.update(item.get("name", "").casefold() for item in self.state.get("dismissedClues", [])
+                    if item.get("name"))
+        return [row for row in rows if row["title"].casefold() not in seen][:DISCOVERY_RESULT_LIMIT]
 
     def safety(self, company):
         result = self.bridge("company", name=company["name"], domain=company["domain"])
@@ -677,6 +825,16 @@ class Pilot:
                           "nextStep": "Do not repeat or paraphrase this lookup. Resolve a different uncertainty, change research direction, or wait."}
                 self.event("action", action=name, purpose=purpose, company=args.get("company"), result=result)
                 return result
+        if name == "fetch":
+            failures = self.recent_fetch_failures(args["url"])
+            if len(failures) >= MAX_FETCH_FAILURES_PER_DOMAIN:
+                host = (urllib.parse.urlsplit(args["url"]).hostname or "").casefold().removeprefix("www.")
+                retry_at = max(parse_time(row["at"]) for row in failures) + FETCH_DOMAIN_BACKOFF
+                result = {"state": "domain_backoff", "domain": host,
+                          "failureCount": len(failures), "retryAfter": iso(retry_at),
+                          "nextStep": "Change company, source or service; do not try another URL on this domain yet."}
+                self.event("action", action=name, purpose=purpose, company=args.get("company"), result=result)
+                return result
         if name in {"search", "fetch"} and args.get("company"):
             self.safety(self.company(args))
         # Save the attempt BEFORE I/O, so interrupted/failed lookups are not repeated on restart.
@@ -708,19 +866,28 @@ class Pilot:
                 raise ValueError("Choose a business direction")
             if args.get("sourceKey") not in SOURCE_BY_KEY:
                 raise ValueError("Choose a source from researchSourceCatalog")
-            cost = self.config["searchCostMicros"]
-            if self.config["searchProvider"] == "BRAVE" and cost <= 0:
+            structured = args["sourceKey"] == "cbsa_customs_brokers"
+            cost = 0 if structured else self.config["searchCostMicros"]
+            if not structured and self.config["searchProvider"] == "BRAVE" and cost <= 0:
                 raise ValueError("Paid search requires a configured conservative per-call cost")
             self.reserve("searches", cost)
             try:
-                rows = self.search(query)
+                rows = self.structured_source_rows(args["sourceKey"])
+                if rows is None:
+                    rows = self.search(query)
             except (urllib.error.URLError, TimeoutError) as error:
                 return {"state": "unavailable", "provider": self.config["searchProvider"],
                         "httpStatus": getattr(error, "code", None)}
+            except RuntimeError as error:
+                code = public_fetch_failure_code(error)
+                if not code:
+                    raise
+                return {"state": "unavailable", "provider": "CBSA", "reasonCode": code}
             ids = [self.evidence(r, "search", args.get("company"), args["sourceKey"],
                                  args["direction"]) for r in rows[:DISCOVERY_RESULT_LIMIT]]
             return {"evidenceIds": ids, "resultCount": len(ids), "direction": args["direction"],
-                    "sourceKey": args["sourceKey"], "empty": not ids}
+                    "sourceKey": args["sourceKey"],
+                    "provider": "CBSA" if structured else self.config["searchProvider"], "empty": not ids}
         if name == "fetch":
             url = text(args.get("url"), 2000)
             self.reserve("pages")
@@ -728,6 +895,11 @@ class Pilot:
                 fetched = self.fetch(url)
             except (urllib.error.URLError, TimeoutError) as error:
                 return {"state": "unavailable", "url": url, "httpStatus": getattr(error, "code", None)}
+            except RuntimeError as error:
+                code = public_fetch_failure_code(error)
+                if not code:
+                    raise
+                return {"state": "unavailable", "url": url, "reasonCode": code}
             excerpt, published = fetched[:2]
             final_url = fetched[2] if len(fetched) > 2 else url
             if not excerpt:
@@ -785,6 +957,12 @@ class Pilot:
             if not isinstance(titles, list) or not 1 <= len(titles) <= 8:
                 raise ValueError("Choose 1–8 relevant roles")
             titles = [text(t, 80) for t in titles]
+            research = self.buyer_research(company)
+            if research["lookupAttempts"] >= MAX_BUYER_LOOKUPS:
+                raise ValueError("Buyer lookup limit reached; preserve the contact gap for owner review")
+            if research["lookupAttempts"] and {title.casefold() for title in titles} == {
+                    title.casefold() for title in company.get("contactTitles", [])}:
+                raise ValueError("Second buyer lookup must use a materially different, narrower role set")
             self.reserve("people")
             result = self.bridge("people", name=company["name"], domain=company["domain"], titles=titles)
             if result.get("tenantId") != self.config["tenantId"] or not result.get("allowed"):
@@ -797,6 +975,7 @@ class Pilot:
             company["contactState"] = result["result"]
             company["contactTitles"] = titles
             company["contactResearchAt"] = iso(self.clock())
+            company["contactResearchAttempts"] = research["lookupAttempts"] + 1
             return {"state": result["result"], "candidates": company["contacts"]}
         if name == "verify_contact":
             company = self.company(args)
@@ -840,6 +1019,14 @@ class Pilot:
             summary = text(args.get("summary"))
             uncertainty = text(args.get("uncertainty"))
             next_action = text(args.get("nextAction"))
+            pivot_direction = args.get("direction")
+            pivot_hypothesis = args.get("hypothesis")
+            if bool(pivot_direction) != bool(pivot_hypothesis):
+                raise ValueError("An active service pivot requires both direction and hypothesis")
+            if pivot_direction and status != "active":
+                raise ValueError("Use status active when pivoting to another service direction")
+            if pivot_direction not in {None, *DIRECTIONS}:
+                raise ValueError("Choose a supported service direction")
             if status == "recommended":
                 quote = text(args.get("quote"), 1000)
                 evidence = self.state["evidence"].get(args.get("quoteEvidenceId"))
@@ -860,6 +1047,12 @@ class Pilot:
             if type(revisit_days) is not int or not 1 <= revisit_days <= 180:
                 raise ValueError("Revisit must be 1–180 days")
             revisit_when = text(args.get("revisitWhen"))
+            if pivot_direction and pivot_direction != company["direction"]:
+                company.setdefault("closedDirectionHypotheses", []).append({
+                    "direction": company["direction"], "hypothesis": company.get("hypothesis"),
+                    "closedAt": iso(self.clock()), "reason": summary})
+                company["direction"] = pivot_direction
+                company["hypothesis"] = text(pivot_hypothesis)
             company.update(status=status, summary=summary, uncertainty=uncertainty, nextAction=next_action,
                 evidenceIds=list(dict.fromkeys(company["evidenceIds"] + ids)), decidedAt=iso(self.clock()),
                 revisitAt=iso(self.clock() + dt.timedelta(days=revisit_days)), revisitWhen=revisit_when,
@@ -1193,9 +1386,10 @@ class Pilot:
             "previousSearches": [a.get("query") for a in self.state["attempts"].values() if a.get("query")][-50:],
             "researchCoverage": self.research_coverage(), "unreadClues": self.unread_clues(),
             "researchSourceCatalog": {"version": SOURCE_CATALOG_VERSION, "sources": SOURCE_CATALOG},
+            "fetchDomainBackoffs": self.fetch_domain_backoffs(),
             "researchMomentum": self.research_momentum(),
             "consecutiveStalledWakes": self.state.get("unproductiveWakes", 0),
-            "workSelection": "Choose one action that can materially change a decision. A company is research-qualified when first-party evidence supports the right goods movement, a specific Newl service and the relevant geography or lane with no material contradiction. Public proof of outsourcing, provider shopping or current buying intent is not required and its absence is never a dismiss_clue reason. Open and investigate plausible ICP companies rather than demanding evidence that is rarely public. Continue an active investigation first when a decisive source exists. A pending buyerResearchQueue item is useful only after commercial recommendation; complete at most one tailored lookup rather than using people search for discovery. If contactVerificationQueue has candidates, make one bounded public employment check using company_follow_up, fetch the strongest public source when useful, and record verify_contact without guessing identity. Otherwise select a relevant researchSourceCatalog source, harvest one bounded candidate batch, and review the returned unreadClues before another discovery search. researchCoverage.sourceStrategies records candidate, dismissal and company outcomes for the chosen source; researchCoverage.sourceFamilies separately records observed domains. These observed source outcomes are marginal-yield evidence, not quotas, scores or forced rotations. Reuse productive sources, but leave repeated empty or same-shaped dead ends. open_web is a fallback, and other_named_source permits a materially new source when its purpose names its hypothesis. At the start of a fresh business day, change company, source or service after prior low yield. Once current-day searches and dismissals show falling marginal yield and no stronger clue remains, wait. unreadClues is a menu, not an inbox; do not clear weak clues merely to create activity. Coverage counts do not prove that a market is exhausted.",
+            "workSelection": "Choose one action that can materially change a decision. A company is research-qualified when first-party evidence supports the right goods movement, a specific Newl service and the relevant geography or lane with no material contradiction. Public proof of outsourcing, provider shopping or current buying intent is not required and its absence is never a dismiss_clue reason. Open and investigate plausible ICP companies rather than demanding evidence that is rarely public. Continue an active investigation first when a decisive source exists. Before parking or rejecting a company, use an active decision with a new direction and hypothesis when the saved evidence supports another Newl service; this preserves the closed direction. A pending buyerResearchQueue item is useful only after commercial recommendation; complete one tailored lookup and, only when it returns no person, at most one materially different lookup rather than using people search for discovery. If contactVerificationQueue has candidates, make one bounded public employment check using company_follow_up, fetch the strongest public source when useful, and record verify_contact without guessing identity. Otherwise select a relevant researchSourceCatalog source, harvest one bounded candidate batch, and review the returned unreadClues before another discovery search. researchCoverage.sourceStrategies records candidate, dismissal and company outcomes for the chosen source; researchCoverage.sourceFamilies separately records observed domains. fetchDomainBackoffs lists sites with repeated recent retrieval failures; change company, source or service until retryAfter instead of trying another URL on that site. These observed source outcomes are marginal-yield evidence, not quotas, scores or forced rotations. Reuse productive sources, but leave repeated empty or same-shaped dead ends. open_web is a fallback, and other_named_source permits a materially new source when its purpose names its hypothesis. At the start of a fresh business day, change company, source or service after prior low yield. Once current-day searches and dismissals show falling marginal yield and no stronger clue remains, wait. unreadClues is a menu, not an inbox; do not clear weak clues merely to create activity. Coverage counts do not prove that a market is exhausted.",
             "usedToday": self.budget(), "limits": self.config["limits"]}
 
     def recover_legacy_wait(self):
@@ -1258,7 +1452,8 @@ class Pilot:
             execution_error = None
             try:
                 result = self.execute(action)
-                unproductive = unproductive + 1 if result.get("state") in {"cached_or_already_attempted", "unavailable", "already_known"} or result.get("empty") else 0
+                unproductive = unproductive + 1 if result.get("state") in {
+                    "cached_or_already_attempted", "unavailable", "already_known", "domain_backoff"} or result.get("empty") else 0
                 if unproductive == 0 and action["action"] != "wait":
                     productive = True
                     self.state["lastUsefulActionAt"] = iso(self.clock())
