@@ -11,7 +11,7 @@ import { parseWebsiteGrowthScoutCompletion } from "@/modules/website-growth/scou
 import { parseWebsiteGrowthBacklinkReview, persistWebsiteGrowthBacklinkReview } from "@/modules/website-growth/backlinks";
 import { hasPostChangeEvidence, measurementWindows, measureScoutPage } from "./measurement";
 import { loadScoutPageEvidence } from "./page-evidence";
-import { projectPageHandoffs } from "./lifecycle";
+import { pageHandoffTransition, projectPageHandoffs } from "./lifecycle";
 import { projectSupervisorCorrections, scoutCompetitorEvidence, scoutOutcomes, supervisorReview } from "./learning";
 import { DEFAULT_MISSION, MISSION_JOB, WORK_JOB, STEP_JOB, WAKE_JOB, LEASE_MS, DAY_MS, ScoutWorkError,
   isDue, newWork, nextWork, parseMission, parseResult, readWork, record, routePath, stableId, text,
@@ -21,19 +21,55 @@ type Client = Prisma.TransactionClient;
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 
 export async function scoutWorkspace(tenantId: string) {
-  const [missionJob, jobs] = await Promise.all([
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - DAY_MS);
+  const [missionJob, jobs, activityJobs] = await Promise.all([
     prisma.automationJobRun.findFirst({ where: { tenantId, id: stableId(tenantId, "mission"), jobType: MISSION_JOB } }),
-    prisma.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB }, orderBy: { createdAt: "desc" }, take: 1000 })
+    prisma.automationJobRun.findMany({ where: { tenantId, jobType: WORK_JOB }, orderBy: { createdAt: "desc" }, take: 1000 }),
+    prisma.automationJobRun.findMany({ where: { tenantId, jobType: { in: [STEP_JOB, WAKE_JOB] }, startedAt: { gte: cutoff } },
+      orderBy: { startedAt: "desc" }, take: 100 })
   ]);
   const mission = missionJob ? parseMission(missionJob.input) : DEFAULT_MISSION;
   const projected = await projectPageHandoffs(prisma, tenantId, jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; }));
   const campaign = await authorityCampaign(tenantId);
   const items = projectSupervisorCorrections(projectAuthorityHandoffs(projected, campaign));
   const usedSteps = await prisma.automationJobRun.count({ where: { tenantId, jobType: STEP_JOB,
-    startedAt: { gte: new Date(Date.now() - DAY_MS) } } });
-  const active = items.filter(item => item.state === "NEEDS_REVIEW" || (item.state === "WORKING" && Date.parse(item.leaseUntil ?? "") > Date.now())).length;
+    startedAt: { gte: cutoff } } });
+  const active = items.filter(item => item.state === "NEEDS_REVIEW" || (item.state === "WORKING" && Date.parse(item.leaseUntil ?? "") > now.getTime())).length;
+  const recentActivity = projectScoutActivity(activityJobs, usedSteps, mission.dailySteps);
   return { mission, configured: Boolean(missionJob), items, truncated: jobs.length === 1000,
-    capacity: { usedSteps, active, available: usedSteps < mission.dailySteps && active < mission.maxActive } };
+    capacity: { usedSteps, active, available: usedSteps < mission.dailySteps && active < mission.maxActive }, recentActivity };
+}
+
+export function projectScoutActivity(rows: Array<{ jobType: string; status: unknown; startedAt: Date | null; finishedAt: Date | null;
+  input: unknown; output: unknown }>, usedSteps: number, dailySteps: number) {
+  const ordered = [...rows].sort((left, right) => (right.startedAt?.getTime() ?? 0) - (left.startedAt?.getTime() ?? 0));
+  const steps = ordered.filter(row => row.jobType === STEP_JOB && row.startedAt).map(row => {
+    const input = record(row.input), output = record(row.output);
+    return {
+      at: row.startedAt!.toISOString(), finishedAt: row.finishedAt?.toISOString() ?? null, status: String(row.status),
+      title: typeof input.workTitle === "string" ? input.workTitle : "Scout research step",
+      kind: typeof input.workKind === "string" ? input.workKind : null,
+      selectionReason: typeof input.selectionReason === "string" ? input.selectionReason : null,
+      summary: typeof output.summary === "string" ? output.summary : null,
+      state: typeof output.state === "string" ? output.state : null
+    };
+  });
+  const wakeRow = ordered.find(row => row.jobType === WAKE_JOB && row.startedAt);
+  const wake = wakeRow ? record(wakeRow.output) : null;
+  const oldestStep = steps.at(-1);
+  return {
+    steps,
+    latestWake: wakeRow && wake ? {
+      at: wakeRow.startedAt!.toISOString(),
+      summary: typeof wake.summary === "string" ? wake.summary : "Scout completed its scheduled capacity check.",
+      idleReason: typeof wake.idleReason === "string" ? wake.idleReason : null,
+      dueCount: typeof wake.dueCount === "number" ? wake.dueCount : null
+    } : null,
+    nextBudgetAt: usedSteps >= dailySteps && oldestStep
+      ? new Date(Date.parse(oldestStep.at) + DAY_MS).toISOString()
+      : null
+  };
 }
 export async function saveScoutMission(tenantId: string, userId: string, input: unknown) {
   const mission = parseMission(input);
@@ -442,11 +478,13 @@ async function reconcilePageHandoffs(tenantId: string) {
     output: { path: ["kind"], equals: "PAGE" } }, take: 1000 });
   const items = jobs.flatMap(job => { const work = readWork(job.output); return work ? [{ id: job.id, ...work }] : []; });
   const projected = await projectPageHandoffs(prisma, tenantId, items);
-  for (const work of items) {
-    const current = projected.find(item => item.id === work.id)!;
-    if (JSON.stringify(current) === JSON.stringify(work)) continue;
-    const updated = nextWork(work, current, "HANDOFF", current.nextAction);
-    await prisma.$transaction(tx => replace(tx, tenantId, work.id, work, updated));
+  for (const job of jobs) {
+    const previous = readWork(job.output);
+    const current = projected.find(item => item.id === job.id);
+    if (!previous || !current) continue;
+    const updated = pageHandoffTransition(previous, current);
+    if (!updated) continue;
+    await prisma.$transaction(tx => replace(tx, tenantId, job.id, previous, updated));
   }
 }
 async function reconcileRelationshipHandoffs(tenantId: string) {

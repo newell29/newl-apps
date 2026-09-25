@@ -120,10 +120,12 @@ Choose WAIT with a concrete next action when evidence is missing. DISMISS weak w
 Every WAIT must include waitBlocker. Name the exact missing evidence, the action that can resolve it, and whether Scout can resolve it itself.
 Use OWNER_INPUT only for a business decision or private fact Scout cannot verify. Do not push ordinary public research or available saved data back to the owner.
 For PAGE deliver the complete page brief schema with exact copy, source context, and useful conversion improvements.
+Treat pageEvidence.searchQueries.totals as the deterministic aggregate for the bounded saved report. Never replace it with an older narrative total or sum the displayed top-query rows as if they were complete. Disclose PARTIAL evidence as bounded.
 Treat the supplied website route inventory and current-page evidence as authoritative for route existence. If the route exists,
 classify the work as an existing-page update, keep proposedPath on that route, use pagePreview mode existing_page_update,
 and preserve the current page's useful structure. Show the complete page only as after-change context; make pageChangePreview
 a focused section-level patch. Do not disguise a rewrite or a duplicate route as an improvement.
+New conversion or qualification fields are optional by default. Make a field required only when supplied first-party evidence or an explicit owner direction supports the added friction; otherwise propose it as an optional learning field.
 For RELATIONSHIP draft a relevant response to the latest reply for human review; make no commitments.
 For MEASUREMENT use the authoritative supplied measurements, distinguish association from causation, and retain limitations.
 Judge progress by qualified enquiries when actually linked, then enquiries, engaged visits, search clicks, impressions, CTR and position.
@@ -209,6 +211,7 @@ def run():
                                "such as a future measurement window, unavailable external source, or private owner fact. "
                                "REVISE any new-page classification for a route already present in the website inventory, any mismatch between "
                                "the work route and proposedPath, or any existing-page brief that reads as an unnecessary wholesale rewrite. "
+                               "REVISE any newly required conversion or qualification field that lacks first-party evidence or explicit owner direction. "
                                "Check dated competitor evidence and distinguish measured results from interpretation. "
                                "This quality review never approves sending, building or publishing.\n" +
                                json.dumps({"mission": workspace["mission"], "work": public_work, "context": context, "result": result}),

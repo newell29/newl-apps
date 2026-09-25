@@ -24,13 +24,21 @@ describe("Scout marketing workboard", () => {
         waitBlocker: { type: "PUBLIC_RESEARCH", evidenceNeeded: "Public source", resolutionAction: "Check source", resolvableByScout: true }
       } }]);
     mocks.workspace.mockResolvedValue({ configured: true, mission: { ...DEFAULT_MISSION, enabled: true, dailySteps: 7 },
-      items: [item], truncated: false, capacity: { usedSteps: 7, active: 0, available: false } });
+      items: [item], truncated: false, capacity: { usedSteps: 7, active: 0, available: false }, recentActivity: {
+        latestWake: { at: "2026-09-25T15:00:00.000Z", summary: "The rolling daily research-step budget is used.", idleReason: "The rolling daily research-step budget is used.", dueCount: 1 },
+        nextBudgetAt: "2026-09-25T17:00:00.000Z",
+        steps: [{ at: "2026-09-25T14:00:00.000Z", finishedAt: "2026-09-25T14:02:00.000Z", status: "SUCCESS", title: "Review fulfillment page", kind: "PAGE", selectionReason: "Largest qualified opportunity", summary: "Prepared a revised brief.", state: "NEEDS_REVIEW" }]
+      } });
     const html = renderToStaticMarkup(await ScoutWorkPage());
     expect(html).toContain("Correction ready for the next available research wake");
     expect(html).toContain("research budget is used");
     expect(html).toContain("Due for Scout");
     expect(html).not.toContain("Scout checks again");
     expect(html).not.toContain("Save decision");
+    expect(html).toContain("Scout activity · last 24 hours");
+    expect(html).toContain("Why selected:");
+    expect(html).toContain("Prepared a revised brief.");
+    expect(html).toContain("Next research slot:");
   });
   it("shows a useful paused setup and empty states", async () => {
     const html = renderToStaticMarkup(await ScoutWorkPage());

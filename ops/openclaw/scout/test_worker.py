@@ -118,6 +118,9 @@ class WorkerTests(unittest.TestCase):
         self.assertIn("website route inventory and current-page evidence as authoritative", worker.RULES)
         self.assertIn("pageChangePreview", worker.RULES)
         self.assertIn("Set newPage false", worker.RULES)
+        self.assertIn("pageEvidence.searchQueries.totals as the deterministic aggregate", worker.RULES)
+        self.assertIn("New conversion or qualification fields are optional by default", worker.RULES)
+        self.assertIn("newly required conversion or qualification field", Path(worker.__file__).read_text())
 
     @unittest.skipUnless(shutil.which("zsh"), "Installer requires zsh")
     def test_installer_does_not_attempt_an_unconfigured_message_delivery(self):

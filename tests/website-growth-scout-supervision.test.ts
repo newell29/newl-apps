@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import { newWork, type Work } from "@/modules/website-growth/scout/model";
-import { projectPageHandoffs, needsOwner } from "@/modules/website-growth/scout/lifecycle";
+import { pageHandoffTransition, projectPageHandoffs, needsOwner } from "@/modules/website-growth/scout/lifecycle";
 import { scoutCandidates, scoutCompetitorEvidence, scoutOutcomes } from "@/modules/website-growth/scout/learning";
 
 const cache = vi.hoisted(() => vi.fn());
@@ -40,6 +40,20 @@ describe("Authoritative page handoffs", () => {
       const [item] = await projectPageHandoffs(tx, "tenant-a", [revision]);
       expect(item.state).toBe(state); expect(item.lease).toBeNull(); expect(needsOwner(item)).toBe(false);
     }
+  });
+  it("records a terminal handoff once even when the old build phase later changes", async () => {
+    drafts.mockResolvedValue([{ id: "draft-synthetic", opportunityId: "opportunity-synthetic", status: "PUBLISHED" }]);
+    builds.mockResolvedValue([{ input: { contentDraftId: "draft-synthetic" }, output: { phase: "RUNNING" }, status: "RUNNING", startedAt: now }]);
+    const previous = page();
+    const firstProjection = (await projectPageHandoffs(tx, "tenant-a", [previous]))[0];
+    const transitioned = pageHandoffTransition(previous, firstProjection, now);
+    expect(transitioned?.history.at(-1)?.action).toBe("HANDOFF");
+    expect(transitioned?.evidence.handoff).toMatchObject({ draftStatus: "PUBLISHED", phase: null });
+
+    builds.mockResolvedValue([{ input: { contentDraftId: "draft-synthetic" }, output: { phase: "PR_OPEN" }, status: "RUNNING", startedAt: now }]);
+    const secondProjection = (await projectPageHandoffs(tx, "tenant-a", [{ id: previous.id, ...transitioned! }]))[0];
+    expect(pageHandoffTransition(transitioned!, secondProjection, now)).toBeNull();
+    expect(secondProjection.history).toHaveLength(transitioned!.history.length);
   });
 });
 

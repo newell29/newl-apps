@@ -15,12 +15,17 @@ type QueryMetric = {
   position: number | null;
 };
 
+type QueryTotals = QueryMetric & {
+  queryCount: number;
+};
+
 export type ScoutPageEvidence = {
   route: string;
   searchQueries: {
     status: "AVAILABLE" | "UNAVAILABLE" | "PARTIAL";
     observedAt: string | null;
     windows: { before: Period; after: Period } | null;
+    totals: { before: QueryTotals; after: QueryTotals } | null;
     rows: Array<{
       query: string;
       before: QueryMetric | null;
@@ -127,18 +132,41 @@ export async function loadScoutPageEvidence(tenantId: string, routeInput: string
       status: truncated ? "PARTIAL" : "AVAILABLE",
       observedAt: (latestImport.completedAt ?? latestImport.createdAt).toISOString(),
       windows: { before, after },
+      totals: { before: queryTotals(periods.before), after: queryTotals(periods.after) },
       rows: packetRows,
       limitation: truncated
-        ? `The packet contains the top ${QUERY_PACKET_CAP} matched queries for this route from a bounded saved report. Use it for prioritization, not as a complete export.`
-        : "Matched query/page rows come from the latest saved Search Console comparison. Missing rows remain missing rather than being converted to zero."
+        ? `The totals cover every matched query in the bounded saved report; the rows show only the top ${QUERY_PACKET_CAP}. Treat both as partial rather than as a complete Search Console export.`
+        : "The totals cover all matched query/page rows in the latest saved Search Console comparison. Missing rows remain missing rather than being converted to zero."
     },
     deployments
   };
 }
 
 function unavailablePageEvidence(route: string): ScoutPageEvidence {
-  return { route, searchQueries: { status: "UNAVAILABLE", observedAt: null, windows: null, rows: [],
+  return { route, searchQueries: { status: "UNAVAILABLE", observedAt: null, windows: null, totals: null, rows: [],
     limitation: "No compatible saved Search Console comparison is available. Continue with other evidence and record the specific missing source." }, deployments: [] };
+}
+
+function queryTotals(rows: Map<string, QueryMetric>): QueryTotals {
+  let clicks = 0;
+  let impressions = 0;
+  let positionedImpressions = 0;
+  let weightedPosition = 0;
+  for (const row of rows.values()) {
+    clicks += row.clicks;
+    impressions += row.impressions;
+    if (row.position !== null && row.impressions > 0) {
+      weightedPosition += row.position * row.impressions;
+      positionedImpressions += row.impressions;
+    }
+  }
+  return {
+    queryCount: rows.size,
+    clicks,
+    impressions,
+    ctr: impressions > 0 ? clicks / impressions : null,
+    position: positionedImpressions > 0 ? weightedPosition / positionedImpressions : null
+  };
 }
 
 function readPeriod(value: unknown): Period | null {

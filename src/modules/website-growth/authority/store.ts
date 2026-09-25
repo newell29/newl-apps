@@ -127,26 +127,41 @@ export async function reviewAuthorityAction(tenantId: string, userId: string, id
   return prisma.$transaction(async tx => {
     const a = await getAction(tx, tenantId, id);
     if (a.revision !== revision || !["REVIEW", "BLOCKED", "UNCERTAIN"].includes(a.state)) throw new ScoutWorkError("This review is no longer current.", 409);
-    if (!["APPROVE", "CLOSE", "REVISE", "RESOLVE"].includes(decision)) throw new ScoutWorkError("Choose an authority review decision.");
+    if (!["APPROVE", "CLOSE", "REVISE", "RESOLVE", "RECORD_SUBMISSION"].includes(decision)) throw new ScoutWorkError("Choose an authority review decision.");
     if (a.state === "UNCERTAIN" && decision !== "RESOLVE") throw new ScoutWorkError("Reconcile the mailbox or publisher receipt first. Record the evidence to resolve this hold.");
     if (decision === "RESOLVE" && a.state !== "UNCERTAIN") throw new ScoutWorkError("Only uncertain actions need reconciliation.");
-    if (decision === "APPROVE") {
-      if (a.state !== "REVIEW" || a.plan.method === "MANUAL") throw new ScoutWorkError("Only a fresh executable proposal can be approved.");
+    if (decision === "RECORD_SUBMISSION" && (a.state !== "REVIEW" || a.plan.method !== "MANUAL")) {
+      throw new ScoutWorkError("Only a fresh manual proposal can record a completed submission.");
+    }
+    const detail = text(feedback, decision === "RECORD_SUBMISSION" ? "Submission receipt or decision evidence" : "Review or reconciliation evidence", 2000);
+    assertSafeAuthorityEvidence(detail);
+    const reviewedAt = new Date();
+    if (decision === "APPROVE" || decision === "RECORD_SUBMISSION") {
+      if (decision === "APPROVE" && (a.state !== "REVIEW" || a.plan.method === "MANUAL")) throw new ScoutWorkError("Only a fresh executable proposal can be approved.");
       parsePlan(a.plan); // stale feasibility cannot be approved
       const source = await tx.websiteGrowthBacklinkOpportunity.findFirst({ where: { tenantId, id: a.plan.opportunityId, unsubscribedAt: null } });
       if (!source || source.updatedAt.toISOString() !== a.sourceUpdatedAt) throw new ScoutWorkError("Publisher evidence changed. Send this proposal back for a fresh review.", 409);
+      if (decision === "RECORD_SUBMISSION") {
+        const recorded = await tx.websiteGrowthBacklinkOpportunity.updateMany({ where: { tenantId, id: source.id, updatedAt: source.updatedAt },
+          data: { status: "SUBMITTED", submittedAt: reviewedAt, notes: detail } });
+        if (recorded.count !== 1) throw new ScoutWorkError("The publisher changed while the manual result was being recorded.", 409);
+        const next = transition(a, { state: "SUBMITTED", approvedBy: userId, approvedAt: reviewedAt.toISOString(),
+          startedAt: reviewedAt.toISOString(), finishedAt: reviewedAt.toISOString(), result: detail }, "RECORD_SUBMISSION", detail, reviewedAt);
+        await replace(tx, tenantId, id, a, next);
+        await audit(tx, tenantId, userId, "record_submission", id, { revision, detail });
+        return next;
+      }
       // Existing email guards still require explicit opportunity authority.
       const updated = await tx.websiteGrowthBacklinkOpportunity.updateMany({ where: { tenantId, id: source.id, updatedAt: source.updatedAt },
-        data: { approvedAt: new Date(), approvedByUserId: userId,
+        data: { approvedAt: reviewedAt, approvedByUserId: userId,
           ...(a.plan.method === "EMAIL" ? { status: "APPROVED" as const } : {}) } });
       if (updated.count !== 1) throw new ScoutWorkError("The publisher changed during approval.", 409);
       const refreshed = await tx.websiteGrowthBacklinkOpportunity.findFirstOrThrow({ where: { tenantId, id: source.id } });
       a.sourceUpdatedAt = refreshed.updatedAt.toISOString();
     }
-    const detail = text(feedback, "Review or reconciliation evidence", 2000);
     const next = transition(a, { state: decision === "APPROVE" ? "APPROVED" : "CLOSED",
-      approvedBy: decision === "APPROVE" ? userId : a.approvedBy, approvedAt: decision === "APPROVE" ? new Date().toISOString() : a.approvedAt,
-      result: detail }, decision, detail);
+      approvedBy: decision === "APPROVE" ? userId : a.approvedBy, approvedAt: decision === "APPROVE" ? reviewedAt.toISOString() : a.approvedAt,
+      result: detail }, decision, detail, reviewedAt);
     await replace(tx, tenantId, id, a, next);
     await audit(tx, tenantId, userId, decision.toLowerCase(), id, { revision, detail });
     return next;

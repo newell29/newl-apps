@@ -1,7 +1,7 @@
 import { reviewWindows } from "@/modules/website-growth/scout/effectiveness-model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MISSION, DAY_MS, WORK_JOB, MISSION_JOB, STEP_JOB, isDue, newWork, parseMission, parseResult, stableId } from "@/modules/website-growth/scout/model";
-import { claimScoutWork, completeScoutWork, reviewScoutWork, scoutWorkContext, reconcileScoutWork, scoutWorkspace } from "@/modules/website-growth/scout/store";
+import { DEFAULT_MISSION, DAY_MS, WORK_JOB, MISSION_JOB, STEP_JOB, WAKE_JOB, isDue, newWork, parseMission, parseResult, stableId } from "@/modules/website-growth/scout/model";
+import { claimScoutWork, completeScoutWork, projectScoutActivity, reviewScoutWork, scoutWorkContext, reconcileScoutWork, scoutWorkspace } from "@/modules/website-growth/scout/store";
 import { buildTemplateWebsiteGrowthContentDraft } from "@/modules/website-growth/content-drafts";
 import { WebsiteGrowthAction } from "@prisma/client";
 import { reusableWebsiteGrowthResearchHashes } from "@/modules/website-growth/backlink-discovery";
@@ -63,6 +63,20 @@ describe("Scout work model", () => {
     expect(isDue({ ...work(), state: "WAITING", nextReviewAt: new Date(now.getTime() + DAY_MS).toISOString() }, now)).toBe(false);
     expect(isDue({ ...leased(), leaseUntil: new Date(now.getTime() - 1).toISOString() }, now)).toBe(true);
     expect(isDue({ ...work(), evidence: { externalWait: true } }, now)).toBe(false);
+  });
+  it("explains recent selection and the exact rolling-budget release time", () => {
+    const activity = projectScoutActivity([
+      { jobType: STEP_JOB, status: "SUCCESS", startedAt: new Date("2026-06-15T10:00:00Z"), finishedAt: new Date("2026-06-15T10:03:00Z"),
+        input: { workTitle: "Improve service page", workKind: "PAGE", selectionReason: "Best qualified opportunity" },
+        output: { summary: "Prepared a focused brief.", state: "NEEDS_REVIEW" } },
+      { jobType: WAKE_JOB, status: "SUCCESS", startedAt: new Date("2026-06-15T12:00:00Z"), finishedAt: new Date("2026-06-15T12:00:00Z"),
+        input: {}, output: { summary: "The rolling daily research-step budget is used.", idleReason: "Budget used", dueCount: 2 } },
+      { jobType: STEP_JOB, status: "SUCCESS", startedAt: new Date("2026-06-15T11:00:00Z"), finishedAt: new Date("2026-06-15T11:02:00Z"),
+        input: { workTitle: "Review outcome", selectionReason: "Measurement was due" }, output: { summary: "Saved outcome.", state: "DONE" } }
+    ], 2, 2);
+    expect(activity.steps.map(step => step.title)).toEqual(["Review outcome", "Improve service page"]);
+    expect(activity.latestWake).toMatchObject({ at: "2026-06-15T12:00:00.000Z", dueCount: 2 });
+    expect(activity.nextBudgetAt).toBe("2026-06-16T10:00:00.000Z");
   });
   it("requires concrete deliverables and bounded retry dates", () => {
     expect(() => parseResult({ decision: "DELIVER", summary: "Ready", nextAction: "Review" }, now)).toThrow();
