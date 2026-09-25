@@ -24,9 +24,10 @@ export async function reviewAuthorityPlanAction(form: FormData): Promise<{ error
   try {
     const c = await reviewer(), decision = text(form.get("decision"), "Decision", 30);
     if (decision === "APPROVE" && form.get("confirm") !== "on") throw new ScoutWorkError("Confirm this exact external action before approving it.");
+    if (decision === "RECORD_SUBMISSION" && form.get("confirm") !== "on") throw new ScoutWorkError("Confirm that you completed the publisher action and recorded its receipt or decision evidence.");
     await reviewAuthorityAction(c.tenantId, c.userId, text(form.get("id"), "Action", 100), Number(form.get("revision")), decision,
       text(form.get("feedback"), "Decision or reconciliation evidence", 2000));
-    if (decision === "REVISE" || decision === "RESOLVE") await wakeAuthorityResearch(c.tenantId);
+    if (["REVISE", "RESOLVE", "RECORD_SUBMISSION"].includes(decision)) await wakeAuthorityResearch(c.tenantId);
     revalidatePath("/website-growth/backlinks"); revalidatePath("/website-growth/marketing"); return { error: null };
   } catch (error) { return { error: error instanceof ScoutWorkError ? error.message : "Decision could not be confirmed. Reload the saved action before trying again." }; }
 }

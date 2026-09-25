@@ -68,6 +68,7 @@ export default async function ScoutWorkPage() {
       <ol className="grid gap-3 text-sm md:grid-cols-3"><li><strong>1. Reconcile sources.</strong><br />Read saved opportunities, publisher replies, published pages, and reusable research reviews.</li><li><strong>2. Choose one due item.</strong><br />A supervisor weighs the owner’s direction, earlier decisions, measured results, and available competitor evidence.</li><li><strong>3. Save the next state.</strong><br />Scout records a result, a dated reason to wait, or a concrete owner decision. Sending, building, and publishing keep their approval gates.</li></ol>
       <p role="status" className="rounded-md bg-muted/40 p-4 text-sm"><strong>If Scout woke now:</strong> {board.wakeStatus}</p>
       {capacity && <p className="text-sm text-mutedForeground">{capacity.usedSteps} of {workspace.mission.dailySteps} research steps used in the rolling 24-hour window. {capacity.active} of {workspace.mission.maxActive} active research/review slots used. An empty wake does not claim work and does not consume a research step.</p>}
+      <ScoutActivity activity={workspace.recentActivity} />
       <div><h3 className="text-sm font-semibold">Where new work comes from <span className="font-normal text-mutedForeground">· open records now</span></h3><dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-5">
         <WorkSource label="Page opportunities" count={board.sourceCounts.pages}>Saved signals and pages you ask Scout to investigate.</WorkSource>
         <WorkSource label="Publisher replies" count={board.sourceCounts.replies}>Replies that need a useful, reviewed next response.</WorkSource>
@@ -107,6 +108,24 @@ export default async function ScoutWorkPage() {
       <div className="mt-4 grid gap-4 md:grid-cols-2">{workspace.items.filter(item => item.kind !== "MEASUREMENT" && ["DONE", "DISMISSED"].includes(item.state)).slice(0, 20).map(item => <WorkCard key={item.id} item={item} canReview={false} />)}</div>
     </details>
   </div>;
+}
+function ScoutActivity({ activity }: { activity?: Awaited<ReturnType<typeof scoutWorkspace>>["recentActivity"] }) {
+  if (!activity) return null;
+  return <div className="rounded-md border border-border p-4">
+    <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-semibold">Scout activity · last 24 hours</h3>
+      <p className="mt-1 text-xs text-mutedForeground">Research steps consume the rolling budget. Scheduled capacity checks do not.</p></div>
+      {activity.nextBudgetAt && <p className="text-xs font-medium">Next research slot: {activityTime(activity.nextBudgetAt)}</p>}
+    </div>
+    {activity.latestWake && <div className="mt-3 rounded bg-muted/40 p-3 text-sm"><p><strong>Latest scheduled check · {activityTime(activity.latestWake.at)}</strong></p><p className="mt-1">{activity.latestWake.summary}</p></div>}
+    {activity.steps.length ? <ol className="mt-3 space-y-2">{activity.steps.slice(0, 10).map((step, index) => <li key={`${step.at}-${index}`} className="rounded border border-border p-3 text-sm">
+      <div className="flex flex-wrap justify-between gap-2"><strong>{step.title}</strong><span className="text-xs text-mutedForeground">{activityTime(step.at)} · {step.state ?? step.status.toLowerCase()}</span></div>
+      {step.selectionReason && <p className="mt-1 text-xs"><strong>Why selected:</strong> {step.selectionReason}</p>}
+      <p className="mt-1 text-xs text-mutedForeground"><strong>Result:</strong> {step.summary ?? (step.status === "RUNNING" ? "Research is still running." : "No result summary was recorded.")}</p>
+    </li>)}</ol> : <p className="mt-3 text-sm text-mutedForeground">No research step was claimed in the last 24 hours.</p>}
+  </div>;
+}
+function activityTime(value: string) {
+  return new Date(value).toLocaleString("en-CA", { timeZone: "America/Toronto", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
 }
 function WorkColumn({ title, empty, items, canReview }: { title: string; empty: string; items: Array<Work & { id: string; recipientEmail?: string | null }>; canReview: boolean }) {
   return <section className="space-y-3"><h2 className="text-lg font-semibold">{title} <span className="text-mutedForeground">{items.length}</span></h2>{items.length === 0 ? <p className="rounded-lg border border-dashed border-border p-5 text-sm text-mutedForeground">{empty}</p> : items.map(item => <WorkCard key={item.id} item={item} canReview={canReview} />)}</section>;

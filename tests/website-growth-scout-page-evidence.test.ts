@@ -38,6 +38,10 @@ describe("Scout page evidence", () => {
   it("supplies matched before/after query evidence and recorded deployment dates from the authenticated tenant", async () => {
     const evidence = await loadScoutPageEvidence("tenant-a", "/services/fulfillment-services");
     expect(evidence.searchQueries).toMatchObject({ status: "AVAILABLE", windows: { before, after } });
+    expect(evidence.searchQueries.totals).toEqual({
+      before: { queryCount: 1, clicks: 0, impressions: 50, ctr: 0, position: 18 },
+      after: { queryCount: 1, clicks: 0, impressions: 93, ctr: 0, position: 14.1 }
+    });
     expect(evidence.searchQueries.rows).toEqual([expect.objectContaining({
       query: "best pick and pack warehouse",
       before: expect.objectContaining({ impressions: 50, position: 18 }),
@@ -53,7 +57,19 @@ describe("Scout page evidence", () => {
     db.websiteGrowthDataImport.findFirst.mockResolvedValue(null);
     const evidence = await loadScoutPageEvidence("tenant-b", "/services/example");
     expect(evidence.searchQueries.status).toBe("UNAVAILABLE");
+    expect(evidence.searchQueries.totals).toBeNull();
     expect(evidence.searchQueries.rows).toEqual([]);
     expect(db.websiteGrowthMetric.findMany).not.toHaveBeenCalled();
+  });
+  it("computes totals across the bounded matched set instead of only the visible top-query rows", async () => {
+    db.websiteGrowthMetric.findMany.mockImplementation(async ({ where }: { where: { dateRangeStart: Date } }) => {
+      const period = where.dateRangeStart.toISOString().startsWith(before.startDate) ? before : after;
+      return Array.from({ length: 45 }, (_, index) => metric(`synthetic query ${index}`, period, 1, index + 1, 10 + index));
+    });
+    const evidence = await loadScoutPageEvidence("tenant-a", "/services/fulfillment-services");
+    expect(evidence.searchQueries.status).toBe("PARTIAL");
+    expect(evidence.searchQueries.rows).toHaveLength(40);
+    expect(evidence.searchQueries.totals?.before).toMatchObject({ queryCount: 45, clicks: 45, impressions: 1035 });
+    expect(evidence.searchQueries.totals?.after).toMatchObject({ queryCount: 45, clicks: 45, impressions: 1035 });
   });
 });

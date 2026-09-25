@@ -1,6 +1,6 @@
 import { type Prisma } from "@prisma/client";
 import { getWebsiteGrowthBuildRetryState, WEBSITE_GROWTH_BUILD_JOB_TYPE } from "@/modules/website-growth/build-requests";
-import { record, type Work } from "./model";
+import { nextWork, record, type Work } from "./model";
 
 /** Read current source records in the caller's tenant/transaction. An AI never decides whether an approval happened. */
 export async function projectPageHandoffs(tx: Prisma.TransactionClient, tenantId: string, items: Array<Work & { id: string }>) {
@@ -33,8 +33,23 @@ export async function projectPageHandoffs(tx: Prisma.TransactionClient, tenantId
       : phase === "RUNNING" ? "The website builder is implementing your approved brief. No decision is needed yet."
       : "The approved brief is queued for the website builder. No decision is needed yet.";
     return { ...work, state, draftId: draft.id, nextAction, lease: null, leaseUntil: null,
-      evidence: { ...work.evidence, externalWait, escalation: null, handoff: { draftStatus: draft.status, phase: phase || null, needsOwner } } };
+      evidence: { ...work.evidence, externalWait, escalation: null,
+        handoff: { draftStatus: draft.status, phase: externalWait ? phase || null : null, needsOwner } } };
   });
+}
+
+/** Return a persisted transition only when the authoritative handoff changed semantically. */
+export function pageHandoffTransition(previousInput: Work, projectedInput: Work, now = new Date()) {
+  const previous = persistedWork(previousInput);
+  const projected = persistedWork(projectedInput);
+  if (JSON.stringify(previous) === JSON.stringify(projected)) return null;
+  return nextWork(previous, projected, "HANDOFF", projected.nextAction, now);
+}
+
+function persistedWork(work: Work): Work {
+  const persisted = { ...work } as Work & { id?: string };
+  delete persisted.id;
+  return persisted;
 }
 
 export function needsOwner(work: Work) {
