@@ -13,7 +13,8 @@ import urllib.error
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops/openclaw/hunter"))
-from hunter_pilot import Pilot, PilotTextParser, BudgetExceeded, atomic_write, digest, UTC, ZONE
+from hunter_pilot import (Pilot, PilotTextParser, BudgetExceeded, atomic_write, digest,
+    parse_cbsa_brokers, UTC, ZONE)
 from hunter_pilot import (LocalModel, LocalModelResponseError, configured_model, MISSION,
     TOOLS, SCHEMA, SOURCE_CATALOG_VERSION, schedule_error_retry)
 from hunter_model_diagnostics import (COMPACT_MISSION, MAX_ADDITIONAL_ATTEMPTS,
@@ -341,6 +342,39 @@ class PilotTests(unittest.TestCase):
         self.assertIn("open_web", sources)
         self.assertIn("other_named_source", sources)
 
+    def test_cbsa_parser_keeps_company_sites_and_omits_emails(self):
+        document = """<table><tr><th>Name</th><th>Address</th><th>Email</th><th>Website</th></tr>
+            <tr><td>Synthetic Broker Ltd.</td><td>Toronto, ON</td>
+            <td><a href="mailto:broker@example.com">broker@example.com</a></td>
+            <td><a href="https://broker.example/services">Website</a></td></tr>
+            <tr><td>No Website Broker</td><td>Toronto, ON</td>
+            <td><a href="mailto:private@example.com">private@example.com</a></td><td></td></tr></table>"""
+        rows = parse_cbsa_brokers(document)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["title"], "Synthetic Broker Ltd.")
+        self.assertTrue(rows[0]["url"].startswith(
+            "https://www.cbsa-asfc.gc.ca/services/cb-cd/cb-cd-eng.html#broker-"))
+        self.assertIn("https://broker.example/services", rows[0]["snippet"])
+        self.assertNotIn("broker@example.com", json.dumps(rows))
+
+    def test_cbsa_source_uses_first_party_table_without_general_search(self):
+        rows = [{"url": "https://www.cbsa-asfc.gc.ca/services/cb-cd/cb-cd-eng.html#broker-one",
+                 "title": "Synthetic Broker Ltd.",
+                 "snippet": "CBSA lists this company. Listed company website: https://broker.example/",
+                 "publishedAt": None}]
+        with patch("hunter_pilot.fetch_cbsa_brokers", return_value=rows) as fetch_table:
+            first = self.action("search", query="CBSA brokers near Toronto", direction="gta",
+                                sourceKey="cbsa_customs_brokers")
+            second = self.action("search", query="CBSA customs brokers GTA", direction="referral",
+                                 sourceKey="cbsa_customs_brokers")
+        self.assertEqual(first["resultCount"], 1)
+        self.assertEqual(second["resultCount"], 0)
+        self.assertEqual(first["provider"], "CBSA")
+        self.assertEqual(self.p.budget()["searches"], 2)
+        self.assertEqual(self.p.state["usdMicros"], 0)
+        self.search.assert_not_called()
+        self.assertEqual(fetch_table.call_count, 2)
+
     def test_structured_search_preserves_bounded_candidate_batch_and_source_outcomes(self):
         self.search.return_value = [{"url": f"https://candidate-{index}.example/", "title": f"Candidate {index}",
                                      "snippet": "Synthetic GTA manufacturer."} for index in range(15)]
@@ -632,16 +666,25 @@ class PilotTests(unittest.TestCase):
         self.assertFalse(result["outreachReady"])
         self.assertEqual(self.p.status()["contactVerification"]["verifiedCurrent"], 1)
 
-    def test_empty_buyer_search_records_gap_without_retry_queue(self):
+    def test_empty_buyer_search_allows_one_materially_different_retry(self):
         self.open(); self.decision()
         self.bridge.side_effect = lambda action, **kw: {"tenantId": "tenant-a", "tenantSlug": "synthetic", "allowed": True,
             "result": "NO_PEOPLE_RETURNED", "candidates": []}
         self.action("people", company="supply.example", titles=["Owner", "Operations"])
         buyer = self.p.buyer_research(self.p.state["companies"]["supply.example"])
-        self.assertEqual(buyer["state"], "COMPLETED")
+        self.assertEqual(buyer["state"], "PENDING")
         self.assertEqual(buyer["candidateCount"], 0)
+        self.assertEqual(buyer["lookupAttempts"], 1)
         self.assertFalse(buyer["employmentVerified"])
+        self.assertEqual(len(self.p.context()["buyerResearchQueue"]), 1)
+        self.action("people", company="supply.example", titles=["Founder", "Head of Supply Chain"])
+        buyer = self.p.buyer_research(self.p.state["companies"]["supply.example"])
+        self.assertEqual(buyer["state"], "COMPLETED")
+        self.assertEqual(buyer["lookupAttempts"], 2)
         self.assertEqual(self.p.context()["buyerResearchQueue"], [])
+        with self.assertRaisesRegex(ValueError, "lookup limit"):
+            self.action("people", company="supply.example", titles=["President"])
+        self.assertEqual(self.p.budget()["people"], 2)
 
     def test_legacy_contact_state_prevents_duplicate_buyer_lookup(self):
         self.open(); self.decision()
@@ -731,6 +774,29 @@ class PilotTests(unittest.TestCase):
         self.time += dt.timedelta(days=31)
         self.assertEqual(len(self.p.context()["dueForRevisit"]), 1)
 
+    def test_active_decision_can_pivot_service_without_losing_closed_direction(self):
+        company = self.open()
+        evidence = company["evidenceIds"]
+        result = self.action("decide", company="supply.example", status="active",
+            summary="Owned warehouse weakens the warehouse hypothesis but imported goods may fit ocean",
+            uncertainty="Freight control and import lanes are unconfirmed",
+            nextAction="Check product origins and who controls inbound freight", evidenceIds=evidence,
+            revisitDays=30, revisitWhen="New sourcing evidence", direction="ocean",
+            hypothesis="Imported retail goods may fit hands-on ocean forwarding")
+        company = self.p.state["companies"]["supply.example"]
+        self.assertEqual(result["state"], "active")
+        self.assertEqual(company["direction"], "ocean")
+        self.assertEqual(company["hypothesis"], "Imported retail goods may fit hands-on ocean forwarding")
+        self.assertEqual(company["closedDirectionHypotheses"][0]["direction"], "gta")
+
+    def test_non_active_decision_cannot_silently_change_service(self):
+        company = self.open()
+        with self.assertRaisesRegex(ValueError, "status active"):
+            self.action("decide", company="supply.example", status="parked",
+                summary="Park", uncertainty="Unknown", nextAction="Revisit",
+                evidenceIds=company["evidenceIds"], revisitDays=30,
+                revisitWhen="New evidence", direction="ocean", hypothesis="Ocean fit")
+
     def test_model_refund_uses_reservation_day_across_midnight(self):
         def model(_context):
             self.time += dt.timedelta(days=1)
@@ -747,6 +813,48 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(result["httpStatus"], 404)
         self.assertEqual(self.p.budget()["pages"], 1)
         self.assertEqual(self.action("fetch", url="https://supply.example/missing")["state"], "cached_or_already_attempted")
+
+    def test_known_fetch_runtime_failure_is_recoverable(self):
+        self.fetch.side_effect = RuntimeError("Hunter research response exceeded its size limit.")
+        result = self.action("fetch", url="https://supply.example/oversized")
+        self.assertEqual(result["state"], "unavailable")
+        self.assertEqual(result["reasonCode"], "RESPONSE_TOO_LARGE")
+        self.assertEqual(self.p.budget()["pages"], 1)
+        attempt = next(iter(self.p.state["attempts"].values()))
+        self.assertEqual(attempt["state"], "completed")
+
+    def test_unknown_fetch_runtime_failure_remains_visible(self):
+        self.fetch.side_effect = RuntimeError("Synthetic parser defect")
+        with self.assertRaisesRegex(RuntimeError, "Synthetic parser defect"):
+            self.action("fetch", url="https://supply.example/broken")
+
+    def test_two_domain_failures_back_off_other_urls_on_same_site(self):
+        self.fetch.side_effect = RuntimeError("Hunter research response exceeded its size limit.")
+        for page in ("one", "two"):
+            self.assertEqual(self.action("fetch", url=f"https://supply.example/{page}")["state"], "unavailable")
+        result = self.action("fetch", url="https://supply.example/three")
+        self.assertEqual(result["state"], "domain_backoff")
+        self.assertEqual(result["domain"], "supply.example")
+        self.assertEqual(self.fetch.call_count, 2)
+        self.assertEqual(self.p.budget()["pages"], 2)
+        self.assertEqual(self.p.context()["fetchDomainBackoffs"][0]["domain"], "supply.example")
+
+    def test_recoverable_fetch_failure_does_not_abort_remaining_wake(self):
+        self.fetch.side_effect = RuntimeError("Hunter research response exceeded its size limit.")
+        self.model.side_effect = [
+            ({"action": "fetch", "purpose": "Read the candidate page",
+              "args": {"url": "https://supply.example/oversized"}}, {}),
+            ({"action": "search", "purpose": "Change company after the failed site",
+              "args": {"query": "synthetic alternate wholesale company", "direction": "charlotte",
+                       "sourceKey": "official_company_retailer"}}, {}),
+            ({"action": "wait", "purpose": "Continue next wake",
+              "args": {"reason": "Bounded session complete", "minutes": 30}}, {})]
+        self.p.tick(force=True, max_steps=3)
+        actions = [event["action"] for event in self.p.state["events"] if event["kind"] == "action"]
+        self.assertEqual(actions, ["fetch", "search", "wait"])
+        self.assertEqual(self.p.state["health"], "waiting")
+        self.assertIsNone(self.p.state["lastError"])
+        self.assertEqual(self.search.call_count, 1)
 
     def test_page_extraction_does_not_truncate_content_behind_navigation(self):
         parser = PilotTextParser()

@@ -1,4 +1,4 @@
-# Hunter autonomous research pilot — owner brief, updated 2026-09-22
+# Hunter autonomous research pilot — owner brief, updated 2026-09-25
 
 Find worthwhile business for Newl. Choose research directions and follow evidence; there is no mandatory
 company research script, service allocation, score, or requirement to use TradeMining. Produce a small
@@ -68,6 +68,11 @@ and product-origin evidence; and dated operating changes. Directory membership, 
 growth, hiring or a facility announcement is only a clue. Verify identity and material operating claims
 on first-party pages, and keep outsourcing, freight control, timing and buying intent unconfirmed unless
 the evidence actually establishes them.
+
+The CBSA source is a structured first-party licence list. Use its broker names and listed company
+websites as a bounded candidate batch, then investigate a candidate's own site. Do not turn an empty
+general search for CBSA pages into a conclusion about the broker market, and do not treat the licence
+as proof of GTA activity, local trucking need or referral interest.
 
 For Charlotte, favor company-first discovery of brands, importers, wholesalers and distributors whose
 goods flow resembles Newl's work: wholesale or retailer programs, marketplace/FBA replenishment,
@@ -140,7 +145,10 @@ materially change the choice. Opening a company creates research memory, not qua
 a clue is not a permanent company rejection and does not assert that future fit is impossible.
 
 When a page fails, a query repeats, or a lead weakens, use researchCoverage and unreadClues to consider
-another source, company or service. Charlotte has priority, but GTA warehouse/trucking, ocean and
+another source, company or service. A known public-page retrieval failure is an unavailable observation,
+not evidence against the company or market. After two recent failures on one domain, leave that domain
+until its reported retry time and continue elsewhere instead of probing more URLs. Charlotte has priority,
+but GTA warehouse/trucking, ocean and
 referral work should not be forgotten when Charlotte clues stall. There is no required rotation or equal allocation. Do not
 relabel the same query as another direction or paraphrase it to avoid the cache. Park a known company
 with decide and a revisit condition; an unpromising property clue need not become a company record.
@@ -181,9 +189,10 @@ people lookup appears in buyerResearchQueue on later wakes. Normally complete on
 lookup for the role that would actually buy the proposed service before returning to broad discovery,
 unless an active investigation has an immediately decisive source. Use operations, supply chain,
 logistics, transportation, shipping, warehouse or owner roles according to the supported hypothesis;
-do not send a generic title list merely to clear the queue. One completed lookup is enough to record the
-result. Do not retry title synonyms when it returns no suitable person; preserve the contact gap for
-owner review and continue useful research.
+do not send a generic title list merely to clear the queue. When the first lookup returns no person, one
+second lookup may use a materially different, narrower owner or operating-role set. Never exceed two
+lookups or repeat title synonyms. After that, preserve the contact gap for owner review and continue
+useful research.
 Apollo search can return masked names and email-availability flags. Those are not verified identities,
 current employment, revealed addresses, or delivery validation. No paid enrichment in this pilot.
 Use the first name, masked surname hint, role and company as clues for public employer verification;

@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-21",
+  "version": "2026-09-25",
   "sources": [
     {
       "key": "high_point_market",
@@ -43,8 +43,8 @@
       "kind": "partner_directory",
       "directions": ["gta", "referral"],
       "domains": ["cbsa-asfc.gc.ca"],
-      "objective": "Seed licensed brokers for a later first-party check of GTA presence, airport work and local-cartage purchasing or referral fit.",
-      "caution": "A customs-broker licence does not establish location-specific trucking demand or a partnership need."
+      "objective": "Use the structured first-party CBSA licence table to seed brokers, then check company pages for GTA presence, airport work and local-cartage purchasing or referral fit.",
+      "caution": "The licence table identifies the broker and its listed website. It does not establish GTA operations, location-specific trucking demand or a partnership need."
     },
     {
       "key": "official_company_retailer",
