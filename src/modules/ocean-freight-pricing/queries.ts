@@ -1,9 +1,13 @@
-import { IntegrationProvider, ModuleKey, OceanEquipmentType, OceanRateStatus, Prisma } from "@prisma/client";
+import { IntegrationProvider, JobStatus, ModuleKey, OceanEquipmentType, OceanExtractionStatus, OceanRateStatus, Prisma } from "@prisma/client";
 import { OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE } from "@/modules/ocean-freight-pricing/ingestion";
 import {
   OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME,
   parseOceanFreightMicrosoftGraphSettings
 } from "@/modules/ocean-freight-pricing/microsoft-graph-settings";
+import {
+  getOceanFreightReviewDisposition,
+  parseOceanFreightAutomationSettings
+} from "@/modules/ocean-freight-pricing/automation-settings";
 import { prisma } from "@/server/db";
 import type { AuthenticatedContext } from "@/server/tenant-context";
 import { requireModule } from "@/server/auth/authorization";
@@ -40,6 +44,10 @@ export type OceanFreightSourceFilters = {
   receivedTo?: string;
   search?: string;
 };
+export type OceanFreightReviewFilters = {
+  status?: string;
+  search?: string;
+};
 
 export function getComputedOceanRateStatus(rate: { status: OceanRateStatus; validityStartDate: Date | null; validityEndDate: Date | null }, today = new Date()) {
   if (rate.status === OceanRateStatus.INACTIVE || rate.status === OceanRateStatus.SUPERSEDED) return rate.status;
@@ -69,7 +77,7 @@ export async function getOceanFreightPricingShell(ctx: AuthenticatedContext, fil
       include: { contacts: { orderBy: { fullName: "asc" } } }
     }),
     prisma.oceanFreightRateCandidate.findMany({
-      where: { tenantId: ctx.tenantId },
+      where: { tenantId: ctx.tenantId, status: { in: [OceanExtractionStatus.NEW, OceanExtractionStatus.NEEDS_REVIEW] } },
       orderBy: { createdAt: "desc" },
       take: 25
     }),
@@ -106,7 +114,15 @@ export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, fil
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
   const where = buildSourceWhere(ctx.tenantId, filters);
   const [sources, mailboxes, microsoftGraphCredential] = await Promise.all([
-    prisma.oceanFreightSourceEmail.findMany({ where, orderBy: { receivedAt: "desc" }, take: 100, include: { attachments: { orderBy: { fileName: "asc" } } } }),
+    prisma.oceanFreightSourceEmail.findMany({
+      where,
+      orderBy: { receivedAt: "desc" },
+      take: 100,
+      include: {
+        attachments: { orderBy: { fileName: "asc" } },
+        candidates: { orderBy: { createdAt: "desc" }, take: 1 }
+      }
+    }),
     prisma.oceanFreightSourceEmail.findMany({ where: { tenantId: ctx.tenantId }, distinct: ["mailboxAddress"], select: { mailboxAddress: true }, orderBy: { mailboxAddress: "asc" } }),
     prisma.integrationCredential.findFirst({
       where: {
@@ -121,18 +137,84 @@ export async function getOceanFreightSourcesShell(ctx: AuthenticatedContext, fil
   return {
     sources,
     mailboxes: mailboxes.map((item) => item.mailboxAddress),
-    microsoftGraphSettings: parseOceanFreightMicrosoftGraphSettings(microsoftGraphCredential)
+    microsoftGraphSettings: parseOceanFreightMicrosoftGraphSettings(microsoftGraphCredential),
+    automationSettings: parseOceanFreightAutomationSettings(microsoftGraphCredential)
   };
+}
+
+export async function getOceanFreightReviewShell(ctx: AuthenticatedContext, filters?: OceanFreightReviewFilters) {
+  await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
+  const where = buildReviewWhere(ctx.tenantId, filters);
+  const [candidates, agents, microsoftGraphCredential] = await Promise.all([
+    prisma.oceanFreightRateCandidate.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }],
+      take: 100,
+      include: {
+        sourceEmail: true,
+        sourceAttachment: true,
+        agent: true,
+        agentContact: true
+      }
+    }),
+    prisma.oceanFreightAgent.findMany({
+      where: { tenantId: ctx.tenantId },
+      orderBy: [{ name: "asc" }],
+      include: { contacts: { orderBy: { fullName: "asc" } } }
+    }),
+    prisma.integrationCredential.findFirst({
+      where: {
+        tenantId: ctx.tenantId,
+        provider: IntegrationProvider.MICROSOFT_GRAPH,
+        name: OCEAN_FREIGHT_MICROSOFT_GRAPH_CREDENTIAL_NAME
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      select: { provider: true, status: true, publicConfig: true }
+    })
+  ]);
+  const automationSettings = parseOceanFreightAutomationSettings(microsoftGraphCredential);
+  const candidatesWithDisposition = candidates.map((candidate) => ({
+    ...candidate,
+    reviewDisposition: getOceanFreightReviewDisposition(candidate, automationSettings)
+  }));
+  const shouldShowWorkQueueOnly = (filters?.status || "workQueue") === "workQueue";
+  const visibleCandidates = shouldShowWorkQueueOnly && automationSettings.exceptionOnlyReview
+    ? candidatesWithDisposition.filter((candidate) => candidate.reviewDisposition.isHighConfidence || candidate.reviewDisposition.isException)
+    : candidatesWithDisposition;
+
+  return { candidates: visibleCandidates, agents, automationSettings };
 }
 
 export async function getOceanFreightJobsShell(ctx: AuthenticatedContext) {
   await requireModule(ctx, ModuleKey.OCEAN_FREIGHT_PRICING);
+  await markStaleOceanFreightJobs(ctx.tenantId);
   const jobs = await prisma.automationJobRun.findMany({
     where: { tenantId: ctx.tenantId, jobType: OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE },
     orderBy: { startedAt: "desc" },
     take: 50
   });
   return { jobs };
+}
+
+async function markStaleOceanFreightJobs(tenantId: string) {
+  const staleBefore = new Date(Date.now() - 5 * 60 * 1000);
+  await prisma.automationJobRun.updateMany({
+    where: {
+      tenantId,
+      jobType: OCEAN_FREIGHT_EMAIL_INGESTION_JOB_TYPE,
+      status: JobStatus.RUNNING,
+      startedAt: { lt: staleBefore },
+      finishedAt: null
+    },
+    data: {
+      status: JobStatus.ERROR,
+      finishedAt: new Date(),
+      errorMessage: "Ingestion appears to have timed out before completion. This can happen in preview/serverless environments for long Microsoft Graph syncs.",
+      output: {
+        error: "Stale RUNNING job marked failed after 5 minutes without completion."
+      }
+    }
+  });
 }
 
 export async function getOceanFreightAgentsShell(ctx: AuthenticatedContext, filters?: OceanFreightAgentFilters) {
@@ -173,7 +255,39 @@ function buildSourceWhere(tenantId: string, filters?: OceanFreightSourceFilters)
   return where;
 }
 
+function buildReviewWhere(tenantId: string, filters?: OceanFreightReviewFilters): Prisma.OceanFreightRateCandidateWhereInput {
+  const where: Prisma.OceanFreightRateCandidateWhereInput = { tenantId };
+  const status = filters?.status || "workQueue";
+  if (status === "open" || status === "workQueue") {
+    where.status = { in: [OceanExtractionStatus.NEW, OceanExtractionStatus.NEEDS_REVIEW] };
+  } else if (Object.values(OceanExtractionStatus).includes(status as OceanExtractionStatus)) {
+    where.status = status as OceanExtractionStatus;
+  }
+
+  const search = filters?.search?.trim();
+  if (search) {
+    where.AND = appendReviewAnd(where.AND, {
+      OR: [
+        { agentCompanyNameRaw: { contains: search, mode: "insensitive" } },
+        { agentContactEmailRaw: { contains: search, mode: "insensitive" } },
+        { originPort: { contains: search, mode: "insensitive" } },
+        { destinationPort: { contains: search, mode: "insensitive" } },
+        { shippingLine: { contains: search, mode: "insensitive" } },
+        { notes: { contains: search, mode: "insensitive" } },
+        { sourceEmail: { subject: { contains: search, mode: "insensitive" } } },
+        { sourceEmail: { fromAddress: { contains: search, mode: "insensitive" } } },
+        { sourceEmail: { fromName: { contains: search, mode: "insensitive" } } }
+      ]
+    });
+  }
+  return where;
+}
+
 function appendSourceAnd(current: Prisma.OceanFreightSourceEmailWhereInput["AND"], next: Prisma.OceanFreightSourceEmailWhereInput): Prisma.OceanFreightSourceEmailWhereInput["AND"] {
+  return Array.isArray(current) ? [...current, next] : current ? [current, next] : [next];
+}
+
+function appendReviewAnd(current: Prisma.OceanFreightRateCandidateWhereInput["AND"], next: Prisma.OceanFreightRateCandidateWhereInput): Prisma.OceanFreightRateCandidateWhereInput["AND"] {
   return Array.isArray(current) ? [...current, next] : current ? [current, next] : [next];
 }
 
