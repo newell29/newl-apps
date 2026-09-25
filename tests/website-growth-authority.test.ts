@@ -148,6 +148,30 @@ describe("supervisor to executor walkthroughs", () => {
     expect(await executeAuthorityAction(tenant, verification, claimed!.lease!)).toMatchObject({ state: "LIVE" });
     expect(authorityOutcomes([...rows.values()].filter(r => r.jobType === ACTION_JOB).map(r => ({ id: r.id, ...readAction(r.output)! }))).verifiedPlacements).toBe(1);
   });
+  it("records a completed owner-only submission without giving it to the executor or calling it live", async () => {
+    const id = await proposal({ ...plan(), method: "MANUAL", free: false, accountRequired: true,
+      completion: "Save the publisher's on-screen receipt and later verify the public listing." });
+    expect(action(id).state).toBe("REVIEW");
+    expect(await claimAuthorityAction(tenant, "manual-must-not-run", now)).toBeNull();
+    const saved = await reviewAuthorityAction(tenant, "owner-synthetic", id, 0, "RECORD_SUBMISSION",
+      "Publisher displayed receipt reference SYNTHETIC-MANUAL-123 after the owner submitted the listing.");
+    expect(saved).toMatchObject({ state: "SUBMITTED", approvedBy: "owner-synthetic", startedAt: now.toISOString(), finishedAt: now.toISOString() });
+    expect(saved.history.at(-1)?.event).toBe("RECORD_SUBMISSION");
+    expect(publisher).toMatchObject({ status: "SUBMITTED", submittedAt: now });
+    expect(await claimAuthorityAction(tenant, "manual-after-recording", now)).toBeNull();
+    expect(mocks.send).not.toHaveBeenCalled(); expect(mocks.graph).not.toHaveBeenCalled();
+
+    const verification = await proposal({ ...plan(), method: "VERIFY", route: "https://publisher.example.com/listing" });
+    expect(action(verification).state).toBe("APPROVED");
+  });
+  it("rejects manual completion for an executable proposal or changed publisher evidence", async () => {
+    const executable = await proposal();
+    await expect(reviewAuthorityAction(tenant, "owner", executable, 0, "RECORD_SUBMISSION", "Synthetic receipt")).rejects.toThrow("manual proposal");
+    await reviewAuthorityAction(tenant, "owner", executable, 0, "CLOSE", "Use the owner-only route instead.");
+    const manual = await proposal({ ...plan(), method: "MANUAL", free: false, accountRequired: true });
+    publisher.updatedAt = new Date(now.getTime() + 5000);
+    await expect(reviewAuthorityAction(tenant, "owner", manual, 0, "RECORD_SUBMISSION", "Synthetic receipt")).rejects.toThrow("evidence changed");
+  });
   it("holds an interrupted send and never recycles it as fresh approved work", async () => {
     const { id, lease } = await approveClaim(); mocks.send.mockRejectedValue(new Error("Synthetic timeout"));
     expect(await executeAuthorityAction(tenant, id, lease)).toMatchObject({ state: "UNCERTAIN" });
